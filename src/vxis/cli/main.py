@@ -336,6 +336,201 @@ def plugins_cmd(
 
 
 @app.command()
+def batch(
+    csv_file: Path = typer.Argument(help="CSV file with target portfolio"),
+    profile: str = typer.Option(
+        "standard",
+        "--profile",
+        "-p",
+        help="Scan profile: passive | stealth | standard | aggressive",
+    ),
+    max_concurrent: int = typer.Option(
+        3,
+        "--concurrent",
+        "-c",
+        help="Maximum number of simultaneous scans",
+    ),
+    output_dir: Path = typer.Option(
+        Path("./reports/batch"),
+        "--output",
+        "-o",
+        help="Directory to write per-target and summary reports",
+    ),
+) -> None:
+    """Batch scan multiple targets from a CSV portfolio file."""
+    from vxis.core.batch import BatchScanner
+
+    _print_banner()
+
+    if not csv_file.exists():
+        err_console.print(f"[bold red]Error:[/bold red] CSV file not found: {csv_file}")
+        raise typer.Exit(code=1)
+
+    config = _get_config()
+    scanner = BatchScanner(config)
+
+    try:
+        targets = BatchScanner.load_targets(csv_file)
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[bold red]Failed to load CSV:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[bold]Batch scan:[/bold] {len(targets)} target(s) from "
+        f"[cyan]{csv_file}[/cyan] using profile '[yellow]{profile}[/yellow]'"
+    )
+    console.print(
+        f"[dim]Concurrency: {max_concurrent} | Output: {output_dir}[/dim]"
+    )
+
+    completed: list = []
+
+    def _on_complete(result) -> None:
+        completed.append(result)
+        status = (
+            "[green]OK[/green]"
+            if result.succeeded
+            else f"[red]FAILED[/red]: {result.error}"
+        )
+        console.print(
+            f"  [{len(completed)}/{len(targets)}] "
+            f"[cyan]{result.target.name}[/cyan] ({result.target.domain}) — {status}"
+        )
+
+    with console.status("[bold green]Running batch scan...[/bold green]", spinner="dots"):
+        results = asyncio.run(
+            scanner.run_batch(
+                targets=targets,
+                profile=profile,
+                max_concurrent=max_concurrent,
+                on_complete=_on_complete,
+            )
+        )
+
+    # Generate per-target DOCX reports
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    from vxis.report.docx_export import DOCXReportGenerator
+    from vxis.report.generator import ReportData
+    from datetime import date
+
+    docx_gen = DOCXReportGenerator()
+    for result in results:
+        if result.succeeded and result.scan_result:
+            sr = result.scan_result
+            report_data = ReportData(
+                scan_id=sr.scan_id,
+                client_name=result.target.name,
+                target=result.target.domain,
+                scan_date=date.today().isoformat(),
+                findings=sr.findings,
+            )
+            safe_name = result.target.domain.replace(".", "_").replace("/", "_")
+            docx_path = output_dir / f"{safe_name}.docx"
+            try:
+                docx_gen.generate(report_data, docx_path)
+                console.print(f"  [dim]Report:[/dim] {docx_path}")
+            except Exception as exc:  # noqa: BLE001
+                err_console.print(
+                    f"[yellow]Warning:[/yellow] Could not generate report for "
+                    f"{result.target.name}: {exc}"
+                )
+
+    # Generate summary report
+    summary_path = output_dir / "portfolio_summary.docx"
+    try:
+        scanner.generate_summary_report(results, summary_path)
+        console.print(
+            f"\n[bold green]Summary report:[/bold green] [underline]{summary_path}[/underline]"
+        )
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[yellow]Warning:[/yellow] Could not generate summary report: {exc}")
+
+    # Print final table
+    success_count = sum(1 for r in results if r.succeeded)
+    fail_count = len(results) - success_count
+    console.print(
+        f"\n[bold]Batch complete:[/bold] {success_count} succeeded, "
+        f"{fail_count} failed out of {len(results)} target(s)."
+    )
+
+
+@app.command()
+def export(
+    scan_id: str = typer.Argument(help="Scan ID to export"),
+    format: str = typer.Option(
+        "docx",
+        "--format",
+        "-f",
+        help="Output format: docx | html | attestation",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output file path (default: ./<scan_id>.<format>)",
+    ),
+) -> None:
+    """Export scan results to DOCX, HTML, or attestation letter."""
+    supported_formats = {"docx", "html", "attestation"}
+    if format not in supported_formats:
+        err_console.print(
+            f"[bold red]Unsupported format:[/bold red] '{format}'. "
+            f"Choose from: {', '.join(sorted(supported_formats))}"
+        )
+        raise typer.Exit(code=1)
+
+    # Resolve default output path
+    ext_map = {"docx": "docx", "html": "html", "attestation": "docx"}
+    ext = ext_map[format]
+    out_path = output or Path(f"{scan_id}.{ext}")
+
+    console.print(
+        f"[bold]Exporting[/bold] scan [cyan]{scan_id}[/cyan] "
+        f"as [yellow]{format}[/yellow] → [underline]{out_path}[/underline]"
+    )
+
+    # NOTE: Full database lookup is not yet wired — a ReportData must be
+    # constructed from persisted scan records. The scaffolding below shows
+    # where that lookup would occur once the DB query layer is extended.
+    # For now we surface a clear informational message.
+    console.print(
+        "[yellow]Note:[/yellow] Database-backed scan retrieval is not yet implemented. "
+        "Construct a ReportData object programmatically and pass it to "
+        "DOCXReportGenerator or AttestationGenerator directly."
+    )
+
+    if format == "docx":
+        console.print(
+            "[dim]Use:[/dim] from vxis.report.docx_export import DOCXReportGenerator"
+        )
+    elif format == "attestation":
+        console.print(
+            "[dim]Use:[/dim] from vxis.report.attestation import AttestationGenerator"
+        )
+    elif format == "html":
+        console.print(
+            "[dim]Use:[/dim] from vxis.report.generator import ReportGenerator"
+        )
+
+
+@app.command()
+def dashboard(
+    host: str = typer.Option("127.0.0.1", "--host", help="Host address to bind"),
+    port: int = typer.Option(8080, "--port", help="Port number to listen on"),
+) -> None:
+    """Launch the VXIS web dashboard."""
+    import uvicorn
+    from vxis.dashboard.app import app as dash_app
+
+    console.print(
+        f"[bold green]VXIS Dashboard[/bold green] running at "
+        f"[underline cyan]http://{host}:{port}[/underline cyan]"
+    )
+    uvicorn.run(dash_app, host=host, port=port)
+
+
+@app.command()
 def version() -> None:
     """Show VXIS version information."""
     from vxis import __version__

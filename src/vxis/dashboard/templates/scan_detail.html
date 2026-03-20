@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+
+{% block title %}Scan {{ scan.target }} — VXIS{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex items-center gap-2 text-sm">
+  <a href="/" class="text-gray-500 hover:text-gray-300 transition-colors">Dashboard</a>
+  <span class="text-gray-700">/</span>
+  <span class="text-gray-400">Scan</span>
+  <span class="text-gray-700">/</span>
+  <span class="text-gray-100 font-medium font-mono">{{ scan.target }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <!-- Header row -->
+  <div class="flex items-start justify-between">
+    <div>
+      <h1 class="text-xl font-semibold text-white font-mono">{{ scan.target }}</h1>
+      <div class="flex items-center gap-3 mt-1.5 text-xs text-gray-500">
+        <span>Scan ID: <span class="text-gray-400 font-mono">{{ scan.id }}</span></span>
+        <span>·</span>
+        <span>Profile: <span class="text-gray-400">{{ scan.profile }}</span></span>
+        <span>·</span>
+        <span>Started: <span class="text-gray-400">{{ scan.started_at | fmtdt }}</span></span>
+        {% if scan.finished_at %}
+        <span>·</span>
+        <span>Finished: <span class="text-gray-400">{{ scan.finished_at | fmtdt }}</span></span>
+        {% endif %}
+      </div>
+    </div>
+    <!-- Export button -->
+    <a href="/scan/{{ scan_id }}/export"
+       class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
+              bg-cyan-900/40 text-cyan-400 border border-cyan-800/50
+              hover:bg-cyan-900/70 transition-colors">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      Export HTML
+    </a>
+  </div>
+
+  <!-- Charts row -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+    <!-- Donut chart -->
+    <div class="bg-surface rounded-lg border border-surface-border p-5">
+      <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Findings by Severity</h2>
+      <div class="flex items-center gap-6">
+        <!-- SVG chart (inline from Python) -->
+        <div class="flex-shrink-0">
+          {{ severity_donut_svg(counts, 160) | safe }}
+        </div>
+        <!-- Legend -->
+        <div class="space-y-2">
+          {% for sev in severity_order %}
+          <div class="flex items-center gap-2.5">
+            {% if sev == 'critical' %}
+              <span class="w-2.5 h-2.5 rounded-sm bg-red-900 flex-shrink-0"></span>
+            {% elif sev == 'high' %}
+              <span class="w-2.5 h-2.5 rounded-sm bg-red-600 flex-shrink-0"></span>
+            {% elif sev == 'medium' %}
+              <span class="w-2.5 h-2.5 rounded-sm bg-orange-500 flex-shrink-0"></span>
+            {% elif sev == 'low' %}
+              <span class="w-2.5 h-2.5 rounded-sm bg-green-600 flex-shrink-0"></span>
+            {% else %}
+              <span class="w-2.5 h-2.5 rounded-sm bg-blue-500 flex-shrink-0"></span>
+            {% endif %}
+            <span class="text-xs text-gray-400 capitalize">{{ sev }}</span>
+            <span class="text-xs font-semibold text-white ml-auto">{{ counts.get(sev, 0) }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Bar chart -->
+    <div class="bg-surface rounded-lg border border-surface-border p-5">
+      <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">Distribution</h2>
+      <div class="overflow-hidden">
+        {{ severity_bar_svg(counts, 360, 26) | safe }}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Findings section -->
+  <div class="bg-surface rounded-lg border border-surface-border overflow-hidden">
+
+    <!-- Filter toolbar -->
+    <div class="px-5 py-3 border-b border-surface-border flex items-center justify-between flex-wrap gap-3">
+      <h2 class="text-sm font-semibold text-white">Findings</h2>
+
+      <!-- Severity filter buttons (HTMX) -->
+      <div class="flex items-center gap-1.5 flex-wrap" id="severity-filters">
+        <button
+          hx-get="/scan/{{ scan_id }}/findings?severity=all"
+          hx-target="#findings-container"
+          hx-swap="innerHTML"
+          hx-indicator="#loading-spinner"
+          onclick="setActiveFilter(this)"
+          class="filter-btn active px-3 py-1 rounded text-xs font-medium border transition-colors
+                 bg-cyan-900/50 text-cyan-300 border-cyan-700">
+          All
+        </button>
+        {% for sev in severity_order %}
+        <button
+          hx-get="/scan/{{ scan_id }}/findings?severity={{ sev }}"
+          hx-target="#findings-container"
+          hx-swap="innerHTML"
+          hx-indicator="#loading-spinner"
+          onclick="setActiveFilter(this)"
+          class="filter-btn px-3 py-1 rounded text-xs font-medium border transition-colors
+                 text-gray-400 border-gray-700 bg-gray-800/50 hover:border-gray-500 hover:text-gray-200">
+          {{ sev | capitalize }}
+          <span class="ml-1 text-gray-600">({{ counts.get(sev, 0) }})</span>
+        </button>
+        {% endfor %}
+      </div>
+
+      <!-- Loading indicator -->
+      <span id="loading-spinner" class="htmx-indicator text-xs text-gray-500">
+        Loading...
+      </span>
+    </div>
+
+    <!-- Findings table (HTMX target) -->
+    <div id="findings-container"
+         hx-get="/scan/{{ scan_id }}/findings"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+      <!-- Skeleton loader shown before HTMX loads -->
+      <div class="px-5 py-8 text-center text-sm text-gray-600">Loading findings...</div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+  function setActiveFilter(btn) {
+    document.querySelectorAll('.filter-btn').forEach(function(b) {
+      b.classList.remove('active', 'bg-cyan-900/50', 'text-cyan-300', 'border-cyan-700');
+      b.classList.add('text-gray-400', 'border-gray-700', 'bg-gray-800/50');
+    });
+    btn.classList.add('active', 'bg-cyan-900/50', 'text-cyan-300', 'border-cyan-700');
+    btn.classList.remove('text-gray-400', 'border-gray-700', 'bg-gray-800/50');
+  }
+</script>
+{% endblock %}

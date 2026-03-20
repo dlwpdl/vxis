@@ -1,0 +1,120 @@
+{% if findings %}
+<div class="overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-surface-border bg-surface-raised">
+        <th class="text-left px-5 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Severity</th>
+        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Title</th>
+        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Target</th>
+        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-16">Port</th>
+        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">Confidence</th>
+        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Source</th>
+        <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider w-28">Status</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-surface-border">
+      {% for finding in findings %}
+      <tr class="hover:bg-surface-raised transition-colors cursor-pointer"
+          onclick="window.location='/scan/{{ scan_id }}/finding/{{ finding.id }}'">
+
+        <!-- Severity badge -->
+        <td class="px-5 py-2.5">
+          {% set sev = finding.effective_severity | lower %}
+          {% if sev == 'critical' %}
+            <span class="severity-badge bg-red-950 text-red-300 border border-red-800">CRITICAL</span>
+          {% elif sev == 'high' %}
+            <span class="severity-badge bg-red-900/60 text-red-300 border border-red-700">HIGH</span>
+          {% elif sev == 'medium' %}
+            <span class="severity-badge bg-orange-900/60 text-orange-300 border border-orange-700">MEDIUM</span>
+          {% elif sev == 'low' %}
+            <span class="severity-badge bg-green-900/50 text-green-300 border border-green-700">LOW</span>
+          {% else %}
+            <span class="severity-badge bg-blue-900/50 text-blue-300 border border-blue-700">INFO</span>
+          {% endif %}
+        </td>
+
+        <!-- Title -->
+        <td class="px-4 py-2.5">
+          <span class="text-gray-200 font-medium leading-snug line-clamp-1">{{ finding.title }}</span>
+          {% if finding.cve_ids %}
+          <div class="flex gap-1 mt-0.5">
+            {% for cve in finding.cve_ids[:2] %}
+            <span class="text-xs text-gray-600 font-mono">{{ cve }}</span>
+            {% endfor %}
+            {% if finding.cve_ids | length > 2 %}
+            <span class="text-xs text-gray-700">+{{ finding.cve_ids | length - 2 }}</span>
+            {% endif %}
+          </div>
+          {% endif %}
+        </td>
+
+        <!-- Target -->
+        <td class="px-4 py-2.5 font-mono text-xs text-cyan-400/80 max-w-xs truncate">
+          {{ finding.target }}
+        </td>
+
+        <!-- Port -->
+        <td class="px-4 py-2.5 text-xs text-gray-500 font-mono">
+          {% if finding.port %}{{ finding.port }}{% else %}—{% endif %}
+        </td>
+
+        <!-- Confidence -->
+        <td class="px-4 py-2.5">
+          {% set pct = (finding.confidence * 100) | int %}
+          <div class="flex items-center gap-1.5">
+            <div class="flex-1 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+              <div class="h-1.5 rounded-full
+                {% if pct >= 80 %}bg-green-500{% elif pct >= 50 %}bg-yellow-500{% else %}bg-red-500{% endif %}"
+                   style="width: {{ pct }}%"></div>
+            </div>
+            <span class="text-xs text-gray-500 w-8 text-right">{{ pct }}%</span>
+          </div>
+        </td>
+
+        <!-- Source -->
+        <td class="px-4 py-2.5 text-xs text-gray-500 truncate max-w-xs">
+          {{ finding.source_plugin }}
+        </td>
+
+        <!-- Status -->
+        <td class="px-4 py-2.5">
+          {% set st = finding.status | lower %}
+          {% if st == 'open' %}
+            <span class="text-xs text-yellow-400">Open</span>
+          {% elif st == 'confirmed' %}
+            <span class="text-xs text-red-400">Confirmed</span>
+          {% elif st == 'false_positive' %}
+            <span class="text-xs text-gray-500">False Positive</span>
+          {% elif st == 'accepted_risk' %}
+            <span class="text-xs text-purple-400">Accepted Risk</span>
+          {% elif st == 'remediated' %}
+            <span class="text-xs text-green-400">Remediated</span>
+          {% else %}
+            <span class="text-xs text-gray-500">{{ finding.status | capitalize }}</span>
+          {% endif %}
+        </td>
+
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- Table footer -->
+<div class="px-5 py-3 border-t border-surface-border bg-surface-raised">
+  <p class="text-xs text-gray-600">
+    Showing <span class="text-gray-400 font-medium">{{ findings | length }}</span> finding{{ 's' if findings | length != 1 else '' }}
+  </p>
+</div>
+
+{% else %}
+<!-- Empty state -->
+<div class="flex flex-col items-center justify-center py-12 text-center">
+  <div class="w-10 h-10 rounded-full bg-gray-800 flex items-center justify-center mb-3">
+    <svg class="w-5 h-5 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/><line x1="8" y1="12" x2="16" y2="12"/>
+    </svg>
+  </div>
+  <p class="text-sm text-gray-500">No findings match the selected filter.</p>
+</div>
+{% endif %}
