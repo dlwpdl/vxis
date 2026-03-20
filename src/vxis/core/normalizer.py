@@ -1353,6 +1353,719 @@ class FindingFactory:
         return findings_out
 
     # ------------------------------------------------------------------
+    # bloodhound
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_bloodhound(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert BloodHound AD graph statistics into Finding objects.
+
+        Severity mapping:
+        - Kerberoastable users  → high
+        - Unconstrained delegation → critical
+        - AS-REP roastable users → medium
+
+        Args:
+            parsed_data: Dict with keys: users, admins, kerberoastable,
+                         asreproastable, unconstrained_delegation.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for risky AD configurations.
+        """
+        findings: list[Finding] = []
+
+        kerberoastable = int(parsed_data.get("kerberoastable", 0))
+        if kerberoastable > 0:
+            findings.append(Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=f"Kerberoastable Users Detected ({kerberoastable})",
+                description=(
+                    f"{kerberoastable} user account(s) have Service Principal Names (SPNs) "
+                    "set and are vulnerable to Kerberoasting attacks. Attackers can request "
+                    "service tickets offline and crack them to recover plaintext credentials."
+                ),
+                severity=Severity.high,
+                target="Active Directory",
+                affected_component="Kerberos / SPNs",
+                finding_type="misconfiguration",
+                source_plugin="bloodhound",
+                evidence=[Evidence(
+                    evidence_type="ad_graph",
+                    title="BloodHound AD Statistics",
+                    content=f"Kerberoastable accounts: {kerberoastable}",
+                    content_type="text/plain",
+                )],
+                raw_data=parsed_data,
+            ))
+
+        unconstrained = int(parsed_data.get("unconstrained_delegation", 0))
+        if unconstrained > 0:
+            findings.append(Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=f"Unconstrained Delegation Enabled ({unconstrained})",
+                description=(
+                    f"{unconstrained} object(s) have unconstrained delegation enabled. "
+                    "An attacker who compromises these accounts can impersonate any domain "
+                    "user, including Domain Admins, against any service in the domain."
+                ),
+                severity=Severity.critical,
+                target="Active Directory",
+                affected_component="Kerberos Delegation",
+                finding_type="misconfiguration",
+                source_plugin="bloodhound",
+                evidence=[Evidence(
+                    evidence_type="ad_graph",
+                    title="BloodHound AD Statistics",
+                    content=f"Unconstrained delegation objects: {unconstrained}",
+                    content_type="text/plain",
+                )],
+                raw_data=parsed_data,
+            ))
+
+        asrep = int(parsed_data.get("asreproastable", 0))
+        if asrep > 0:
+            findings.append(Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=f"AS-REP Roastable Users Detected ({asrep})",
+                description=(
+                    f"{asrep} user account(s) do not require Kerberos pre-authentication "
+                    "(DONT_REQ_PREAUTH flag set). Attackers can request AS-REP tickets "
+                    "without credentials and crack them offline."
+                ),
+                severity=Severity.medium,
+                target="Active Directory",
+                affected_component="Kerberos Pre-authentication",
+                finding_type="misconfiguration",
+                source_plugin="bloodhound",
+                evidence=[Evidence(
+                    evidence_type="ad_graph",
+                    title="BloodHound AD Statistics",
+                    content=f"AS-REP roastable accounts: {asrep}",
+                    content_type="text/plain",
+                )],
+                raw_data=parsed_data,
+            ))
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # certipy
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_certipy(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert Certipy ADCS findings into Finding objects.
+
+        Severity mapping:
+        - ESC1, ESC2 → critical
+        - ESC3-ESC8  → high
+
+        Args:
+            parsed_data: Dict with key "vulnerable_templates" (list of template dicts).
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for each vulnerable certificate template.
+        """
+        _CRITICAL_CLASSES: frozenset[str] = frozenset({"ESC1", "ESC2"})
+
+        findings: list[Finding] = []
+        templates: list[dict[str, Any]] = parsed_data.get("vulnerable_templates", [])
+
+        for template in templates:
+            esc_class = str(template.get("vulnerability", "")).upper()
+            template_name = template.get("template_name", "Unknown")
+            severity = Severity.critical if esc_class in _CRITICAL_CLASSES else Severity.high
+
+            findings.append(Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=f"ADCS Vulnerable Template: {template_name} ({esc_class})",
+                description=(
+                    f"Certificate template '{template_name}' is vulnerable to {esc_class}. "
+                    f"Enabled: {template.get('enabled', False)}, "
+                    f"Client Authentication: {template.get('client_authentication', False)}, "
+                    f"Enrollee Supplies Subject: {template.get('enrollee_supplies_subject', False)}. "
+                    "This may allow domain privilege escalation via certificate abuse."
+                ),
+                severity=severity,
+                target="Active Directory Certificate Services",
+                affected_component=template_name,
+                finding_type="misconfiguration",
+                source_plugin="certipy",
+                source_tool_ref=esc_class,
+                evidence=[Evidence(
+                    evidence_type="adcs_scan",
+                    title=f"Certipy Finding: {esc_class}",
+                    content=(
+                        f"Template: {template_name}\n"
+                        f"Vulnerability: {esc_class}\n"
+                        f"Enabled: {template.get('enabled', False)}\n"
+                        f"Client Authentication: {template.get('client_authentication', False)}"
+                    ),
+                    content_type="text/plain",
+                )],
+                raw_data=template,
+            ))
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # netexec
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_netexec(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert NetExec SMB enumeration results into Finding objects.
+
+        Severity mapping:
+        - Readable SMB shares → medium
+        - Weak password policy → high
+
+        Args:
+            parsed_data: Dict with keys "readable_shares" (list) and
+                         "password_policy" (dict with min_length, complexity).
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for exposed shares and policy weaknesses.
+        """
+        findings: list[Finding] = []
+
+        for share in parsed_data.get("readable_shares", []):
+            share_name = share.get("share", "Unknown")
+            permissions = share.get("permissions", "")
+            findings.append(Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=f"Readable SMB Share: {share_name}",
+                description=(
+                    f"SMB share '{share_name}' is accessible with permissions: {permissions}. "
+                    "Unauthorised network share access may expose sensitive data or configuration files."
+                ),
+                severity=Severity.medium,
+                target="SMB",
+                affected_component=share_name,
+                finding_type="exposure",
+                source_plugin="netexec",
+                evidence=[Evidence(
+                    evidence_type="smb_enum",
+                    title=f"SMB Share: {share_name}",
+                    content=f"Share: {share_name}\nPermissions: {permissions}",
+                    content_type="text/plain",
+                )],
+                raw_data=share,
+            ))
+
+        policy = parsed_data.get("password_policy", {})
+        if policy:
+            min_length = policy.get("min_length")
+            complexity = policy.get("complexity")
+            is_weak = (min_length is not None and min_length < 8) or (complexity is False)
+            if is_weak:
+                findings.append(Finding(
+                    id=_make_id(),
+                    scan_id=scan_id,
+                    title="Weak Domain Password Policy",
+                    description=(
+                        f"The domain password policy is weak: {policy.get('raw', '')}. "
+                        "A minimum length below 8 characters or disabled complexity requirements "
+                        "significantly increases the risk of successful brute-force or spray attacks."
+                    ),
+                    severity=Severity.high,
+                    target="Active Directory",
+                    affected_component="Password Policy",
+                    finding_type="misconfiguration",
+                    source_plugin="netexec",
+                    evidence=[Evidence(
+                        evidence_type="smb_enum",
+                        title="Domain Password Policy",
+                        content=f"Policy: {policy.get('raw', '')}\nMinLength: {min_length}\nComplexity: {complexity}",
+                        content_type="text/plain",
+                    )],
+                    raw_data=policy,
+                ))
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # linpeas
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_linpeas(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert LinPEAS privilege escalation results into Finding objects.
+
+        Severity mapping (from linpeas confidence percentages):
+        - 95% → critical
+        - 70% → high
+        - 50% → medium
+
+        Args:
+            parsed_data: Dict with key "findings" (list of dicts with severity,
+                         title, confidence_pct) as produced by LinpeasPlugin.
+                         Also accepts direct PluginOutput.findings-style list
+                         via a "privesc_findings" key.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for Linux privilege escalation vectors.
+        """
+        _PCT_TO_SEVERITY: dict[int, Severity] = {
+            95: Severity.critical,
+            70: Severity.high,
+            50: Severity.medium,
+        }
+        _NAME_TO_SEVERITY: dict[str, Severity] = {
+            "critical": Severity.critical,
+            "high": Severity.high,
+            "medium": Severity.medium,
+            "low": Severity.low,
+        }
+
+        findings: list[Finding] = []
+
+        # Support both list-under-key and raw-list forms
+        raw_list: list[dict[str, Any]] = (
+            parsed_data.get("privesc_findings")
+            or parsed_data.get("findings")
+            or []
+        )
+
+        for item in raw_list:
+            title = item.get("title", "Linux Privilege Escalation Vector")
+            description = item.get("description", title)
+            pct: int | None = item.get("confidence_pct")
+            severity_str: str = item.get("severity", "medium")
+
+            if pct is not None and pct in _PCT_TO_SEVERITY:
+                severity = _PCT_TO_SEVERITY[pct]
+            else:
+                severity = _NAME_TO_SEVERITY.get(severity_str.lower(), Severity.medium)
+
+            findings.append(Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target="localhost",
+                affected_component="Linux OS",
+                finding_type="vulnerability",
+                source_plugin="linpeas",
+                evidence=[Evidence(
+                    evidence_type="privesc_scan",
+                    title="LinPEAS Finding",
+                    content=item.get("raw_line", title),
+                    content_type="text/plain",
+                )],
+                raw_data=item,
+            ))
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # semgrep
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_semgrep(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert semgrep SAST findings to Finding objects.
+
+        Severity mapping:
+        - ERROR → high
+        - WARNING → medium
+
+        Args:
+            parsed_data: Dict with key "sast_findings" (list) produced by SemgrepPlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for each semgrep result.
+        """
+        _semgrep_severity_map: dict[str, Severity] = {
+            "ERROR": Severity.high,
+            "WARNING": Severity.medium,
+            "INFO": Severity.informational,
+        }
+
+        raw_findings: list[dict[str, Any]] = (
+            parsed_data.get("sast_findings", parsed_data)
+            if isinstance(parsed_data, dict)
+            else parsed_data
+        )
+        if not isinstance(raw_findings, list):
+            raw_findings = [raw_findings]
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            severity_str = str(item.get("severity", "WARNING")).upper()
+            severity = _semgrep_severity_map.get(severity_str, Severity.medium)
+
+            check_id = item.get("check_id", "")
+            message = item.get("message", "")
+            cwe_ids: list[str] = item.get("cwe_ids", [])
+            affected_component = item.get("affected_component", "")
+
+            title = f"SAST: {check_id}" if check_id else "SAST Finding"
+            description = message or f"Semgrep rule triggered: {check_id}"
+
+            evidence_list = [Evidence(
+                evidence_type="sast_result",
+                title=f"Semgrep: {check_id}",
+                content=(
+                    f"Rule: {check_id}\n"
+                    f"Severity: {severity_str}\n"
+                    f"Message: {message}\n"
+                    f"Location: {affected_component}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target=item.get("path", ""),
+                affected_component=affected_component,
+                finding_type="vulnerability",
+                source_plugin="semgrep",
+                source_tool_ref=check_id,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # bandit
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_bandit(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert bandit Python SAST findings to Finding objects.
+
+        Severity mapping:
+        - HIGH → high
+        - MEDIUM → medium
+        - LOW → low
+
+        Args:
+            parsed_data: Dict with key "python_sast" (list) produced by BanditPlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for each bandit result.
+        """
+        _bandit_severity_map: dict[str, Severity] = {
+            "HIGH": Severity.high,
+            "MEDIUM": Severity.medium,
+            "LOW": Severity.low,
+        }
+
+        raw_findings: list[dict[str, Any]] = (
+            parsed_data.get("python_sast", parsed_data)
+            if isinstance(parsed_data, dict)
+            else parsed_data
+        )
+        if not isinstance(raw_findings, list):
+            raw_findings = [raw_findings]
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            severity_str = str(item.get("issue_severity", "MEDIUM")).upper()
+            severity = _bandit_severity_map.get(severity_str, Severity.medium)
+
+            test_id = item.get("test_id", "")
+            issue_text = item.get("issue_text", "")
+            filename = item.get("filename", "")
+            line_number = item.get("line_number", 0)
+            cwe_id = item.get("cwe_id")
+
+            cwe_ids_out: list[str] = []
+            if cwe_id is not None:
+                cwe_ids_out.append(f"CWE-{cwe_id}")
+
+            affected_component = f"{filename}:{line_number}" if filename else ""
+            title = f"Python SAST: {test_id}" if test_id else "Python SAST Finding"
+            description = issue_text or f"Bandit issue detected: {test_id}"
+
+            evidence_list = [Evidence(
+                evidence_type="sast_result",
+                title=f"Bandit: {test_id}",
+                content=(
+                    f"TestID: {test_id}\n"
+                    f"Severity: {severity_str}\n"
+                    f"Issue: {issue_text}\n"
+                    f"File: {filename}\n"
+                    f"Line: {line_number}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target=filename,
+                affected_component=affected_component,
+                finding_type="vulnerability",
+                source_plugin="bandit",
+                source_tool_ref=test_id,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # checkov
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_checkov(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert checkov IaC misconfiguration findings to Finding objects.
+
+        Severity is derived from the check's severity field (HIGH/MEDIUM/LOW).
+        Defaults to medium when unspecified.
+
+        Args:
+            parsed_data: Dict with key "iac_findings" (list) produced by CheckovPlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for failed IaC checks.
+        """
+        _checkov_severity_map: dict[str, Severity] = {
+            "CRITICAL": Severity.critical,
+            "HIGH": Severity.high,
+            "MEDIUM": Severity.medium,
+            "LOW": Severity.low,
+        }
+
+        raw_findings: list[dict[str, Any]] = (
+            parsed_data.get("iac_findings", parsed_data)
+            if isinstance(parsed_data, dict)
+            else parsed_data
+        )
+        if not isinstance(raw_findings, list):
+            raw_findings = [raw_findings]
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            severity_str = str(item.get("severity", "MEDIUM")).upper()
+            severity = _checkov_severity_map.get(severity_str, Severity.medium)
+
+            check_id = item.get("check_id", "")
+            name = item.get("name", "")
+            guideline = item.get("guideline", "")
+            file_path = item.get("file_path", "")
+            line_range = item.get("file_line_range", [])
+
+            line_info = f":{line_range[0]}-{line_range[-1]}" if line_range else ""
+            affected_component = f"{file_path}{line_info}" if file_path else ""
+
+            title = f"IaC Misconfiguration: {check_id}" if check_id else "IaC Misconfiguration"
+            description = name or f"Checkov check failed: {check_id}"
+
+            evidence_list = [Evidence(
+                evidence_type="iac_scan",
+                title=f"Checkov: {check_id}",
+                content=(
+                    f"CheckID: {check_id}\n"
+                    f"Name: {name}\n"
+                    f"Severity: {severity_str}\n"
+                    f"File: {file_path}\n"
+                    f"Lines: {line_range}\n"
+                    f"Guideline: {guideline}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target=file_path,
+                affected_component=affected_component,
+                finding_type="misconfiguration",
+                source_plugin="checkov",
+                source_tool_ref=check_id,
+                remediation=guideline,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # kube-bench
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_kube_bench(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert kube-bench CIS benchmark failures to Finding objects.
+
+        All CIS benchmark failures are treated as medium severity by default;
+        scored checks are considered more impactful.
+
+        Args:
+            parsed_data: Dict with key "k8s_cis" (list) produced by KubeBenchPlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for each benchmark failure.
+        """
+        raw_findings: list[dict[str, Any]] = (
+            parsed_data.get("k8s_cis", parsed_data)
+            if isinstance(parsed_data, dict)
+            else parsed_data
+        )
+        if not isinstance(raw_findings, list):
+            raw_findings = [raw_findings]
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            test_number = item.get("test_number", "")
+            test_desc = item.get("test_desc", "")
+            remediation = item.get("remediation", "")
+            scored = item.get("scored", True)
+
+            title = f"CIS K8s Benchmark Failure: {test_number}" if test_number else "CIS K8s Benchmark Failure"
+            description = test_desc or f"CIS benchmark check {test_number} failed."
+
+            severity = Severity.medium if scored else Severity.low
+
+            evidence_list = [Evidence(
+                evidence_type="cis_benchmark",
+                title=f"kube-bench: {test_number}",
+                content=(
+                    f"TestNumber: {test_number}\n"
+                    f"Description: {test_desc}\n"
+                    f"Status: FAIL\n"
+                    f"Scored: {scored}\n"
+                    f"Remediation: {remediation}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target="kubernetes",
+                affected_component=test_number,
+                finding_type="misconfiguration",
+                source_plugin="kube-bench",
+                source_tool_ref=test_number,
+                remediation=remediation,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # poutine
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_poutine(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert poutine CI/CD security findings to Finding objects.
+
+        Severity mapping:
+        - critical → critical
+        - high → high
+        - medium → medium
+        - low / info → low
+
+        Args:
+            parsed_data: Dict with key "cicd_findings" (list) produced by PoutinePlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for each CI/CD pipeline security issue.
+        """
+        _poutine_severity_map: dict[str, Severity] = {
+            "critical": Severity.critical,
+            "high": Severity.high,
+            "medium": Severity.medium,
+            "low": Severity.low,
+            "info": Severity.low,
+        }
+
+        raw_findings: list[dict[str, Any]] = (
+            parsed_data.get("cicd_findings", parsed_data)
+            if isinstance(parsed_data, dict)
+            else parsed_data
+        )
+        if not isinstance(raw_findings, list):
+            raw_findings = [raw_findings]
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            severity_str = str(item.get("severity", "medium")).lower()
+            severity = _poutine_severity_map.get(severity_str, Severity.medium)
+
+            rule_id = item.get("id", "")
+            rule_title = item.get("title", "")
+            details = item.get("details", "")
+
+            title = f"CI/CD Security: {rule_title}" if rule_title else f"CI/CD Security: {rule_id}"
+            description = details or rule_title or f"Poutine rule triggered: {rule_id}"
+
+            evidence_list = [Evidence(
+                evidence_type="cicd_scan",
+                title=f"Poutine: {rule_id}",
+                content=(
+                    f"RuleID: {rule_id}\n"
+                    f"Title: {rule_title}\n"
+                    f"Severity: {severity_str}\n"
+                    f"Details: {details}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target="cicd",
+                affected_component=rule_id,
+                finding_type="misconfiguration",
+                source_plugin="poutine",
+                source_tool_ref=rule_id,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
     # wafw00f
     # ------------------------------------------------------------------
 
