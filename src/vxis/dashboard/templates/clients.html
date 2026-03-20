@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Clients — VXIS{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex items-center gap-2 text-sm">
+  <span class="text-gray-500">Dashboard</span>
+  <span class="text-gray-700">/</span>
+  <span class="text-gray-100 font-medium">Clients</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <!-- Page heading -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-semibold text-white">Clients</h1>
+      <p class="text-sm text-gray-500 mt-0.5">
+        {{ total_clients }} managed client{{ 's' if total_clients != 1 else '' }} — click a card to view details.
+      </p>
+    </div>
+    <div class="text-xs text-gray-600">
+      Use <code class="bg-gray-900 text-cyan-400 px-1.5 py-0.5 rounded border border-gray-800">vxis client add</code> to register a new client.
+    </div>
+  </div>
+
+  {% if client_summaries %}
+  <!-- Client cards grid -->
+  <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+    {% for summary in client_summaries %}
+    {% set client = summary.client %}
+    <a href="/client/{{ client.id }}"
+       class="group bg-surface rounded-lg border border-surface-border p-5 hover:border-cyan-800/60 transition-colors block">
+
+      <!-- Header row -->
+      <div class="flex items-start justify-between mb-3">
+        <div class="flex-1 min-w-0">
+          <h2 class="text-sm font-semibold text-white group-hover:text-cyan-400 transition-colors truncate">
+            {{ client.name }}
+          </h2>
+          <p class="text-xs text-gray-500 font-mono mt-0.5">{{ client.id }}</p>
+        </div>
+        {% if client.industry %}
+        <span class="ml-2 flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-800 text-gray-400 border border-gray-700">
+          {{ client.industry }}
+        </span>
+        {% endif %}
+      </div>
+
+      <!-- Domains -->
+      {% if client.domains %}
+      <div class="mb-4">
+        <p class="text-xs text-gray-600 uppercase tracking-wider mb-1">Domains</p>
+        <div class="flex flex-wrap gap-1">
+          {% for domain in client.domains[:3] %}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono bg-gray-900 text-cyan-300 border border-gray-800">
+            {{ domain }}
+          </span>
+          {% endfor %}
+          {% if client.domains | length > 3 %}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs text-gray-500">
+            +{{ (client.domains | length) - 3 }} more
+          </span>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Stats row -->
+      <div class="grid grid-cols-2 gap-3 pt-3 border-t border-surface-border">
+        <div>
+          <p class="text-xs text-gray-600 uppercase tracking-wider">Scans</p>
+          <p class="text-lg font-bold text-white mt-0.5">{{ summary.total_scans }}</p>
+        </div>
+        <div>
+          <p class="text-xs text-gray-600 uppercase tracking-wider">Findings</p>
+          <p class="text-lg font-bold {% if summary.total_findings > 0 %}text-yellow-400{% else %}text-white{% endif %} mt-0.5">
+            {{ summary.total_findings }}
+          </p>
+        </div>
+      </div>
+
+      <!-- Latest scan -->
+      {% if summary.latest_scan %}
+      <div class="mt-3 pt-3 border-t border-surface-border">
+        <p class="text-xs text-gray-600">
+          Last scan:
+          <span class="text-gray-400">{{ summary.latest_scan.started_at | fmtdt }}</span>
+          &mdash;
+          {% if summary.latest_scan.status == 'completed' %}
+            <span class="text-green-400">completed</span>
+          {% elif summary.latest_scan.status == 'running' %}
+            <span class="text-cyan-400">running</span>
+          {% elif summary.latest_scan.status == 'failed' %}
+            <span class="text-red-400">failed</span>
+          {% else %}
+            <span class="text-gray-500">{{ summary.latest_scan.status }}</span>
+          {% endif %}
+        </p>
+      </div>
+      {% else %}
+      <div class="mt-3 pt-3 border-t border-surface-border">
+        <p class="text-xs text-gray-700 italic">No scans yet</p>
+      </div>
+      {% endif %}
+
+    </a>
+    {% endfor %}
+  </div>
+
+  {% else %}
+  <!-- Empty state -->
+  <div class="flex flex-col items-center justify-center py-20 text-center">
+    <div class="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center mb-4">
+      <svg class="w-7 h-7 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+        <circle cx="9" cy="7" r="4"/>
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+      </svg>
+    </div>
+    <p class="text-sm font-medium text-gray-400">No clients configured</p>
+    <p class="text-xs text-gray-600 mt-1">Register your first client using the VXIS CLI.</p>
+    <code class="mt-3 text-xs bg-gray-900 text-cyan-400 px-3 py-1.5 rounded border border-gray-800 font-mono">
+      vxis client add "Client Name" "example.com"
+    </code>
+  </div>
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -382,6 +382,151 @@ async def export_report(
     )
 
 
+@app.get("/clients", response_class=HTMLResponse)
+async def clients_list(request: Request) -> HTMLResponse:
+    """Clients management page — lists all configured clients with scan history summary."""
+    from vxis.config.client_manager import ClientManager
+
+    clients_dir = Path.home() / ".vxis" / "clients"
+    manager = ClientManager(clients_dir)
+    clients = manager.list_clients()
+
+    engine = _get_engine(request)
+
+    # Build per-client scan summaries
+    client_summaries: list[dict] = []
+    async with get_session(engine) as session:
+        for client in clients:
+            total_scans = 0
+            total_findings = 0
+            latest_scan = None
+
+            for domain in client.domains:
+                stmt = (
+                    select(ScanRecord)
+                    .where(ScanRecord.target.like(f"%{domain}%"))
+                    .order_by(ScanRecord.started_at.desc())
+                )
+                rows = list((await session.execute(stmt)).scalars().all())
+                total_scans += len(rows)
+
+                if rows and latest_scan is None:
+                    latest_scan = rows[0]
+
+                for scan in rows:
+                    count_stmt = select(func.count(FindingRecord.id)).where(
+                        FindingRecord.scan_id == scan.id
+                    )
+                    count: int = (await session.execute(count_stmt)).scalar_one_or_none() or 0
+                    total_findings += count
+
+            client_summaries.append(
+                {
+                    "client": client,
+                    "total_scans": total_scans,
+                    "total_findings": total_findings,
+                    "latest_scan": latest_scan,
+                }
+            )
+
+    return templates.TemplateResponse(
+        request,
+        "clients.html",
+        {
+            "client_summaries": client_summaries,
+            "total_clients": len(clients),
+        },
+    )
+
+
+@app.get("/client/{client_id}", response_class=HTMLResponse)
+async def client_detail(request: Request, client_id: str) -> HTMLResponse:
+    """Client detail page — client info, scan history table, and risk trend."""
+    from vxis.config.client_manager import ClientManager
+
+    clients_dir = Path.home() / ".vxis" / "clients"
+    manager = ClientManager(clients_dir)
+    client = manager.get_client(client_id)
+
+    if client is None:
+        return templates.TemplateResponse(
+            request,
+            "404.html",
+            {"message": f"Client '{client_id}' not found"},
+            status_code=404,
+        )
+
+    engine = _get_engine(request)
+
+    # Collect scan history across all client domains
+    scan_history: list[dict] = []
+    async with get_session(engine) as session:
+        for domain in client.domains:
+            stmt = (
+                select(ScanRecord)
+                .where(ScanRecord.target.like(f"%{domain}%"))
+                .order_by(ScanRecord.started_at.desc())
+            )
+            rows = list((await session.execute(stmt)).scalars().all())
+            for scan in rows:
+                count_stmt = select(func.count(FindingRecord.id)).where(
+                    FindingRecord.scan_id == scan.id
+                )
+                finding_count: int = (
+                    await session.execute(count_stmt)
+                ).scalar_one_or_none() or 0
+
+                # Severity breakdown for risk grade
+                sev_stmt = (
+                    select(FindingRecord.effective_severity, func.count(FindingRecord.id))
+                    .where(FindingRecord.scan_id == scan.id)
+                    .group_by(FindingRecord.effective_severity)
+                )
+                sev_rows = list((await session.execute(sev_stmt)).all())
+                sev_counts: dict[str, int] = {
+                    sev: cnt for sev, cnt in sev_rows
+                }
+
+                # Compute a simple risk grade (A-F) based on critical/high count
+                critical_count = sev_counts.get("critical", 0)
+                high_count = sev_counts.get("high", 0)
+                if critical_count > 0:
+                    grade = "F"
+                elif high_count >= 3:
+                    grade = "D"
+                elif high_count > 0:
+                    grade = "C"
+                elif sev_counts.get("medium", 0) > 0:
+                    grade = "B"
+                else:
+                    grade = "A"
+
+                scan_history.append(
+                    {
+                        "scan": scan,
+                        "finding_count": finding_count,
+                        "sev_counts": sev_counts,
+                        "grade": grade,
+                    }
+                )
+
+    # Sort combined history by started_at descending
+    scan_history.sort(
+        key=lambda x: x["scan"].started_at or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "client_detail.html",
+        {
+            "client": client,
+            "scan_history": scan_history,
+            "total_scans": len(scan_history),
+        },
+    )
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     """Health check endpoint."""
