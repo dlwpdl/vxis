@@ -1,0 +1,25 @@
+# VXIS Security Automation Platform — default configuration
+#
+# This file provides baseline values. Any field can be overridden by:
+#   • Environment variables:  VXIS_<FIELD>=value
+#   • A .env file in the working directory
+#   • CLI flags at runtime
+#
+# Sensitive values (API keys, credentials) must NOT be stored here.
+# Use environment variables or a secrets manager instead.
+
+# ---------------------------------------------------------------------------
+# Core infrastructure
+# ---------------------------------------------------------------------------
+data_dir = "~/.vxis"
+db_url   = "sqlite+aiosqlite:///~/.vxis/vxis.db"
+
+# Accepted values: DEBUG | INFO | WARNING | ERROR
+log_level = "INFO"
+
+# ---------------------------------------------------------------------------
+# Report generation
+# ---------------------------------------------------------------------------
+report_output_dir   = "~/.vxis/reports"
+report_company_name = "VXIS Security"
+report_author       = ""
