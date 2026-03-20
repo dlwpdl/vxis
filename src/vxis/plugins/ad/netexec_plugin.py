@@ -29,6 +29,7 @@ class NetexecPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="nxc",
         category="ad",
+            tier=2,
         depends_on=(),
         produces=("ad_enum",),
         timeout_seconds=900,

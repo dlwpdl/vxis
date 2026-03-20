@@ -117,6 +117,7 @@ class ScanOrchestrator:
         profile: str = "standard",
         selected_plugins: list[str] | None = None,
         client_config_path: Path | None = None,
+        tier: int = 1,
     ) -> ScanResult:
         """Execute a full scan against *target*.
 
@@ -172,6 +173,20 @@ class ScanOrchestrator:
 
         # --- 4. Plugin discovery and filtering ---
         registry = discover_plugins()
+
+        # Filter by tier: only run Tier 1 (recon) plugins for zero-touch scans.
+        # Tier 2 (breach) plugins require --tier breach flag (future).
+        # tier comes from the parameter above
+        registry = {
+            k: v for k, v in registry.items()
+            if getattr(v.meta, 'tier', 1) <= tier
+        }
+
+        # Filter out plugins whose binary is not installed
+        registry = {
+            k: v for k, v in registry.items()
+            if v.validate_environment()
+        }
 
         # Apply profile-level skip list
         for skip_name in scan_profile.skip_plugins:

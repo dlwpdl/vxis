@@ -18,6 +18,7 @@ class PluginMeta:
     version: str
     tool_binary: str
     category: str  # "recon", "scan", "vuln", "crypto", "secrets"
+    tier: int = 1  # 1 = recon (zero-touch), 2 = breach (cooperative)
     depends_on: tuple[str, ...] = ()
     optional_depends: tuple[str, ...] = ()
     timeout_seconds: int = 600

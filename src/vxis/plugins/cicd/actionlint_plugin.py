@@ -29,6 +29,7 @@ class ActionlintPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="actionlint",
         category="cicd",
+            tier=2,
         depends_on=(),
         produces=("gha_lint",),
         timeout_seconds=120,

@@ -29,6 +29,7 @@ class CertipyPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="certipy",
         category="ad",
+            tier=2,
         depends_on=(),
         produces=("adcs_findings",),
         timeout_seconds=600,

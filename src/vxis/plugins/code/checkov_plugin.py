@@ -17,6 +17,7 @@ class CheckovPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="checkov",
         category="code",
+            tier=2,
         depends_on=(),
         produces=("iac_findings",),
         timeout_seconds=900,

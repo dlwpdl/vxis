@@ -17,6 +17,7 @@ class KubeBenchPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="kube-bench",
         category="container",
+            tier=2,
         depends_on=(),
         produces=("k8s_cis",),
         timeout_seconds=300,

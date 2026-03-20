@@ -19,6 +19,7 @@ class BloodhoundPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="bloodhound-python",
         category="ad",
+            tier=2,
         depends_on=(),
         produces=("ad_graph",),
         timeout_seconds=1800,

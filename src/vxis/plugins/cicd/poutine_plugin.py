@@ -17,6 +17,7 @@ class PoutinePlugin(BasePlugin):
         version="1.0.0",
         tool_binary="poutine",
         category="cicd",
+            tier=2,
         depends_on=(),
         produces=("cicd_findings",),
         timeout_seconds=600,

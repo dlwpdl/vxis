@@ -27,6 +27,7 @@ class LinpeasPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="bash",
         category="privesc",
+            tier=2,
         depends_on=(),
         produces=("linux_privesc",),
         timeout_seconds=600,

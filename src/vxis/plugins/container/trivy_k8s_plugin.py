@@ -17,6 +17,7 @@ class TrivyK8sPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="trivy",
         category="container",
+            tier=2,
         depends_on=(),
         produces=("k8s_vulns",),
         timeout_seconds=900,

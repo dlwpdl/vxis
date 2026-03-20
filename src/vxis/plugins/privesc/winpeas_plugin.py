@@ -26,6 +26,7 @@ class WinpeasPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="winpeas.exe",
         category="privesc",
+            tier=2,
         depends_on=(),
         produces=("windows_privesc",),
         timeout_seconds=600,

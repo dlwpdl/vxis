@@ -17,6 +17,7 @@ class SemgrepPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="semgrep",
         category="code",
+            tier=2,
         depends_on=(),
         produces=("sast_findings",),
         timeout_seconds=1800,
