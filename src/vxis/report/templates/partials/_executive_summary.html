@@ -1,0 +1,63 @@
+{# Executive summary partial — section 1 #}
+{% set counts = report.severity_counts %}
+
+<div class="section-label">Section 1</div>
+<h1>Executive Summary</h1>
+
+{# Severity summary table #}
+<h3>Finding Summary</h3>
+<table>
+  <thead>
+    <tr>
+      <th>Severity</th>
+      <th style="text-align:center;">Count</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for severity in ["critical", "high", "medium", "low", "informational"] %}
+    {% set count = counts[severity] %}
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-{{ severity }}">
+          {{ severity | upper }}
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:{% if count > 0 %}700{% else %}400{% endif %};">
+        {{ count }}
+      </td>
+    </tr>
+    {% endfor %}
+    <tr style="border-top: 2px solid #1a1a2e;">
+      <td style="font-weight:700;">Total</td>
+      <td style="text-align:center; font-weight:700;">{{ report.total_findings }}</td>
+    </tr>
+  </tbody>
+</table>
+
+{# Charts row #}
+{% if report.total_findings > 0 %}
+<div class="summary-chart-row">
+  <div class="summary-chart-donut">
+    {{ severity_donut_svg(counts, 160) | safe }}
+  </div>
+  <div class="summary-chart-bars">
+    {{ severity_bar_svg(counts, 380, 26) | safe }}
+  </div>
+</div>
+{% endif %}
+
+{# Executive summary narrative #}
+{% if report.executive_summary %}
+<h3>Assessment Overview</h3>
+<div class="attestation-body">
+  {{ report.executive_summary | replace('\n\n', '</p><p>') | replace('\n', '<br>') | safe }}
+</div>
+{% endif %}
+
+{# Risk score #}
+<h3>Overall Risk Score</h3>
+<p>
+  The overall risk score for this assessment is
+  <strong>{{ "%.1f" | format(report.risk_score) }} / 10.0</strong>,
+  calculated as a weighted composite across all identified findings.
+</p>

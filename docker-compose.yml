@@ -1,0 +1,10 @@
+services:
+  vxis:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./config.toml:/app/config.toml:ro
+    env_file:
+      - .env
+    network_mode: host

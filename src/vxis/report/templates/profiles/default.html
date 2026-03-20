@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ report.client_name }} Security Assessment Report — {{ report.company_name }}</title>
+  <link rel="stylesheet" href="../styles/main.css">
+</head>
+<body>
+
+  {# ============================================================
+     COVER PAGE
+     ============================================================ #}
+  {% include "partials/_cover.html" %}
+  <div class="page-break"></div>
+
+  {# ============================================================
+     TABLE OF CONTENTS
+     ============================================================ #}
+  <div class="section-label">Contents</div>
+  <h1>Table of Contents</h1>
+
+  <div class="toc">
+    <div class="toc-entry">
+      <span class="toc-entry-title">1. Executive Summary</span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">3</span>
+    </div>
+    <div class="toc-entry">
+      <span class="toc-entry-title">2. Methodology</span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">4</span>
+    </div>
+    <div class="toc-entry">
+      <span class="toc-entry-title">3. Findings</span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">5</span>
+    </div>
+    {% set counts = report.severity_counts %}
+    {% set severities = ["critical", "high", "medium", "low", "informational"] %}
+    {% set page_offset = namespace(val=5) %}
+    {% for severity in severities %}
+      {% if counts[severity] > 0 %}
+      <div class="toc-entry" style="padding-left:16pt;">
+        <span class="toc-entry-title">
+          3.{{ loop.index }}. {{ severity | title }} Findings ({{ counts[severity] }})
+        </span>
+        <span class="toc-dots"></span>
+        <span class="toc-entry-page">{{ page_offset.val }}</span>
+      </div>
+      {% set page_offset.val = page_offset.val + counts[severity] %}
+      {% endif %}
+    {% endfor %}
+    <div class="toc-entry">
+      <span class="toc-entry-title">4. Attestation</span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">—</span>
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  {# ============================================================
+     SECTION 1: EXECUTIVE SUMMARY
+     ============================================================ #}
+  {% include "partials/_executive_summary.html" %}
+  <div class="page-break"></div>
+
+  {# ============================================================
+     SECTION 2: METHODOLOGY
+     ============================================================ #}
+  <div class="section-label">Section 2</div>
+  <h1>Methodology</h1>
+
+  <p>{{ report.methodology | replace('\n', '<br>') | safe }}</p>
+
+  <div class="page-break"></div>
+
+  {# ============================================================
+     SECTION 3: FINDINGS
+     ============================================================ #}
+  <div class="section-label">Section 3</div>
+  <h1>Findings</h1>
+
+  {% if report.total_findings == 0 %}
+    <p>No security findings were identified during this assessment.</p>
+  {% else %}
+    {% for severity in ["critical", "high", "medium", "low", "informational"] %}
+      {% set findings_list = report.findings_by_severity[severity] %}
+      {% if findings_list %}
+        <h2>
+          <span class="severity-badge severity-badge-{{ severity }}">{{ severity | upper }}</span>
+          &nbsp;{{ severity | title }} Findings ({{ findings_list | length }})
+        </h2>
+
+        {% for finding in findings_list %}
+          {% include "partials/_finding_card.html" %}
+        {% endfor %}
+
+        {% if not loop.last %}
+          <div class="page-break"></div>
+        {% endif %}
+      {% endif %}
+    {% endfor %}
+  {% endif %}
+
+  <div class="page-break"></div>
+
+  {# ============================================================
+     SECTION 4: ATTESTATION
+     ============================================================ #}
+  <div class="section-label">Section 4</div>
+  <h1>Attestation</h1>
+
+  {% include "partials/_attestation.html" %}
+
+</body>
+</html>

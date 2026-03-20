@@ -1,0 +1,137 @@
+{# Finding card partial — NCC Group style
+   Context variable: `finding` (Finding model instance) #}
+
+{% set sev = finding.effective_severity.value %}
+
+<div class="finding-card severity-{{ sev }}">
+
+  {# Header: title + severity badge #}
+  <div class="finding-header">
+    <span class="finding-title">{{ finding.title }}</span>
+    <span class="severity-badge severity-badge-{{ sev }}">{{ sev | upper }}</span>
+  </div>
+
+  <div class="finding-body">
+
+    {# Meta summary table #}
+    <table class="finding-meta-table">
+      <thead>
+        <tr>
+          <th>Overall Risk</th>
+          <th>Impact</th>
+          <th>Exploitability</th>
+          <th>Finding ID</th>
+          <th>Component</th>
+          <th>Category</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="severity-badge severity-badge-{{ sev }}">{{ sev | upper }}</span>
+          </td>
+          <td>
+            {% if finding.cvss %}
+              {{ "%.1f" | format(finding.cvss.base_score) }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td>
+            {% if finding.cvss %}
+              {{ finding.cvss.vector_string | truncate(20, true, '…') }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td><code>{{ finding.id }}</code></td>
+          <td>{{ finding.affected_component if finding.affected_component else "—" }}</td>
+          <td>{{ finding.finding_type }}</td>
+          <td>{{ finding.status.value | replace("_", " ") | title }}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    {# CVE / CWE references #}
+    {% if finding.cve_ids or finding.cwe_ids %}
+    <div class="finding-section-title">Identifiers</div>
+    <p>
+      {% if finding.cve_ids %}
+        <strong>CVE:</strong>
+        {% for cve in finding.cve_ids %}
+          <a href="https://nvd.nist.gov/vuln/detail/{{ cve }}">{{ cve }}</a>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+      {% endif %}
+      {% if finding.cve_ids and finding.cwe_ids %}&nbsp;&nbsp;|&nbsp;&nbsp;{% endif %}
+      {% if finding.cwe_ids %}
+        <strong>CWE:</strong>
+        {% for cwe in finding.cwe_ids %}
+          <a href="https://cwe.mitre.org/data/definitions/{{ cwe | replace('CWE-', '') }}.html">{{ cwe }}</a>{% if not loop.last %}, {% endif %}
+        {% endfor %}
+      {% endif %}
+    </p>
+    {% endif %}
+
+    {# Description #}
+    <div class="finding-section-title">Description</div>
+    <div>{{ finding.description | replace('\n', '<br>') | safe }}</div>
+
+    {# Evidence #}
+    {% if finding.evidence %}
+    <div class="finding-section-title">Evidence</div>
+    {% for ev in finding.evidence %}
+    <div class="evidence-block">
+      <div class="evidence-title">
+        {{ ev.title }}
+        <span class="evidence-type-badge">{{ ev.evidence_type | upper }}</span>
+      </div>
+      <div>{{ ev.content | replace('\n', '<br>') | safe }}</div>
+      {% if ev.file_path %}
+      <div style="margin-top:4pt; font-size:8.5pt; color:#666;">
+        File: <code>{{ ev.file_path }}</code>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    {# Recommendation #}
+    {% if finding.remediation %}
+    <div class="finding-section-title">Recommendation</div>
+    <div>{{ finding.remediation | replace('\n', '<br>') | safe }}</div>
+    {% endif %}
+
+    {# References #}
+    {% if finding.references %}
+    <div class="finding-section-title">References</div>
+    <ul style="margin:4pt 0; padding-left:18pt; font-size:9pt;">
+      {% for ref in finding.references %}
+      <li>
+        <a href="{{ ref.url }}">{{ ref.title }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {# MITRE ATT&CK #}
+    {% if finding.mitre_attack %}
+    {% set mitre = finding.mitre_attack %}
+    <div class="finding-section-title">MITRE ATT&amp;CK</div>
+    <div class="mitre-block">
+      <strong>Tactic:</strong> {{ mitre.tactic_id }} — {{ mitre.tactic_name }}<br>
+      <strong>Technique:</strong> {{ mitre.technique_id }} — {{ mitre.technique_name }}
+      {% if mitre.subtechnique_id %}
+        <br><strong>Sub-technique:</strong> {{ mitre.subtechnique_id }}
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {# Analyst notes #}
+    {% if finding.analyst_notes %}
+    <div class="finding-section-title">Analyst Notes</div>
+    <div style="font-style:italic; color:#555;">{{ finding.analyst_notes | replace('\n', '<br>') | safe }}</div>
+    {% endif %}
+
+  </div>{# /finding-body #}
+</div>{# /finding-card #}

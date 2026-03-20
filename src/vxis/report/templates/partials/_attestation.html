@@ -1,0 +1,77 @@
+{# Attestation letter partial — one-page confirmation of assessment completion #}
+{% set counts = report.severity_counts %}
+
+<div class="letterhead">
+  <div class="letterhead-company">{{ report.company_name | upper }}</div>
+  <div class="letterhead-tagline">Security Assessment Services</div>
+</div>
+
+<div class="attestation-body">
+
+  <p>{{ report.scan_date }}</p>
+
+  <p><strong>To Whom It May Concern,</strong></p>
+
+  <p>
+    This letter serves as formal attestation that
+    <strong>{{ report.company_name }}</strong> has completed a security assessment
+    of the systems and services operated by <strong>{{ report.client_name }}</strong>
+    as outlined in the agreed scope of work. The assessment was conducted by qualified
+    security professionals in accordance with industry-standard methodologies.
+  </p>
+
+  <p>
+    The assessment target was: <strong>{{ report.target }}</strong>.<br>
+    Assessment reference: <strong>{{ report.scan_id }}</strong>.
+  </p>
+
+  <p>The findings identified during this engagement are summarised below:</p>
+
+  <table style="width:360pt; margin-bottom:14pt;">
+    <thead>
+      <tr>
+        <th>Severity</th>
+        <th style="text-align:center;">Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for severity in ["critical", "high", "medium", "low", "informational"] %}
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-{{ severity }}">{{ severity | upper }}</span>
+        </td>
+        <td style="text-align:center; font-weight:{% if counts[severity] > 0 %}700{% else %}400{% endif %};">
+          {{ counts[severity] }}
+        </td>
+      </tr>
+      {% endfor %}
+      <tr style="border-top:2px solid #1a1a2e;">
+        <td style="font-weight:700;">Total</td>
+        <td style="text-align:center; font-weight:700;">{{ report.total_findings }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    All findings have been documented in the accompanying technical report and disclosed
+    to the client in accordance with responsible disclosure practices. This letter may
+    be presented to relevant stakeholders, auditors, or regulatory bodies as evidence
+    of completed security testing activities.
+  </p>
+
+  <p>
+    For questions regarding this attestation or the underlying assessment, please contact
+    <strong>{{ report.company_name }}</strong> directly.
+  </p>
+
+  <div class="signature-block">
+    <p>Sincerely,</p>
+    <div class="signature-line"></div>
+    <p>
+      <strong>{{ report.author if report.author else "Assessment Lead" }}</strong><br>
+      {{ report.company_name }}<br>
+      <em>Client Confidential — Not for Distribution</em>
+    </p>
+  </div>
+
+</div>

@@ -1,0 +1,48 @@
+{# Cover page partial — NCC Group style #}
+<div class="cover-page">
+
+  {# Logo or text fallback #}
+  {% if report.logo_path %}
+    <img class="cover-logo" src="{{ report.logo_path }}" alt="{{ report.company_name }} logo" />
+  {% else %}
+    <div class="cover-logo-text">{{ report.company_name | upper }}</div>
+  {% endif %}
+
+  {# Report title #}
+  <h1 class="cover-title">{{ report.client_name }} Security Assessment</h1>
+  <div class="cover-subtitle">Penetration Testing &amp; Vulnerability Assessment Report</div>
+
+  {# Meta table #}
+  <div class="cover-meta">
+    <table>
+      <tbody>
+        <tr>
+          <td>Prepared for</td>
+          <td>{{ report.client_name }}</td>
+        </tr>
+        <tr>
+          <td>Prepared by</td>
+          <td>{{ report.company_name }}{% if report.author %} — {{ report.author }}{% endif %}</td>
+        </tr>
+        <tr>
+          <td>Assessment date</td>
+          <td>{{ report.scan_date }}</td>
+        </tr>
+        <tr>
+          <td>Report version</td>
+          <td>1.0 — Final</td>
+        </tr>
+        <tr>
+          <td>Scan reference</td>
+          <td>{{ report.scan_id }}</td>
+        </tr>
+        <tr>
+          <td>Target</td>
+          <td>{{ report.target }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="cover-classification">CLIENT CONFIDENTIAL</div>
+  </div>
+
+</div>
