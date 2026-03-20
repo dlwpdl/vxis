@@ -715,6 +715,644 @@ class FindingFactory:
         return findings
 
     # ------------------------------------------------------------------
+    # prowler
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_prowler(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert Prowler FAIL results to Finding objects.
+
+        Severity is derived directly from Prowler's severity field.
+
+        Args:
+            parsed_data: Dict with key "cloud_findings" (list) produced by ProwlerPlugin,
+                         or a raw list of Prowler check result dicts.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for all FAIL checks.
+        """
+        _prowler_severity_map: dict[str, Severity] = {
+            "critical": Severity.critical,
+            "high": Severity.high,
+            "medium": Severity.medium,
+            "low": Severity.low,
+            "informational": Severity.informational,
+        }
+
+        raw_findings: list[dict[str, Any]] = (
+            parsed_data.get("cloud_findings", parsed_data)
+            if isinstance(parsed_data, dict)
+            else parsed_data
+        )
+        if not isinstance(raw_findings, list):
+            raw_findings = [raw_findings]
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            severity_str = str(item.get("severity", "medium")).lower()
+            severity = _prowler_severity_map.get(severity_str, Severity.medium)
+
+            check_id = item.get("check_id", "")
+            service_name = item.get("service_name", "")
+            description = item.get("description", "")
+            risk = item.get("risk", "")
+            remediation = item.get("remediation", "")
+            resource_arn = item.get("resource_arn", "")
+
+            title = f"Cloud Misconfiguration: {check_id}" if check_id else "Cloud Misconfiguration"
+
+            evidence_list = [Evidence(
+                evidence_type="cloud_audit",
+                title=f"Prowler Check: {check_id}",
+                content=(
+                    f"CheckID: {check_id}\n"
+                    f"Service: {service_name}\n"
+                    f"Status: FAIL\n"
+                    f"Risk: {risk}\n"
+                    f"Resource: {resource_arn}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target=resource_arn or service_name,
+                affected_component=service_name,
+                finding_type="misconfiguration",
+                source_plugin="prowler",
+                source_tool_ref=check_id,
+                remediation=remediation,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # gitleaks
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_gitleaks(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert Gitleaks secret findings to Finding objects with masked secret values.
+
+        All gitleaks findings are treated as high severity; secrets with AWS/cloud
+        rule IDs are elevated to critical.
+
+        Args:
+            parsed_data: Dict with key "code_secrets" (list) produced by GitleaksPlugin,
+                         or a raw list of gitleaks result dicts.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for detected secrets.
+        """
+        _cloud_rule_patterns: list[str] = ["aws", "gcp", "azure", "github", "gitlab", "stripe"]
+
+        raw_findings: list[dict[str, Any]] = (
+            parsed_data.get("code_secrets", parsed_data)
+            if isinstance(parsed_data, dict)
+            else parsed_data
+        )
+        if not isinstance(raw_findings, list):
+            raw_findings = [raw_findings]
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            rule_id = item.get("rule_id", "")
+            description = item.get("description", "")
+            file_path = item.get("file", "")
+            start_line = item.get("start_line", 0)
+            commit = item.get("commit", "")
+            masked_secret = item.get("secret", "")
+
+            # Re-mask raw secret if it slipped through without masking.
+            if masked_secret and "*" not in masked_secret:
+                masked_secret = mask_secret(masked_secret)
+
+            rule_lower = rule_id.lower()
+            if any(pattern in rule_lower for pattern in _cloud_rule_patterns):
+                severity = Severity.critical
+            else:
+                severity = Severity.high
+
+            title = f"Secret Detected: {rule_id}" if rule_id else "Secret Detected"
+            full_description = (
+                f"{description}\n"
+                f"File: {file_path} (line {start_line})\n"
+                f"Commit: {commit}\n"
+                f"Secret (masked): {masked_secret}"
+            ).strip()
+
+            evidence_list = [Evidence(
+                evidence_type="secret",
+                title=f"Gitleaks Finding: {rule_id}",
+                content=(
+                    f"RuleID: {rule_id}\n"
+                    f"File: {file_path}\n"
+                    f"Line: {start_line}\n"
+                    f"Commit: {commit}\n"
+                    f"Masked Secret: {masked_secret}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=full_description,
+                severity=severity,
+                target=file_path,
+                affected_component=file_path,
+                finding_type="secret",
+                source_plugin="gitleaks",
+                source_tool_ref=rule_id,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # trivy
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_trivy(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert Trivy dependency vulnerability findings to Finding objects.
+
+        Args:
+            parsed_data: Dict with key "dependency_vulns" (list) produced by TrivyPlugin,
+                         or a raw list of vulnerability dicts.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects, each representing a CVE in a dependency.
+        """
+        _trivy_severity_map: dict[str, Severity] = {
+            "CRITICAL": Severity.critical,
+            "HIGH": Severity.high,
+            "MEDIUM": Severity.medium,
+            "LOW": Severity.low,
+            "UNKNOWN": Severity.informational,
+        }
+
+        raw_findings: list[dict[str, Any]] = (
+            parsed_data.get("dependency_vulns", parsed_data)
+            if isinstance(parsed_data, dict)
+            else parsed_data
+        )
+        if not isinstance(raw_findings, list):
+            raw_findings = [raw_findings]
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            vuln_id = item.get("vulnerability_id", "")
+            pkg_name = item.get("pkg_name", "")
+            installed_version = item.get("installed_version", "")
+            fixed_version = item.get("fixed_version", "")
+            severity_str = item.get("severity", "UNKNOWN")
+            title_str = item.get("title", "")
+            description_str = item.get("description", "")
+
+            severity = _trivy_severity_map.get(severity_str.upper(), Severity.informational)
+
+            # Extract CVE IDs from vulnerability_id field.
+            cve_ids: list[str] = []
+            if re.match(r"CVE-\d{4}-\d+", vuln_id, re.IGNORECASE):
+                cve_ids.append(vuln_id.upper())
+
+            title = title_str or f"Vulnerable Dependency: {pkg_name} ({vuln_id})"
+            full_description = (
+                f"{description_str}\n"
+                f"Package: {pkg_name} {installed_version}\n"
+                f"Fixed in: {fixed_version or 'N/A'}\n"
+                f"CVE: {vuln_id}"
+            ).strip()
+
+            evidence_list = [Evidence(
+                evidence_type="dependency_scan",
+                title=f"Trivy Finding: {vuln_id}",
+                content=(
+                    f"VulnerabilityID: {vuln_id}\n"
+                    f"Package: {pkg_name}\n"
+                    f"InstalledVersion: {installed_version}\n"
+                    f"FixedVersion: {fixed_version}\n"
+                    f"Severity: {severity_str}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=full_description,
+                severity=severity,
+                target=pkg_name,
+                affected_component=f"{pkg_name}@{installed_version}",
+                finding_type="vulnerability",
+                cve_ids=cve_ids,
+                source_plugin="trivy",
+                source_tool_ref=vuln_id,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # dnstwist
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_dnstwist(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert dnstwist lookalike domain results to Finding objects.
+
+        All registered lookalike domains are treated as medium severity brand risk.
+
+        Args:
+            parsed_data: Dict with key "lookalike_domains" (list) produced by DnstwistPlugin,
+                         or a raw list of domain dicts.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of medium-severity Finding objects for registered lookalike domains.
+        """
+        raw_findings: list[dict[str, Any]] = (
+            parsed_data.get("lookalike_domains", parsed_data)
+            if isinstance(parsed_data, dict)
+            else parsed_data
+        )
+        if not isinstance(raw_findings, list):
+            raw_findings = [raw_findings]
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            fuzzer = item.get("fuzzer", "")
+            domain = item.get("domain", "")
+            dns_a: list[str] = item.get("dns_a", []) or []
+            dns_mx: list[str] = item.get("dns_mx", []) or []
+
+            if not domain:
+                continue
+
+            title = f"Lookalike Domain Registered: {domain}"
+            description = (
+                f"A lookalike domain '{domain}' has been registered and resolves to DNS records. "
+                f"Fuzzer technique: {fuzzer}. "
+                f"This domain may be used for phishing or brand impersonation attacks."
+            )
+
+            evidence_content = (
+                f"Domain: {domain}\n"
+                f"Fuzzer: {fuzzer}\n"
+                f"DNS A: {', '.join(dns_a) if dns_a else 'none'}\n"
+                f"DNS MX: {', '.join(dns_mx) if dns_mx else 'none'}"
+            )
+
+            evidence_list = [Evidence(
+                evidence_type="brand_monitoring",
+                title=f"Lookalike Domain: {domain}",
+                content=evidence_content,
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=Severity.medium,
+                target=domain,
+                affected_component="Brand/Domain",
+                finding_type="exposure",
+                source_plugin="dnstwist",
+                source_tool_ref=fuzzer,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # crtsh
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_crtsh(parsed_data: dict[str, Any], scan_id: str, domain: str) -> list[Finding]:
+        """Convert crt.sh certificate data into Finding objects.
+
+        Generates findings for:
+        - Expired certificates (high severity)
+        - Wildcard certificates (informational)
+        - Certificates from unexpected/unknown CAs (medium severity)
+
+        Args:
+            parsed_data: Dict with key "certificates" (list) as produced by CrtshPlugin.
+            scan_id: Identifier of the parent scan.
+            domain: The domain that was queried.
+
+        Returns:
+            List of Finding objects for certificate issues.
+        """
+        from datetime import datetime, timezone
+
+        _EXPECTED_CA_FRAGMENTS: tuple[str, ...] = (
+            "let's encrypt", "letsencrypt", "digicert", "comodo", "sectigo",
+            "globalsign", "entrust", "geotrust", "godaddy", "go daddy",
+            "amazon", "microsoft", "google", "zerossl", "trust asia",
+            "identrust", "actalis", "buypass", "certum", "ssl.com",
+        )
+
+        findings_out: list[Finding] = []
+        now = datetime.now(tz=timezone.utc)
+        certificates: list[dict[str, Any]] = parsed_data.get("certificates", [])
+
+        for cert in certificates:
+            common_name: str = cert.get("common_name", "")
+            issuer_name: str = cert.get("issuer_name", "")
+            not_after_str: str = cert.get("not_after", "")
+            name_value: str = cert.get("name_value", "")
+
+            # Parse expiry date
+            not_after: datetime | None = None
+            if not_after_str:
+                for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+                    try:
+                        dt = datetime.strptime(not_after_str[:19], fmt)
+                        not_after = dt.replace(tzinfo=timezone.utc)
+                        break
+                    except ValueError:
+                        continue
+
+            # Expired certificate finding
+            if not_after and not_after < now:
+                findings_out.append(Finding(
+                    id=_make_id(),
+                    scan_id=scan_id,
+                    title=f"Expired Certificate: {common_name}",
+                    description=(
+                        f"The certificate for '{common_name}' on domain '{domain}' "
+                        f"expired on {not_after_str}. Expired certificates cause browser "
+                        "security warnings and indicate neglected certificate lifecycle management."
+                    ),
+                    severity=Severity.high,
+                    target=domain,
+                    affected_component=common_name,
+                    finding_type="misconfiguration",
+                    source_plugin="crtsh",
+                    evidence=[Evidence(
+                        evidence_type="certificate",
+                        title="Certificate Transparency Record",
+                        content=(
+                            f"Common Name: {common_name}\n"
+                            f"Issuer: {issuer_name}\n"
+                            f"Not After: {not_after_str}"
+                        ),
+                        content_type="text/plain",
+                    )],
+                    raw_data=cert,
+                ))
+
+            # Wildcard certificate finding
+            if "*." in common_name or "*." in name_value:
+                findings_out.append(Finding(
+                    id=_make_id(),
+                    scan_id=scan_id,
+                    title=f"Wildcard Certificate Detected: {common_name}",
+                    description=(
+                        f"A wildcard certificate '{common_name}' was found for domain '{domain}'. "
+                        "Wildcard certificates cover all subdomains and increase the blast radius "
+                        "if the private key is compromised."
+                    ),
+                    severity=Severity.informational,
+                    target=domain,
+                    affected_component=common_name,
+                    finding_type="exposure",
+                    source_plugin="crtsh",
+                    evidence=[Evidence(
+                        evidence_type="certificate",
+                        title="Wildcard Certificate Record",
+                        content=(
+                            f"Common Name: {common_name}\n"
+                            f"Issuer: {issuer_name}\n"
+                            f"Name Value: {name_value}"
+                        ),
+                        content_type="text/plain",
+                    )],
+                    raw_data=cert,
+                ))
+
+            # Unexpected CA finding
+            if issuer_name and not any(
+                frag in issuer_name.lower() for frag in _EXPECTED_CA_FRAGMENTS
+            ):
+                findings_out.append(Finding(
+                    id=_make_id(),
+                    scan_id=scan_id,
+                    title=f"Certificate from Unexpected CA: {issuer_name}",
+                    description=(
+                        f"The certificate for '{common_name}' on domain '{domain}' was issued by "
+                        f"'{issuer_name}', which is not a commonly recognized public CA. "
+                        "This may indicate a private/internal CA, a misissued certificate, or "
+                        "a potential man-in-the-middle scenario."
+                    ),
+                    severity=Severity.medium,
+                    target=domain,
+                    affected_component=common_name,
+                    finding_type="misconfiguration",
+                    source_plugin="crtsh",
+                    evidence=[Evidence(
+                        evidence_type="certificate",
+                        title="Certificate Authority Record",
+                        content=(
+                            f"Common Name: {common_name}\n"
+                            f"Issuer: {issuer_name}"
+                        ),
+                        content_type="text/plain",
+                    )],
+                    raw_data=cert,
+                ))
+
+        return findings_out
+
+    # ------------------------------------------------------------------
+    # sslyze
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_sslyze(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert sslyze TLS scan results into Finding objects.
+
+        Generates findings for:
+        - Weak/deprecated protocols (TLS 1.0, TLS 1.1, SSL 2.0, SSL 3.0) — medium/high
+        - Expired certificates — high
+        - Self-signed certificates — medium
+        - Weak key sizes (RSA < 2048, EC < 224) — medium
+
+        Args:
+            parsed_data: Dict with key "tls_detailed" (list) as produced by SSLyzePlugin,
+                         or raw sslyze JSON with "server_scan_results".
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for TLS weaknesses.
+        """
+        _WEAK_PROTOCOL_MAP: dict[str, str] = {
+            "tls_1_0_cipher_suites": "TLS 1.0",
+            "tls_1_1_cipher_suites": "TLS 1.1",
+            "ssl_2_0_cipher_suites": "SSL 2.0",
+            "ssl_3_0_cipher_suites": "SSL 3.0",
+        }
+
+        findings_out: list[Finding] = []
+
+        # Support both pre-parsed (from SSLyzePlugin.parse_output) and raw sslyze JSON
+        tls_results: list[dict[str, Any]] = parsed_data.get("tls_detailed", [])
+
+        if not tls_results:
+            # Fallback: raw sslyze output with "server_scan_results"
+            for server_result in parsed_data.get("server_scan_results", []):
+                server_location = server_result.get("server_location", {})
+                hostname: str = server_location.get("hostname", "")
+                port: int = server_location.get("port", 443)
+                host_label = f"{hostname}:{port}"
+                scan_result: dict[str, Any] = server_result.get("scan_result", {})
+
+                for field, label in _WEAK_PROTOCOL_MAP.items():
+                    proto_data = scan_result.get(field, {})
+                    if proto_data and proto_data.get("accepted_cipher_suites"):
+                        severity = Severity.high if label.startswith("SSL") else Severity.medium
+                        findings_out.append(Finding(
+                            id=_make_id(),
+                            scan_id=scan_id,
+                            title=f"Deprecated Protocol Supported: {label} on {host_label}",
+                            description=(
+                                f"The server {host_label} supports {label}, a deprecated TLS/SSL "
+                                "protocol with known cryptographic vulnerabilities. "
+                                "Disable it and use TLS 1.2 or TLS 1.3 exclusively."
+                            ),
+                            severity=severity,
+                            target=hostname,
+                            affected_component="TLS/SSL",
+                            port=port,
+                            protocol="tcp",
+                            finding_type="misconfiguration",
+                            source_plugin="sslyze",
+                            evidence=[Evidence(
+                                evidence_type="tls_scan",
+                                title=f"sslyze: {label} Supported",
+                                content=f"Host: {host_label}\nProtocol: {label}",
+                                content_type="text/plain",
+                            )],
+                            raw_data=server_result,
+                        ))
+            return findings_out
+
+        # Process pre-parsed tls_detailed entries
+        for host_entry in tls_results:
+            host_label = host_entry.get("host", "")
+            hostname_str: str = host_entry.get("hostname", host_label.split(":")[0])
+            port_val: int = host_entry.get("port", 443)
+
+            for protocol_label in host_entry.get("weak_protocols", []):
+                sev = Severity.high if protocol_label.startswith("SSL") else Severity.medium
+                findings_out.append(Finding(
+                    id=_make_id(),
+                    scan_id=scan_id,
+                    title=f"Deprecated Protocol Supported: {protocol_label} on {host_label}",
+                    description=(
+                        f"The server {host_label} supports {protocol_label}, a deprecated TLS/SSL "
+                        "protocol with known cryptographic vulnerabilities. "
+                        "Disable it and use TLS 1.2 or TLS 1.3 exclusively."
+                    ),
+                    severity=sev,
+                    target=hostname_str,
+                    affected_component="TLS/SSL",
+                    port=port_val,
+                    protocol="tcp",
+                    finding_type="misconfiguration",
+                    source_plugin="sslyze",
+                    evidence=[Evidence(
+                        evidence_type="tls_scan",
+                        title=f"sslyze: {protocol_label} Supported",
+                        content=f"Host: {host_label}\nProtocol: {protocol_label}",
+                        content_type="text/plain",
+                    )],
+                ))
+
+            for issue in host_entry.get("certificate_issues", []):
+                if issue == "expired":
+                    findings_out.append(Finding(
+                        id=_make_id(),
+                        scan_id=scan_id,
+                        title=f"Expired TLS Certificate on {host_label}",
+                        description=(
+                            f"The TLS certificate on {host_label} has expired. "
+                            "Expired certificates cause handshake failures and browser warnings."
+                        ),
+                        severity=Severity.high,
+                        target=hostname_str,
+                        affected_component="TLS Certificate",
+                        port=port_val,
+                        protocol="tcp",
+                        finding_type="misconfiguration",
+                        source_plugin="sslyze",
+                    ))
+                elif issue == "self_signed":
+                    findings_out.append(Finding(
+                        id=_make_id(),
+                        scan_id=scan_id,
+                        title=f"Self-Signed Certificate on {host_label}",
+                        description=(
+                            f"The TLS certificate on {host_label} is self-signed and not "
+                            "trusted by browsers or clients by default."
+                        ),
+                        severity=Severity.medium,
+                        target=hostname_str,
+                        affected_component="TLS Certificate",
+                        port=port_val,
+                        protocol="tcp",
+                        finding_type="misconfiguration",
+                        source_plugin="sslyze",
+                    ))
+
+            for weak_key in host_entry.get("weak_keys", []):
+                findings_out.append(Finding(
+                    id=_make_id(),
+                    scan_id=scan_id,
+                    title=f"Weak Key Size ({weak_key}) on {host_label}",
+                    description=(
+                        f"The TLS certificate on {host_label} uses a weak key: {weak_key}. "
+                        "Upgrade to RSA-2048+ or ECDSA-256+ to meet modern security standards."
+                    ),
+                    severity=Severity.medium,
+                    target=hostname_str,
+                    affected_component="TLS Certificate",
+                    port=port_val,
+                    protocol="tcp",
+                    finding_type="misconfiguration",
+                    source_plugin="sslyze",
+                ))
+
+        return findings_out
+
+    # ------------------------------------------------------------------
     # wafw00f
     # ------------------------------------------------------------------
 
