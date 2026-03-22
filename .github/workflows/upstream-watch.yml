@@ -1,0 +1,155 @@
+name: Upstream Watch
+
+on:
+  # Daily at 09:00 KST (00:00 UTC)
+  schedule:
+    - cron: "0 0 * * *"
+
+  # Manual trigger with options
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode"
+        required: true
+        default: "daily"
+        type: choice
+        options:
+          - daily
+          - weekly
+      repo:
+        description: "Filter to specific repo (e.g., usestrix/strix). Leave empty for all."
+        required: false
+        type: string
+      dry_run:
+        description: "Dry run (no notifications)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  daily-watch:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'daily')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install anthropic
+
+      - name: Restore state
+        uses: actions/cache@v4
+        with:
+          path: tools/upstream_watch/.state.json
+          key: upstream-watch-state-${{ github.run_id }}
+          restore-keys: |
+            upstream-watch-state-
+
+      - name: Run daily watch
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VXIS_SLACK_WEBHOOK: ${{ secrets.VXIS_SLACK_WEBHOOK }}
+        run: |
+          ARGS="--mode daily"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.repo }}" ]; then
+            ARGS="$ARGS --repo ${{ github.event.inputs.repo }}"
+          fi
+          python -m tools.upstream_watch $ARGS
+
+      - name: Commit digest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tools/upstream_watch/digests/ tools/upstream_watch/.state.json
+          git diff --staged --quiet || git commit -m "chore: upstream watch daily digest $(date -u +%Y-%m-%d)"
+          git push
+
+      - name: Create issue for high-priority items
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_FILE=$(ls -t tools/upstream_watch/digests/issue-*.md 2>/dev/null | head -1)
+          if [ -n "$ISSUE_FILE" ] && [ -s "$ISSUE_FILE" ]; then
+            gh issue create \
+              --title "Upstream Watch: $(date -u +%Y-%m-%d) — High-priority items" \
+              --body-file "$ISSUE_FILE" \
+              --label "upstream-watch,triage"
+          fi
+
+  weekly-digest:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'weekly'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install anthropic
+
+      - name: Run weekly digest
+        run: python -m tools.upstream_watch --mode weekly
+
+      - name: Commit weekly digest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tools/upstream_watch/digests/
+          git diff --staged --quiet || git commit -m "chore: upstream watch weekly digest $(date -u +%Y-%m-%d)"
+          git push
+
+  # Weekly digest auto-trigger every Sunday
+  weekly-auto:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    needs: daily-watch
+    steps:
+      - name: Check if Sunday
+        id: check-day
+        run: |
+          DAY=$(date -u +%u)
+          echo "is_sunday=$( [ $DAY -eq 7 ] && echo true || echo false )" >> $GITHUB_OUTPUT
+
+      - name: Checkout
+        if: steps.check-day.outputs.is_sunday == 'true'
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        if: steps.check-day.outputs.is_sunday == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        if: steps.check-day.outputs.is_sunday == 'true'
+        run: pip install anthropic
+
+      - name: Run weekly digest
+        if: steps.check-day.outputs.is_sunday == 'true'
+        run: python -m tools.upstream_watch --mode weekly
+
+      - name: Commit weekly digest
+        if: steps.check-day.outputs.is_sunday == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tools/upstream_watch/digests/
+          git diff --staged --quiet || git commit -m "chore: upstream watch weekly digest $(date -u +%Y-%m-%d)"
+          git push

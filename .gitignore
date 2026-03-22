@@ -11,3 +11,6 @@ build/
 .env
 data/
 reports/
+
+# Upstream watch — state is cached in CI, digests are committed
+tools/upstream_watch/.state.json
