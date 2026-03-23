@@ -69,13 +69,16 @@ jobs:
           fi
           python -m tools.upstream_watch $ARGS
 
-      - name: Commit digest
+      - name: Commit digest and state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tools/upstream_watch/digests/ tools/upstream_watch/.state.json
-          git diff --staged --quiet || git commit -m "chore: upstream watch daily digest $(date -u +%Y-%m-%d)"
-          git push
+          git add tools/upstream_watch/digests/ tools/upstream_watch/.state.json || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: upstream watch daily digest $(date -u +%Y-%m-%d)"
+            git pull --rebase origin "${{ github.ref_name }}"
+            git push
+          fi
 
       - name: Create issue for high-priority items
         env:
@@ -111,9 +114,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tools/upstream_watch/digests/
-          git diff --staged --quiet || git commit -m "chore: upstream watch weekly digest $(date -u +%Y-%m-%d)"
-          git push
+          git add tools/upstream_watch/digests/ || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: upstream watch weekly digest $(date -u +%Y-%m-%d)"
+            git pull --rebase origin "${{ github.ref_name }}"
+            git push
+          fi
 
   # Weekly digest auto-trigger every Sunday
   weekly-auto:
@@ -150,6 +156,9 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tools/upstream_watch/digests/
-          git diff --staged --quiet || git commit -m "chore: upstream watch weekly digest $(date -u +%Y-%m-%d)"
-          git push
+          git add tools/upstream_watch/digests/ || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: upstream watch weekly digest $(date -u +%Y-%m-%d)"
+            git pull --rebase origin "${{ github.ref_name }}"
+            git push
+          fi
