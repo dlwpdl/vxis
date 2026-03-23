@@ -2,7 +2,8 @@
 Upstream Watch — GitHub change fetcher.
 
 Uses GitHub REST API (via gh CLI or httpx) to detect new commits
-and releases since last check.
+and releases since last check.  Related commits are grouped into
+CommitCluster objects before being forwarded to the analyzer.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import STATE_FILE, WatchTarget
@@ -36,11 +37,22 @@ class ReleaseInfo:
 
 
 @dataclass
+class CommitCluster:
+    """A group of related commits that share temporal and file-path proximity."""
+
+    commits: list[CommitInfo]
+    summary: str  # Combined commit messages, newline-separated
+    files_changed: list[str]  # Union of all files across the cluster
+    time_span: str  # Human-readable duration, e.g. "2h30m"
+
+
+@dataclass
 class RepoChanges:
     target: WatchTarget
     commits: list[CommitInfo] = field(default_factory=list)
     releases: list[ReleaseInfo] = field(default_factory=list)
     diff_summary: str = ""  # Combined diff stat for all new commits
+    clusters: list[CommitCluster] = field(default_factory=list)
     error: str = ""
 
     @property
@@ -217,6 +229,157 @@ def fetch_diff_stat(target: WatchTarget, base_sha: str, head_sha: str) -> str:
         return ""
 
 
+def _parse_commit_datetime(date_str: str) -> datetime | None:
+    """Parse ISO 8601 commit date into an aware UTC datetime, or None on failure."""
+    if not date_str:
+        return None
+    try:
+        # GitHub returns e.g. "2024-01-15T12:34:56Z"
+        dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except ValueError:
+        return None
+
+
+def _format_timedelta(delta: timedelta) -> str:
+    """Format a timedelta as a compact human-readable string like '2h30m'."""
+    total_seconds = int(abs(delta.total_seconds()))
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes = remainder // 60
+    if hours and minutes:
+        return f"{hours}h{minutes}m"
+    if hours:
+        return f"{hours}h"
+    if minutes:
+        return f"{minutes}m"
+    return f"{total_seconds}s"
+
+
+def _file_overlap_ratio(files_a: list[str], files_b: list[str]) -> float:
+    """
+    Compute Jaccard-like overlap ratio between two file path sets.
+
+    Returns 0.0 when both sets are empty (no evidence of relatedness).
+    """
+    set_a = set(files_a)
+    set_b = set(files_b)
+    if not set_a or not set_b:
+        return 0.0
+    intersection = len(set_a & set_b)
+    union = len(set_a | set_b)
+    return intersection / union if union else 0.0
+
+
+def cluster_commits(commits: list[CommitInfo]) -> list[CommitCluster]:
+    """
+    Group related commits into CommitCluster objects.
+
+    Two commits are merged into the same cluster when they satisfy ANY of:
+    1. Both are within a 4-hour time window AND share >30 % of modified files
+       (path overlap by Jaccard ratio).
+    2. They share the same author AND are within a 2-hour time window.
+
+    The algorithm is a single-pass greedy merge: each commit is tested
+    against every existing cluster's representative window and file set.
+    This is O(n * k) where k is the number of clusters — acceptable for
+    the typical upstream watch batch size of ≤200 commits.
+
+    Returns a list of CommitCluster objects.  Commits with unparseable
+    dates are placed in singleton clusters.
+    """
+    if not commits:
+        return []
+
+    # Pre-parse dates once
+    dated: list[tuple[CommitInfo, datetime | None]] = [
+        (c, _parse_commit_datetime(c.date)) for c in commits
+    ]
+
+    _4h = timedelta(hours=4)
+    _2h = timedelta(hours=2)
+    FILE_OVERLAP_THRESHOLD = 0.30
+
+    # Each open cluster is represented as a mutable dict for accumulation
+    open_clusters: list[dict] = []
+
+    for commit, dt in dated:
+        merged = False
+        for clust in open_clusters:
+            clust_dt: datetime | None = clust["representative_dt"]
+
+            # Condition 1: time window + file overlap
+            time_close_4h = (
+                dt is not None
+                and clust_dt is not None
+                and abs(dt - clust_dt) <= _4h
+            )
+            file_overlap = _file_overlap_ratio(commit.files_changed, clust["files"])
+            cond1 = time_close_4h and file_overlap > FILE_OVERLAP_THRESHOLD
+
+            # Condition 2: same author + 2-hour window
+            time_close_2h = (
+                dt is not None
+                and clust_dt is not None
+                and abs(dt - clust_dt) <= _2h
+            )
+            cond2 = time_close_2h and commit.author == clust["author"]
+
+            if cond1 or cond2:
+                # Absorb commit into this cluster
+                clust["commits"].append(commit)
+                clust["files"] = list(set(clust["files"]) | set(commit.files_changed))
+                clust["messages"].append(commit.message)
+                # Extend the representative timestamp toward the newest commit
+                if dt is not None and (
+                    clust_dt is None or dt > clust_dt
+                ):
+                    clust["representative_dt"] = dt
+                # Track earliest/latest for time_span calculation
+                if dt is not None:
+                    if clust["earliest_dt"] is None or dt < clust["earliest_dt"]:
+                        clust["earliest_dt"] = dt
+                    if clust["latest_dt"] is None or dt > clust["latest_dt"]:
+                        clust["latest_dt"] = dt
+                merged = True
+                break
+
+        if not merged:
+            open_clusters.append({
+                "commits": [commit],
+                "files": list(commit.files_changed),
+                "messages": [commit.message],
+                "author": commit.author,
+                "representative_dt": dt,
+                "earliest_dt": dt,
+                "latest_dt": dt,
+            })
+
+    # Convert raw dicts to CommitCluster dataclasses
+    result: list[CommitCluster] = []
+    for clust in open_clusters:
+        earliest: datetime | None = clust["earliest_dt"]
+        latest: datetime | None = clust["latest_dt"]
+        if earliest is not None and latest is not None and earliest != latest:
+            span = _format_timedelta(latest - earliest)
+        elif len(clust["commits"]) == 1:
+            span = "0m"
+        else:
+            span = "unknown"
+
+        result.append(
+            CommitCluster(
+                commits=clust["commits"],
+                summary="\n".join(clust["messages"]),
+                files_changed=sorted(set(clust["files"])),
+                time_span=span,
+            )
+        )
+
+    return result
+
+
 def fetch_all(targets: list[WatchTarget]) -> list[RepoChanges]:
     """Fetch changes for all targets since last check."""
     state = _load_state()
@@ -239,6 +402,10 @@ def fetch_all(targets: list[WatchTarget]) -> list[RepoChanges]:
                     changes.diff_summary = fetch_diff_stat(
                         target, last_sha, changes.commits[0].sha
                     )
+
+                # Cluster related commits for downstream analysis
+                if changes.commits:
+                    changes.clusters = cluster_commits(changes.commits)
 
             if target.watch_releases:
                 changes.releases = fetch_releases(target, since=since)

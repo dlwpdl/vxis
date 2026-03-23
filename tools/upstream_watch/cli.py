@@ -179,6 +179,37 @@ def cmd_approved(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_trending(args: argparse.Namespace) -> int:
+    """Show repository activity trends and spike alerts."""
+    try:
+        from .trending import TrendTracker, format_trending_report
+    except ImportError:
+        print("Trending module not available yet.")
+        return 1
+
+    tracker = TrendTracker()
+    report = format_trending_report(tracker)
+    print(report)
+    return 0
+
+
+def cmd_discover(args: argparse.Namespace) -> int:
+    """Search GitHub for new AI pentesting tools."""
+    try:
+        from .discovery import search_new_tools, format_discovery_report
+    except ImportError:
+        print("Discovery module not available yet.")
+        return 1
+
+    print("Searching GitHub for new AI security tools...")
+    repos = search_new_tools()
+    if not repos:
+        print("No new tools discovered matching criteria.")
+        return 0
+    print(format_discovery_report(repos))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="VXIS Upstream Watch CLI"
@@ -212,6 +243,8 @@ def main() -> int:
     subparsers.add_parser("review", help="Show pending proposals")
     subparsers.add_parser("stats", help="Show adoption statistics")
     subparsers.add_parser("approved", help="List approved proposals")
+    subparsers.add_parser("trending", help="Show repo activity trends & spike alerts")
+    subparsers.add_parser("discover", help="Search GitHub for new AI pentest tools")
 
     decide_p = subparsers.add_parser("decide", help="Record decision on a proposal")
     decide_p.add_argument("proposal_id", help="Proposal ID")
@@ -247,6 +280,10 @@ def main() -> int:
         return cmd_stats(args)
     elif args.command == "approved":
         return cmd_approved(args)
+    elif args.command == "trending":
+        return cmd_trending(args)
+    elif args.command == "discover":
+        return cmd_discover(args)
     else:
         parser.print_help()
         return 0

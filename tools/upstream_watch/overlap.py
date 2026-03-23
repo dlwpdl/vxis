@@ -4,16 +4,24 @@ Upstream Watch — VXIS codebase overlap detector.
 Scans the VXIS source tree to build a capability inventory, then
 compares upstream suggestions against it to prevent duplicate work
 and highlight genuine gaps.
+
+LLM-based semantic overlap detection is available when ANTHROPIC_API_KEY
+is set in the environment. Falls back to keyword matching otherwise.
 """
 
 from __future__ import annotations
 
 import ast
+import json
+import logging
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .analyzer import ActionItem
+
+logger = logging.getLogger(__name__)
 
 # ── VXIS Source Root ─────────────────────────────────────────────
 
@@ -242,12 +250,152 @@ def check_overlap(
     )
 
 
+_LLM_OVERLAP_PROMPT = """\
+You are a senior software architect reviewing whether a proposed feature already
+exists in the VXIS platform or is genuinely new work.
+
+VXIS is an AI-powered security automation platform that orchestrates 35+ \
+open-source security tools, analyzes results with multi-model AI, and generates \
+NCC Group-grade consulting reports.
+
+You will be given:
+1. A proposed action item (title + description + category).
+2. A concise summary of VXIS capabilities (class names, descriptions, file paths).
+
+Your task:
+- Judge whether the action item is already covered, partially covered, or new.
+- Be precise: a plugin named "nmap_plugin" does NOT mean nmap scanning is fully covered
+  unless its description confirms the specific proposed feature.
+
+Return ONLY valid JSON, no markdown, no explanation:
+{
+  "overlap_score": <float 0.0-1.0>,
+  "verdict": "<new|enhancement|already_exists|partial_overlap>",
+  "recommendation": "<1-2 sentences on what to do>"
+}
+
+Verdict guide:
+- "new"            — Not covered at all. Safe to implement fresh.
+- "enhancement"    — Related code exists but the specific feature is missing.
+- "partial_overlap"— Some overlap; proceed with care to avoid duplication.
+- "already_exists" — Functionally equivalent code already exists.\
+"""
+
+# Maximum capabilities to include in the LLM prompt (token budget)
+_MAX_CAPS_IN_PROMPT = 40
+
+
+def _build_capability_summary(capabilities: list[VXISCapability]) -> str:
+    """Format capability list into a concise token-efficient summary."""
+    lines = []
+    for cap in capabilities[:_MAX_CAPS_IN_PROMPT]:
+        # One line per capability: category | name | description[:120] | path
+        desc_short = cap.description[:120].replace("\n", " ")
+        lines.append(f"[{cap.category}] {cap.name} — {desc_short} ({cap.file_path})")
+    if len(capabilities) > _MAX_CAPS_IN_PROMPT:
+        lines.append(
+            f"... and {len(capabilities) - _MAX_CAPS_IN_PROMPT} more modules (omitted for brevity)"
+        )
+    return "\n".join(lines)
+
+
+def check_overlap_with_llm(
+    item: ActionItem,
+    capabilities: list[VXISCapability],
+) -> OverlapResult | None:
+    """
+    Use the configured LLM provider to semantically compare an action item
+    against the VXIS capability inventory.
+
+    Returns None when no API key is available or the call fails, allowing
+    the caller to fall back to keyword-based detection.
+    """
+    from .llm import chat as llm_chat, is_available as llm_is_available
+
+    if not llm_is_available():
+        return None
+
+    capability_summary = _build_capability_summary(capabilities)
+
+    user_message = (
+        f"## Proposed Action Item\n"
+        f"**Title:** {item.title}\n"
+        f"**Category:** {item.category}\n"
+        f"**Description:** {item.description}\n\n"
+        f"## VXIS Capability Inventory\n"
+        f"{capability_summary}\n\n"
+        f"Does this action item already exist in VXIS? Return JSON only."
+    )
+
+    try:
+        response = llm_chat(
+            system_prompt=_LLM_OVERLAP_PROMPT,
+            user_prompt=user_message,
+            max_tokens=256,
+        )
+        if response is None:
+            return None
+
+        raw_text = response.text.strip()
+
+        # Strip optional markdown fences before parsing
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("```")[1]
+            if raw_text.startswith("json"):
+                raw_text = raw_text[4:]
+        raw_text = raw_text.strip()
+
+        data = json.loads(raw_text)
+
+        overlap_score = float(data.get("overlap_score", 0.0))
+        verdict = str(data.get("verdict", "new"))
+        recommendation = str(data.get("recommendation", ""))
+
+        # Validate verdict enum — reject malformed responses
+        valid_verdicts = {"new", "enhancement", "already_exists", "partial_overlap"}
+        if verdict not in valid_verdicts:
+            logger.warning("LLM returned unknown verdict %r; falling back", verdict)
+            return None
+
+        # Attach matching capabilities from keyword scan
+        keyword_result = check_overlap(item, capabilities)
+        matching_caps = keyword_result.matching_capabilities
+
+        return OverlapResult(
+            item=item,
+            overlap_score=overlap_score,
+            matching_capabilities=matching_caps,
+            verdict=verdict,
+            recommendation=recommendation,
+        )
+
+    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        logger.warning("LLM overlap parse error for %r: %s", item.title, exc)
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("LLM overlap API error for %r: %s", item.title, exc)
+        return None
+
+
 def check_all_overlaps(
     items: list[ActionItem],
 ) -> list[OverlapResult]:
-    """Check overlap for all action items against VXIS codebase."""
+    """
+    Check overlap for all action items against the VXIS codebase.
+
+    Uses LLM semantic analysis when ANTHROPIC_API_KEY is set; falls back
+    to keyword matching per item when the LLM is unavailable or returns
+    an error.
+    """
     capabilities = build_capability_inventory()
-    return [check_overlap(item, capabilities) for item in items]
+    results = []
+    for item in items:
+        # Try LLM first; fall back to keyword matching on None
+        result = check_overlap_with_llm(item, capabilities)
+        if result is None:
+            result = check_overlap(item, capabilities)
+        results.append(result)
+    return results
 
 
 def format_overlap_report(results: list[OverlapResult]) -> str:

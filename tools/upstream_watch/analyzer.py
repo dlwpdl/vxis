@@ -1,8 +1,8 @@
 """
 Upstream Watch — AI-powered diff analyzer.
 
-Uses Claude API to evaluate whether upstream changes are relevant
-to VXIS, scoring and summarizing actionable insights.
+Uses a configurable LLM provider (Kimi, GLM, DeepSeek, Claude, etc.) to
+evaluate whether upstream changes are relevant to VXIS.
 """
 
 from __future__ import annotations
@@ -11,10 +11,9 @@ import json
 import os
 from dataclasses import dataclass, field
 
-import anthropic
-
 from .config import VXIS_CONTEXT, WatchTarget
-from .fetcher import CommitInfo, ReleaseInfo, RepoChanges
+from .fetcher import CommitCluster, CommitInfo, ReleaseInfo, RepoChanges
+from .llm import chat as llm_chat, is_available as llm_is_available
 
 
 @dataclass
@@ -41,8 +40,8 @@ class ActionItem:
 
 
 SYSTEM_PROMPT = """\
-You are an expert security engineer and software architect reviewing upstream \
-open-source project changes for relevance to the VXIS platform.
+You are an expert security engineer reviewing upstream open-source project \
+changes for relevance to the VXIS security automation platform.
 
 Your job:
 1. Analyze the provided changes (commits and/or releases) from an upstream repo.
@@ -58,17 +57,18 @@ CRITICAL RULES:
   (unless they indicate a significant feature).
 - Prioritize: new attack techniques, tool integration patterns, architecture improvements, \
   report quality enhancements, performance optimizations.
+- ALL text fields (summary, title, description) MUST be written in Korean (한국어).
 
 Output valid JSON matching this schema:
 {
   "relevance_score": 0.0-1.0,
-  "summary": "2-3 sentence overview",
+  "summary": "2~3문장 한국어 요약",
   "actionable_items": [
     {
-      "title": "short title",
+      "title": "짧은 한국어 제목",
       "category": "architecture|plugin|report|pipeline|tool-integration|performance|security",
       "priority": "high|medium|low",
-      "description": "What VXIS should do (concept only, no copied code)",
+      "description": "VXIS에 적용할 방법 (컨셉만, 코드 복사 금지) — 한국어로 작성",
       "source_ref": "URL or commit ref",
       "vxis_files": ["src/vxis/path/to/affected.py"]
     }
@@ -102,35 +102,63 @@ def _format_changes(changes: RepoChanges) -> str:
         parts.append(f"### New Commits ({len(changes.commits)} total)")
         if changes.diff_summary:
             parts.extend(["Diff summary:", changes.diff_summary, ""])
-        for c in changes.commits[:20]:
-            files_str = ", ".join(c.files_changed[:10]) if c.files_changed else ""
+
+        if changes.clusters:
+            # Clustered view — surfaces logical units of work rather than
+            # individual commits, reducing noise in the LLM prompt.
             parts.append(
-                f"- `{c.sha}` {c.message} [{c.author}] {files_str}"
+                f"(Grouped into {len(changes.clusters)} cluster(s) by author/time/files)"
             )
-        if len(changes.commits) > 20:
-            parts.append(f"  ... and {len(changes.commits) - 20} more commits")
+            for idx, cluster in enumerate(changes.clusters[:15], start=1):
+                commit_count = len(cluster.commits)
+                shas = ", ".join(f"`{c.sha}`" for c in cluster.commits[:5])
+                if commit_count > 5:
+                    shas += f" (+{commit_count - 5} more)"
+                files_preview = ", ".join(cluster.files_changed[:8])
+                if len(cluster.files_changed) > 8:
+                    files_preview += f" (+{len(cluster.files_changed) - 8} more files)"
+                parts.extend([
+                    f"**Cluster {idx}** — {commit_count} commit(s) over {cluster.time_span}",
+                    f"  Commits: {shas}",
+                    f"  Files: {files_preview}" if files_preview else "  Files: (none recorded)",
+                    f"  Messages:",
+                ])
+                for line in cluster.summary.splitlines()[:5]:
+                    parts.append(f"    - {line}")
+                if cluster.summary.count("\n") >= 5:
+                    extra = cluster.summary.count("\n") - 4
+                    parts.append(f"    - ... and {extra} more messages")
+                parts.append("")
+            if len(changes.clusters) > 15:
+                parts.append(f"  ... and {len(changes.clusters) - 15} more clusters")
+        else:
+            # Fallback: flat commit list (no clustering data available)
+            for c in changes.commits[:20]:
+                files_str = ", ".join(c.files_changed[:10]) if c.files_changed else ""
+                parts.append(
+                    f"- `{c.sha}` {c.message} [{c.author}] {files_str}"
+                )
+            if len(changes.commits) > 20:
+                parts.append(f"  ... and {len(changes.commits) - 20} more commits")
 
     return "\n".join(parts)
 
 
 def analyze_changes(changes: RepoChanges) -> AnalysisResult:
-    """Use Claude API to analyze upstream changes for VXIS relevance."""
+    """Use the configured LLM to analyze upstream changes for VXIS relevance."""
+    repo_name = f"{changes.target.owner}/{changes.target.repo}"
+
     if not changes.has_changes:
         return AnalysisResult(
-            repo=f"{changes.target.owner}/{changes.target.repo}",
-            relevance_score=0.0,
+            repo=repo_name, relevance_score=0.0,
             summary="No new changes detected.",
         )
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
+    if not llm_is_available():
         return AnalysisResult(
-            repo=f"{changes.target.owner}/{changes.target.repo}",
-            relevance_score=0.0,
-            summary="ANTHROPIC_API_KEY not set — skipping AI analysis.",
+            repo=repo_name, relevance_score=0.0,
+            summary="No LLM API key configured — skipping AI analysis.",
         )
-
-    client = anthropic.Anthropic(api_key=api_key)
 
     user_prompt = f"""\
 {VXIS_CONTEXT}
@@ -146,16 +174,21 @@ Here are the latest changes from an upstream repository:
 Analyze these changes and return JSON with relevance score and actionable items for VXIS.\
 """
 
-    try:
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
+    response = llm_chat(
+        system_prompt=SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        max_tokens=2000,
+    )
+
+    if response is None:
+        return AnalysisResult(
+            repo=repo_name, relevance_score=0.0,
+            summary="LLM API call failed — see logs for details.",
         )
 
-        raw_text = response.content[0].text
+    raw_text = response.text
 
+    try:
         # Extract JSON from response (handle markdown code blocks)
         json_str = raw_text
         if "```json" in json_str:
@@ -178,7 +211,7 @@ Analyze these changes and return JSON with relevance score and actionable items 
         ]
 
         return AnalysisResult(
-            repo=f"{changes.target.owner}/{changes.target.repo}",
+            repo=repo_name,
             relevance_score=data.get("relevance_score", 0.0),
             summary=data.get("summary", ""),
             actionable_items=items,
@@ -187,16 +220,9 @@ Analyze these changes and return JSON with relevance score and actionable items 
 
     except (json.JSONDecodeError, KeyError, IndexError) as e:
         return AnalysisResult(
-            repo=f"{changes.target.owner}/{changes.target.repo}",
-            relevance_score=0.0,
+            repo=repo_name, relevance_score=0.0,
             summary=f"AI analysis parse error: {e}",
-            raw_response=raw_text if "raw_text" in dir() else "",
-        )
-    except anthropic.APIError as e:
-        return AnalysisResult(
-            repo=f"{changes.target.owner}/{changes.target.repo}",
-            relevance_score=0.0,
-            summary=f"Claude API error: {e}",
+            raw_response=raw_text,
         )
 
 

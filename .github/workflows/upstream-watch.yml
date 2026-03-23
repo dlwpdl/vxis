@@ -1,9 +1,9 @@
 name: Upstream Watch
 
 on:
-  # Daily at 09:00 KST (00:00 UTC)
+  # Every 6 hours — stay close to upstream changes
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 */6 * * *"
 
   # Manual trigger with options
   workflow_dispatch:
@@ -16,6 +16,7 @@ on:
         options:
           - daily
           - weekly
+          - discovery
       repo:
         description: "Filter to specific repo (e.g., usestrix/strix). Leave empty for all."
         required: false
@@ -44,19 +45,32 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install anthropic
+        run: echo "No external dependencies needed — using stdlib urllib"
 
       - name: Restore state
         uses: actions/cache@v4
         with:
-          path: tools/upstream_watch/.state.json
+          path: |
+            tools/upstream_watch/.state.json
+            tools/upstream_watch/.metrics_history.json
+            tools/upstream_watch/.telegram_state.json
+            tools/upstream_watch/decisions.json
           key: upstream-watch-state-${{ github.run_id }}
           restore-keys: |
             upstream-watch-state-
 
       - name: Run daily watch
         env:
+          # LLM: together (default) | anthropic | google | openai | deepseek | kimi | glm
+          UPSTREAM_LLM_PROVIDER: ${{ vars.UPSTREAM_LLM_PROVIDER || 'together' }}
+          UPSTREAM_LLM_MODEL: ${{ vars.UPSTREAM_LLM_MODEL || '' }}
+          # API keys — set whichever provider you use
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VXIS_SLACK_WEBHOOK: ${{ secrets.VXIS_SLACK_WEBHOOK }}
         run: |
@@ -69,12 +83,16 @@ jobs:
           fi
           python -m tools.upstream_watch $ARGS
 
-      - name: Commit digest
+      - name: Commit digest and state
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tools/upstream_watch/digests/ tools/upstream_watch/.state.json
-          git diff --staged --quiet || git commit -m "chore: upstream watch daily digest $(date -u +%Y-%m-%d)"
+          git add tools/upstream_watch/digests/ tools/upstream_watch/.state.json \
+                  tools/upstream_watch/.metrics_history.json \
+                  tools/upstream_watch/.telegram_state.json \
+                  tools/upstream_watch/proposals/ \
+                  tools/upstream_watch/decisions.json
+          git diff --staged --quiet || git commit -m "chore: upstream watch digest $(date -u +%Y-%m-%dT%H:%M)"
           git push
 
       - name: Create issue for high-priority items
@@ -102,7 +120,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install anthropic
+        run: echo "No external dependencies needed — using stdlib urllib"
 
       - name: Run weekly digest
         run: python -m tools.upstream_watch --mode weekly
@@ -139,7 +157,7 @@ jobs:
 
       - name: Install dependencies
         if: steps.check-day.outputs.is_sunday == 'true'
-        run: pip install anthropic
+        run: echo "No external dependencies needed — using stdlib urllib"
 
       - name: Run weekly digest
         if: steps.check-day.outputs.is_sunday == 'true'

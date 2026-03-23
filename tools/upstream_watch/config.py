@@ -146,6 +146,70 @@ TARGETS: list[WatchTarget] = [
         reason="AI agent framework for black-box testing — workflow patterns",
         relevance_tags=("agent-workflow", "black-box-testing"),
     ),
+    # ── AI-Powered Security Assistants ──
+    WatchTarget(
+        owner="GreyDGL",
+        repo="PentestGPT",
+        reason="GPT-based interactive pentest assistant — AI workflow and prompt engineering patterns",
+        include_paths=("pentestgpt/", "src/"),
+        relevance_tags=("ai-agent", "llm", "interactive-pentest", "gpt"),
+    ),
+    WatchTarget(
+        owner="Hacker-GPT",
+        repo="HackerGPT-2.0",
+        reason="AI security chatbot — RAG patterns for security knowledge, prompt engineering",
+        include_paths=("app/", "lib/", "components/"),
+        relevance_tags=("ai-agent", "llm", "security-chatbot", "rag"),
+    ),
+    # ── Recon & OSINT Frameworks ──
+    WatchTarget(
+        owner="blacklanternsecurity",
+        repo="bbot",
+        reason="Modular recon framework — module system, dependency resolution, event pipeline",
+        include_paths=("bbot/modules/", "bbot/core/", "bbot/scanner/"),
+        relevance_tags=("recon", "osint", "modular", "pipeline", "subdomain"),
+    ),
+    WatchTarget(
+        owner="six2dez",
+        repo="reconftw",
+        reason="All-in-one recon pipeline — tool chain orchestration patterns",
+        include_paths=("reconftw.sh",),
+        watch_commits=True,
+        watch_releases=True,
+        relevance_tags=("recon", "pipeline", "automation", "all-in-one"),
+    ),
+    # ── Scan Orchestration & Workflow Engines ──
+    WatchTarget(
+        owner="j3ssie",
+        repo="osmedeus",
+        reason="Workflow-based scan orchestration — distributed scanning, workflow engine",
+        include_paths=("core/", "libs/", "workflow/"),
+        relevance_tags=("workflow", "automation", "distributed", "scan-engine"),
+    ),
+    # ── Adversary Emulation & TTP Libraries ──
+    WatchTarget(
+        owner="mitre",
+        repo="caldera",
+        reason="Adversary emulation — plugin architecture, ATT&CK mapping, agent patterns",
+        include_paths=("app/", "plugins/"),
+        relevance_tags=("adversary-emulation", "mitre-attack", "agent", "plugin-system"),
+    ),
+    WatchTarget(
+        owner="redcanaryco",
+        repo="atomic-red-team",
+        reason="ATT&CK TTP test cases — new techniques and detection coverage",
+        watch_commits=False,
+        watch_releases=True,
+        relevance_tags=("mitre-attack", "ttp", "detection", "testing"),
+    ),
+    # ── Modern Web Security Tooling ──
+    WatchTarget(
+        owner="caido",
+        repo="caido",
+        reason="Modern web security proxy — UX patterns, plugin system, automation API",
+        include_paths=("packages/",),
+        relevance_tags=("web-security", "proxy", "automation", "modern-ui"),
+    ),
 ]
 
 

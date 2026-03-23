@@ -33,7 +33,7 @@ from vxis.core.rate_limiter import GlobalRateLimiter
 from vxis.core.fp_pipeline import FPPipeline
 from vxis.core.logger import AuditLogger
 from vxis.core.normalizer import FindingDeduplicator, FindingFactory
-from vxis.core.resilience import classify_result
+from vxis.core.resilience import ResilientRunner, ToolExecutionError, classify_result
 from vxis.core.scanner import run_tool
 from vxis.core.scope import ScopeValidator, ScopeViolationError
 from vxis.models.db_models import FindingRecord, ScanRecord, ToolRunRecord
@@ -125,6 +125,14 @@ class ScanOrchestrator:
         self.event_bus = event_bus or ScanEventBus()
         self.audit_logger = AuditLogger(config.data_dir / "audit.jsonl")
         self.rate_limiter = GlobalRateLimiter()
+        self.resilient_runner = ResilientRunner()
+
+        # Reusable DB engine — created once, shared across scans.
+        db_url = config.db_url
+        if ":///" in db_url:
+            prefix, path = db_url.split("///", 1)
+            db_url = f"{prefix}///{Path(path).expanduser()}"
+        self._db_engine = create_engine(db_url)
 
     # ------------------------------------------------------------------
     # Public API
@@ -319,7 +327,8 @@ class ScanOrchestrator:
             finding_count=len(deduped),
             detail=f"{len(deduped)} after dedup",
         ))
-        fp_pipeline = FPPipeline(tech_stack=[])
+        tech_stack = self._detect_tech_stack(dag_context)
+        fp_pipeline = FPPipeline(tech_stack=tech_stack)
         filtered = await fp_pipeline.process(deduped)
 
         # --- 11. Enrich ---
@@ -483,50 +492,73 @@ class ScanOrchestrator:
             # the profile's configured requests-per-second limit.
             await self.rate_limiter.get_limiter(target).acquire()
 
-            try:
-                result = await run_tool(
-                    command=command_str,
-                    timeout=timeout,
-                    shell=True,
-                    on_line=_on_line,
-                )
-            except TimeoutError:
-                # Propagate so DAGExecutor records TIMED_OUT state.
+            async def _exec_tool() -> PluginOutput:
+                """Execute the tool, raising ToolExecutionError on failure for retry."""
+                try:
+                    r = await run_tool(
+                        command=command_str,
+                        timeout=timeout,
+                        shell=True,
+                        on_line=_on_line,
+                    )
+                except TimeoutError:
+                    self.audit_logger.log_tool_run(
+                        scan_id=scan_id,
+                        plugin_name=plugin_name,
+                        target=target,
+                        command=command_str,
+                        exit_code=None,
+                        elapsed_seconds=None,
+                    )
+                    raise
+
+                _level = classify_result(r.return_code, r.stdout)
                 self.audit_logger.log_tool_run(
                     scan_id=scan_id,
                     plugin_name=plugin_name,
                     target=target,
-                    command=command_str,
-                    exit_code=None,
-                    elapsed_seconds=None,
+                    command=r.command,
+                    exit_code=r.return_code,
+                    elapsed_seconds=r.elapsed_seconds,
                 )
+
+                # If the tool failed without output, raise for retry
+                if r.return_code != 0 and not r.stdout.strip():
+                    raise ToolExecutionError(
+                        f"Plugin '{plugin_name}' exited with code {r.return_code}",
+                        exit_code=r.return_code,
+                        stderr=r.stderr,
+                    )
+
+                logger.debug(
+                    "Plugin '%s' finished: exit_code=%d, level=%s, elapsed=%.1fs.",
+                    plugin_name,
+                    r.return_code,
+                    _level.value,
+                    r.elapsed_seconds,
+                )
+
+                po = plugin.parse_output(r.stdout, r.stderr)
+                dag_context.set(plugin_name, po)
+                return po
+
+            try:
+                return await self.resilient_runner.run_with_retry(_exec_tool)
+            except ToolExecutionError:
+                # All retries exhausted — parse whatever output we have
+                plugin_output = plugin.parse_output("", "")
+                dag_context.set(plugin_name, plugin_output)
                 raise
 
-            # Classify and log
-            _level = classify_result(result.return_code, result.stdout)
-            self.audit_logger.log_tool_run(
-                scan_id=scan_id,
-                plugin_name=plugin_name,
-                target=target,
-                command=result.command,
-                exit_code=result.return_code,
-                elapsed_seconds=result.elapsed_seconds,
-            )
-
-            logger.debug(
-                "Plugin '%s' finished: exit_code=%d, level=%s, elapsed=%.1fs.",
-                plugin_name,
-                result.return_code,
-                _level.value,
-                result.elapsed_seconds,
-            )
-
-            # Parse output into PluginOutput
-            plugin_output = plugin.parse_output(result.stdout, result.stderr)
-            dag_context.set(plugin_name, plugin_output)
-            return plugin_output
-
         return _run
+
+    # Factory methods that require extra keyword arguments beyond (data, scan_id).
+    _FACTORY_EXTRA_KWARGS: dict[str, list[str]] = {
+        "checkdmarc": ["domain"],
+        "crtsh": ["domain"],
+        "subfinder": ["domain"],
+        "swaks": ["target"],
+    }
 
     def _normalize_output(
         self,
@@ -536,47 +568,100 @@ class ScanOrchestrator:
     ) -> list[Finding]:
         """Convert a PluginOutput into Finding objects using FindingFactory.
 
-        Dispatches to the appropriate factory method based on plugin_name.
-        Falls back to an empty list for plugins not yet covered by the factory.
+        Uses dynamic dispatch via ``getattr`` so that every ``from_<name>``
+        method on :class:`FindingFactory` is automatically available without
+        an explicit if-elif chain.  Plugin names containing hyphens are
+        normalised to underscores (e.g. ``trivy-k8s`` → ``from_trivy_k8s``).
 
         Args:
             plugin_output: Raw parsed output from a plugin execution.
             scan_id:       Identifier of the parent scan.
-            target:        Primary scan target (used by checkdmarc).
+            target:        Primary scan target (passed as ``domain=`` or
+                           ``target=`` to factories that require it).
 
         Returns:
             List of Finding objects extracted from this plugin's output.
         """
         name = plugin_output.plugin_name
         data = plugin_output.parsed_data
+        method_name = f"from_{name.replace('-', '_')}"
+
+        factory_method = getattr(FindingFactory, method_name, None)
+        if factory_method is None:
+            raw_findings: list[dict[str, Any]] = plugin_output.findings
+            logger.debug(
+                "Plugin '%s' has no factory method '%s'; %d raw finding(s) skipped.",
+                name,
+                method_name,
+                len(raw_findings),
+            )
+            return []
 
         try:
-            if name == "nuclei":
-                return FindingFactory.from_nuclei(data, scan_id)
-            elif name == "nmap":
-                return FindingFactory.from_nmap(data, scan_id)
-            elif name == "testssl":
-                return FindingFactory.from_testssl(data, scan_id)
-            elif name == "checkdmarc":
-                return FindingFactory.from_checkdmarc(data, scan_id, domain=target)
-            elif name == "trufflehog":
-                return FindingFactory.from_trufflehog(data, scan_id)
-            elif name == "wafw00f":
-                return FindingFactory.from_wafw00f(data, scan_id)
-            else:
-                # Unknown plugin — use findings list directly if present
-                raw_findings: list[dict[str, Any]] = plugin_output.findings
-                logger.debug(
-                    "Plugin '%s' has no dedicated factory; %d raw finding(s) skipped.",
-                    name,
-                    len(raw_findings),
-                )
-                return []
+            extra_params = self._FACTORY_EXTRA_KWARGS.get(name, [])
+            kwargs: dict[str, Any] = {}
+            for param in extra_params:
+                if param == "domain":
+                    kwargs["domain"] = target
+                elif param == "target":
+                    kwargs["target"] = target
+            return factory_method(data, scan_id, **kwargs)
         except Exception:
             logger.exception(
                 "Failed to normalize output for plugin '%s'. Skipping.", name
             )
             return []
+
+    @staticmethod
+    def _detect_tech_stack(dag_context: DAGContext) -> list[str]:
+        """Extract technology stack identifiers from completed plugin outputs.
+
+        Inspects httpx, nmap, and wafw00f results for technology indicators
+        (web server, OS, WAF) and returns a list of lowercase tech strings
+        suitable for :class:`FPPipeline`.
+        """
+        tech: set[str] = set()
+
+        # --- httpx: tech detection from response headers / body ---
+        httpx_out = dag_context.get("httpx")
+        if httpx_out and httpx_out.parsed_data:
+            results = httpx_out.parsed_data.get("results", [])
+            if isinstance(results, list):
+                for entry in results:
+                    # httpx "tech" field
+                    for t in entry.get("tech", []) or []:
+                        tech.add(t.lower())
+                    # httpx webserver field
+                    ws = entry.get("webserver", "") or ""
+                    if ws:
+                        tech.add(ws.split("/")[0].lower())
+
+        # --- nmap: OS and service detection ---
+        nmap_out = dag_context.get("nmap")
+        if nmap_out and nmap_out.parsed_data:
+            for host in nmap_out.parsed_data.get("hosts", []) or []:
+                # OS matches
+                for os_match in host.get("os_matches", []) or []:
+                    os_name = (os_match.get("name", "") or "").lower()
+                    if "linux" in os_name:
+                        tech.add("linux")
+                    elif "windows" in os_name:
+                        tech.add("windows")
+                # Service banners
+                for port_info in host.get("ports", []) or []:
+                    product = (port_info.get("product", "") or "").lower()
+                    if product:
+                        tech.add(product.split("/")[0])
+
+        # --- wafw00f: WAF detection ---
+        waf_out = dag_context.get("wafw00f")
+        if waf_out and waf_out.parsed_data:
+            for entry in waf_out.parsed_data.get("results", []) or []:
+                waf_name = (entry.get("firewall", "") or "").lower()
+                if waf_name:
+                    tech.add(waf_name)
+
+        return list(tech)
 
     async def _persist(
         self,
@@ -602,13 +687,7 @@ class ScanOrchestrator:
             started_at:  Scan start timestamp (UTC).
             finished_at: Scan end timestamp (UTC).
         """
-        db_url = self.config.db_url
-        # Expand the tilde in the default SQLite path if present
-        if ":///" in db_url:
-            prefix, path = db_url.split("///", 1)
-            db_url = f"{prefix}///{Path(path).expanduser()}"
-
-        engine = create_engine(db_url)
+        engine = self._db_engine
 
         try:
             await init_db(engine)
@@ -695,5 +774,3 @@ class ScanOrchestrator:
                 "Failed to persist scan '%s' to database. Results are still returned.",
                 scan_id,
             )
-        finally:
-            await engine.dispose()
