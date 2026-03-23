@@ -31,18 +31,28 @@
         {% endif %}
       </div>
     </div>
-    <!-- Export button -->
-    <a href="/scan/{{ scan_id }}/export"
-       class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
-              bg-cyan-900/40 text-cyan-400 border border-cyan-800/50
-              hover:bg-cyan-900/70 transition-colors">
-      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-        <polyline points="7 10 12 15 17 10"/>
-        <line x1="12" y1="15" x2="12" y2="3"/>
-      </svg>
-      Export HTML
-    </a>
+    <!-- Export controls -->
+    <div class="flex items-center gap-2">
+      <select id="export-format"
+              onchange="document.getElementById('export-link').href = '/scan/{{ scan_id }}/export?format=' + this.value"
+              class="bg-gray-900 border border-gray-700 rounded-md px-2.5 py-2 text-xs text-gray-300
+                     focus:outline-none focus:border-cyan-600 transition-colors">
+        <option value="html">HTML Report</option>
+        <option value="json">JSON</option>
+        <option value="csv">CSV</option>
+      </select>
+      <a id="export-link" href="/scan/{{ scan_id }}/export?format=html"
+         class="inline-flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium
+                bg-cyan-900/40 text-cyan-400 border border-cyan-800/50
+                hover:bg-cyan-900/70 transition-colors">
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Export
+      </a>
+    </div>
   </div>
 
   <!-- Charts row -->

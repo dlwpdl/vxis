@@ -213,6 +213,12 @@ async def index(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/scan/new", response_class=HTMLResponse)
+async def scan_new(request: Request) -> HTMLResponse:
+    """Render the new scan launch form."""
+    return templates.TemplateResponse(request, "scan_new.html", {})
+
+
 @app.get("/scan/{scan_id}", response_class=HTMLResponse)
 async def scan_detail(request: Request, scan_id: str) -> HTMLResponse:
     """Scan detail page — charts, filters, and findings table."""
@@ -636,12 +642,6 @@ _scan_buses: dict[str, ScanEventBus] = {}
 # ---------------------------------------------------------------------------
 # Feature 1: Scan Launch Form + Background Scan
 # ---------------------------------------------------------------------------
-
-
-@app.get("/scan/new", response_class=HTMLResponse)
-async def scan_new(request: Request) -> HTMLResponse:
-    """Render the new scan launch form."""
-    return templates.TemplateResponse(request, "scan_new.html", {})
 
 
 @app.post("/api/scan")

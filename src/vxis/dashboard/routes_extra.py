@@ -43,8 +43,10 @@ def _get_engine(request: Request):
 
 
 def _templates(request: Request):
-    """Return the Jinja2Templates instance stored on the app."""
-    return request.app.state.templates
+    """Return the Jinja2Templates instance from the app module."""
+    from vxis.dashboard.app import templates
+
+    return templates
 
 
 def _clients_dir() -> Path:
