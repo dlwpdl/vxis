@@ -7,12 +7,21 @@ Stage 0 - Context Prefilter: drop tech-incompatible findings
 Stage 1 - Tool Validation: remove structurally invalid findings
 Stage 2 - Cross-Tool Correlation: boost confidence for multi-source findings
 Stage 3 - Revalidation: flag high/critical findings that need manual review
+Stage 3.5 - HTTP Revalidation: actively revalidate flagged findings via HTTP
 Stage 4 - Confidence Scoring: apply base confidence per source tool and filter
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import re
+
+import httpx
+
 from vxis.models.finding import Finding, Severity
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +90,33 @@ _CROSS_TOOL_BOOST: float = 0.15
 #: Minimum confidence for HIGH/CRITICAL findings before flagging for revalidation.
 _REVALIDATION_THRESHOLD: float = 0.7
 
+#: Default timeout in seconds for HTTP revalidation requests.
+_REVALIDATION_TIMEOUT: float = 5.0
+
+#: Maximum number of concurrent HTTP revalidation requests.
+_REVALIDATION_MAX_CONCURRENT: int = 10
+
+#: Confidence boost when HTTP revalidation confirms a vulnerability indicator.
+_REVALIDATION_CONFIRM_BOOST: float = 0.15
+
+#: Confidence penalty when HTTP revalidation finds no vulnerability indicator.
+_REVALIDATION_DENY_PENALTY: float = 0.15
+
+#: HTTP-related protocols and finding types used to identify revalidatable findings.
+_HTTP_PROTOCOLS: set[str] = {"http", "https"}
+
+#: URL pattern to detect URLs in evidence content.
+_URL_PATTERN: re.Pattern[str] = re.compile(r"https?://[^\s\"'<>]+")
+
+#: HTTP status codes that commonly indicate a vulnerability is still present.
+_VULN_STATUS_CODES: set[int] = {200, 401, 403, 500, 502, 503}
+
+#: Response header patterns that may indicate vulnerability presence.
+_VULN_HEADER_PATTERNS: dict[str, list[str]] = {
+    "server": ["apache", "nginx", "iis"],
+    "x-powered-by": ["php", "asp.net", "express"],
+}
+
 
 # ---------------------------------------------------------------------------
 # FPPipeline
@@ -96,14 +132,25 @@ class FPPipeline:
         clean_findings = await pipeline.process(raw_findings)
     """
 
-    def __init__(self, tech_stack: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        tech_stack: list[str] | None = None,
+        revalidate: bool = True,
+        revalidation_timeout: float = _REVALIDATION_TIMEOUT,
+    ) -> None:
         """Initialize pipeline with optional detected tech stack.
 
         Args:
             tech_stack: List of technology identifiers detected on the target
                         (e.g. ["nginx", "linux", "postgresql"]). Used in Stage 0.
+            revalidate: Whether to perform HTTP revalidation on flagged findings.
+                        Defaults to True. Set to False to skip revalidation.
+            revalidation_timeout: Timeout in seconds for each HTTP revalidation
+                                  request. Defaults to 5 seconds.
         """
         self._tech_stack: list[str] = [t.lower() for t in (tech_stack or [])]
+        self._revalidate: bool = revalidate
+        self._revalidation_timeout: float = revalidation_timeout
 
     async def process(self, findings: list[Finding]) -> list[Finding]:
         """Run all 5 pipeline stages sequentially.
@@ -118,6 +165,8 @@ class FPPipeline:
         stage1 = self._tool_validation(stage0)
         stage2 = self._cross_tool_correlation(stage1)
         stage3 = self._revalidation(stage2)
+        if self._revalidate:
+            stage3 = await self._http_revalidation(stage3)
         stage4 = self._confidence_scoring(stage3)
         return stage4
 
@@ -256,6 +305,207 @@ class FPPipeline:
                     finding.analyst_notes = note
 
         return findings
+
+    # ------------------------------------------------------------------
+    # Stage 3.5 — HTTP Revalidation
+    # ------------------------------------------------------------------
+
+    async def _http_revalidation(self, findings: list[Finding]) -> list[Finding]:
+        """Perform HTTP revalidation on findings flagged in stage 3.
+
+        Only findings with ``[needs_revalidation]`` in analyst_notes and
+        HTTP-related evidence (URLs, endpoints) are revalidated. A rate-limited
+        semaphore caps concurrency.
+
+        Args:
+            findings: Input findings list (post stage 3).
+
+        Returns:
+            Same findings list with confidence adjusted based on revalidation.
+        """
+        semaphore = asyncio.Semaphore(_REVALIDATION_MAX_CONCURRENT)
+
+        async def _guarded_revalidate(finding: Finding) -> Finding:
+            async with semaphore:
+                return await self._http_revalidate(finding)
+
+        tasks: list[asyncio.Task[Finding]] = []
+        flagged_indices: list[int] = []
+
+        for i, finding in enumerate(findings):
+            if self._is_flagged_for_revalidation(finding):
+                url = self._extract_revalidation_url(finding)
+                if url is not None:
+                    flagged_indices.append(i)
+                    tasks.append(asyncio.ensure_future(_guarded_revalidate(finding)))
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for idx, result in zip(flagged_indices, results):
+                if isinstance(result, Finding):
+                    findings[idx] = result
+                # Exceptions are swallowed — original finding is kept unchanged
+
+        return findings
+
+    async def _http_revalidate(self, finding: Finding) -> Finding:
+        """Perform a single HTTP revalidation request for a finding.
+
+        Extracts the target URL, sends a lightweight request, and adjusts
+        confidence based on whether vulnerability indicators are still present.
+
+        Args:
+            finding: A finding flagged for revalidation with HTTP evidence.
+
+        Returns:
+            The finding with potentially adjusted confidence and updated notes.
+        """
+        url = self._extract_revalidation_url(finding)
+        if url is None:
+            return finding
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=self._revalidation_timeout,
+                verify=False,  # noqa: S501 — targets may use self-signed certs
+                follow_redirects=True,
+                max_redirects=3,
+            ) as client:
+                # Try HEAD first (lightweight), fall back to GET if HEAD is rejected
+                try:
+                    response = await client.head(url)
+                    if response.status_code == 405:  # Method Not Allowed
+                        response = await client.get(url)
+                except httpx.HTTPError:
+                    response = await client.get(url)
+
+            confirmed = self._check_vulnerability_indicators(response, finding)
+
+            if confirmed:
+                new_confidence = min(1.0, finding.confidence + _REVALIDATION_CONFIRM_BOOST)
+                note = (
+                    f"[http_revalidation] Confirmed: HTTP {response.status_code} "
+                    f"at {url}. Confidence boosted {finding.confidence:.2f} -> "
+                    f"{new_confidence:.2f}."
+                )
+                finding.confidence = new_confidence
+            else:
+                new_confidence = max(0.0, finding.confidence - _REVALIDATION_DENY_PENALTY)
+                note = (
+                    f"[http_revalidation] Not confirmed: HTTP {response.status_code} "
+                    f"at {url}. Confidence reduced {finding.confidence:.2f} -> "
+                    f"{new_confidence:.2f}."
+                )
+                finding.confidence = new_confidence
+
+            if finding.analyst_notes:
+                finding.analyst_notes = finding.analyst_notes + "\n" + note
+            else:
+                finding.analyst_notes = note
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPError) as exc:
+            # Network errors: don't change confidence, just log
+            logger.debug(
+                "HTTP revalidation failed for %s (%s): %s",
+                finding.id,
+                url,
+                exc,
+            )
+            note = f"[http_revalidation] Skipped: {type(exc).__name__} for {url}."
+            if finding.analyst_notes:
+                finding.analyst_notes = finding.analyst_notes + "\n" + note
+            else:
+                finding.analyst_notes = note
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Unexpected error during HTTP revalidation for %s: %s",
+                finding.id,
+                exc,
+            )
+
+        return finding
+
+    @staticmethod
+    def _is_flagged_for_revalidation(finding: Finding) -> bool:
+        """Check whether a finding was flagged for revalidation in stage 3."""
+        return bool(
+            finding.analyst_notes and "[needs_revalidation]" in finding.analyst_notes
+        )
+
+    @staticmethod
+    def _extract_revalidation_url(finding: Finding) -> str | None:
+        """Extract a target URL suitable for HTTP revalidation.
+
+        Checks (in order):
+        1. Evidence content for explicit URLs
+        2. Target field if it looks like a URL
+        3. Target + port to construct an HTTP URL
+
+        Returns:
+            A URL string, or None if no HTTP-based URL can be derived.
+        """
+        # 1. Look for URLs in evidence content
+        for ev in finding.evidence:
+            matches = _URL_PATTERN.findall(ev.content)
+            if matches:
+                return matches[0]
+
+        # 2. Target field itself might be a URL
+        target = finding.target.strip()
+        if target.startswith("http://") or target.startswith("https://"):
+            return target
+
+        # 3. Construct from target + port if port is HTTP-like
+        if finding.port in (80, 443, 8080, 8443):
+            scheme = "https" if finding.port in (443, 8443) else "http"
+            return f"{scheme}://{target}:{finding.port}"
+
+        # 4. If protocol is http/https, construct URL
+        if finding.protocol and finding.protocol.lower() in _HTTP_PROTOCOLS:
+            scheme = finding.protocol.lower()
+            port_suffix = f":{finding.port}" if finding.port else ""
+            return f"{scheme}://{target}{port_suffix}"
+
+        return None
+
+    @staticmethod
+    def _check_vulnerability_indicators(
+        response: httpx.Response,
+        finding: Finding,
+    ) -> bool:
+        """Check whether the HTTP response indicates the vulnerability is present.
+
+        Heuristics:
+        - Status code is in the set of codes that suggest a live vulnerable endpoint
+        - Finding-related keywords appear in response headers
+
+        Args:
+            response: The HTTP response from the revalidation request.
+            finding: The original finding being revalidated.
+
+        Returns:
+            True if vulnerability indicators are detected.
+        """
+        # Check status code
+        if response.status_code in _VULN_STATUS_CODES:
+            # Look for finding-type keywords in response headers
+            finding_keywords = finding.finding_type.lower().split()
+            for header_name, patterns in _VULN_HEADER_PATTERNS.items():
+                header_value = response.headers.get(header_name, "").lower()
+                if header_value:
+                    for pattern in patterns:
+                        if pattern in header_value:
+                            return True
+
+            # If status code indicates something interesting (error/auth), count as confirmed
+            if response.status_code in {401, 403, 500, 502, 503}:
+                return True
+
+            # For 200, require more evidence — the endpoint is reachable and live
+            if response.status_code == 200:
+                return True
+
+        return False
 
     # ------------------------------------------------------------------
     # Stage 4 — Confidence Scoring
