@@ -2917,3 +2917,41 @@ class FindingDeduplicator:
         for finding in findings:
             groups[finding.fuzzy_hash].append(finding)
         return dict(groups)
+
+
+# ---------------------------------------------------------------------------
+# NORMALIZERS registry — maps plugin name to FindingFactory method
+# ---------------------------------------------------------------------------
+
+NORMALIZERS: dict[str, Any] = {
+    "nuclei": FindingFactory.from_nuclei,
+    "nmap": FindingFactory.from_nmap,
+    "testssl": FindingFactory.from_testssl,
+    "checkdmarc": FindingFactory.from_checkdmarc,
+    "trufflehog": FindingFactory.from_trufflehog,
+    "wafw00f": FindingFactory.from_wafw00f,
+    "prowler": FindingFactory.from_prowler,
+    "gitleaks": FindingFactory.from_gitleaks,
+    "trivy": FindingFactory.from_trivy,
+    "dnstwist": FindingFactory.from_dnstwist,
+    "crtsh": FindingFactory.from_crtsh,
+    "sslyze": FindingFactory.from_sslyze,
+    "bloodhound": FindingFactory.from_bloodhound,
+    "certipy": FindingFactory.from_certipy,
+    "netexec": FindingFactory.from_netexec,
+    "linpeas": FindingFactory.from_linpeas,
+    "semgrep": FindingFactory.from_semgrep,
+    "bandit": FindingFactory.from_bandit,
+    "checkov": FindingFactory.from_checkov,
+    "kube-bench": FindingFactory.from_kube_bench,
+    "poutine": FindingFactory.from_poutine,
+    "subfinder": FindingFactory.from_subfinder,
+    "httpx": FindingFactory.from_httpx,
+    "shodan": FindingFactory.from_shodan,
+    "trivy-k8s": FindingFactory.from_trivy_k8s,
+    "swaks": FindingFactory.from_swaks,
+    "actionlint": FindingFactory.from_actionlint,
+    "s3scanner": FindingFactory.from_s3scanner,
+    "confused": FindingFactory.from_confused,
+    "winpeas": FindingFactory.from_winpeas,
+}
