@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} — VXIS Dashboard{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex items-center gap-2 text-sm">
+  <a href="/" class="text-gray-500 hover:text-gray-300">Dashboard</a>
+  <span class="text-gray-600">/</span>
+  <span class="text-gray-300">{{ title }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+
+  <!-- Page header -->
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-bold text-white">{{ title }}</h1>
+    {% if target %}
+    <a href="/trend" class="text-sm text-cyan-400 hover:text-cyan-300 transition-colors">
+      View Portfolio Trend &rarr;
+    </a>
+    {% endif %}
+  </div>
+
+  {% if rows|length == 0 %}
+  <!-- Empty state -->
+  <div class="bg-surface rounded-lg border border-surface-border p-12 text-center">
+    <svg class="w-16 h-16 mx-auto text-gray-600 mb-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+    </svg>
+    <h2 class="text-lg font-semibold text-gray-400 mb-2">No scan data found</h2>
+    <p class="text-sm text-gray-500">
+      {% if target %}
+        No scans have been recorded for <span class="text-gray-300 font-mono">{{ target }}</span> yet.
+      {% else %}
+        No scans have been recorded yet. Run a scan to see trend data here.
+      {% endif %}
+    </p>
+  </div>
+
+  {% else %}
+
+  <!-- SVG Line Chart -->
+  <div class="bg-surface rounded-lg border border-surface-border p-6">
+    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Severity Over Time</h2>
+
+    {% set ns = namespace(max_val=1) %}
+    {% for row in rows %}
+      {% if row.critical > ns.max_val %}{% set ns.max_val = row.critical %}{% endif %}
+      {% if row.high > ns.max_val %}{% set ns.max_val = row.high %}{% endif %}
+      {% if row.medium > ns.max_val %}{% set ns.max_val = row.medium %}{% endif %}
+      {% if row.low > ns.max_val %}{% set ns.max_val = row.low %}{% endif %}
+      {% if row.info > ns.max_val %}{% set ns.max_val = row.info %}{% endif %}
+    {% endfor %}
+
+    {# Chart dimensions #}
+    {% set chart_left = 50 %}
+    {% set chart_right = 760 %}
+    {% set chart_top = 20 %}
+    {% set chart_bottom = 360 %}
+    {% set chart_w = chart_right - chart_left %}
+    {% set chart_h = chart_bottom - chart_top %}
+
+    <svg viewBox="0 0 800 400" class="w-full" style="max-height: 420px;" xmlns="http://www.w3.org/2000/svg">
+
+      <!-- Background -->
+      <rect x="0" y="0" width="800" height="400" fill="#161923" rx="8"/>
+
+      <!-- Grid lines -->
+      {% for i in range(6) %}
+        {% set gy = chart_bottom - (chart_h * i / 5) %}
+        <line x1="{{ chart_left }}" y1="{{ gy }}" x2="{{ chart_right }}" y2="{{ gy }}" stroke="#252a3d" stroke-width="1"/>
+        {% set label_val = (ns.max_val * i / 5)|round|int %}
+        <text x="{{ chart_left - 8 }}" y="{{ gy + 4 }}" text-anchor="end" fill="#6b7280" font-size="11" font-family="monospace">{{ label_val }}</text>
+      {% endfor %}
+
+      <!-- X-axis labels -->
+      {% for row in rows %}
+        {% set n = rows|length %}
+        {% if n == 1 %}
+          {% set px = chart_left + chart_w / 2 %}
+        {% else %}
+          {% set px = chart_left + (chart_w * loop.index0 / (n - 1)) %}
+        {% endif %}
+        {% if n <= 15 or loop.index0 % ((n // 10) + 1) == 0 %}
+        <text x="{{ px }}" y="{{ chart_bottom + 20 }}" text-anchor="middle" fill="#6b7280" font-size="10" font-family="monospace">
+          {{ row.date.strftime('%m/%d') if row.date else '—' }}
+        </text>
+        {% endif %}
+      {% endfor %}
+
+      <!-- Severity lines and dots -->
+      {% set severities = [
+        ("critical", "#7B2C34"),
+        ("high", "#C0392B"),
+        ("medium", "#E67E22"),
+        ("low", "#2ECC71"),
+        ("info", "#3498DB")
+      ] %}
+
+      {% for sev_name, sev_color in severities %}
+
+        {# Build polyline points #}
+        {% set points_list = [] %}
+        {% for row in rows %}
+          {% set n = rows|length %}
+          {% if n == 1 %}
+            {% set px = chart_left + chart_w / 2 %}
+          {% else %}
+            {% set px = chart_left + (chart_w * loop.index0 / (n - 1)) %}
+          {% endif %}
+          {% set val = row[sev_name] %}
+          {% set py = chart_bottom - (chart_h * val / ns.max_val) %}
+          {% set _ = points_list.append("%.1f,%.1f"|format(px, py)) %}
+        {% endfor %}
+
+        <polyline
+          points="{{ points_list|join(' ') }}"
+          fill="none"
+          stroke="{{ sev_color }}"
+          stroke-width="2"
+          stroke-linejoin="round"
+          stroke-linecap="round"
+        />
+
+        {# Dots with hover titles #}
+        {% for row in rows %}
+          {% set n = rows|length %}
+          {% if n == 1 %}
+            {% set px = chart_left + chart_w / 2 %}
+          {% else %}
+            {% set px = chart_left + (chart_w * loop.index0 / (n - 1)) %}
+          {% endif %}
+          {% set val = row[sev_name] %}
+          {% set py = chart_bottom - (chart_h * val / ns.max_val) %}
+          <circle cx="{{ px }}" cy="{{ py }}" r="3.5" fill="{{ sev_color }}" stroke="#161923" stroke-width="1.5">
+            <title>{{ sev_name|capitalize }}: {{ val }} ({{ row.date.strftime('%Y-%m-%d') if row.date else '—' }})</title>
+          </circle>
+        {% endfor %}
+
+      {% endfor %}
+
+    </svg>
+
+    <!-- Legend -->
+    <div class="flex flex-wrap gap-5 mt-4 justify-center">
+      {% for sev_name, sev_color in [("Critical", "#7B2C34"), ("High", "#C0392B"), ("Medium", "#E67E22"), ("Low", "#2ECC71"), ("Info", "#3498DB")] %}
+      <div class="flex items-center gap-2 text-xs text-gray-400">
+        <span class="inline-block w-3 h-3 rounded-full" style="background: {{ sev_color }};"></span>
+        {{ sev_name }}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- Summary Table -->
+  <div class="bg-surface rounded-lg border border-surface-border overflow-hidden">
+    <div class="px-6 py-4 border-b border-surface-border">
+      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Scan Summary</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-surface-border text-left">
+            <th class="px-6 py-3 text-gray-500 font-medium">Scan ID</th>
+            <th class="px-6 py-3 text-gray-500 font-medium">Date</th>
+            {% if not target %}
+            <th class="px-6 py-3 text-gray-500 font-medium">Target</th>
+            {% endif %}
+            <th class="px-6 py-3 text-gray-500 font-medium text-center">
+              <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:#7B2C34"></span>Crit
+            </th>
+            <th class="px-6 py-3 text-gray-500 font-medium text-center">
+              <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:#C0392B"></span>High
+            </th>
+            <th class="px-6 py-3 text-gray-500 font-medium text-center">
+              <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:#E67E22"></span>Med
+            </th>
+            <th class="px-6 py-3 text-gray-500 font-medium text-center">
+              <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:#2ECC71"></span>Low
+            </th>
+            <th class="px-6 py-3 text-gray-500 font-medium text-center">
+              <span class="inline-block w-2 h-2 rounded-full mr-1" style="background:#3498DB"></span>Info
+            </th>
+            <th class="px-6 py-3 text-gray-500 font-medium text-center">Total</th>
+            <th class="px-6 py-3 text-gray-500 font-medium text-center">Risk</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-surface-border">
+          {% for row in rows %}
+          <tr class="hover:bg-surface-raised transition-colors">
+            <td class="px-6 py-3">
+              <a href="/scan/{{ row.scan_id }}" class="text-cyan-400 hover:text-cyan-300 font-mono">#{{ row.scan_id }}</a>
+            </td>
+            <td class="px-6 py-3 text-gray-400 font-mono text-xs">
+              {{ row.date.strftime('%Y-%m-%d %H:%M') if row.date else '—' }}
+            </td>
+            {% if not target %}
+            <td class="px-6 py-3 text-gray-300 font-mono text-xs">
+              <a href="/trend/{{ row.target }}" class="hover:text-cyan-400 transition-colors">{{ row.target }}</a>
+            </td>
+            {% endif %}
+            <td class="px-6 py-3 text-center {% if row.critical > 0 %}text-red-300 font-bold{% else %}text-gray-500{% endif %}">{{ row.critical }}</td>
+            <td class="px-6 py-3 text-center {% if row.high > 0 %}text-red-400 font-semibold{% else %}text-gray-500{% endif %}">{{ row.high }}</td>
+            <td class="px-6 py-3 text-center {% if row.medium > 0 %}text-orange-400{% else %}text-gray-500{% endif %}">{{ row.medium }}</td>
+            <td class="px-6 py-3 text-center {% if row.low > 0 %}text-green-400{% else %}text-gray-500{% endif %}">{{ row.low }}</td>
+            <td class="px-6 py-3 text-center {% if row.info > 0 %}text-blue-400{% else %}text-gray-500{% endif %}">{{ row.info }}</td>
+            <td class="px-6 py-3 text-center text-gray-300 font-semibold">{{ row.total }}</td>
+            <td class="px-6 py-3 text-center">
+              <span class="font-mono font-bold {% if row.risk_score >= 7 %}text-red-400{% elif row.risk_score >= 4 %}text-orange-400{% else %}text-green-400{% endif %}">
+                {{ row.risk_score }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% endif %}
+
+</div>
+{% endblock %}

@@ -7,15 +7,18 @@ without a JavaScript framework.
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import tempfile
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
@@ -23,6 +26,7 @@ from sqlalchemy.orm import selectinload
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from vxis.core.db import create_engine, get_session, init_db
+from vxis.core.events import ScanEventBus
 from vxis.models.db_models import FindingRecord, ScanRecord
 from vxis.report.charts import severity_bar_svg, severity_donut_svg
 
@@ -619,6 +623,147 @@ async def login_submit(request: Request) -> RedirectResponse:
         return RedirectResponse(url=f"/?token={token}", status_code=303)
 
     return RedirectResponse(url="/login?error=invalid", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Running scans registry
+# ---------------------------------------------------------------------------
+
+_running_scans: dict[str, asyncio.Task] = {}
+_scan_buses: dict[str, ScanEventBus] = {}
+
+
+# ---------------------------------------------------------------------------
+# Feature 1: Scan Launch Form + Background Scan
+# ---------------------------------------------------------------------------
+
+
+@app.get("/scan/new", response_class=HTMLResponse)
+async def scan_new(request: Request) -> HTMLResponse:
+    """Render the new scan launch form."""
+    return templates.TemplateResponse(request, "scan_new.html", {})
+
+
+@app.post("/api/scan")
+async def api_scan_start(request: Request) -> JSONResponse:
+    """Start a scan in the background and return the scan ID."""
+    body = await request.json()
+    target: str = body.get("target", "").strip()
+    profile: str = body.get("profile", "standard")
+
+    if not target:
+        return JSONResponse({"error": "target is required"}, status_code=400)
+
+    scan_id = uuid.uuid4().hex[:12]
+    event_bus = ScanEventBus()
+    _scan_buses[scan_id] = event_bus
+
+    async def _run_scan() -> None:
+        from vxis.config.schema import VXISConfig
+        from vxis.core.orchestrator import ScanOrchestrator
+
+        try:
+            config = VXISConfig()
+            orchestrator = ScanOrchestrator(config, event_bus=event_bus)
+            await orchestrator.run_scan(target=target, profile=profile)
+        except Exception as exc:
+            from vxis.core.events import EventType, ScanLifecycleEvent
+
+            await event_bus.emit(
+                ScanLifecycleEvent(
+                    event_type=EventType.SCAN_FAILED,
+                    scan_id=scan_id,
+                    error=str(exc),
+                )
+            )
+        finally:
+            # Clean up after a delay so SSE clients can receive final events
+            await asyncio.sleep(5)
+            _running_scans.pop(scan_id, None)
+            _scan_buses.pop(scan_id, None)
+
+    task = asyncio.create_task(_run_scan())
+    _running_scans[scan_id] = task
+
+    return JSONResponse({"scan_id": scan_id, "status": "started"})
+
+
+@app.get("/api/scan/{scan_id}/stream")
+async def api_scan_stream(scan_id: str) -> StreamingResponse:
+    """SSE endpoint that streams scan events in real time."""
+
+    async def _event_generator():
+        event_bus = _scan_buses.get(scan_id)
+        if event_bus is None:
+            yield f"data: {json.dumps({'error': 'Scan not found', 'scan_id': scan_id})}\n\n"
+            return
+
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def _enqueue(event: Any) -> None:
+            from dataclasses import asdict
+            await queue.put(asdict(event))
+
+        event_bus.on_any(_enqueue)
+
+        try:
+            while True:
+                try:
+                    event_data = await asyncio.wait_for(queue.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event_data, default=str)}\n\n"
+                    # Close stream on terminal events
+                    etype = event_data.get("event_type", "")
+                    if etype in ("scan.completed", "scan.failed"):
+                        break
+                except asyncio.TimeoutError:
+                    # Send keepalive comment
+                    yield ": keepalive\n\n"
+                    # Check if scan is still running
+                    if scan_id not in _running_scans:
+                        yield f"data: {json.dumps({'event_type': 'scan.completed', 'scan_id': scan_id, 'detail': 'stream closed'})}\n\n"
+                        break
+        finally:
+            event_bus.off_any(_enqueue) if hasattr(event_bus, "off_any") else None
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Feature 2: Plugin Status Page
+# ---------------------------------------------------------------------------
+
+
+@app.get("/plugins", response_class=HTMLResponse)
+async def plugins_page(request: Request) -> HTMLResponse:
+    """Plugin status page — discover all plugins and show availability."""
+    from vxis.plugins.registry import discover_plugins
+
+    registry = discover_plugins()
+
+    plugin_rows: list[dict[str, Any]] = []
+    for name, plugin in sorted(registry.items()):
+        meta = plugin.meta
+        available = plugin.validate_environment()
+        plugin_rows.append(
+            {
+                "name": meta.name,
+                "version": meta.version,
+                "category": meta.category,
+                "binary": meta.tool_binary,
+                "tier": meta.tier,
+                "available": available,
+            }
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "plugins.html",
+        {"plugins": plugin_rows, "total_plugins": len(plugin_rows)},
+    )
 
 
 @app.get("/health")

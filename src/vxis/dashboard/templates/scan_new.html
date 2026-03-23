@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+
+{% block title %}New Scan — VXIS Dashboard{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex items-center gap-2 text-sm">
+  <a href="/" class="text-gray-500 hover:text-gray-300">Dashboard</a>
+  <span class="text-gray-600">/</span>
+  <span class="text-gray-300">New Scan</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+
+  <!-- Header -->
+  <div class="mb-8">
+    <h1 class="text-2xl font-bold text-white mb-1">Launch New Scan</h1>
+    <p class="text-sm text-gray-500">Configure and start a security scan against a target.</p>
+  </div>
+
+  <!-- Scan Form -->
+  <div id="scan-form-card" class="bg-surface rounded-lg border border-surface-border p-6">
+    <form id="scan-form" class="space-y-5">
+
+      <!-- Target -->
+      <div>
+        <label for="target" class="block text-sm font-medium text-gray-300 mb-1.5">Target</label>
+        <input
+          type="text"
+          id="target"
+          name="target"
+          required
+          placeholder="e.g. example.com or 192.168.1.0/24"
+          class="w-full px-3 py-2 rounded-md bg-gray-900 border border-surface-border text-gray-100 text-sm
+                 placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+        />
+      </div>
+
+      <!-- Profile -->
+      <div>
+        <label for="profile" class="block text-sm font-medium text-gray-300 mb-1.5">Scan Profile</label>
+        <select
+          id="profile"
+          name="profile"
+          class="w-full px-3 py-2 rounded-md bg-gray-900 border border-surface-border text-gray-100 text-sm
+                 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-transparent"
+        >
+          <option value="passive">Passive</option>
+          <option value="stealth">Stealth</option>
+          <option value="standard" selected>Standard</option>
+          <option value="aggressive">Aggressive</option>
+        </select>
+      </div>
+
+      <!-- Submit -->
+      <div class="pt-2">
+        <button
+          type="submit"
+          id="scan-submit-btn"
+          class="w-full px-4 py-2.5 rounded-md bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold
+                 transition-colors focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-2 focus:ring-offset-gray-900"
+        >
+          Start Scan
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Live Progress Area (hidden until scan starts) -->
+  <div id="scan-progress" class="hidden mt-6">
+    <div class="bg-surface rounded-lg border border-surface-border p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold text-white">Scan Progress</h2>
+        <div class="flex items-center gap-1.5">
+          <span id="scan-status-dot" class="w-2 h-2 rounded-full bg-yellow-400 animate-pulse inline-block"></span>
+          <span id="scan-status-text" class="text-xs text-gray-400">Running</span>
+        </div>
+      </div>
+      <div
+        id="scan-log"
+        class="bg-gray-950 rounded-md border border-surface-border p-4 h-80 overflow-y-auto font-mono text-xs text-gray-400 space-y-0.5"
+      >
+        <!-- Log lines will be appended here -->
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+document.getElementById('scan-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+
+  const target = document.getElementById('target').value.trim();
+  const profile = document.getElementById('profile').value;
+  const btn = document.getElementById('scan-submit-btn');
+
+  if (!target) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Starting...';
+  btn.classList.add('opacity-50', 'cursor-not-allowed');
+
+  try {
+    const resp = await fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target, profile }),
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok) {
+      appendLog('ERROR: ' + (data.error || 'Failed to start scan'), 'text-red-400');
+      btn.disabled = false;
+      btn.textContent = 'Start Scan';
+      btn.classList.remove('opacity-50', 'cursor-not-allowed');
+      return;
+    }
+
+    // Show progress area
+    document.getElementById('scan-form-card').classList.add('opacity-50', 'pointer-events-none');
+    document.getElementById('scan-progress').classList.remove('hidden');
+    appendLog('Scan ' + data.scan_id + ' started for target: ' + target);
+
+    // Connect to SSE stream
+    const evtSource = new EventSource('/api/scan/' + data.scan_id + '/stream');
+
+    evtSource.onmessage = (event) => {
+      try {
+        const evt = JSON.parse(event.data);
+        const etype = evt.event_type || '';
+
+        // Build a human-readable log line
+        let line = '[' + etype + ']';
+        if (evt.plugin_name) line += ' ' + evt.plugin_name;
+        if (evt.state) line += ' → ' + evt.state;
+        if (evt.detail) line += ' — ' + evt.detail;
+        if (evt.line) line += ' ' + evt.line;
+        if (evt.title) line += ' ' + evt.title;
+        if (evt.error) line += ' ERROR: ' + evt.error;
+        if (evt.finding_count) line += ' (findings: ' + evt.finding_count + ')';
+
+        let color = 'text-gray-400';
+        if (etype.includes('failed') || evt.error) color = 'text-red-400';
+        else if (etype.includes('completed')) color = 'text-green-400';
+        else if (etype.includes('started')) color = 'text-cyan-400';
+        else if (etype.includes('finding')) color = 'text-yellow-400';
+
+        appendLog(line, color);
+
+        // Terminal events
+        if (etype === 'scan.completed') {
+          document.getElementById('scan-status-dot').classList.remove('bg-yellow-400', 'animate-pulse');
+          document.getElementById('scan-status-dot').classList.add('bg-green-500');
+          document.getElementById('scan-status-text').textContent = 'Completed';
+          evtSource.close();
+        } else if (etype === 'scan.failed') {
+          document.getElementById('scan-status-dot').classList.remove('bg-yellow-400', 'animate-pulse');
+          document.getElementById('scan-status-dot').classList.add('bg-red-500');
+          document.getElementById('scan-status-text').textContent = 'Failed';
+          evtSource.close();
+        }
+      } catch (_) {
+        appendLog(event.data);
+      }
+    };
+
+    evtSource.onerror = () => {
+      appendLog('SSE connection closed.', 'text-gray-600');
+      evtSource.close();
+    };
+
+  } catch (err) {
+    appendLog('Network error: ' + err.message, 'text-red-400');
+    btn.disabled = false;
+    btn.textContent = 'Start Scan';
+    btn.classList.remove('opacity-50', 'cursor-not-allowed');
+  }
+});
+
+function appendLog(text, colorClass) {
+  const log = document.getElementById('scan-log');
+  const div = document.createElement('div');
+  div.textContent = text;
+  if (colorClass) div.className = colorClass;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+</script>
+{% endblock %}

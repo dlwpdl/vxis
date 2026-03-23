@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} — VXIS{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex items-center gap-2 text-sm">
+  <a href="/clients" class="text-gray-500 hover:text-gray-300 transition-colors">Clients</a>
+  <span class="text-gray-700">/</span>
+  {% if editing and client %}
+  <a href="/client/{{ client.id }}" class="text-gray-500 hover:text-gray-300 transition-colors">{{ client.name }}</a>
+  <span class="text-gray-700">/</span>
+  <span class="text-gray-100 font-medium">Edit</span>
+  {% else %}
+  <span class="text-gray-100 font-medium">New Client</span>
+  {% endif %}
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+
+  <!-- Page heading -->
+  <div>
+    <h1 class="text-xl font-semibold text-white">{{ page_title }}</h1>
+    <p class="text-sm text-gray-500 mt-0.5">
+      {% if editing %}Update client details below.{% else %}Fill in the details to register a new client.{% endif %}
+    </p>
+  </div>
+
+  <!-- Form card -->
+  <div class="bg-surface rounded-lg border border-surface-border p-6">
+    <form method="post"
+          action="{% if editing and client %}/api/client/{{ client.id }}{% else %}/api/client{% endif %}"
+          class="space-y-5">
+
+      <!-- Name -->
+      <div>
+        <label for="name" class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">
+          Client Name <span class="text-red-400">*</span>
+        </label>
+        <input type="text" id="name" name="name" required
+               value="{{ client.name if client else '' }}"
+               placeholder="e.g. ACME Corporation"
+               class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-white
+                      placeholder-gray-600 focus:outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600
+                      transition-colors" />
+      </div>
+
+      <!-- Domains -->
+      <div>
+        <label for="domains" class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">
+          Domains <span class="text-gray-600">(comma-separated)</span>
+        </label>
+        <input type="text" id="domains" name="domains"
+               value="{{ client.domains | join(', ') if client and client.domains else '' }}"
+               placeholder="e.g. example.com, api.example.com"
+               class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-white font-mono
+                      placeholder-gray-600 focus:outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600
+                      transition-colors" />
+        <p class="text-xs text-gray-600 mt-1">Authorised scan targets for this client.</p>
+      </div>
+
+      <!-- Industry -->
+      <div>
+        <label for="industry" class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">
+          Industry
+        </label>
+        <input type="text" id="industry" name="industry"
+               value="{{ client.industry if client else '' }}"
+               placeholder="e.g. Financial, Healthcare, Technology"
+               class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-white
+                      placeholder-gray-600 focus:outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600
+                      transition-colors" />
+      </div>
+
+      <!-- Contact row -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label for="contact_name" class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">
+            Contact Name
+          </label>
+          <input type="text" id="contact_name" name="contact_name"
+                 value="{{ client.contact_name if client else '' }}"
+                 placeholder="e.g. Jane Doe"
+                 class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-white
+                        placeholder-gray-600 focus:outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600
+                        transition-colors" />
+        </div>
+        <div>
+          <label for="contact_email" class="block text-xs font-medium text-gray-400 uppercase tracking-wider mb-1.5">
+            Contact Email
+          </label>
+          <input type="email" id="contact_email" name="contact_email"
+                 value="{{ client.contact_email if client else '' }}"
+                 placeholder="e.g. jane@example.com"
+                 class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-white
+                        placeholder-gray-600 focus:outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600
+                        transition-colors" />
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center justify-between pt-4 border-t border-surface-border">
+        <a href="{% if editing and client %}/client/{{ client.id }}{% else %}/clients{% endif %}"
+           class="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium
+                  text-gray-400 border border-gray-700 bg-gray-800
+                  hover:bg-gray-700 hover:text-gray-200 transition-colors">
+          Cancel
+        </a>
+
+        <div class="flex items-center gap-3">
+          {% if editing and client %}
+          <!-- Delete button (separate form to avoid mixing with update) -->
+          <button type="button"
+                  onclick="if(confirm('Delete client {{ client.name }}? This cannot be undone.')) document.getElementById('delete-form').submit();"
+                  class="inline-flex items-center px-4 py-2 rounded-md text-sm font-medium
+                         text-red-400 border border-red-800/50 bg-red-900/20
+                         hover:bg-red-900/40 transition-colors">
+            Delete
+          </button>
+          {% endif %}
+
+          <button type="submit"
+                  class="inline-flex items-center px-5 py-2 rounded-md text-sm font-medium
+                         bg-cyan-900/40 text-cyan-400 border border-cyan-800/50
+                         hover:bg-cyan-900/70 transition-colors">
+            {% if editing %}Update Client{% else %}Create Client{% endif %}
+          </button>
+        </div>
+      </div>
+
+    </form>
+
+    {% if editing and client %}
+    <!-- Hidden delete form -->
+    <form id="delete-form" method="post" action="/api/client/{{ client.id }}/delete" class="hidden"></form>
+    {% endif %}
+  </div>
+
+</div>
+{% endblock %}
