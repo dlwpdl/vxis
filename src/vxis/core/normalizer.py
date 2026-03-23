@@ -1,7 +1,11 @@
 """Post-processing normalizer for VXIS security automation platform.
 
-Converts raw tool output (nuclei, nmap, testssl, checkdmarc, trufflehog, wafw00f)
-into canonical Finding objects and provides deduplication utilities.
+Converts raw tool output from all supported plugins into canonical Finding
+objects and provides deduplication utilities.  Supported tools: nuclei, nmap,
+testssl, checkdmarc, trufflehog, wafw00f, prowler, gitleaks, trivy, dnstwist,
+crtsh, sslyze, bloodhound, certipy, netexec, linpeas, semgrep, bandit,
+checkov, kube-bench, poutine, subfinder, httpx, shodan, trivy-k8s, swaks,
+actionlint, s3scanner, confused, winpeas.
 """
 
 from __future__ import annotations
@@ -2062,6 +2066,725 @@ class FindingFactory:
                 raw_data=item,
             )
             findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # subfinder
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_subfinder(parsed_data: dict[str, Any], scan_id: str, domain: str = "") -> list[Finding]:
+        """Convert subfinder subdomain enumeration results to informational findings.
+
+        Each discovered subdomain is an informational asset-discovery finding.
+
+        Args:
+            parsed_data: Dict with key "subdomains" (list of hostname strings)
+                         as produced by SubfinderPlugin.
+            scan_id: Identifier of the parent scan.
+            domain: The parent domain that was queried.
+
+        Returns:
+            List of informational Finding objects for each discovered subdomain.
+        """
+        subdomains: list[str] = parsed_data.get("subdomains", [])
+        if not isinstance(subdomains, list):
+            subdomains = []
+
+        findings: list[Finding] = []
+
+        for subdomain in subdomains:
+            if not subdomain:
+                continue
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=f"Subdomain Discovered: {subdomain}",
+                description=(
+                    f"The subdomain '{subdomain}' was discovered via passive/active enumeration "
+                    f"for domain '{domain or subdomain}'. This is an asset inventory finding."
+                ),
+                severity=Severity.informational,
+                target=domain or subdomain,
+                affected_component=subdomain,
+                finding_type="discovery",
+                source_plugin="subfinder",
+                evidence=[Evidence(
+                    evidence_type="recon",
+                    title="Subdomain Enumeration",
+                    content=f"Subdomain: {subdomain}",
+                    content_type="text/plain",
+                )],
+                raw_data={"host": subdomain},
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # httpx
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_httpx(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert httpx live host probe results to informational findings.
+
+        Each reachable host/URL is an informational asset-discovery finding.
+
+        Args:
+            parsed_data: Dict with key "live_hosts" (list of host entry dicts
+                         with url, status_code, title, tech, cdn, etc.)
+                         as produced by HttpxPlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of informational Finding objects for each live host.
+        """
+        live_hosts: list[dict[str, Any]] = parsed_data.get("live_hosts", [])
+        if not isinstance(live_hosts, list):
+            live_hosts = []
+
+        findings: list[Finding] = []
+
+        for host_entry in live_hosts:
+            url = host_entry.get("url", "")
+            if not url:
+                continue
+
+            status_code = host_entry.get("status_code", "")
+            title = host_entry.get("title", "")
+            tech: list[str] = host_entry.get("tech", []) or []
+            cdn = host_entry.get("cdn", False)
+
+            finding_title = f"Live Host: {url}"
+            description_parts = [f"HTTP service detected at {url}."]
+            if status_code:
+                description_parts.append(f"Status: {status_code}.")
+            if title:
+                description_parts.append(f"Page title: {title}.")
+            if tech:
+                description_parts.append(f"Technologies: {', '.join(tech)}.")
+            if cdn:
+                description_parts.append("Behind CDN.")
+
+            evidence_content = f"URL: {url}\nStatus: {status_code}\nTitle: {title}"
+            if tech:
+                evidence_content += f"\nTechnologies: {', '.join(tech)}"
+            if cdn:
+                evidence_content += "\nCDN: Yes"
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=finding_title,
+                description=" ".join(description_parts),
+                severity=Severity.informational,
+                target=url,
+                affected_component=title or url,
+                finding_type="discovery",
+                source_plugin="httpx",
+                evidence=[Evidence(
+                    evidence_type="recon",
+                    title="HTTP Probe Result",
+                    content=evidence_content,
+                    content_type="text/plain",
+                )],
+                raw_data=host_entry,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # shodan
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_shodan(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert Shodan exposed service results to informational findings.
+
+        Each internet-exposed service is an informational finding.
+
+        Args:
+            parsed_data: Dict with key "shodan_results" (list of service dicts
+                         with ip, port, org, os, product) as produced by
+                         ShodanPlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of informational Finding objects for each exposed service.
+        """
+        services: list[dict[str, Any]] = parsed_data.get("shodan_results", [])
+        if not isinstance(services, list):
+            services = []
+
+        findings: list[Finding] = []
+
+        for service in services:
+            ip = service.get("ip", "")
+            port = service.get("port", 0)
+            org = service.get("org", "")
+            os_name = service.get("os", "")
+            product = service.get("product", "")
+
+            if not ip:
+                continue
+
+            port_int: int | None = None
+            if port:
+                try:
+                    port_int = int(port)
+                except (ValueError, TypeError):
+                    port_int = None
+
+            title = f"Exposed Service: {ip}:{port}"
+            if product:
+                title += f" ({product})"
+
+            description_parts = [f"Internet-exposed service detected on {ip}:{port}."]
+            if product:
+                description_parts.append(f"Product: {product}.")
+            if os_name:
+                description_parts.append(f"OS: {os_name}.")
+            if org:
+                description_parts.append(f"Organization: {org}.")
+
+            evidence_content = (
+                f"IP: {ip}\n"
+                f"Port: {port}\n"
+                f"Product: {product}\n"
+                f"OS: {os_name}\n"
+                f"Organization: {org}"
+            )
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=" ".join(description_parts),
+                severity=Severity.informational,
+                target=ip,
+                affected_component=product or f"{ip}:{port}",
+                port=port_int,
+                protocol="tcp",
+                finding_type="discovery",
+                source_plugin="shodan",
+                evidence=[Evidence(
+                    evidence_type="osint",
+                    title="Shodan Service",
+                    content=evidence_content,
+                    content_type="text/plain",
+                )],
+                raw_data=service,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # trivy-k8s
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_trivy_k8s(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert Trivy K8s cluster vulnerability findings to Finding objects.
+
+        Severity is derived directly from each vulnerability's Severity field.
+
+        Args:
+            parsed_data: Dict with key "k8s_vulns" (list of dicts with
+                         cluster_name, vulnerability_id, severity, title,
+                         misconf_summary) as produced by TrivyK8sPlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for Kubernetes cluster vulnerabilities.
+        """
+        _trivy_k8s_severity_map: dict[str, Severity] = {
+            "CRITICAL": Severity.critical,
+            "HIGH": Severity.high,
+            "MEDIUM": Severity.medium,
+            "LOW": Severity.low,
+            "UNKNOWN": Severity.informational,
+        }
+
+        raw_findings: list[dict[str, Any]] = parsed_data.get("k8s_vulns", [])
+        if not isinstance(raw_findings, list):
+            raw_findings = []
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            vuln_id = item.get("vulnerability_id", "")
+            severity_str = item.get("severity", "UNKNOWN")
+            title_str = item.get("title", "")
+            cluster_name = item.get("cluster_name", "")
+            misconf_summary = item.get("misconf_summary", {})
+
+            severity = _trivy_k8s_severity_map.get(severity_str.upper(), Severity.informational)
+
+            cve_ids: list[str] = []
+            if re.match(r"CVE-\d{4}-\d+", vuln_id, re.IGNORECASE):
+                cve_ids.append(vuln_id.upper())
+
+            title = title_str or f"K8s Vulnerability: {vuln_id}"
+            description = title_str or f"Kubernetes cluster vulnerability detected: {vuln_id}"
+            if cluster_name:
+                description += f"\nCluster: {cluster_name}"
+
+            evidence_content = (
+                f"VulnerabilityID: {vuln_id}\n"
+                f"Severity: {severity_str}\n"
+                f"Cluster: {cluster_name}"
+            )
+            if misconf_summary:
+                evidence_content += f"\nMisconfiguration Summary: {misconf_summary}"
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target=cluster_name or "kubernetes",
+                affected_component=vuln_id,
+                finding_type="vulnerability",
+                cve_ids=cve_ids,
+                source_plugin="trivy-k8s",
+                source_tool_ref=vuln_id,
+                evidence=[Evidence(
+                    evidence_type="k8s_scan",
+                    title=f"Trivy K8s: {vuln_id}",
+                    content=evidence_content,
+                    content_type="text/plain",
+                )],
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # swaks
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_swaks(parsed_data: dict[str, Any], scan_id: str, target: str = "") -> list[Finding]:
+        """Convert Swaks SMTP open relay test results to Finding objects.
+
+        Generates a high-severity finding when an open relay is detected.
+        Generates an informational finding when no relay is detected.
+
+        Args:
+            parsed_data: Dict with key "email_relay_results" (dict with
+                         open_relay, connection_failed, relay_denied)
+                         as produced by SwaksPlugin.
+            scan_id: Identifier of the parent scan.
+            target: The target domain or mail server being tested.
+
+        Returns:
+            List of Finding objects for SMTP relay test results.
+        """
+        relay_results: dict[str, Any] = parsed_data.get("email_relay_results", {})
+        if not isinstance(relay_results, dict):
+            return []
+
+        findings: list[Finding] = []
+        open_relay = relay_results.get("open_relay", False)
+
+        if open_relay:
+            findings.append(Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title="SMTP Open Relay Detected",
+                description=(
+                    f"The mail server for '{target}' accepted a RCPT TO for a domain it does "
+                    "not own (250 response), indicating a potential open relay. Open relays "
+                    "can be abused to send spam or phishing emails on behalf of the target."
+                ),
+                severity=Severity.high,
+                target=target,
+                affected_component="SMTP",
+                port=25,
+                protocol="tcp",
+                finding_type="misconfiguration",
+                source_plugin="swaks",
+                evidence=[Evidence(
+                    evidence_type="email_test",
+                    title="SMTP Open Relay Test",
+                    content=f"Open Relay: True\nTarget: {target}",
+                    content_type="text/plain",
+                )],
+                raw_data=relay_results,
+            ))
+        else:
+            connection_failed = relay_results.get("connection_failed", False)
+            reason = relay_results.get("reason", "")
+            if not connection_failed:
+                findings.append(Finding(
+                    id=_make_id(),
+                    scan_id=scan_id,
+                    title="SMTP Relay Test: Not Vulnerable",
+                    description=(
+                        f"The mail server for '{target}' does not appear to be an open relay. "
+                        f"Relay was denied or not accepted."
+                    ),
+                    severity=Severity.informational,
+                    target=target,
+                    affected_component="SMTP",
+                    port=25,
+                    protocol="tcp",
+                    finding_type="exposure",
+                    source_plugin="swaks",
+                    evidence=[Evidence(
+                        evidence_type="email_test",
+                        title="SMTP Relay Test",
+                        content=(
+                            f"Open Relay: False\n"
+                            f"Target: {target}\n"
+                            f"Reason: {reason}"
+                        ),
+                        content_type="text/plain",
+                    )],
+                    raw_data=relay_results,
+                ))
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # actionlint
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_actionlint(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert actionlint GitHub Actions lint findings to Finding objects.
+
+        Severity mapping:
+        - Security-relevant kinds (expression, shellcheck, credentials,
+          permissions, secret, injection) -> medium
+        - All other kinds -> low
+
+        Args:
+            parsed_data: Dict with key "gha_lint" (list of dicts with filepath,
+                         line, column, message, kind, severity) as produced by
+                         ActionlintPlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for each GitHub Actions lint issue.
+        """
+        _actionlint_severity_map: dict[str, Severity] = {
+            "critical": Severity.critical,
+            "high": Severity.high,
+            "medium": Severity.medium,
+            "low": Severity.low,
+        }
+
+        raw_findings: list[dict[str, Any]] = parsed_data.get("gha_lint", [])
+        if not isinstance(raw_findings, list):
+            raw_findings = []
+
+        findings: list[Finding] = []
+
+        for item in raw_findings:
+            severity_str = str(item.get("severity", "low")).lower()
+            severity = _actionlint_severity_map.get(severity_str, Severity.low)
+
+            filepath = item.get("filepath", "")
+            line = item.get("line", 0)
+            column = item.get("column", 0)
+            message = item.get("message", "")
+            kind = item.get("kind", "")
+
+            affected_component = f"{filepath}:{line}" if filepath else ""
+            title = f"GitHub Actions Lint: {kind}" if kind else "GitHub Actions Lint Issue"
+            description = message or f"actionlint issue in {filepath}:{line}"
+
+            evidence_list = [Evidence(
+                evidence_type="cicd_lint",
+                title=f"actionlint: {kind}",
+                content=(
+                    f"File: {filepath}\n"
+                    f"Line: {line}\n"
+                    f"Column: {column}\n"
+                    f"Kind: {kind}\n"
+                    f"Message: {message}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target=filepath,
+                affected_component=affected_component,
+                finding_type="misconfiguration",
+                source_plugin="actionlint",
+                source_tool_ref=kind,
+                evidence=evidence_list,
+                raw_data=item,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # s3scanner
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_s3scanner(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert S3Scanner public bucket findings to Finding objects.
+
+        Severity mapping:
+        - Public write access -> critical
+        - Public read access -> high
+
+        Args:
+            parsed_data: Dict with key "public_buckets" (list of dicts with
+                         bucket, exists, public_read, public_write) as produced
+                         by S3ScannerPlugin.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for each publicly accessible S3 bucket.
+        """
+        public_buckets: list[dict[str, Any]] = parsed_data.get("public_buckets", [])
+        if not isinstance(public_buckets, list):
+            public_buckets = []
+
+        findings: list[Finding] = []
+
+        for bucket in public_buckets:
+            bucket_name = bucket.get("bucket", "")
+            public_read = bucket.get("public_read", False)
+            public_write = bucket.get("public_write", False)
+
+            if not bucket_name:
+                continue
+
+            if public_write:
+                severity = Severity.critical
+                title = f"S3 Bucket Publicly Writable: {bucket_name}"
+                description = (
+                    f"The S3 bucket '{bucket_name}' is publicly writable. "
+                    "Anyone on the internet can upload, modify, or delete objects in this bucket. "
+                    "This can lead to data tampering, malware hosting, or full data loss."
+                )
+            else:
+                severity = Severity.high
+                title = f"S3 Bucket Publicly Readable: {bucket_name}"
+                description = (
+                    f"The S3 bucket '{bucket_name}' is publicly readable. "
+                    "Anyone on the internet can list and download objects from this bucket, "
+                    "potentially exposing sensitive data."
+                )
+
+            permissions_str = []
+            if public_read:
+                permissions_str.append("READ")
+            if public_write:
+                permissions_str.append("WRITE")
+
+            evidence_list = [Evidence(
+                evidence_type="cloud_scan",
+                title=f"S3 Bucket: {bucket_name}",
+                content=(
+                    f"Bucket: {bucket_name}\n"
+                    f"Public Read: {public_read}\n"
+                    f"Public Write: {public_write}\n"
+                    f"Permissions: {', '.join(permissions_str)}"
+                ),
+                content_type="text/plain",
+            )]
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target=bucket_name,
+                affected_component="S3 Bucket",
+                finding_type="misconfiguration",
+                source_plugin="s3scanner",
+                source_tool_ref=bucket_name,
+                evidence=evidence_list,
+                raw_data=bucket,
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # confused
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_confused(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert confused dependency confusion findings to Finding objects.
+
+        All dependency confusion findings are treated as high severity.
+
+        Args:
+            parsed_data: Dict with key "dependency_confusion" (dict with
+                         vulnerable_packages list and total_found count)
+                         as produced by ConfusedPlugin. Also supports a
+                         "findings" key with richer dicts.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for each dependency confusion vulnerability.
+        """
+        findings: list[Finding] = []
+
+        # Support richer findings list from PluginOutput.findings
+        raw_findings: list[dict[str, Any]] = parsed_data.get("findings", [])
+        if raw_findings:
+            for item in raw_findings:
+                package_name = item.get("package_name", "")
+                title = item.get("title", f"Dependency Confusion: {package_name}")
+                description = item.get("description", "")
+                registry_info = item.get("registry_info", "")
+
+                evidence_list = [Evidence(
+                    evidence_type="supply_chain",
+                    title=f"Dependency Confusion: {package_name}",
+                    content=(
+                        f"Package: {package_name}\n"
+                        f"Registry: {registry_info}\n"
+                        f"Raw: {item.get('raw_line', '')}"
+                    ),
+                    content_type="text/plain",
+                )]
+
+                finding = Finding(
+                    id=_make_id(),
+                    scan_id=scan_id,
+                    title=title,
+                    description=description,
+                    severity=Severity.high,
+                    target=package_name,
+                    affected_component=package_name,
+                    finding_type="vulnerability",
+                    source_plugin="confused",
+                    source_tool_ref=package_name,
+                    evidence=evidence_list,
+                    raw_data=item,
+                )
+                findings.append(finding)
+            return findings
+
+        # Fallback: use dependency_confusion.vulnerable_packages list
+        confusion_data = parsed_data.get("dependency_confusion", {})
+        if not isinstance(confusion_data, dict):
+            return findings
+
+        packages: list[str] = confusion_data.get("vulnerable_packages", [])
+        for package_name in packages:
+            if not package_name:
+                continue
+
+            finding = Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=f"Dependency Confusion: {package_name}",
+                description=(
+                    f"The internal package '{package_name}' was found on a public registry. "
+                    "An attacker could upload a malicious package with this name and a higher "
+                    "version number, causing build systems to pull the malicious version."
+                ),
+                severity=Severity.high,
+                target=package_name,
+                affected_component=package_name,
+                finding_type="vulnerability",
+                source_plugin="confused",
+                source_tool_ref=package_name,
+                evidence=[Evidence(
+                    evidence_type="supply_chain",
+                    title=f"Dependency Confusion: {package_name}",
+                    content=f"Package: {package_name}",
+                    content_type="text/plain",
+                )],
+            )
+            findings.append(finding)
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # winpeas
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def from_winpeas(parsed_data: dict[str, Any], scan_id: str) -> list[Finding]:
+        """Convert WinPEAS privilege escalation results into Finding objects.
+
+        Severity mapping (from winpeas confidence percentages):
+        - 95% -> critical
+        - 70% -> high
+        - 50% -> medium
+
+        Args:
+            parsed_data: Dict with a "findings" key (list of dicts from
+                         WinpeasPlugin PluginOutput.findings) containing
+                         severity, title, confidence_pct, raw_line.
+            scan_id: Identifier of the parent scan.
+
+        Returns:
+            List of Finding objects for Windows privilege escalation vectors.
+        """
+        _PCT_TO_SEVERITY: dict[int, Severity] = {
+            95: Severity.critical,
+            70: Severity.high,
+            50: Severity.medium,
+        }
+        _NAME_TO_SEVERITY: dict[str, Severity] = {
+            "critical": Severity.critical,
+            "high": Severity.high,
+            "medium": Severity.medium,
+            "low": Severity.low,
+        }
+
+        findings: list[Finding] = []
+
+        raw_list: list[dict[str, Any]] = parsed_data.get("findings", [])
+        if not isinstance(raw_list, list):
+            raw_list = []
+
+        for item in raw_list:
+            title = item.get("title", "Windows Privilege Escalation Vector")
+            description = item.get("description", title)
+            pct: int | None = item.get("confidence_pct")
+            severity_str: str = item.get("severity", "medium")
+
+            if pct is not None and pct in _PCT_TO_SEVERITY:
+                severity = _PCT_TO_SEVERITY[pct]
+            else:
+                severity = _NAME_TO_SEVERITY.get(severity_str.lower(), Severity.medium)
+
+            findings.append(Finding(
+                id=_make_id(),
+                scan_id=scan_id,
+                title=title,
+                description=description,
+                severity=severity,
+                target="localhost",
+                affected_component="Windows OS",
+                finding_type="vulnerability",
+                source_plugin="winpeas",
+                evidence=[Evidence(
+                    evidence_type="privesc_scan",
+                    title="WinPEAS Finding",
+                    content=item.get("raw_line", title),
+                    content_type="text/plain",
+                )],
+                raw_data=item,
+            ))
 
         return findings
 
