@@ -10,77 +10,35 @@ Phase 1+ will add NVD API lookups and live MITRE data.
 
 from __future__ import annotations
 
+import json
+from importlib import resources
+
 from vxis.models.finding import CVSSVector, Finding, MitreAttack, Severity
 
 
 # ---------------------------------------------------------------------------
-# Static mapping constants
+# Static mapping constants – loaded from external JSON data files
 # ---------------------------------------------------------------------------
 
+def _load_json(filename: str) -> dict:
+    """Load a JSON file from the vxis.data package."""
+    data_files = resources.files("vxis.data")
+    return json.loads(data_files.joinpath(filename).read_text(encoding="utf-8"))
+
+
+def _load_mitre_mapping() -> dict[str, tuple[str, str, str, str, str | None]]:
+    """Load MITRE ATT&CK mappings and convert JSON lists back to tuples."""
+    raw = _load_json("mitre_attack.json")
+    return {k: tuple(v) for k, v in raw.items()}  # type: ignore[misc]
+
+
 #: Maps finding_type to MITRE ATT&CK technique metadata.
-#: Format: finding_type → (tactic_id, tactic_name, technique_id, technique_name, subtechnique_id)
-MITRE_MAPPING: dict[str, tuple[str, str, str, str, str | None]] = {
-    "vulnerability": ("TA0001", "Initial Access", "T1190", "Exploit Public-Facing Application", None),
-    "exposure": ("TA0009", "Collection", "T1530", "Data from Cloud Storage", None),
-    "misconfiguration": ("TA0003", "Persistence", "T1574", "Hijack Execution Flow", None),
-    "secret": ("TA0006", "Credential Access", "T1552", "Unsecured Credentials", "T1552.001"),
-    "sqli": ("TA0001", "Initial Access", "T1190", "Exploit Public-Facing Application", None),
-    "xss": ("TA0001", "Initial Access", "T1190", "Exploit Public-Facing Application", None),
-    "rce": ("TA0002", "Execution", "T1203", "Exploitation for Client Execution", None),
-    "lfi": ("TA0007", "Discovery", "T1083", "File and Directory Discovery", None),
-    "ssrf": ("TA0009", "Collection", "T1090", "Proxy", None),
-    "injection": ("TA0001", "Initial Access", "T1190", "Exploit Public-Facing Application", None),
-    "takeover": ("TA0001", "Initial Access", "T1190", "Exploit Public-Facing Application", None),
-}
+#: Format: finding_type -> (tactic_id, tactic_name, technique_id, technique_name, subtechnique_id)
+MITRE_MAPPING: dict[str, tuple[str, str, str, str, str | None]] = _load_mitre_mapping()
 
 #: Maps finding_type to compliance control references.
-#: Format: finding_type → {"iso27001": [...], "soc2": [...]}
-COMPLIANCE_MAPPING: dict[str, dict[str, list[str]]] = {
-    "vulnerability": {
-        "iso27001": ["A.12.6.1", "A.14.2.2"],
-        "soc2": ["CC7.1", "CC7.2"],
-    },
-    "exposure": {
-        "iso27001": ["A.8.2.1", "A.13.1.1"],
-        "soc2": ["CC6.1", "CC6.6"],
-    },
-    "misconfiguration": {
-        "iso27001": ["A.12.1.2", "A.14.1.2"],
-        "soc2": ["CC6.1", "CC6.3"],
-    },
-    "secret": {
-        "iso27001": ["A.9.2.4", "A.10.1.1"],
-        "soc2": ["CC6.1", "CC6.7"],
-    },
-    "sqli": {
-        "iso27001": ["A.14.2.5", "A.12.6.1"],
-        "soc2": ["CC7.1", "CC8.1"],
-    },
-    "xss": {
-        "iso27001": ["A.14.2.5", "A.12.6.1"],
-        "soc2": ["CC7.1", "CC8.1"],
-    },
-    "rce": {
-        "iso27001": ["A.12.6.1", "A.14.2.2"],
-        "soc2": ["CC7.1", "CC7.2"],
-    },
-    "lfi": {
-        "iso27001": ["A.12.6.1", "A.14.2.5"],
-        "soc2": ["CC7.1", "CC6.1"],
-    },
-    "ssrf": {
-        "iso27001": ["A.13.1.3", "A.14.2.5"],
-        "soc2": ["CC6.6", "CC7.1"],
-    },
-    "injection": {
-        "iso27001": ["A.14.2.5", "A.12.6.1"],
-        "soc2": ["CC7.1", "CC8.1"],
-    },
-    "takeover": {
-        "iso27001": ["A.12.6.1", "A.14.2.2"],
-        "soc2": ["CC7.1", "CC7.2"],
-    },
-}
+#: Format: finding_type -> {"iso27001": [...], "soc2": [...]}
+COMPLIANCE_MAPPING: dict[str, dict[str, list[str]]] = _load_json("compliance_controls.json")
 
 #: Maps finding_type to generic remediation guidance templates.
 REMEDIATION_TEMPLATES: dict[str, str] = {

@@ -370,15 +370,7 @@ def report(
 
         from vxis.core.db import create_engine, get_session
         from vxis.models.db_models import FindingRecord, ScanRecord
-        from vxis.models.finding import (
-            CVSSVector,
-            Evidence,
-            Finding,
-            FindingStatus,
-            MitreAttack,
-            Reference,
-            Severity,
-        )
+        from vxis.models.finding import Finding
         from vxis.report.generator import ReportData, ReportGenerator
 
         config = _get_config()

@@ -274,7 +274,13 @@ class BatchScanner:
                             "on_complete callback raised for '%s'", target.name
                         )
 
-        await asyncio.gather(*[_scan_one(i, t) for i, t in enumerate(targets)])
+        # return_exceptions=True ensures that an unexpected exception escaping
+        # _scan_one (e.g. from the semaphore or logging) never cancels sibling
+        # tasks — each target is isolated.
+        await asyncio.gather(
+            *[_scan_one(i, t) for i, t in enumerate(targets)],
+            return_exceptions=True,
+        )
 
         # All slots must be populated — cast away None (guaranteed by gather)
         return [r for r in results if r is not None]  # type: ignore[misc]

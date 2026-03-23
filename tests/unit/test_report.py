@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 import pytest
 
@@ -310,18 +311,56 @@ class TestReportGeneratorHtmlFile:
 
 
 # ---------------------------------------------------------------------------
-# ReportGenerator — generate_pdf (stubbed)
+# ReportGenerator — generate_pdf (via wkhtmltopdf)
 # ---------------------------------------------------------------------------
 
 
 class TestReportGeneratorPdf:
-    def test_generate_pdf_raises_not_implemented(self, tmp_path: Path):
-        with pytest.raises(NotImplementedError):
-            make_generator().generate_pdf(make_report_data(), tmp_path / "report.pdf")
+    def test_generate_pdf_raises_runtime_error_when_wkhtmltopdf_missing(self, tmp_path: Path):
+        with patch("vxis.report.generator.shutil.which", return_value=None):
+            with pytest.raises(RuntimeError, match="wkhtmltopdf"):
+                make_generator().generate_pdf(make_report_data(), tmp_path / "report.pdf")
 
-    def test_not_implemented_message_mentions_weasyprint(self, tmp_path: Path):
-        with pytest.raises(NotImplementedError, match="WeasyPrint"):
-            make_generator().generate_pdf(make_report_data(), tmp_path / "report.pdf")
+    def test_generate_pdf_calls_wkhtmltopdf(self, tmp_path: Path):
+        output = tmp_path / "report.pdf"
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+        with (
+            patch("vxis.report.generator.shutil.which", return_value="/usr/bin/wkhtmltopdf"),
+            patch("vxis.report.generator.subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            make_generator().generate_pdf(make_report_data(), output)
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            assert cmd[0] == "/usr/bin/wkhtmltopdf"
+            assert str(output) in cmd
+
+    def test_generate_pdf_raises_on_nonzero_exit(self, tmp_path: Path):
+        output = tmp_path / "report.pdf"
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "some error"
+        with (
+            patch("vxis.report.generator.shutil.which", return_value="/usr/bin/wkhtmltopdf"),
+            patch("vxis.report.generator.subprocess.run", return_value=mock_result),
+        ):
+            with pytest.raises(RuntimeError, match="exited with code 1"):
+                make_generator().generate_pdf(make_report_data(), output)
+
+    def test_generate_pdf_cleans_up_intermediate_html(self, tmp_path: Path):
+        output = tmp_path / "report.pdf"
+        html_path = output.with_suffix(".html")
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+        with (
+            patch("vxis.report.generator.shutil.which", return_value="/usr/bin/wkhtmltopdf"),
+            patch("vxis.report.generator.subprocess.run", return_value=mock_result),
+        ):
+            make_generator().generate_pdf(make_report_data(), output)
+            # Intermediate HTML should be cleaned up
+            assert not html_path.exists()
 
 
 # ---------------------------------------------------------------------------

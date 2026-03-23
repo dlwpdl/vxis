@@ -48,6 +48,12 @@ vxis = "vxis.cli.main:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/vxis"]
 
+[tool.hatch.build]
+include = [
+    "src/vxis/**/*.py",
+    "src/vxis/**/*.json",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

@@ -56,23 +56,20 @@ class TokenBucketRateLimiter:
         if self.rate <= 0:
             return
 
-        async with self._lock:
-            self._refill()
+        while True:
+            async with self._lock:
+                self._refill()
 
-            if self._tokens >= tokens:
-                self._tokens -= tokens
-                return
+                if self._tokens >= tokens:
+                    self._tokens -= tokens
+                    return
 
-            # Calculate wait time needed for enough tokens to accumulate
-            deficit = tokens - self._tokens
-            wait_time = deficit / self.rate
+                # Calculate wait time needed for enough tokens to accumulate
+                deficit = tokens - self._tokens
+                wait_time = deficit / self.rate
 
-        # Sleep outside the lock to allow other coroutines to proceed
-        await asyncio.sleep(wait_time)
-
-        async with self._lock:
-            self._refill()
-            self._tokens -= tokens
+            # Sleep outside the lock to allow other coroutines to proceed
+            await asyncio.sleep(wait_time)
 
 
 class GlobalRateLimiter:

@@ -29,6 +29,7 @@ from vxis.core.events import (
     ToolOutputEvent,
 )
 from vxis.core.enricher import FindingEnricher
+from vxis.core.rate_limiter import GlobalRateLimiter
 from vxis.core.fp_pipeline import FPPipeline
 from vxis.core.logger import AuditLogger
 from vxis.core.normalizer import FindingDeduplicator, FindingFactory
@@ -57,6 +58,8 @@ class ScanResult:
         profile:       Scan profile name used (e.g. 'standard').
         findings:      Deduplicated, enriched Finding objects.
         tool_runs:     Summary dicts for each plugin execution.
+        errors:        List of dicts with 'plugin', 'state', and 'error' keys
+                       for every plugin that failed, timed out, or was skipped.
         started_at:    UTC wall-clock start time.
         finished_at:   UTC wall-clock end time.
     """
@@ -66,6 +69,7 @@ class ScanResult:
     profile: str
     findings: list[Finding] = field(default_factory=list)
     tool_runs: list[dict[str, Any]] = field(default_factory=list)
+    errors: list[dict[str, str]] = field(default_factory=list)
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     finished_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -260,6 +264,25 @@ class ScanOrchestrator:
                 }
             )
 
+        # --- 7b. Collect errors from failed / skipped / timed-out nodes ---
+        plugin_errors: list[dict[str, str]] = []
+        for node_name, node in completed_nodes.items():
+            if node.state in (TaskState.FAILED, TaskState.TIMED_OUT, TaskState.SKIPPED):
+                plugin_errors.append(
+                    {
+                        "plugin": node_name,
+                        "state": node.state.value,
+                        "error": node.error or "unknown error",
+                    }
+                )
+                logger.warning(
+                    "Scan %s: plugin '%s' ended in state '%s': %s",
+                    scan_id,
+                    node_name,
+                    node.state.value,
+                    node.error or "unknown error",
+                )
+
         # --- 8. Normalize findings from all completed nodes ---
         all_raw_findings: list[Finding] = []
         for node_name, node in completed_nodes.items():
@@ -343,6 +366,7 @@ class ScanOrchestrator:
             profile=profile,
             findings=enriched,
             tool_runs=tool_runs,
+            errors=plugin_errors,
             started_at=started_at,
             finished_at=finished_at,
         )
