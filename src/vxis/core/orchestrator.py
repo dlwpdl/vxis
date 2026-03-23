@@ -19,6 +19,15 @@ from vxis.config.schema import VXISConfig
 from vxis.core.context import DAGContext, PluginOutput
 from vxis.core.db import create_engine, get_session, init_db
 from vxis.core.engine import DAGExecutor, TaskState
+from vxis.core.events import (
+    EventType,
+    NodeEvent,
+    PipelineEvent,
+    ScanEventBus,
+    ScanLifecycleEvent,
+    ToolFindingEvent,
+    ToolOutputEvent,
+)
 from vxis.core.enricher import FindingEnricher
 from vxis.core.fp_pipeline import FPPipeline
 from vxis.core.logger import AuditLogger
@@ -103,8 +112,13 @@ class ScanOrchestrator:
         config: Root VXIS configuration object.
     """
 
-    def __init__(self, config: VXISConfig) -> None:
+    def __init__(
+        self,
+        config: VXISConfig,
+        event_bus: ScanEventBus | None = None,
+    ) -> None:
         self.config = config
+        self.event_bus = event_bus or ScanEventBus()
         self.audit_logger = AuditLogger(config.data_dir / "audit.jsonl")
 
     # ------------------------------------------------------------------
@@ -209,8 +223,21 @@ class ScanOrchestrator:
         dag_nodes = build_dag_from_plugins(registry)
         dag_context = DAGContext(target=target, scan_profile=profile)
 
+        # --- Emit scan started ---
+        await self.event_bus.emit(ScanLifecycleEvent(
+            event_type=EventType.SCAN_STARTED,
+            scan_id=scan_id,
+            target=target,
+            profile=profile,
+            plugin_count=len(registry),
+        ))
+
         # --- 6. Execute DAG ---
-        executor = DAGExecutor(dag_nodes, max_concurrency=scan_profile.max_concurrency)
+        executor = DAGExecutor(
+            dag_nodes,
+            max_concurrency=scan_profile.max_concurrency,
+            event_bus=self.event_bus,
+        )
         completed_nodes = await executor.execute(
             self._make_run_func(
                 registry=registry,
@@ -243,14 +270,35 @@ class ScanOrchestrator:
             all_raw_findings.extend(normalized)
 
         # --- 9. Deduplicate ---
+        await self.event_bus.emit(PipelineEvent(
+            event_type=EventType.PIPELINE_STAGE,
+            scan_id=scan_id,
+            stage="deduplicate",
+            finding_count=len(all_raw_findings),
+            detail=f"{len(all_raw_findings)} raw findings",
+        ))
         deduplicator = FindingDeduplicator()
         deduped = deduplicator.deduplicate(all_raw_findings)
 
         # --- 10. False-positive pipeline ---
+        await self.event_bus.emit(PipelineEvent(
+            event_type=EventType.PIPELINE_STAGE,
+            scan_id=scan_id,
+            stage="fp_filter",
+            finding_count=len(deduped),
+            detail=f"{len(deduped)} after dedup",
+        ))
         fp_pipeline = FPPipeline(tech_stack=[])
         filtered = await fp_pipeline.process(deduped)
 
         # --- 11. Enrich ---
+        await self.event_bus.emit(PipelineEvent(
+            event_type=EventType.PIPELINE_STAGE,
+            scan_id=scan_id,
+            stage="enrich",
+            finding_count=len(filtered),
+            detail=f"{len(filtered)} after FP filter",
+        ))
         enricher = FindingEnricher()
         enriched = enricher.enrich(filtered)
 
@@ -272,6 +320,15 @@ class ScanOrchestrator:
             finding_count=len(enriched),
             status="completed",
         )
+
+        await self.event_bus.emit(ScanLifecycleEvent(
+            event_type=EventType.SCAN_COMPLETED,
+            scan_id=scan_id,
+            target=target,
+            profile=profile,
+            finding_count=len(enriched),
+            duration_seconds=(finished_at - started_at).total_seconds(),
+        ))
 
         logger.info(
             "Scan %s completed: %d findings in %.1fs.",
@@ -345,11 +402,56 @@ class ScanOrchestrator:
                 timeout,
             )
 
+            # Streaming callback for real-time tool output
+            _event_bus = self.event_bus
+            _scan_id = scan_id
+
+            async def _on_line(line: str, is_stderr: bool) -> None:
+                await _event_bus.emit(ToolOutputEvent(
+                    event_type=EventType.TOOL_OUTPUT_LINE,
+                    scan_id=_scan_id,
+                    plugin_name=plugin_name,
+                    line=line,
+                    is_stderr=is_stderr,
+                ))
+                # Detect findings in real-time from JSON Lines tools
+                if not is_stderr and line.startswith("{"):
+                    _try_emit_finding(line, plugin_name)
+
+            def _try_emit_finding(line: str, pname: str) -> None:
+                """Best-effort real-time finding detection from JSON output."""
+                import json as _json
+                try:
+                    data = _json.loads(line)
+                    # Nuclei format
+                    if "info" in data and "severity" in data.get("info", {}):
+                        asyncio.create_task(_event_bus.emit(ToolFindingEvent(
+                            event_type=EventType.TOOL_FINDING,
+                            scan_id=_scan_id,
+                            plugin_name=pname,
+                            severity=data["info"]["severity"],
+                            title=data["info"].get("name", data.get("template-id", "")),
+                            target=data.get("host", data.get("matched-at", "")),
+                        )))
+                    # Trufflehog format
+                    elif "DetectorName" in data:
+                        asyncio.create_task(_event_bus.emit(ToolFindingEvent(
+                            event_type=EventType.TOOL_FINDING,
+                            scan_id=_scan_id,
+                            plugin_name=pname,
+                            severity="high",
+                            title=f"Secret: {data.get('DetectorName', '')}",
+                            target=data.get("SourceMetadata", {}).get("Data", {}).get("Github", {}).get("repository", ""),
+                        )))
+                except (_json.JSONDecodeError, KeyError, TypeError):
+                    pass
+
             try:
                 result = await run_tool(
                     command=command_str,
                     timeout=timeout,
                     shell=True,
+                    on_line=_on_line,
                 )
             except TimeoutError:
                 # Propagate so DAGExecutor records TIMED_OUT state.

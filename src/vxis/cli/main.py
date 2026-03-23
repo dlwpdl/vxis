@@ -149,23 +149,40 @@ def scan(
     # --- Run scan ---
     config = _get_config()
 
+    from vxis.core.events import ScanEventBus, ScanSnapshotCollector
     from vxis.core.orchestrator import ScanOrchestrator
     from vxis.core.scope import ScopeViolationError
+    from vxis.cli.live_display import ScanLiveDisplay
 
-    orchestrator = ScanOrchestrator(config)
+    event_bus = ScanEventBus()
+    collector = ScanSnapshotCollector()
+    event_bus.on_any(collector.handle_event)
 
-    with console.status(
-        f"[bold green]Scanning [cyan]{target}[/cyan] ...[/bold green]",
-        spinner="dots",
-    ):
-        try:
-            result = asyncio.run(
-                orchestrator.run_scan(
-                    target=target,
-                    profile=profile,
-                    selected_plugins=selected_plugins,
-                )
+    orchestrator = ScanOrchestrator(config, event_bus=event_bus)
+
+    async def _run_with_live_display() -> "ScanResult":
+        """Run the scan while updating the live TUI display."""
+        scan_task = asyncio.create_task(
+            orchestrator.run_scan(
+                target=target,
+                profile=profile,
+                selected_plugins=selected_plugins,
             )
+        )
+
+        # Refresh loop: update TUI until scan finishes
+        while not scan_task.done():
+            display.update(collector.snapshot)
+            await asyncio.sleep(0.25)
+
+        # Final update
+        display.update(collector.snapshot)
+        return await scan_task
+
+    display = ScanLiveDisplay(console)
+    with display:
+        try:
+            result = asyncio.run(_run_with_live_display())
         except ScopeViolationError as exc:
             err_console.print(f"[bold red]Scope violation:[/bold red] {exc}")
             raise typer.Exit(code=1) from exc

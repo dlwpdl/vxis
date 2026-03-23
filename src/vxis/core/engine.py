@@ -15,6 +15,11 @@ from enum import Enum
 from typing import Any
 
 from vxis.core.context import PluginOutput
+from vxis.core.events import (
+    EventType,
+    NodeEvent,
+    ScanEventBus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,9 +112,11 @@ class DAGExecutor:
         self,
         nodes: dict[str, TaskNode],
         max_concurrency: int = 8,
+        event_bus: ScanEventBus | None = None,
     ) -> None:
         self._nodes = nodes
         self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._event_bus = event_bus
         # One asyncio.Event per node; set when the node reaches a terminal state.
         self._done_events: dict[str, asyncio.Event] = {
             name: asyncio.Event() for name in nodes
@@ -118,6 +125,11 @@ class DAGExecutor:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    async def _emit(self, event: NodeEvent) -> None:
+        """Emit an event if a bus is configured."""
+        if self._event_bus is not None:
+            await self._event_bus.emit(event)
 
     async def execute(self, run_func: RunFunc) -> dict[str, TaskNode]:
         """Execute all nodes respecting the dependency graph.
@@ -152,10 +164,20 @@ class DAGExecutor:
         """Drive a single node through its lifecycle."""
         node = self._nodes[name]
 
+        # Emit queued event
+        await self._emit(NodeEvent(
+            event_type=EventType.NODE_QUEUED, plugin_name=name,
+        ))
+
         # 1. Wait for all hard dependencies to reach a terminal state.
         for dep_name in node.depends_on:
             dep_event = self._done_events.get(dep_name)
             if dep_event is not None:
+                await self._emit(NodeEvent(
+                    event_type=EventType.NODE_WAITING,
+                    plugin_name=name,
+                    waiting_for=dep_name,
+                ))
                 await dep_event.wait()
 
         # 2. Wait for optional dependencies (we still want their data if
@@ -180,6 +202,11 @@ class DAGExecutor:
                     f"Required dependency '{dep_name}' is in state "
                     f"'{dep_node.state.value}'."
                 )
+                await self._emit(NodeEvent(
+                    event_type=EventType.NODE_SKIPPED,
+                    plugin_name=name,
+                    error=node.error,
+                ))
                 self._done_events[name].set()
                 return
 
@@ -188,6 +215,9 @@ class DAGExecutor:
             node.state = TaskState.RUNNING
             node.started_at = time.monotonic()
             logger.debug("Starting plugin '%s'.", name)
+            await self._emit(NodeEvent(
+                event_type=EventType.NODE_STARTED, plugin_name=name,
+            ))
 
             try:
                 result = await asyncio.wait_for(
@@ -196,10 +226,18 @@ class DAGExecutor:
                 )
                 node.result = result
                 node.state = TaskState.COMPLETED
+                elapsed = time.monotonic() - node.started_at
                 logger.debug("Plugin '%s' completed successfully.", name)
+                await self._emit(NodeEvent(
+                    event_type=EventType.NODE_COMPLETED,
+                    plugin_name=name,
+                    elapsed_seconds=elapsed,
+                    finding_count=len(result.findings) if result else 0,
+                ))
 
             except TimeoutError:
                 node.state = TaskState.TIMED_OUT
+                elapsed = time.monotonic() - node.started_at
                 node.error = (
                     f"Plugin '{name}' timed out after {node.timeout_seconds}s."
                 )
@@ -208,11 +246,23 @@ class DAGExecutor:
                     name,
                     node.timeout_seconds,
                 )
+                await self._emit(NodeEvent(
+                    event_type=EventType.NODE_TIMED_OUT,
+                    plugin_name=name,
+                    elapsed_seconds=elapsed,
+                ))
 
             except Exception as exc:  # noqa: BLE001
                 node.state = TaskState.FAILED
+                elapsed = time.monotonic() - node.started_at
                 node.error = str(exc)
                 logger.exception("Plugin '%s' raised an unexpected error.", name)
+                await self._emit(NodeEvent(
+                    event_type=EventType.NODE_FAILED,
+                    plugin_name=name,
+                    elapsed_seconds=elapsed,
+                    error=str(exc),
+                ))
 
             finally:
                 node.finished_at = time.monotonic()
