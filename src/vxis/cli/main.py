@@ -457,13 +457,13 @@ def plugins_cmd(
         show_header=True,
         header_style="bold",
         border_style="blue",
-        expand=False,
+        expand=True,
     )
-    table.add_column("Name", no_wrap=True, style="bold cyan")
-    table.add_column("Version", no_wrap=True)
-    table.add_column("Category", no_wrap=True)
-    table.add_column("Binary", no_wrap=True)
-    table.add_column("Dependencies")
+    table.add_column("Name", no_wrap=True, style="bold cyan", min_width=12)
+    table.add_column("Version", no_wrap=True, min_width=6)
+    table.add_column("Category", no_wrap=True, min_width=10)
+    table.add_column("Binary", no_wrap=True, min_width=10)
+    table.add_column("Dependencies", min_width=8)
 
     if check:
         table.add_column("Available", no_wrap=True)
@@ -725,6 +725,13 @@ def export(
     console.print(
         f"[bold green]Exported to:[/bold green] [underline]{result_path}[/underline]"
     )
+
+
+@app.command()
+def setup() -> None:
+    """도구 설치 현황 확인 및 미설치 도구 자동 설치."""
+    from vxis.cli.installer import install_interactive
+    install_interactive()
 
 
 @app.command()

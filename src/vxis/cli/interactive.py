@@ -474,9 +474,8 @@ def _dispatch(action: str) -> None:
             _generate_report(result)
 
     elif action == "plugins":
-        from vxis.cli.main import plugins_cmd
-        import argparse
-        plugins_cmd(check=True)
+        from vxis.cli.installer import install_interactive
+        install_interactive()
 
     elif action == "client":
         _client_menu()
