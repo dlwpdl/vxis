@@ -7,6 +7,7 @@ without a JavaScript framework.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -14,11 +15,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import selectinload
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from vxis.core.db import create_engine, get_session, init_db
 from vxis.models.db_models import FindingRecord, ScanRecord
@@ -49,6 +51,61 @@ app = FastAPI(title="VXIS Dashboard", version="0.1.0", lifespan=_lifespan)
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
+
+# ---------------------------------------------------------------------------
+# Token-based authentication middleware
+# ---------------------------------------------------------------------------
+
+# Read the dashboard token from the environment at import time.
+# Using os.environ directly keeps this simple; the canonical VXISConfig field
+# is ``dashboard_token`` (env var ``VXIS_DASHBOARD_TOKEN``).
+_DASHBOARD_TOKEN: str | None = os.environ.get("VXIS_DASHBOARD_TOKEN") or None
+
+# Paths that are always accessible without a token.
+_PUBLIC_PATHS: set[str] = {"/health", "/login"}
+
+
+class _TokenAuthMiddleware(BaseHTTPMiddleware):
+    """Require a Bearer token or ``?token=`` query param when a dashboard token is configured."""
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        # If no token is configured, auth is disabled — pass everything through.
+        if _DASHBOARD_TOKEN is None:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Always allow public paths.
+        if path in _PUBLIC_PATHS:
+            return await call_next(request)
+
+        # Check Authorization header (Bearer <token>).
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer ") and auth_header[7:] == _DASHBOARD_TOKEN:
+            return await call_next(request)
+
+        # Check query parameter ``?token=<token>``.
+        query_token = request.query_params.get("token")
+        if query_token == _DASHBOARD_TOKEN:
+            return await call_next(request)
+
+        # Unauthenticated — decide between JSON 401 or redirect to login page.
+        # HTMX requests and non-browser API calls get a JSON 401.
+        if (
+            request.headers.get("hx-request")
+            or "text/html" not in request.headers.get("accept", "")
+        ):
+            return JSONResponse(
+                {"detail": "Authentication required"},
+                status_code=401,
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        # Browser navigation — redirect to the login page.
+        return RedirectResponse(url="/login", status_code=303)
+
+
+app.add_middleware(_TokenAuthMiddleware)
 
 # Register chart helpers as Jinja2 globals
 templates.env.globals["severity_donut_svg"] = severity_donut_svg
@@ -525,6 +582,35 @@ async def client_detail(request: Request, client_id: str) -> HTMLResponse:
             "total_scans": len(scan_history),
         },
     )
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, error: str | None = Query(None)) -> HTMLResponse:
+    """Simple login page that asks for the dashboard token."""
+    if _DASHBOARD_TOKEN is None:
+        return RedirectResponse(url="/", status_code=303)  # type: ignore[return-value]
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {"error": error},
+    )
+
+
+@app.post("/login")
+async def login_submit(request: Request) -> RedirectResponse:
+    """Validate the submitted token and redirect to the dashboard."""
+    form = await request.form()
+    submitted_token = form.get("token", "")
+
+    if _DASHBOARD_TOKEN is None:
+        return RedirectResponse(url="/", status_code=303)
+
+    if submitted_token == _DASHBOARD_TOKEN:
+        # Redirect with the token as a query parameter so the middleware allows it.
+        # For a simple internal tool this is acceptable; the token stays in the URL.
+        return RedirectResponse(url=f"/?token={_DASHBOARD_TOKEN}", status_code=303)
+
+    return RedirectResponse(url="/login?error=invalid", status_code=303)
 
 
 @app.get("/health")

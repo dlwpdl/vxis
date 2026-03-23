@@ -6,7 +6,10 @@ in NCC Group style. PDF generation is stubbed pending WeasyPrint availability.
 
 from __future__ import annotations
 
+import logging
 import os
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,6 +21,8 @@ from vxis.report.charts import severity_bar_svg, severity_donut_svg
 
 if TYPE_CHECKING:
     pass
+
+_logger = logging.getLogger(__name__)
 
 # Severity ordering for consistent report presentation
 _SEVERITY_ORDER: list[str] = [
@@ -236,26 +241,93 @@ class ReportGenerator:
         output_path: Path,
         template_name: str = "profiles/default.html",
     ) -> Path:
-        """Generate a PDF report.
+        """Generate a PDF report by rendering HTML then converting via *wkhtmltopdf*.
 
-        .. note::
-            PDF generation requires WeasyPrint, which is not currently installed
-            in this environment (blocked by SCFW policy). To enable PDF output:
+        The method first writes a temporary HTML file using :meth:`generate_html_file`,
+        then shells out to ``wkhtmltopdf`` to produce the final PDF.
 
-            1. Install WeasyPrint: ``pip install weasyprint``
-            2. Ensure system dependencies (Pango, Cairo, GDK-PixBuf) are present.
-            3. Remove the :class:`NotImplementedError` raise below and uncomment
-               the WeasyPrint rendering block.
+        Parameters
+        ----------
+        data:
+            Populated :class:`ReportData` instance.
+        output_path:
+            Destination path for the PDF file.
+        template_name:
+            Jinja2 template path relative to *template_dir*.
+
+        Returns
+        -------
+        Path
+            The resolved *output_path*.
 
         Raises
         ------
-        NotImplementedError
-            Always, until WeasyPrint is available.
+        RuntimeError
+            If ``wkhtmltopdf`` is not found on ``$PATH`` or if the conversion
+            process exits with a non-zero return code.
         """
-        raise NotImplementedError(
-            "PDF generation requires WeasyPrint, which is not currently installed. "
-            "Install it with: pip install weasyprint\n"
-            "Ensure system dependencies (Pango, Cairo, GDK-PixBuf) are also available.\n"
-            "As a workaround, use generate_html_file() and open the HTML in a browser "
-            "to print-to-PDF using the browser's built-in renderer."
+        output_path = output_path.resolve()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Render an intermediate HTML file next to the target PDF
+        html_path = output_path.with_suffix(".html")
+        self.generate_html_file(data, html_path, template_name)
+
+        pdf_path = _html_to_pdf(html_path, output_path)
+
+        # Clean up the intermediate HTML file
+        try:
+            html_path.unlink()
+        except OSError:
+            _logger.debug("Could not remove intermediate HTML file: %s", html_path)
+
+        return pdf_path
+
+
+def _html_to_pdf(html_path: Path, pdf_path: Path) -> Path:
+    """Convert an HTML file to PDF using ``wkhtmltopdf``.
+
+    Parameters
+    ----------
+    html_path:
+        Path to the source HTML file.
+    pdf_path:
+        Destination path for the generated PDF.
+
+    Returns
+    -------
+    Path
+        The resolved *pdf_path*.
+
+    Raises
+    ------
+    RuntimeError
+        If ``wkhtmltopdf`` is not installed or the conversion fails.
+    """
+    wkhtmltopdf = shutil.which("wkhtmltopdf")
+    if wkhtmltopdf is None:
+        raise RuntimeError(
+            "PDF generation requires 'wkhtmltopdf' to be installed and on $PATH. "
+            "Install it via your system package manager "
+            "(e.g. 'apt install wkhtmltopdf' or 'brew install wkhtmltopdf'). "
+            "Alternatively, use generate_html_file() and print to PDF from a browser."
         )
+
+    cmd = [
+        wkhtmltopdf,
+        "--quiet",
+        "--enable-local-file-access",
+        str(html_path),
+        str(pdf_path),
+    ]
+
+    _logger.debug("Running: %s", " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"wkhtmltopdf exited with code {result.returncode}.\n"
+            f"stderr: {result.stderr.strip()}"
+        )
+
+    return pdf_path

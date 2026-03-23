@@ -170,3 +170,15 @@ class VXISConfig(BaseSettings):
     )
     report_company_name: str = "VXIS Security"
     report_author: str = ""
+
+    # ------------------------------------------------------------------
+    # Dashboard
+    # ------------------------------------------------------------------
+    dashboard_token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Shared secret token for dashboard authentication. "
+            "When set, all dashboard requests must include a Bearer token "
+            "or ?token= query parameter. Leave unset to disable auth."
+        ),
+    )

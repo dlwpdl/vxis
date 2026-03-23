@@ -78,6 +78,69 @@ def _get_config():
     return VXISConfig()
 
 
+def _convert_finding_records(records) -> list:
+    """Convert a list of FindingRecord ORM rows to Pydantic Finding models.
+
+    Mirrors the conversion logic used in the dashboard module so that CLI
+    report generation produces identical Finding objects.
+    """
+    from vxis.models.finding import (
+        CVSSVector,
+        Evidence,
+        Finding,
+        FindingStatus,
+        MitreAttack,
+        Reference,
+        Severity,
+    )
+
+    findings: list[Finding] = []
+    for rec in records:
+        cvss = None
+        if rec.cvss_score is not None and rec.cvss_vector:
+            cvss = CVSSVector(vector_string=rec.cvss_vector, base_score=rec.cvss_score)
+
+        mitre = None
+        if rec.mitre_attack:
+            mitre = MitreAttack(**rec.mitre_attack)
+
+        evidence = [Evidence(**e) for e in (rec.evidence or [])]
+        references = [Reference(**r) for r in (rec.references or [])]
+
+        findings.append(
+            Finding(
+                id=str(rec.id),
+                scan_id=str(rec.scan_id),
+                title=rec.title,
+                description=rec.description,
+                severity=Severity(rec.severity),
+                status=FindingStatus(rec.status),
+                target=rec.target,
+                affected_component=rec.affected_component or "",
+                port=rec.port,
+                protocol=rec.protocol,
+                finding_type=rec.finding_type,
+                cvss=cvss,
+                cve_ids=rec.cve_ids or [],
+                cwe_ids=rec.cwe_ids or [],
+                mitre_attack=mitre,
+                source_plugin=rec.source_plugin,
+                source_plugins=rec.source_plugins or [],
+                confidence=rec.confidence,
+                evidence=evidence,
+                remediation=rec.remediation,
+                references=references,
+                analyst_severity=Severity(rec.analyst_severity)
+                if rec.analyst_severity
+                else None,
+                analyst_notes=rec.analyst_notes,
+                discovered_at=rec.discovered_at,
+                updated_at=rec.updated_at,
+            )
+        )
+    return findings
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -299,11 +362,73 @@ def report(
         f"[bold]Generating report[/bold] for scan [cyan]{scan_id}[/cyan] "
         f"using template '[yellow]{template}[/yellow]' ...",
     )
+
+    async def _generate() -> Path:
+        from datetime import date
+
+        from sqlalchemy import select
+
+        from vxis.core.db import create_engine, get_session
+        from vxis.models.db_models import FindingRecord, ScanRecord
+        from vxis.models.finding import (
+            CVSSVector,
+            Evidence,
+            Finding,
+            FindingStatus,
+            MitreAttack,
+            Reference,
+            Severity,
+        )
+        from vxis.report.generator import ReportData, ReportGenerator
+
+        config = _get_config()
+        engine = create_engine(config.db_url)
+
+        async with get_session(engine) as session:
+            # Look up the scan record
+            result = await session.execute(
+                select(ScanRecord).where(ScanRecord.id == int(scan_id))
+            )
+            scan = result.scalar_one_or_none()
+            if scan is None:
+                err_console.print(
+                    f"[bold red]Scan not found:[/bold red] {scan_id}"
+                )
+                raise typer.Exit(code=1)
+
+            # Load associated findings
+            findings_result = await session.execute(
+                select(FindingRecord).where(FindingRecord.scan_id == int(scan_id))
+            )
+            records: list[FindingRecord] = list(findings_result.scalars().all())
+
+        # Convert FindingRecord ORM rows to Pydantic Finding models
+        findings: list[Finding] = _convert_finding_records(records)
+
+        report_data = ReportData(
+            scan_id=str(scan_id),
+            client_name=scan.target,
+            target=scan.target,
+            scan_date=scan.started_at.strftime("%Y-%m-%d") if scan.started_at else str(date.today()),
+            findings=findings,
+        )
+
+        gen = ReportGenerator()
+        out = gen.generate_html_file(report_data, output, template_name=f"profiles/{template}")
+        await engine.dispose()
+        return out
+
+    try:
+        result_path = asyncio.run(_generate())
+    except typer.Exit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[bold red]Report generation failed:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+
     console.print(
-        f"[dim]Output path:[/dim] [underline]{output}[/underline]"
+        f"[bold green]Report written to:[/bold green] [underline]{result_path}[/underline]"
     )
-    # Report generation module wired in Phase 1+.
-    console.print("[yellow]Report generation not yet implemented.[/yellow]")
 
 
 @app.command(name="plugins")
@@ -520,28 +645,78 @@ def export(
         f"as [yellow]{format}[/yellow] → [underline]{out_path}[/underline]"
     )
 
-    # NOTE: Full database lookup is not yet wired — a ReportData must be
-    # constructed from persisted scan records. The scaffolding below shows
-    # where that lookup would occur once the DB query layer is extended.
-    # For now we surface a clear informational message.
-    console.print(
-        "[yellow]Note:[/yellow] Database-backed scan retrieval is not yet implemented. "
-        "Construct a ReportData object programmatically and pass it to "
-        "DOCXReportGenerator or AttestationGenerator directly."
-    )
+    async def _export() -> Path:
+        from datetime import date
 
-    if format == "docx":
-        console.print(
-            "[dim]Use:[/dim] from vxis.report.docx_export import DOCXReportGenerator"
+        from sqlalchemy import select
+
+        from vxis.core.db import create_engine, get_session
+        from vxis.models.db_models import FindingRecord, ScanRecord
+        from vxis.models.finding import Finding
+        from vxis.report.generator import ReportData
+
+        config = _get_config()
+        engine = create_engine(config.db_url)
+
+        async with get_session(engine) as session:
+            result = await session.execute(
+                select(ScanRecord).where(ScanRecord.id == int(scan_id))
+            )
+            scan = result.scalar_one_or_none()
+            if scan is None:
+                err_console.print(
+                    f"[bold red]Scan not found:[/bold red] {scan_id}"
+                )
+                raise typer.Exit(code=1)
+
+            findings_result = await session.execute(
+                select(FindingRecord).where(FindingRecord.scan_id == int(scan_id))
+            )
+            records: list[FindingRecord] = list(findings_result.scalars().all())
+
+        findings: list[Finding] = _convert_finding_records(records)
+
+        report_data = ReportData(
+            scan_id=str(scan_id),
+            client_name=scan.target,
+            target=scan.target,
+            scan_date=scan.started_at.strftime("%Y-%m-%d") if scan.started_at else str(date.today()),
+            findings=findings,
         )
-    elif format == "attestation":
-        console.print(
-            "[dim]Use:[/dim] from vxis.report.attestation import AttestationGenerator"
-        )
-    elif format == "html":
-        console.print(
-            "[dim]Use:[/dim] from vxis.report.generator import ReportGenerator"
-        )
+
+        if format == "html":
+            from vxis.report.generator import ReportGenerator
+
+            gen = ReportGenerator()
+            generated = gen.generate_html_file(report_data, out_path)
+        elif format == "docx":
+            from vxis.report.docx_export import DOCXReportGenerator
+
+            gen = DOCXReportGenerator()
+            generated = gen.generate(report_data, out_path)
+        elif format == "attestation":
+            from vxis.report.attestation import AttestationGenerator
+
+            gen = AttestationGenerator()
+            generated = gen.generate(report_data, out_path)
+        else:
+            # Should not be reachable due to earlier validation
+            raise ValueError(f"Unsupported format: {format}")
+
+        await engine.dispose()
+        return generated
+
+    try:
+        result_path = asyncio.run(_export())
+    except typer.Exit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[bold red]Export failed:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[bold green]Exported to:[/bold green] [underline]{result_path}[/underline]"
+    )
 
 
 @app.command()

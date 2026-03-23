@@ -25,6 +25,22 @@ dev = [
     "pytest-cov>=6.0,<7",
     "ruff>=0.8,<1",
 ]
+dashboard = [
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.34,<1",
+    "httpx>=0.28,<1",
+]
+export = [
+    "python-docx>=1.1,<2",
+]
+pdf = [
+    "weasyprint>=63,<64",
+]
+all = [
+    "vxis[dashboard]",
+    "vxis[export]",
+    "vxis[pdf]",
+]
 
 [project.scripts]
 vxis = "vxis.cli.main:app"
