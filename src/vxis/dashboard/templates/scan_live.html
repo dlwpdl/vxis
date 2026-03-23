@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+
+{% block title %}Scan Live — {{ target }}{% endblock %}
+
+{% block breadcrumb %}
+<span class="text-sm text-gray-500">Scan Live — <span class="text-cyan-400">{{ target }}</span></span>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto" hx-ext="sse" sse-connect="/api/scan/{{ scan_id }}/events" sse-swap="message">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-white">{{ target }}</h1>
+      <p class="text-sm text-gray-500 mt-1">{{ scan_type_label }} · {{ profile }} · ID: {{ scan_id }}</p>
+    </div>
+    <div id="scan-status" class="flex items-center gap-2">
+      <span class="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse inline-block"></span>
+      <span class="text-sm text-cyan-400">스캔 진행 중...</span>
+    </div>
+  </div>
+
+  <!-- Progress bar -->
+  <div class="bg-surface rounded-lg border border-surface-border p-4 mb-4">
+    <div class="flex justify-between text-sm text-gray-400 mb-2">
+      <span id="progress-label">시작 중...</span>
+      <span id="progress-pct">0%</span>
+    </div>
+    <div class="w-full bg-gray-800 rounded-full h-2">
+      <div id="progress-bar" class="bg-cyan-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+    </div>
+  </div>
+
+  <!-- Stats grid -->
+  <div class="grid grid-cols-4 gap-3 mb-4">
+    <div class="bg-surface rounded-lg border border-surface-border p-3 text-center">
+      <p class="text-2xl font-bold text-white" id="stat-findings">0</p>
+      <p class="text-xs text-gray-500">발견</p>
+    </div>
+    <div class="bg-surface rounded-lg border border-surface-border p-3 text-center">
+      <p class="text-2xl font-bold text-red-400" id="stat-critical">0</p>
+      <p class="text-xs text-gray-500">Critical</p>
+    </div>
+    <div class="bg-surface rounded-lg border border-surface-border p-3 text-center">
+      <p class="text-2xl font-bold text-orange-400" id="stat-high">0</p>
+      <p class="text-xs text-gray-500">High</p>
+    </div>
+    <div class="bg-surface rounded-lg border border-surface-border p-3 text-center">
+      <p class="text-2xl font-bold text-gray-400" id="stat-elapsed">0s</p>
+      <p class="text-xs text-gray-500">경과</p>
+    </div>
+  </div>
+
+  <!-- Plugin status -->
+  <div class="bg-surface rounded-lg border border-surface-border p-4 mb-4">
+    <h3 class="text-sm font-medium text-gray-400 mb-3">플러그인 진행 상황</h3>
+    <div id="plugin-grid" class="grid grid-cols-3 gap-2">
+      <p class="text-xs text-gray-600">로딩 중...</p>
+    </div>
+  </div>
+
+  <!-- Live log -->
+  <div class="bg-surface rounded-lg border border-surface-border p-4">
+    <h3 class="text-sm font-medium text-gray-400 mb-3">실시간 로그</h3>
+    <div id="live-log" class="font-mono text-xs text-gray-500 max-h-48 overflow-y-auto space-y-0.5">
+    </div>
+  </div>
+
+</div>
+
+<script>
+document.body.addEventListener('sse:message', function(evt) {
+  try {
+    const data = JSON.parse(evt.detail.data);
+
+    // Progress
+    if (data.progress) {
+      const pct = data.progress;
+      document.getElementById('progress-bar').style.width = pct;
+      document.getElementById('progress-pct').textContent = pct;
+      document.getElementById('progress-label').textContent =
+        data.completed + '/' + data.total + ' 플러그인 완료' +
+        (data.running > 0 ? ' · ' + data.running + '개 실행 중' : '') +
+        (data.stage ? ' · ' + data.stage : '');
+    }
+
+    // Stats
+    if (data.findings !== undefined) {
+      document.getElementById('stat-findings').textContent = data.findings;
+    }
+    if (data.severity) {
+      document.getElementById('stat-critical').textContent = data.severity.critical || 0;
+      document.getElementById('stat-high').textContent = data.severity.high || 0;
+    }
+    if (data.elapsed) {
+      document.getElementById('stat-elapsed').textContent = data.elapsed;
+    }
+
+    // Plugin grid
+    if (data.plugin) {
+      const grid = document.getElementById('plugin-grid');
+      const p = data.plugin;
+      let el = document.getElementById('plugin-' + p.name);
+      const stateColors = {
+        pending: 'text-gray-600', running: 'text-cyan-400',
+        completed: 'text-green-400', failed: 'text-red-400',
+        skipped: 'text-gray-600', timed_out: 'text-yellow-400',
+      };
+      const stateIcons = {
+        pending: '○', running: '◉', completed: '✓',
+        failed: '✗', skipped: '—', timed_out: '⏱',
+      };
+      const color = stateColors[p.state] || 'text-gray-500';
+      const icon = stateIcons[p.state] || '?';
+      const html = '<span class="' + color + '">' + icon + '</span> ' + p.name +
+        (p.finding_count > 0 ? ' <span class="text-yellow-400">(' + p.finding_count + ')</span>' : '');
+
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'plugin-' + p.name;
+        el.className = 'text-xs';
+        // Clear "로딩 중" placeholder
+        if (grid.children.length === 1 && grid.children[0].tagName === 'P') {
+          grid.innerHTML = '';
+        }
+        grid.appendChild(el);
+      }
+      el.innerHTML = html;
+    }
+
+    // Log
+    if (data.event) {
+      const log = document.getElementById('live-log');
+      const line = document.createElement('div');
+      const ts = data.elapsed || '';
+      line.textContent = '[' + ts + '] ' + data.event +
+        (data.plugin ? ' — ' + data.plugin.name : '') +
+        (data.stage ? ' — ' + data.stage : '');
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+      // Keep max 50 lines
+      while (log.children.length > 50) log.removeChild(log.firstChild);
+    }
+
+    // Completion
+    if (data.event === 'scan_completed') {
+      document.getElementById('scan-status').innerHTML =
+        '<span class="w-2.5 h-2.5 rounded-full bg-green-500 inline-block"></span>' +
+        '<span class="text-sm text-green-400">스캔 완료 — ' + data.findings + '개 발견</span>';
+      document.getElementById('progress-bar').classList.replace('bg-cyan-500', 'bg-green-500');
+    }
+
+    if (data.event === 'scan_failed') {
+      document.getElementById('scan-status').innerHTML =
+        '<span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>' +
+        '<span class="text-sm text-red-400">스캔 실패: ' + (data.error || '') + '</span>';
+      document.getElementById('progress-bar').classList.replace('bg-cyan-500', 'bg-red-500');
+    }
+  } catch(e) {}
+});
+</script>
+{% endblock %}

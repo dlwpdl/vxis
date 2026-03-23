@@ -621,6 +621,148 @@ async def login_submit(request: Request) -> RedirectResponse:
     return RedirectResponse(url="/login?error=invalid", status_code=303)
 
 
+# ---------------------------------------------------------------------------
+# Scan from Dashboard — start, live view, SSE events
+# ---------------------------------------------------------------------------
+
+@app.get("/scan/new", response_class=HTMLResponse)
+async def scan_new_page(request: Request) -> HTMLResponse:
+    """Scan start form page."""
+    scan_types = [
+        ("zero_touch", "제로터치 (Passive)", "\U0001f50d", "대상에 접촉 없이 OSINT만으로 정보 수집"),
+        ("external", "외부 스캔", "\U0001f310", "웹/네트워크 취약점 + SSL/DNS 진단"),
+        ("internal", "내부 스캔", "\U0001f3e2", "AD/내부 네트워크 환경 진단"),
+        ("code", "코드 스캔", "\U0001f4bb", "소스코드 + 의존성 + CI/CD 보안"),
+        ("cloud", "클라우드", "\u2601\ufe0f", "AWS/Azure/GCP 설정 감사"),
+        ("full", "전체 스캔", "\U0001f680", "모든 플러그인 실행"),
+    ]
+    return templates.TemplateResponse(
+        request, "scan_new.html", {"scan_types": scan_types},
+    )
+
+
+@app.post("/api/scan/start", response_class=HTMLResponse)
+async def scan_start_api(request: Request) -> HTMLResponse:
+    """Start a scan from dashboard form. Returns redirect to live view."""
+    from vxis.dashboard.scan_manager import scan_manager, SCAN_TYPE_LABELS
+
+    form = await request.form()
+    target = str(form.get("target", "")).strip()
+    scan_type = str(form.get("scan_type", "external"))
+    profile = str(form.get("profile", ""))
+
+    if not target:
+        return HTMLResponse(
+            '<p class="text-red-400 text-sm">스캔 대상을 입력하세요.</p>',
+            status_code=400,
+        )
+
+    managed = await scan_manager.start_scan(
+        target=target,
+        scan_type=scan_type,
+        profile=profile or None,
+    )
+
+    # Return HTMX redirect to live page
+    label = SCAN_TYPE_LABELS.get(scan_type, scan_type)
+    return HTMLResponse(
+        f'<script>window.location.href="/scan/{managed.scan_id}/live";</script>'
+        f'<p class="text-cyan-400">스캔 시작됨: {managed.scan_id} → 라이브 페이지로 이동 중...</p>',
+    )
+
+
+@app.get("/scan/{scan_id}/live", response_class=HTMLResponse)
+async def scan_live_page(request: Request, scan_id: str) -> HTMLResponse:
+    """Live scan progress page with SSE."""
+    from vxis.dashboard.scan_manager import scan_manager, SCAN_TYPE_LABELS
+
+    managed = scan_manager.get_scan(scan_id)
+    if managed is None:
+        return templates.TemplateResponse(
+            request, "404.html",
+            {"message": f"스캔 {scan_id}를 찾을 수 없습니다"},
+            status_code=404,
+        )
+
+    label = SCAN_TYPE_LABELS.get(managed.scan_type, managed.scan_type)
+
+    return templates.TemplateResponse(
+        request, "scan_live.html",
+        {
+            "scan_id": scan_id,
+            "target": managed.target,
+            "profile": managed.profile,
+            "scan_type_label": label,
+        },
+    )
+
+
+@app.get("/api/scan/{scan_id}/events")
+async def scan_sse_events(request: Request, scan_id: str):
+    """SSE endpoint — streams scan events in real-time."""
+    import asyncio
+    import json
+    from starlette.responses import StreamingResponse
+    from vxis.dashboard.scan_manager import scan_manager
+
+    managed = scan_manager.get_scan(scan_id)
+    if managed is None:
+        return JSONResponse({"error": "Scan not found"}, status_code=404)
+
+    queue = scan_manager.subscribe(scan_id)
+    if queue is None:
+        return JSONResponse({"error": "Scan not found"}, status_code=404)
+
+    async def _event_generator():
+        """Yield SSE events from the queue."""
+        try:
+            # Send initial snapshot
+            snapshot = managed.collector.snapshot
+            initial = {
+                "event": "connected",
+                "progress": f"{snapshot.progress_fraction:.0%}",
+                "completed": snapshot.completed_count,
+                "total": snapshot.total_count,
+                "running": snapshot.running_count,
+                "findings": snapshot.total_findings,
+                "severity": snapshot.severity_counts,
+                "elapsed": f"{snapshot.elapsed_seconds:.0f}s",
+                "stage": snapshot.pipeline_stage,
+            }
+            yield f"data: {json.dumps(initial)}\n\n"
+
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=30)
+                    yield f"data: {json.dumps(data)}\n\n"
+
+                    # Stop streaming after completion/failure
+                    if data.get("event") in ("scan_completed", "scan_failed"):
+                        yield f"data: {json.dumps({'event': 'done'})}\n\n"
+                        break
+
+                except asyncio.TimeoutError:
+                    # Send keepalive ping
+                    yield f": keepalive\n\n"
+
+                # Check if client disconnected
+                if await request.is_disconnected():
+                    break
+
+        except asyncio.CancelledError:
+            pass
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     """Health check endpoint."""

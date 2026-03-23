@@ -541,16 +541,20 @@ def _execute_scan(params: dict) -> None:
         display.update(collector.snapshot)
         return await scan_task
 
-    display = ScanLiveDisplay(console)
-    with display:
-        try:
+    console.print(f"\n[bold cyan]스캔 시작:[/bold cyan] {params['target']} ({params['profile']})\n")
+
+    try:
+        display = ScanLiveDisplay(console)
+        with display:
             result = asyncio.run(_run_with_display())
-        except ScopeViolationError as exc:
-            console.print(f"[bold red]스코프 위반:[/bold red] {exc}")
-            return
-        except Exception as exc:
-            console.print(f"[bold red]스캔 실패:[/bold red] {exc}")
-            return
+    except ScopeViolationError as exc:
+        console.print(f"\n[bold red]스코프 위반:[/bold red] {exc}")
+        return
+    except Exception as exc:
+        console.print(f"\n[bold red]스캔 실패:[/bold red] {exc}")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        return
 
     # Results summary
     console.print(

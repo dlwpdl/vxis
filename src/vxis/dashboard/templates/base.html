@@ -8,8 +8,9 @@
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
 
-  <!-- HTMX -->
+  <!-- HTMX + SSE extension -->
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12/dist/ext/sse.js"></script>
 
   <script>
     tailwind.config = {
@@ -88,9 +89,19 @@
         Dashboard
       </a>
 
+      <a href="/scan/new"
+         class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
+                {% if request.url.path == '/scan/new' %}bg-sidebar-active text-cyan-400{% else %}text-gray-400 hover:bg-sidebar-hover hover:text-gray-100{% endif %}">
+        <!-- Play icon -->
+        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        New Scan
+      </a>
+
       <a href="/"
          class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                {% if '/scan/' in request.url.path %}bg-sidebar-active text-cyan-400{% else %}text-gray-400 hover:bg-sidebar-hover hover:text-gray-100{% endif %}">
+                {% if '/scan/' in request.url.path and request.url.path != '/scan/new' %}bg-sidebar-active text-cyan-400{% else %}text-gray-400 hover:bg-sidebar-hover hover:text-gray-100{% endif %}">
         <!-- Activity icon -->
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
