@@ -577,6 +577,177 @@ def _execute_scan(params: dict) -> None:
     if parts:
         console.print("  " + " | ".join(parts))
 
+    # ── Delta report (compare with previous scan) ─────────────────────────
+    scan_id_str = str(getattr(result, "scan_id", ""))
+    if scan_id_str:
+        try:
+            from vxis.config.schema import VXISConfig as _VXISConfig
+            from vxis.core.db import create_engine as _create_engine
+            from vxis.core.delta import compute_delta, format_delta_summary, get_previous_scan_findings
+
+            _config = _VXISConfig()
+            _db_url = _config.db_url
+            if ":///" in _db_url:
+                _prefix, _path = _db_url.split("///", 1)
+                from pathlib import Path as _Path
+                _db_url = f"{_prefix}///{_Path(_path).expanduser()}"
+
+            _delta_engine = _create_engine(_db_url)
+
+            async def _fetch_delta():
+                prev_findings, prev_id = await get_previous_scan_findings(
+                    _delta_engine, params["target"], scan_id_str
+                )
+                await _delta_engine.dispose()
+                return prev_findings, prev_id
+
+            _prev_findings, _prev_id = asyncio.run(_fetch_delta())
+
+            if _prev_findings:
+                console.print()
+                _delta = compute_delta(
+                    current_findings=result.findings,
+                    previous_findings=_prev_findings,
+                    target=params["target"],
+                    current_scan_id=scan_id_str,
+                    previous_scan_id=_prev_id,
+                )
+                console.print(format_delta_summary(_delta))
+        except Exception:
+            # Delta comparison is optional — silently skip on any error
+            pass
+
+    # ── Post-scan action menu ─────────────────────────────────────────────
+    console.print()
+    try:
+        from InquirerPy import inquirer as _post_inquirer
+
+        post_action = _post_inquirer.select(
+            message="다음 작업을 선택하세요",
+            choices=[
+                {"name": "\U0001f4c4  리포트 생성 (HTML)", "value": "report_html"},
+                {"name": "\U0001f4d8  리포트 생성 (DOCX)", "value": "report_docx"},
+                {"name": "\U0001f4ca  결과 상세 보기", "value": "detail"},
+                {"name": "\U0001f310  대시보드에서 보기", "value": "dashboard"},
+                {"name": "\u2b05\ufe0f   메인 메뉴로", "value": "back"},
+            ],
+            pointer="\u276f",
+            qmark="\u2705",
+            amark="\u2705",
+        ).execute()
+    except KeyboardInterrupt:
+        return
+
+    if post_action == "back" or post_action is None:
+        return
+
+    if post_action in ("report_html", "report_docx"):
+        _report_fmt = "html" if post_action == "report_html" else "docx"
+        _safe_target = params["target"].replace("/", "_").replace(":", "_")
+        _report_ext = _report_fmt
+        _report_path = f"report_{_safe_target}.{_report_ext}"
+
+        if post_action == "report_html":
+            try:
+                from datetime import date as _date
+                from vxis.report.generator import ReportData, ReportGenerator
+
+                _report_data = ReportData(
+                    scan_id=scan_id_str,
+                    client_name=params["target"],
+                    target=params["target"],
+                    scan_date=_date.today().isoformat(),
+                    findings=result.findings,
+                )
+                _html = ReportGenerator().render_html(_report_data)
+                with open(_report_path, "w", encoding="utf-8") as _fh:
+                    _fh.write(_html)
+                console.print(f"[green]HTML 리포트 저장됨:[/green] {_report_path}")
+            except Exception as _exc:
+                console.print(f"[red]HTML 리포트 생성 실패:[/red] {_exc}")
+
+        else:  # report_docx
+            try:
+                from vxis.report.docx_export import DOCXReportGenerator
+            except ImportError:
+                console.print(
+                    "[yellow]DOCX 내보내기를 사용할 수 없습니다.[/yellow] "
+                    "python-docx 패키지를 설치하세요: pip install python-docx"
+                )
+                return
+
+            try:
+                from datetime import date as _date
+                from pathlib import Path as _Path
+                from vxis.report.generator import ReportData
+
+                _report_data = ReportData(
+                    scan_id=scan_id_str,
+                    client_name=params["target"],
+                    target=params["target"],
+                    scan_date=_date.today().isoformat(),
+                    findings=result.findings,
+                )
+                DOCXReportGenerator().generate(_report_data, _Path(_report_path))
+                console.print(f"[green]DOCX 리포트 저장됨:[/green] {_report_path}")
+            except Exception as _exc:
+                console.print(f"[red]DOCX 리포트 생성 실패:[/red] {_exc}")
+
+    elif post_action == "detail":
+        if not result.findings:
+            console.print("[dim]발견된 취약점이 없습니다.[/dim]")
+            return
+
+        _sev_colors = {
+            "critical": "bold red", "high": "red",
+            "medium": "yellow", "low": "blue", "informational": "dim",
+        }
+        _detail_table = Table(
+            title=f"\U0001f50d 취약점 목록 — {params['target']}",
+            show_header=True,
+            header_style="bold",
+            border_style="cyan",
+            expand=False,
+        )
+        _detail_table.add_column("심각도", no_wrap=True, width=12)
+        _detail_table.add_column("제목", no_wrap=False)
+        _detail_table.add_column("대상", no_wrap=True)
+        _detail_table.add_column("신뢰도", justify="right", width=7)
+
+        _sev_order_map = {
+            "critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4,
+        }
+        _sorted = sorted(
+            result.findings,
+            key=lambda _f: _sev_order_map.get(
+                _f.effective_severity.value if hasattr(_f.effective_severity, "value")
+                else str(_f.effective_severity),
+                5,
+            ),
+        )
+        for _f in _sorted:
+            _sev_val = (
+                _f.effective_severity.value
+                if hasattr(_f.effective_severity, "value")
+                else str(_f.effective_severity)
+            )
+            _style = _sev_colors.get(_sev_val, "")
+            _conf_pct = f"{int(_f.confidence * 100)}%"
+            _detail_table.add_row(
+                f"[{_style}]{_sev_val}[/{_style}]",
+                _f.title[:60],
+                _f.target[:40],
+                _conf_pct,
+            )
+        console.print(_detail_table)
+
+    elif post_action == "dashboard":
+        console.print(
+            "[cyan]대시보드 URL:[/cyan] http://127.0.0.1:8080"
+            + (f"/scan/{scan_id_str}" if scan_id_str else "")
+        )
+        console.print("[dim]vxis dashboard 명령으로 서버를 시작할 수 있습니다.[/dim]")
+
 
 def _show_results(params: dict) -> None:
     """스캔 결과 조회."""

@@ -335,10 +335,11 @@ async def finding_detail(
 async def export_report(
     request: Request,
     scan_id: str,
-    format: str = Query("html", description="Export format: html"),
+    format: str = Query("html", description="Export format: html, docx, attestation"),
 ) -> FileResponse:
-    """Export a scan as a standalone HTML report file."""
+    """Export a scan report. Supports html, docx, and attestation formats."""
     from datetime import date
+    from pathlib import Path as FilePath
 
     from vxis.models.finding import (
         CVSSVector,
@@ -413,14 +414,64 @@ async def export_report(
             )
         )
 
+    safe_target = scan.target.replace("/", "_")
+    scan_date = scan.started_at.strftime("%Y-%m-%d") if scan.started_at else str(date.today())
+
     report_data = ReportData(
         scan_id=str(scan_id),
         client_name=scan.target,
         target=scan.target,
-        scan_date=scan.started_at.strftime("%Y-%m-%d") if scan.started_at else str(date.today()),
+        scan_date=scan_date,
         findings=findings,
     )
 
+    if format == "docx":
+        try:
+            from vxis.report.docx_export import DOCXReportGenerator
+        except ImportError:
+            error_html = (
+                "<html><body style='font-family:sans-serif;padding:2rem'>"
+                "<h2>DOCX 내보내기를 사용할 수 없습니다</h2>"
+                "<p><code>python-docx</code> 패키지가 설치되지 않았습니다.</p>"
+                "<p>설치 방법: <code>pip install python-docx</code></p>"
+                "</body></html>"
+            )
+            return HTMLResponse(content=error_html, status_code=503)  # type: ignore[return-value]
+
+        tmp_path = FilePath(tempfile.mktemp(suffix=".docx", prefix=f"vxis_report_{scan_id}_"))
+        DOCXReportGenerator().generate(report_data, tmp_path)
+        filename = f"vxis_report_{safe_target}_{scan_id}.docx"
+        return FileResponse(
+            path=str(tmp_path),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=filename,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    if format == "attestation":
+        try:
+            from vxis.report.attestation import AttestationGenerator
+        except ImportError:
+            error_html = (
+                "<html><body style='font-family:sans-serif;padding:2rem'>"
+                "<h2>Attestation 내보내기를 사용할 수 없습니다</h2>"
+                "<p><code>python-docx</code> 패키지가 설치되지 않았습니다.</p>"
+                "<p>설치 방법: <code>pip install python-docx</code></p>"
+                "</body></html>"
+            )
+            return HTMLResponse(content=error_html, status_code=503)  # type: ignore[return-value]
+
+        tmp_path = FilePath(tempfile.mktemp(suffix=".docx", prefix=f"vxis_attestation_{scan_id}_"))
+        AttestationGenerator().generate(report_data, tmp_path)
+        filename = f"vxis_attestation_{safe_target}_{scan_id}.docx"
+        return FileResponse(
+            path=str(tmp_path),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=filename,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # Default: html
     generator = ReportGenerator()
     html_content = generator.render_html(report_data)
 
@@ -435,7 +486,7 @@ async def export_report(
     tmp.write(html_content)
     tmp.close()
 
-    filename = f"vxis_report_{scan.target.replace('/', '_')}_{scan_id}.html"
+    filename = f"vxis_report_{safe_target}_{scan_id}.html"
 
     return FileResponse(
         path=tmp.name,
