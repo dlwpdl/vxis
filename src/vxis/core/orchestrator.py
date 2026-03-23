@@ -478,6 +478,11 @@ class ScanOrchestrator:
                 except (_json.JSONDecodeError, KeyError, TypeError):
                     pass
 
+            # Acquire a rate-limit token before executing the tool.
+            # This ensures all plugins targeting the same host respect
+            # the profile's configured requests-per-second limit.
+            await self.rate_limiter.get_limiter(target).acquire()
+
             try:
                 result = await run_tool(
                     command=command_str,
