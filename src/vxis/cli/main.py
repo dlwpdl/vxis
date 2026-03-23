@@ -25,7 +25,8 @@ from rich.text import Text
 app = typer.Typer(
     name="vxis",
     help="VXIS — AI-powered security automation platform",
-    no_args_is_help=True,
+    no_args_is_help=False,
+    invoke_without_command=True,
     pretty_exceptions_enable=False,
 )
 console = Console()
@@ -43,10 +44,10 @@ app.add_typer(client_app, name="client")
 # ---------------------------------------------------------------------------
 
 _BANNER = r"""
- __   __ __  __  ____
- \ \ / /|  \/  ||_ _|
-  \ V / | |\/| | | |
-   \_/  |_|  |_||___|
+ _   ___  _____ ____
+| | / / |/ /  _/ __/
+| |/ /|   // /_\ \
+|___/_|_/___/___/
 """
 
 
@@ -60,6 +61,20 @@ def _print_banner() -> None:
             padding=(0, 2),
         )
     )
+
+
+@app.callback()
+def _app_callback(ctx: typer.Context) -> None:
+    """인자 없이 vxis 실행 시 인터랙티브 모드 진입."""
+    if ctx.invoked_subcommand is None:
+        try:
+            from vxis.cli.interactive import run_interactive
+            run_interactive()
+        except ImportError:
+            # InquirerPy 미설치 시 기존 help 표시
+            console.print("[yellow]인터랙티브 모드를 사용하려면: pip install InquirerPy[/yellow]")
+            ctx.invoke(app, ["--help"])
+        raise typer.Exit()
 
 
 # ---------------------------------------------------------------------------
