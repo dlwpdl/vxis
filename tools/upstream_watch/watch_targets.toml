@@ -1,0 +1,458 @@
+# VXIS Upstream Watch — Watched Repositories
+# Managed via: python -m tools.upstream_watch target <add|remove|list>
+#
+# Last updated: 2026-03-23T04:44:53.692724+00:00
+
+[targets."0x4m4--hexstrike-ai"]
+owner = "0x4m4"
+repo = "hexstrike-ai"
+reason = "MCP server for security tools — tool integration patterns, MCP protocol usage"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["src/", "tools/", "agents/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "mcp-server",
+    "tool-integration",
+    "web-automation",
+    "agent-framework",
+]
+added_at = "2026-03-23T04:44:53.692687+00:00"
+
+[targets."GH05TCREW--pentestagent"]
+owner = "GH05TCREW"
+repo = "pentestagent"
+reason = "AI agent framework for black-box testing — workflow patterns"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = ["agent-workflow", "black-box-testing"]
+added_at = "2026-03-23T04:44:53.692705+00:00"
+
+[targets."GreyDGL--PentestGPT"]
+owner = "GreyDGL"
+repo = "PentestGPT"
+reason = "GPT-based interactive pentest assistant — AI workflow and prompt engineering patterns"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["pentestgpt/", "src/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "ai-agent",
+    "llm",
+    "interactive-pentest",
+    "gpt",
+]
+added_at = "2026-03-23T04:44:53.692707+00:00"
+
+[targets."Hacker-GPT--HackerGPT-2.0"]
+owner = "Hacker-GPT"
+repo = "HackerGPT-2.0"
+reason = "AI security chatbot — RAG patterns for security knowledge, prompt engineering"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["app/", "lib/", "components/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "ai-agent",
+    "llm",
+    "security-chatbot",
+    "rag",
+]
+added_at = "2026-03-23T04:44:53.692709+00:00"
+
+[targets."aquasecurity--trivy"]
+owner = "aquasecurity"
+repo = "trivy"
+reason = "Container/supply-chain scanner — new analyzers, output changes"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["pkg/", "cmd/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "new-analyzers",
+    "output-format",
+    "sbom",
+    "license-scanning",
+]
+added_at = "2026-03-23T04:44:53.692698+00:00"
+
+[targets."blacklanternsecurity--bbot"]
+owner = "blacklanternsecurity"
+repo = "bbot"
+reason = "Modular recon framework — module system, dependency resolution, event pipeline"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["bbot/modules/", "bbot/core/", "bbot/scanner/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "recon",
+    "osint",
+    "modular",
+    "pipeline",
+    "subdomain",
+]
+added_at = "2026-03-23T04:44:53.692711+00:00"
+
+[targets."caido--caido"]
+owner = "caido"
+repo = "caido"
+reason = "Modern web security proxy — UX patterns, plugin system, automation API"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["packages/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "web-security",
+    "proxy",
+    "automation",
+    "modern-ui",
+]
+added_at = "2026-03-23T04:44:53.692722+00:00"
+
+[targets."j3ssie--osmedeus"]
+owner = "j3ssie"
+repo = "osmedeus"
+reason = "Workflow-based scan orchestration — distributed scanning, workflow engine"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["core/", "libs/", "workflow/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "workflow",
+    "automation",
+    "distributed",
+    "scan-engine",
+]
+added_at = "2026-03-23T04:44:53.692716+00:00"
+
+[targets."mitre--caldera"]
+owner = "mitre"
+repo = "caldera"
+reason = "Adversary emulation — plugin architecture, ATT&CK mapping, agent patterns"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["app/", "plugins/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "adversary-emulation",
+    "mitre-attack",
+    "agent",
+    "plugin-system",
+]
+added_at = "2026-03-23T04:44:53.692718+00:00"
+
+[targets."projectdiscovery--httpx"]
+owner = "projectdiscovery"
+repo = "httpx"
+reason = "HTTP probing — new detection features, output fields"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["cmd/", "runner/", "common/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = ["tech-detect", "output-fields", "cdn-detection"]
+added_at = "2026-03-23T04:44:53.692696+00:00"
+
+[targets."projectdiscovery--nuclei"]
+owner = "projectdiscovery"
+repo = "nuclei"
+reason = "Primary vuln scanner — new template features, output format changes, performance improvements"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["pkg/", "cmd/", "internal/"]
+exclude_paths = ["docs/", ".github/", "integration_tests/"]
+relevance_tags = [
+    "template-engine",
+    "output-format",
+    "scan-performance",
+    "new-protocols",
+]
+added_at = "2026-03-23T04:44:53.692689+00:00"
+
+[targets."projectdiscovery--nuclei-templates"]
+owner = "projectdiscovery"
+repo = "nuclei-templates"
+reason = "Vuln template updates — new CVEs, detection techniques"
+enabled = true
+watch_releases = true
+watch_commits = false
+branches = ["main", "master"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = ["new-cve-templates", "detection-techniques"]
+added_at = "2026-03-23T04:44:53.692692+00:00"
+
+[targets."projectdiscovery--subfinder"]
+owner = "projectdiscovery"
+repo = "subfinder"
+reason = "Subdomain enumeration — new sources, API changes"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["v2/pkg/", "v2/cmd/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = ["recon-sources", "api-changes", "output-format"]
+added_at = "2026-03-23T04:44:53.692694+00:00"
+
+[targets."prowler-cloud--prowler"]
+owner = "prowler-cloud"
+repo = "prowler"
+reason = "Cloud security — new checks, AWS/Azure/GCP coverage"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["prowler/providers/", "prowler/lib/"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = ["new-checks", "cloud-providers", "compliance-frameworks"]
+added_at = "2026-03-23T04:44:53.692703+00:00"
+
+[targets."redcanaryco--atomic-red-team"]
+owner = "redcanaryco"
+repo = "atomic-red-team"
+reason = "ATT&CK TTP test cases — new techniques and detection coverage"
+enabled = true
+watch_releases = true
+watch_commits = false
+branches = ["main", "master"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "mitre-attack",
+    "ttp",
+    "detection",
+    "testing",
+]
+added_at = "2026-03-23T04:44:53.692720+00:00"
+
+[targets."six2dez--reconftw"]
+owner = "six2dez"
+repo = "reconftw"
+reason = "All-in-one recon pipeline — tool chain orchestration patterns"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = ["reconftw.sh"]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "recon",
+    "pipeline",
+    "automation",
+    "all-in-one",
+]
+added_at = "2026-03-23T04:44:53.692714+00:00"
+
+[targets."trufflesecurity--trufflehog"]
+owner = "trufflesecurity"
+repo = "trufflehog"
+reason = "Secrets detection — new detectors, output format"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = [
+    "p",
+    "k",
+    "g",
+    "/",
+]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = ["new-detectors", "output-format", "verification"]
+added_at = "2026-03-23T04:44:53.692701+00:00"
+
+[targets."usestrix--strix"]
+owner = "usestrix"
+repo = "strix"
+reason = "AI agent pentest framework — architecture, agent patterns, vuln dedup, scan modes"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = [
+    "src/",
+    "strix/",
+    "agents/",
+    "lib/",
+]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "agent-architecture",
+    "vuln-dedup",
+    "scan-mode",
+    "browser-automation",
+    "ci-integration",
+    "report-generation",
+]
+added_at = "2026-03-23T04:44:53.692435+00:00"
+
+[targets."vxcontrol--pentagi"]
+owner = "vxcontrol"
+repo = "pentagi"
+reason = "Multi-agent pentest system — knowledge graph, memory system, sandboxed execution"
+enabled = true
+watch_releases = true
+watch_commits = true
+branches = ["main", "master"]
+include_paths = [
+    "backend/",
+    "internal/",
+    "pkg/",
+    "cmd/",
+]
+exclude_paths = [
+    "docs/",
+    ".github/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    ".gitignore",
+]
+relevance_tags = [
+    "knowledge-graph",
+    "multi-agent",
+    "memory-system",
+    "sandboxed-execution",
+    "tool-orchestration",
+]
+added_at = "2026-03-23T04:44:53.692682+00:00"

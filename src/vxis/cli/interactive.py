@@ -111,10 +111,11 @@ PROFILES = {
 # ── 배너 ────────────────────────────────────────────────────────
 
 _BANNER = r"""
- _   ___  _____ ____
-| | / / |/ /  _/ __/
-| |/ /|   // /_\ \
-|___/_|_/___/___/
+__     __ __  __ ___  ____
+\ \   / / \ \/ /|_ _|/ ___|
+ \ \ / /   \  /  | | \___ \
+  \ V /    /  \ _| |_ ___) |
+   \_/    /_/\_\_____|____/
 """
 
 
@@ -576,7 +577,145 @@ def _execute_scan(params: dict) -> None:
 
 def _show_results(params: dict) -> None:
     """스캔 결과 조회."""
-    console.print("[dim]결과 조회 기능은 대시보드에서 확인하세요: vxis dashboard[/dim]")
+    import asyncio
+
+    from vxis.config.schema import VXISConfig
+    from vxis.core.db import create_engine, get_session
+    from vxis.models.db_models import FindingRecord, ScanRecord
+
+    config = VXISConfig()
+    db_url = config.db_url
+    if ":///" in db_url:
+        prefix, path = db_url.split("///", 1)
+        from pathlib import Path as P
+        db_url = f"{prefix}///{P(path).expanduser()}"
+
+    async def _query():
+        from sqlalchemy import func, select
+
+        engine = create_engine(db_url)
+
+        try:
+            async with get_session(engine) as session:
+                if params["action"] == "by_id":
+                    # 특정 스캔 상세 조회
+                    scan_id = int(params["scan_id"])
+                    scan_r = await session.execute(
+                        select(ScanRecord).where(ScanRecord.id == scan_id)
+                    )
+                    scan = scan_r.scalar_one_or_none()
+                    if scan is None:
+                        console.print(f"[red]스캔 ID {scan_id}를 찾을 수 없습니다.[/red]")
+                        return
+
+                    findings_r = await session.execute(
+                        select(FindingRecord).where(FindingRecord.scan_id == scan_id)
+                    )
+                    findings = list(findings_r.scalars().all())
+
+                    # 스캔 정보
+                    info = Table.grid(padding=(0, 2))
+                    info.add_column(style="bold", width=14)
+                    info.add_column()
+                    info.add_row("\U0001f3af 대상:", f"[cyan]{scan.target}[/cyan]")
+                    info.add_row("\U0001f4cb 프로필:", f"[yellow]{scan.profile}[/yellow]")
+                    info.add_row("\U0001f4c5 시작:", str(scan.started_at))
+                    info.add_row("\u2705 상태:", f"[green]{scan.status}[/green]")
+                    info.add_row("\U0001f50d 발견:", f"[bold]{len(findings)}[/bold]개")
+                    console.print(Panel(info, title=f"스캔 #{scan_id}", border_style="blue"))
+
+                    if findings:
+                        # Severity 테이블
+                        sev_table = Table(
+                            show_header=True, header_style="bold",
+                            border_style="green", expand=False,
+                        )
+                        sev_table.add_column("심각도", no_wrap=True)
+                        sev_table.add_column("건수", justify="right")
+                        sev_table.add_column("주요 항목")
+
+                        sev_colors = {
+                            "critical": "bold red", "high": "red",
+                            "medium": "yellow", "low": "blue", "informational": "dim",
+                        }
+                        sev_kr = {
+                            "critical": "심각", "high": "높음",
+                            "medium": "중간", "low": "낮음", "informational": "정보",
+                        }
+
+                        by_sev: dict[str, list] = {}
+                        for f in findings:
+                            s = f.effective_severity.lower()
+                            by_sev.setdefault(s, []).append(f)
+
+                        for sev in ["critical", "high", "medium", "low", "informational"]:
+                            items = by_sev.get(sev, [])
+                            if not items:
+                                continue
+                            style = sev_colors.get(sev, "")
+                            titles = ", ".join(f.title[:40] for f in items[:3])
+                            if len(items) > 3:
+                                titles += f" (+{len(items) - 3})"
+                            sev_table.add_row(
+                                f"[{style}]{sev_kr.get(sev, sev)}[/{style}]",
+                                f"[{style}]{len(items)}[/{style}]",
+                                titles,
+                            )
+
+                        console.print(sev_table)
+
+                else:
+                    # 최근 스캔 목록
+                    scans_r = await session.execute(
+                        select(ScanRecord).order_by(ScanRecord.started_at.desc()).limit(15)
+                    )
+                    scans = list(scans_r.scalars().all())
+
+                    if not scans:
+                        console.print("[yellow]스캔 기록이 없습니다.[/yellow]")
+                        return
+
+                    table = Table(
+                        title="\U0001f4cb 최근 스캔 목록",
+                        show_header=True, header_style="bold",
+                        border_style="cyan", expand=False,
+                    )
+                    table.add_column("ID", style="bold cyan", no_wrap=True)
+                    table.add_column("대상", no_wrap=True)
+                    table.add_column("프로필", no_wrap=True)
+                    table.add_column("상태", no_wrap=True)
+                    table.add_column("발견", justify="right")
+                    table.add_column("시간", no_wrap=True)
+
+                    for s in scans:
+                        count_r = await session.execute(
+                            select(func.count(FindingRecord.id)).where(
+                                FindingRecord.scan_id == s.id
+                            )
+                        )
+                        count = count_r.scalar_one_or_none() or 0
+
+                        status_style = "green" if s.status == "completed" else "red"
+                        time_str = s.started_at.strftime("%m-%d %H:%M") if s.started_at else "—"
+
+                        table.add_row(
+                            str(s.id),
+                            s.target,
+                            s.profile,
+                            f"[{status_style}]{s.status}[/{status_style}]",
+                            str(count),
+                            time_str,
+                        )
+
+                    console.print(table)
+                    console.print("[dim]상세 조회: 스캔 결과 조회 → 스캔 ID로 조회[/dim]")
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_query())
+    except Exception as exc:
+        console.print(f"[red]조회 실패:[/red] {exc}")
 
 
 def _generate_report(params: dict) -> None:

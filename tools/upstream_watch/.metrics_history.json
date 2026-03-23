@@ -1,0 +1,22 @@
+{
+  "projectdiscovery/nuclei": [
+    {
+      "repo": "projectdiscovery/nuclei",
+      "stars": 27575,
+      "forks": 3319,
+      "open_issues": 169,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-23"
+    }
+  ],
+  "usestrix/strix": [
+    {
+      "repo": "usestrix/strix",
+      "stars": 21107,
+      "forks": 2230,
+      "open_issues": 74,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-23"
+    }
+  ]
+}
