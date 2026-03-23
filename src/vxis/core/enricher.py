@@ -13,7 +13,8 @@ from __future__ import annotations
 import json
 from importlib import resources
 
-from vxis.models.finding import CVSSVector, Finding, MitreAttack, Severity
+from vxis.knowledge.kb import VulnKB, get_vuln_kb
+from vxis.models.finding import CVSSVector, Finding, MitreAttack, Reference, Severity
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +132,15 @@ _SEVERITY_CVSS_VECTOR: dict[Severity, str] = {
 class FindingEnricher:
     """Enriches findings with CVSS, MITRE, compliance, and remediation metadata."""
 
+    def __init__(self, vuln_kb: VulnKB | None = None) -> None:
+        """Initialize the enricher.
+
+        Args:
+            vuln_kb: Optional ``VulnKB`` instance.  When ``None`` the
+                     module-level singleton from :func:`get_vuln_kb` is used.
+        """
+        self._kb = vuln_kb or get_vuln_kb()
+
     def enrich(self, findings: list[Finding]) -> list[Finding]:
         """Run all enrichment steps on each finding.
 
@@ -147,6 +157,7 @@ class FindingEnricher:
             self._enrich_mitre(finding)
             self._enrich_compliance(finding)
             self._enrich_remediation(finding)
+            self._enrich_from_kb(finding)
         return findings
 
     # ------------------------------------------------------------------
@@ -255,3 +266,59 @@ class FindingEnricher:
             )
 
         finding.remediation = template
+
+    # ------------------------------------------------------------------
+    # Knowledge-base enrichment
+    # ------------------------------------------------------------------
+
+    def _enrich_from_kb(self, finding: Finding) -> None:
+        """Augment the finding with data from the vulnerability knowledge base.
+
+        Adds CWE IDs, reference links, and (if remediation was not set by
+        the template step) a more detailed remediation string built from the
+        KB's structured remediation steps.
+
+        This is additive: existing CWE IDs and references are preserved;
+        only new values are appended.
+
+        Args:
+            finding: Finding to enrich in-place.
+        """
+        # Try finding_type first, then title as a fallback search
+        info = self._kb.get_remediation(finding.finding_type)
+        if info is None:
+            # Attempt a keyword search against the title
+            results = self._kb.search(finding.finding_type)
+            if not results:
+                results = self._kb.search(finding.title)
+            if results:
+                info = results[0]
+
+        if info is None:
+            return
+
+        # --- CWE IDs ---
+        if info.cwe_id and info.cwe_id not in finding.cwe_ids:
+            finding.cwe_ids.append(info.cwe_id)
+
+        # --- References ---
+        existing_urls = {ref.url for ref in finding.references}
+        for url in info.references:
+            if url not in existing_urls:
+                finding.references.append(
+                    Reference(title=f"{info.title} reference", url=url)
+                )
+                existing_urls.add(url)
+
+        # --- Remediation (override generic template with detailed KB steps) ---
+        kb_remediation = " ".join(
+            f"({i}) {step}" for i, step in enumerate(info.remediation_steps, 1)
+        )
+        # Replace the generic template-based remediation with the richer KB version
+        if finding.remediation is not None:
+            # Only replace if the current remediation came from the generic template
+            generic = REMEDIATION_TEMPLATES.get(finding.finding_type)
+            if finding.remediation == generic:
+                finding.remediation = kb_remediation
+        else:
+            finding.remediation = kb_remediation
