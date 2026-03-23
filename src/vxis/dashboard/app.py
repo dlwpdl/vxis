@@ -56,21 +56,27 @@ templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 # Token-based authentication middleware
 # ---------------------------------------------------------------------------
 
-# Read the dashboard token from the environment at import time.
-# Using os.environ directly keeps this simple; the canonical VXISConfig field
-# is ``dashboard_token`` (env var ``VXIS_DASHBOARD_TOKEN``).
-_DASHBOARD_TOKEN: str | None = os.environ.get("VXIS_DASHBOARD_TOKEN") or None
-
 # Paths that are always accessible without a token.
 _PUBLIC_PATHS: set[str] = {"/health", "/login"}
+
+
+def _get_dashboard_token() -> str | None:
+    """Return the configured dashboard token, or None if auth is disabled.
+
+    Reads from ``VXIS_DASHBOARD_TOKEN`` env var each time so that tests
+    (or runtime config changes) take effect without restarting.
+    """
+    return os.environ.get("VXIS_DASHBOARD_TOKEN") or None
 
 
 class _TokenAuthMiddleware(BaseHTTPMiddleware):
     """Require a Bearer token or ``?token=`` query param when a dashboard token is configured."""
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
+        token = _get_dashboard_token()
+
         # If no token is configured, auth is disabled — pass everything through.
-        if _DASHBOARD_TOKEN is None:
+        if token is None:
             return await call_next(request)
 
         path = request.url.path
@@ -81,12 +87,12 @@ class _TokenAuthMiddleware(BaseHTTPMiddleware):
 
         # Check Authorization header (Bearer <token>).
         auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer ") and auth_header[7:] == _DASHBOARD_TOKEN:
+        if auth_header.startswith("Bearer ") and auth_header[7:] == token:
             return await call_next(request)
 
         # Check query parameter ``?token=<token>``.
         query_token = request.query_params.get("token")
-        if query_token == _DASHBOARD_TOKEN:
+        if query_token == token:
             return await call_next(request)
 
         # Unauthenticated — decide between JSON 401 or redirect to login page.
@@ -587,7 +593,7 @@ async def client_detail(request: Request, client_id: str) -> HTMLResponse:
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: str | None = Query(None)) -> HTMLResponse:
     """Simple login page that asks for the dashboard token."""
-    if _DASHBOARD_TOKEN is None:
+    if _get_dashboard_token() is None:
         return RedirectResponse(url="/", status_code=303)  # type: ignore[return-value]
     return templates.TemplateResponse(
         request,
@@ -602,13 +608,15 @@ async def login_submit(request: Request) -> RedirectResponse:
     form = await request.form()
     submitted_token = form.get("token", "")
 
-    if _DASHBOARD_TOKEN is None:
+    token = _get_dashboard_token()
+
+    if token is None:
         return RedirectResponse(url="/", status_code=303)
 
-    if submitted_token == _DASHBOARD_TOKEN:
+    if submitted_token == token:
         # Redirect with the token as a query parameter so the middleware allows it.
         # For a simple internal tool this is acceptable; the token stays in the URL.
-        return RedirectResponse(url=f"/?token={_DASHBOARD_TOKEN}", status_code=303)
+        return RedirectResponse(url=f"/?token={token}", status_code=303)
 
     return RedirectResponse(url="/login?error=invalid", status_code=303)
 

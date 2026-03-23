@@ -124,6 +124,7 @@ class ScanOrchestrator:
         self.config = config
         self.event_bus = event_bus or ScanEventBus()
         self.audit_logger = AuditLogger(config.data_dir / "audit.jsonl")
+        self.rate_limiter = GlobalRateLimiter()
 
     # ------------------------------------------------------------------
     # Public API
@@ -236,7 +237,14 @@ class ScanOrchestrator:
             plugin_count=len(registry),
         ))
 
-        # --- 6. Execute DAG ---
+        # --- 6. Configure rate limiter for this target ---
+        if scan_profile.rate_limit > 0:
+            self.rate_limiter.set_rate(target, scan_profile.rate_limit)
+        else:
+            # rate_limit=0 means unlimited; set rate to 0 so acquire() is a no-op
+            self.rate_limiter.set_rate(target, 0)
+
+        # --- 7. Execute DAG ---
         executor = DAGExecutor(
             dag_nodes,
             max_concurrency=scan_profile.max_concurrency,
