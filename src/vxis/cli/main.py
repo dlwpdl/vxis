@@ -390,7 +390,11 @@ def report(
         from vxis.report.generator import ReportData, ReportGenerator
 
         config = _get_config()
-        engine = create_engine(config.db_url)
+        db_url = config.db_url
+        if ":///" in db_url:
+            _pfx, _path = db_url.split("///", 1)
+            db_url = f"{_pfx}///{Path(_path).expanduser()}"
+        engine = create_engine(db_url)
 
         async with get_session(engine) as session:
             # Look up the scan record
@@ -664,7 +668,11 @@ def export(
         from vxis.report.generator import ReportData
 
         config = _get_config()
-        engine = create_engine(config.db_url)
+        db_url = config.db_url
+        if ":///" in db_url:
+            _pfx, _path = db_url.split("///", 1)
+            db_url = f"{_pfx}///{Path(_path).expanduser()}"
+        engine = create_engine(db_url)
 
         async with get_session(engine) as session:
             result = await session.execute(

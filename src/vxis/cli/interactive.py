@@ -402,7 +402,65 @@ def results_menu() -> dict | None:
 # ── 리포트 메뉴 ────────────────────────────────────────────────
 
 def report_menu() -> dict | None:
-    """리포트 생성/내보내기 메뉴."""
+    """리포트 생성/내보내기 메뉴. 최근 스캔 목록을 먼저 보여줌."""
+    import asyncio
+
+    # 최근 스캔 목록 표시
+    try:
+        from vxis.config.schema import VXISConfig
+        from vxis.core.db import create_engine as _ce, get_session as _gs
+        from vxis.models.db_models import FindingRecord, ScanRecord
+        from sqlalchemy import func, select
+
+        config = VXISConfig()
+        db_url = config.db_url
+        if ":///" in db_url:
+            prefix, path = db_url.split("///", 1)
+            from pathlib import Path as _P
+            db_url = f"{prefix}///{_P(path).expanduser()}"
+
+        async def _list_scans():
+            engine = _ce(db_url)
+            try:
+                async with _gs(engine) as session:
+                    r = await session.execute(
+                        select(ScanRecord).order_by(ScanRecord.started_at.desc()).limit(10)
+                    )
+                    scans = list(r.scalars().all())
+                    scan_info = []
+                    for s in scans:
+                        cr = await session.execute(
+                            select(func.count(FindingRecord.id)).where(FindingRecord.scan_id == s.id)
+                        )
+                        count = cr.scalar_one_or_none() or 0
+                        time_str = s.started_at.strftime("%m-%d %H:%M") if s.started_at else "—"
+                        scan_info.append((s.id, s.target, s.profile, count, time_str))
+                    return scan_info
+            finally:
+                await engine.dispose()
+
+        scans = asyncio.run(_list_scans())
+        if scans:
+            table = Table(
+                title="\U0001f4cb 최근 스캔 목록",
+                show_header=True, header_style="bold",
+                border_style="cyan", expand=False,
+            )
+            table.add_column("ID", style="bold cyan")
+            table.add_column("대상")
+            table.add_column("프로필")
+            table.add_column("발견", justify="right")
+            table.add_column("시간")
+            for sid, target, profile, count, time_str in scans:
+                table.add_row(str(sid), target, profile, str(count), time_str)
+            console.print(table)
+            console.print()
+        else:
+            console.print("[yellow]스캔 기록이 없습니다.[/yellow]")
+            return None
+    except Exception:
+        pass  # DB 연결 실패 시 ID 직접 입력으로 진행
+
     scan_id = inquirer.text(
         message="리포트를 생성할 스캔 ID를 입력하세요",
         qmark="\U0001f4c4",
