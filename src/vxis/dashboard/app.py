@@ -57,6 +57,16 @@ _TEMPLATE_DIR = Path(__file__).parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 
 # ---------------------------------------------------------------------------
+# Include sub-routers (client CRUD, KB browser, export, trends)
+# ---------------------------------------------------------------------------
+
+from vxis.dashboard.routes_extra import router as _extra_router  # noqa: E402
+from vxis.dashboard.routes_trend import router as _trend_router  # noqa: E402
+
+app.include_router(_extra_router)
+app.include_router(_trend_router)
+
+# ---------------------------------------------------------------------------
 # Token-based authentication middleware
 # ---------------------------------------------------------------------------
 
