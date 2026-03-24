@@ -36,11 +36,9 @@ class ShodanPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        return (
-            f"shodan search hostname:{target}"
-            " --fields ip_str,port,org,os,product"
-            r" --separator \t"
-        )
+        # Resolve target to IP, then use 'shodan host' (works with free API).
+        # 'shodan search/domain' requires a paid plan.
+        return f"shodan host $(dig +short {target} A | head -1)"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         # Require SHODAN_API_KEY — skip gracefully if absent.
