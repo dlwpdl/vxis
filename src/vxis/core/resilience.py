@@ -49,7 +49,7 @@ class RetryConfig:
     max_retries: int = 2
     backoff_base: float = 5.0
     backoff_multiplier: float = 2.0
-    retryable_exit_codes: tuple[int, ...] = field(default_factory=lambda: (1, 137))
+    retryable_exit_codes: tuple[int, ...] = field(default_factory=lambda: (137, 143))
 
     def is_retryable(self, exit_code: int) -> bool:
         """Return True if *exit_code* warrants a retry attempt."""

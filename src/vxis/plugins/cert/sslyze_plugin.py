@@ -59,21 +59,28 @@ class SSLyzePlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        # Read live HTTPS hosts discovered by the upstream httpx plugin
-        live_hosts: list[str] = ctx.get_data("httpx", "live_hosts", [])
+        # Read live HTTPS hosts discovered by the upstream httpx plugin.
+        # live_hosts may be a list of strings (URLs) or dicts (JSON records).
+        live_hosts_raw = ctx.get_data("httpx", "live_hosts", [])
 
         # Filter to HTTPS-only hosts and format as host:port
         https_hosts: list[str] = []
-        for host in live_hosts:
+        for entry in live_hosts_raw:
+            # Normalise: extract URL string from dict or use directly
+            if isinstance(entry, dict):
+                host = entry.get("url", entry.get("host", ""))
+            else:
+                host = str(entry)
+
+            if not host:
+                continue
+
             if host.startswith("https://"):
-                # Strip scheme, keep host:port
                 host_part = host.replace("https://", "").rstrip("/")
-                # Ensure port is present
                 if ":" not in host_part.split("/")[0]:
                     host_part = f"{host_part}:443"
                 https_hosts.append(host_part)
             elif ":" in host and not host.startswith("http"):
-                # Already in host:port format
                 https_hosts.append(host)
 
         # Fallback: scan the primary target directly
