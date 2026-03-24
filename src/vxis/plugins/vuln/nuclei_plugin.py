@@ -89,7 +89,7 @@ class NucleiPlugin(BasePlugin):
         return (
             f"nuclei -l {input_file} -severity {severity}"
             f" -tags {tags} -etags dos,fuzz"
-            f" -rate-limit {rate} -json -irr -silent"
+            f" -rate-limit {rate} -jsonl -irr -silent"
             f" -header 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)'"
         )
 
