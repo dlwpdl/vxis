@@ -19,6 +19,14 @@ console = Console()
 # ── 스캔 카테고리 정의 ──────────────────────────────────────────
 
 SCAN_CATEGORIES = {
+    "ai_auto": {
+        "name": "AI 자율 스캔 (Agent Mode)",
+        "icon": "\U0001f9e0",
+        "desc": "AI 에이전트가 자율적으로 정찰→취약점→공격→검증 전 과정 수행",
+        "profile": "standard",
+        "plugins": None,  # agent decides
+        "agent_mode": True,
+    },
     "zero_touch": {
         "name": "제로터치 (Passive)",
         "icon": "\U0001f50d",
@@ -680,6 +688,11 @@ def _execute_scan(params: dict) -> None:
         datefmt="%H:%M:%S",
     )
 
+    # AI 자율 모드
+    if params.get("scan_type") == "ai_auto" or SCAN_CATEGORIES.get(params.get("scan_type", ""), {}).get("agent_mode"):
+        _execute_agent_scan(params)
+        return
+
     if params["scan_type"] == "batch":
         from pathlib import Path
         from vxis.cli.main import batch
@@ -1116,6 +1129,70 @@ def _client_menu() -> None:
         if client_id:
             from vxis.cli.main import client_show
             client_show(client_id=client_id.strip())
+
+
+def _execute_agent_scan(params: dict) -> None:
+    """AI 자율 에이전트 모드 실행."""
+    import asyncio
+
+    target = params["target"]
+    profile = params.get("profile", "standard")
+
+    console.print()
+    console.print(Panel(
+        f"[bold cyan]\U0001f9e0 VXIS AI Agent Mode[/bold cyan]\n\n"
+        f"\U0001f3af 타겟: [white]{target}[/white]\n"
+        f"\u26a1 프로필: [yellow]{profile}[/yellow]\n\n"
+        f"[dim]AI 에이전트가 자율적으로 정찰 → 분석 → 공격 → 검증을 수행합니다.\n"
+        f"각 단계마다 AI가 결과를 분석하고 다음 행동을 결정합니다.[/dim]",
+        title="\U0001f9e0 Autonomous Pentesting",
+        border_style="cyan",
+    ))
+    console.print()
+
+    from vxis.agent.executor import AgentExecutor
+    from vxis.agent.brain import AGENT_TEAMS
+
+    # Show team lineup
+    team_table = Table(title="\U0001f46a 에이전트 팀 구성", border_style="cyan", expand=True)
+    team_table.add_column("팀", style="bold cyan", min_width=12)
+    team_table.add_column("역할", min_width=20)
+    team_table.add_column("도구")
+
+    for team_id, team in AGENT_TEAMS.items():
+        team_table.add_row(
+            team["name"],
+            team["desc"],
+            ", ".join(team["tools"]),
+        )
+    console.print(team_table)
+    console.print()
+
+    try:
+        executor = AgentExecutor(max_steps=15)
+        result = asyncio.run(executor.run(target=target, profile=profile))
+
+        # Show results
+        console.print(f"\n[bold green]\u2705 AI 에이전트 스캔 완료[/bold green]")
+        console.print(f"  단계: {result.steps_taken}  |  발견: {len(result.findings)}건  |  시간: {result.duration_seconds:.0f}초")
+
+        if result.findings:
+            severity_colors = {
+                "critical": "bold red", "high": "red",
+                "medium": "yellow", "low": "blue", "informational": "dim",
+            }
+            for f in result.findings:
+                sev = f.severity.value
+                color = severity_colors.get(sev, "")
+                console.print(f"  [{color}][{sev}][/{color}] {f.title}")
+
+        # Show execution log
+        console.print(f"\n[dim]{result.execution_log[:1000]}[/dim]")
+
+    except Exception as exc:
+        console.print(f"\n[bold red]에이전트 스캔 실패:[/bold red] {exc}")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
 
 
 def _client_add_wizard() -> None:
