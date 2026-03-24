@@ -261,6 +261,30 @@ def show_status() -> None:
         f"총 {len(installed) + len(missing)}개"
     )
 
+    # Plugin flag validation — check for CLI compatibility issues
+    try:
+        from vxis.plugins.registry import discover_plugins
+        registry = discover_plugins()
+        console.print("\n[bold]🔍 플러그인 CLI 호환성 검증[/bold]")
+        all_warnings: list[str] = []
+        for name, plugin in sorted(registry.items()):
+            if not plugin.validate_environment():
+                continue
+            warnings = plugin.validate_flags()
+            version = plugin.get_tool_version()
+            if warnings:
+                for w in warnings:
+                    console.print(f"  [yellow]⚠ {w}[/yellow]")
+                    all_warnings.append(w)
+            else:
+                console.print(f"  [green]✓[/green] {name} (v{version}) — 모든 플래그 정상")
+        if not all_warnings:
+            console.print("  [green]모든 플러그인 호환성 확인 완료[/green]")
+        else:
+            console.print(f"\n  [yellow]⚠ {len(all_warnings)}개 경고 — 플러그인 업데이트 필요[/yellow]")
+    except Exception:
+        pass  # Registry import 실패 시 조용히 넘어감
+
 
 def install_missing(selected: list[str] | None = None) -> tuple[int, int]:
     """Install missing tools. Returns (success_count, fail_count)."""

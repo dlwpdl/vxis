@@ -139,6 +139,30 @@ def run_daily(
         f"{total_commits} commits, {total_releases} releases"
     )
 
+    # Phase 1b: Auto-validate VXIS plugins when wrapped tools have new releases
+    from .config import TOOL_PLUGIN_MAP
+    for changes in changes_list:
+        repo_name = f"{changes.target.owner}/{changes.target.repo}"
+        if repo_name in TOOL_PLUGIN_MAP and changes.releases:
+            plugin_name = TOOL_PLUGIN_MAP[repo_name]
+            latest = changes.releases[0].tag
+            print(f"[COMPAT] {repo_name} 새 릴리스 {latest} → {plugin_name} 플러그인 호환성 검증...")
+            try:
+                from vxis.plugins.registry import discover_plugins
+                registry = discover_plugins()
+                plugin = registry.get(plugin_name)
+                if plugin and plugin.validate_environment():
+                    warnings = plugin.validate_flags()
+                    if warnings:
+                        for w in warnings:
+                            print(f"    ⚠ {w}")
+                    else:
+                        print(f"    ✓ {plugin_name} 플래그 정상")
+                else:
+                    print(f"    — {plugin_name} 미설치, 검증 건너뜀")
+            except Exception as exc:
+                print(f"    — 검증 실패: {exc}")
+
     if repos_with_changes == 0:
         print("[SKIP] No changes detected. Nothing to analyze.")
         return 0

@@ -248,6 +248,20 @@ IMPORTANT LICENSE CONSTRAINT:
 """
 
 
+# ── Wrapped Tool → VXIS Plugin Mapping ──────────────────────────
+# When these repos release a new version, VXIS should validate
+# that the corresponding plugin's CLI flags are still compatible.
+
+TOOL_PLUGIN_MAP: dict[str, str] = {
+    "projectdiscovery/nuclei": "nuclei",
+    "projectdiscovery/httpx": "httpx",
+    "projectdiscovery/subfinder": "subfinder",
+    "aquasecurity/trivy": "trivy",
+    "trufflesecurity/trufflehog": "trufflehog",
+    "prowler-cloud/prowler": "prowler",
+}
+
+
 # ── Notification Config ──────────────────────────────────────────
 
 @dataclass
