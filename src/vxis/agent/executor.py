@@ -1,23 +1,17 @@
-"""VXIS Agent Executor — Master Agent가 하위 에이전트를 거느리는 자율 펜테스팅 엔진.
+"""VXIS Agent Executor — Phase 3 자율 펜테스팅 엔진.
 
-Architecture:
-    ┌──────────────────────────────────────┐
-    │  VXIS Master Agent (Brain/LLM)       │
-    │  "Master of Pentesting"              │
-    │                                      │
-    │  Observe → Think → Delegate → Report │
-    └──────────┬───────────┬───────────────┘
-               │           │
-    ┌──────────▼──┐ ┌──────▼──────┐ ┌────────────┐
-    │ Recon Agent │ │ Vuln Agent  │ │ Exploit    │
-    │ subfinder   │ │ nuclei      │ │ Agent      │
-    │ httpx       │ │ testssl     │ │ sqlmap     │
-    │ nmap        │ │ sslyze      │ │ ffuf       │
-    │ crtsh       │ │ checkdmarc  │ │ browser    │
-    └─────────────┘ └─────────────┘ └────────────┘
-
-Each sub-agent runs in parallel and reports back to the Master.
-The Master synthesizes findings and decides the next phase.
+Phase 3 Architecture:
+    ┌──────────────────────────────────────────────────────┐
+    │  VXIS Master Agent (Brain + Phase 3 Modules)         │
+    │                                                      │
+    │  Knowledge Store  ← 지식 축적 (쓸수록 강해짐)          │
+    │  Token Router     ← 비용 최적화 (원가 관리)            │
+    │  Context Compressor ← 90%+ 토큰 절약                 │
+    │  Chain Reasoner   ← 공격 체인 추론                    │
+    │  LLM Fallback     ← 정책 거부 시 자동 전환            │
+    │                                                      │
+    │  Perceive → Recall → Reason → Chain → Reflect → Act  │
+    └──────────────────────────────────────────────────────┘
 """
 
 from __future__ import annotations
@@ -74,14 +68,50 @@ class AgentExecutor:
     ) -> None:
         self._config = config or VXISConfig()
         self._event_bus = event_bus or ScanEventBus()
-        self._brain = AgentBrain(max_steps=max_steps)
         self._orchestrator = ScanOrchestrator(self._config, event_bus=self._event_bus)
         self._observation = AgentObservation(target="")
         self._all_findings: list[Finding] = []
 
+        # ── Phase 3 모듈 초기화 ────────────────────────────────
+        self._knowledge_store = None
+        self._compressor = None
+        self._token_router = None
+        self._chain_reasoner = None
+
+        try:
+            from vxis.knowledge.store import KnowledgeStore
+            self._knowledge_store = KnowledgeStore()
+        except Exception as exc:
+            logger.debug("KnowledgeStore 초기화 실패 (무시): %s", exc)
+
+        try:
+            from vxis.knowledge.compressor import ContextCompressor
+            self._compressor = ContextCompressor()
+        except Exception as exc:
+            logger.debug("ContextCompressor 초기화 실패 (무시): %s", exc)
+
+        try:
+            from vxis.llm.router import TokenRouter
+            self._token_router = TokenRouter()
+        except Exception as exc:
+            logger.debug("TokenRouter 초기화 실패 (무시): %s", exc)
+
+        try:
+            from vxis.graph.chain_reasoner import ChainReasoner
+            self._chain_reasoner = ChainReasoner()
+        except Exception as exc:
+            logger.debug("ChainReasoner 초기화 실패 (무시): %s", exc)
+
+        # Brain에 Phase 3 모듈 주입
+        self._brain = AgentBrain(
+            max_steps=max_steps,
+            knowledge_store=self._knowledge_store,
+            compressor=self._compressor,
+            token_router=self._token_router,
+            chain_reasoner=self._chain_reasoner,
+        )
+
         # ── Sandbox 초기화 ──────────────────────────────────────
-        # Docker가 사용 가능하면 모든 도구를 컨테이너 안에서 실행한다.
-        # 사용 불가 시 기존 direct subprocess 방식으로 폴백한다.
         self._sandbox_available: bool = DockerSandbox.is_available()
         self._sandbox_manager: SandboxManager | None = (
             get_sandbox_manager() if self._sandbox_available else None
@@ -141,6 +171,29 @@ class AgentExecutor:
         duration = (finished_at - started_at).total_seconds()
 
         execution_log = self._brain.get_execution_log()
+
+        # Phase 3: 토큰 사용량 리포트 첨부
+        if self._token_router is not None:
+            execution_log += "\n\n" + self._token_router.format_usage_report()
+
+        # Phase 3: 공격 체인 리포트 첨부
+        if self._chain_reasoner is not None:
+            chain_report = self._chain_reasoner.format_chains_for_brain()
+            if chain_report:
+                execution_log += "\n\n" + chain_report
+
+        # Phase 3: Knowledge Store 통계 첨부
+        if self._knowledge_store is not None:
+            try:
+                stats = self._knowledge_store.get_stats()
+                execution_log += (
+                    f"\n\n## Knowledge Store Stats\n"
+                    f"- 축적된 기록: {stats['total_records']}\n"
+                    f"- 컴파일된 패턴: {stats['compiled_patterns']}\n"
+                    f"- 상관관계 규칙: {stats['correlation_rules']}\n"
+                )
+            except Exception:
+                pass
 
         logger.info(
             "VXIS Agent 완료: %d단계, %d건 발견, %.0f초",

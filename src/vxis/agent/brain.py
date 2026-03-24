@@ -1,20 +1,21 @@
 """VXIS Agent Brain — AI-driven pentesting decision engine.
 
-The Brain is the core of VXIS's autonomous pentesting mode.
-It observes scan results, decides the next action, and coordinates
-tool execution in an iterative loop.
+Phase 3 Architecture:
+    ┌──────────────────────────────────────────────────────────┐
+    │  BRAIN (Cognitive Loop)                                   │
+    │                                                          │
+    │  1. PERCEIVE  — Context Compressor로 데이터 압축           │
+    │  2. RECALL    — Knowledge Store에서 패턴 매칭             │
+    │  3. REASON    — Token Router로 최적 모델 선택 → LLM 호출  │
+    │  4. CHAIN     — Chain Reasoner로 공격 체인 추론            │
+    │  5. REFLECT   — 전략 전환 필요 여부 판단                   │
+    │  6. ACT       — 실행할 도구 결정                          │
+    │  7. LEARN     — 결과를 Knowledge Store에 축적             │
+    └──────────────────────────────────────────────────────────┘
 
-Architecture:
-    Observe → Think → Act → Observe → Think → Act → ... → Report
-
-The LLM receives:
-    1. Target context (domain, tech stack, open ports)
-    2. Current findings (what we've found so far)
-    3. Available tools (what we can run)
-    4. Execution history (what we already ran)
-    → Returns: next action(s) to take
-
-Uses the same LLM provider abstraction as upstream_watch (Together.ai, Claude, etc.)
+    쓸수록 강해지는 구조:
+    - Day 1:   90% LLM, 10% 컴파일 패턴 → 비쌈
+    - Day 100: 10% LLM, 90% 컴파일 패턴 → 저렴 & 최강
 """
 
 from __future__ import annotations
@@ -30,6 +31,10 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from vxis.agent.memory import AgentMemory
+    from vxis.knowledge.store import KnowledgeStore
+    from vxis.knowledge.compressor import ContextCompressor
+    from vxis.llm.router import TokenRouter
+    from vxis.graph.chain_reasoner import ChainReasoner
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +227,10 @@ class AgentBrain:
         provider: str | None = None,
         model: str | None = None,
         memory: "AgentMemory | None" = None,
+        knowledge_store: "KnowledgeStore | None" = None,
+        compressor: "ContextCompressor | None" = None,
+        token_router: "TokenRouter | None" = None,
+        chain_reasoner: "ChainReasoner | None" = None,
     ) -> None:
         self.max_steps = max_steps
         self.steps: list[AgentStep] = []
@@ -229,53 +238,109 @@ class AgentBrain:
         self._provider = provider or os.environ.get("UPSTREAM_LLM_PROVIDER", "together")
         self._model = model or os.environ.get("UPSTREAM_LLM_MODEL", "")
         self._step_count = 0
-        self._memory = memory  # None이면 메모리 기능 비활성화
+        self._memory = memory
+        # Phase 3 모듈
+        self._knowledge_store = knowledge_store
+        self._compressor = compressor
+        self._token_router = token_router
+        self._chain_reasoner = chain_reasoner
+        self._reflection_interval = 5  # 매 N스텝마다 자기 평가
+        self._consecutive_no_findings = 0  # 연속 발견 없는 스텝 수
+        # LLM Fallback 체인 (정책 거부 대응)
+        self._fallback_providers = self._build_fallback_chain()
+
+    def _build_fallback_chain(self) -> list[dict[str, str]]:
+        """LLM Fallback 체인을 구성한다.
+
+        정책 거부 시 순차적으로 다음 모델로 전환.
+        순서: Opus → Sonnet → Haiku → Together → OpenAI → Gemini → DeepSeek
+        """
+        chain: list[dict[str, str]] = []
+
+        # Tier 1: Anthropic (기본)
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            chain.append({"provider": "anthropic", "model": "claude-opus-4-6"})
+            chain.append({"provider": "anthropic", "model": "claude-sonnet-4-6"})
+            chain.append({"provider": "anthropic", "model": "claude-haiku-4-5-20251001"})
+
+        # Tier 2: Together.ai (오픈소스 모델)
+        if os.environ.get("TOGETHER_API_KEY"):
+            chain.append({"provider": "together", "model": "moonshotai/Kimi-K2.5"})
+            chain.append({"provider": "together", "model": "Qwen/Qwen3-235B-A22B"})
+
+        # Tier 3: OpenAI
+        if os.environ.get("OPENAI_API_KEY"):
+            chain.append({"provider": "openai", "model": "gpt-4o"})
+            chain.append({"provider": "openai", "model": "gpt-4o-mini"})
+
+        # Tier 4: Google Gemini
+        if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
+            chain.append({"provider": "gemini", "model": "gemini-2.5-pro"})
+            chain.append({"provider": "gemini", "model": "gemini-2.5-flash"})
+
+        # Tier 5: DeepSeek (중국 모델, 보안 정책 느슨)
+        if os.environ.get("DEEPSEEK_API_KEY"):
+            chain.append({"provider": "deepseek", "model": "deepseek-chat"})
+            chain.append({"provider": "deepseek", "model": "deepseek-reasoner"})
+
+        return chain
 
     def think(self, observation: AgentObservation) -> list[AgentAction]:
-        """Given current observations, decide next actions via LLM."""
+        """Phase 3 인지 루프: Perceive → Recall → Reason → Chain → Reflect → Act.
+
+        기존 think()를 대체하며, 컴파일된 패턴이 있으면 LLM 호출을 건너뛴다.
+        """
         if self.is_done or self._step_count >= self.max_steps:
             self.is_done = True
             return []
 
         self._step_count += 1
 
-        # Build available tools description
+        # ── Step 1: RECALL — 컴파일된 패턴 매칭 (LLM 호출 없이) ──
+        compiled_actions = self._try_compiled_patterns(observation)
+        if compiled_actions:
+            logger.info(
+                "Step %d: 컴파일 패턴 매칭 — LLM 호출 생략 (%s)",
+                self._step_count,
+                ", ".join(a.tool for a in compiled_actions),
+            )
+            self._record_step(observation, compiled_actions)
+            return compiled_actions
+
+        # ── Step 2: REFLECT — 전략 전환 필요 여부 (매 N스텝) ──
+        if self._step_count % self._reflection_interval == 0:
+            self._reflect(observation)
+
+        # ── Step 3: REASON — LLM 호출 (Token Router 사용) ──
         tools_text = "\n".join(
             f"  - {name}: {desc}" for name, desc in TOOL_DESCRIPTIONS.items()
         )
-
         system = AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)
 
-        # Build user prompt with current state + memory context
-        memory_context = self._build_memory_context(
-            observation.target, observation.tech_stack
-        )
-        user_prompt = self._build_observation_prompt(observation, memory_context)
+        # Knowledge Store + Memory + Chain Reasoner 컨텍스트 통합
+        enriched_context = self._build_enriched_context(observation)
+        user_prompt = self._build_observation_prompt(observation, enriched_context)
 
-        # Call LLM
-        response = self._call_llm(system, user_prompt)
+        # LLM 호출 (Fallback 체인 적용)
+        response = self._call_llm_with_fallback(system, user_prompt)
         if response is None:
-            logger.warning("LLM call failed at step %d", self._step_count)
+            logger.warning("모든 LLM 호출 실패 at step %d", self._step_count)
             self.is_done = True
             return []
 
-        # Parse actions
         actions = self._parse_response(response)
+
+        # ── Step 4: CHAIN — 공격 체인 추론 결과로 추가 액션 ──
+        chain_actions = self._get_chain_driven_actions()
+        if chain_actions:
+            actions.extend(chain_actions)
 
         # Check for DONE
         if any(a.tool == "DONE" for a in actions):
             self.is_done = True
             actions = [a for a in actions if a.tool == "DONE"]
 
-        # Record step
-        step = AgentStep(
-            step_number=self._step_count,
-            observation_summary=f"Findings: {len(observation.findings)}, "
-            f"Ports: {len(observation.open_ports)}, "
-            f"Tools run: {len(observation.executed_tools)}",
-            actions=actions,
-        )
-        self.steps.append(step)
+        self._record_step(observation, actions)
 
         logger.info(
             "Step %d: %d action(s) — %s",
@@ -287,7 +352,7 @@ class AgentBrain:
         return actions
 
     def record_result(self, action: AgentAction, result: dict[str, Any]) -> None:
-        """Record the result of an executed action."""
+        """결과 기록 + Knowledge Store 학습 + Chain Reasoner 업데이트."""
         if self.steps:
             self.steps[-1].results.append({
                 "tool": action.tool,
@@ -295,6 +360,429 @@ class AgentBrain:
                 "findings_count": result.get("findings_count", 0),
                 "success": result.get("success", True),
             })
+
+        # 연속 발견 없음 추적
+        if result.get("findings_count", 0) > 0:
+            self._consecutive_no_findings = 0
+        else:
+            self._consecutive_no_findings += 1
+
+        # ── Knowledge Store 학습 ──
+        self._learn_from_result(action, result)
+
+    # ── Phase 3: Compiled Pattern Matching ───────────────────────
+
+    def _try_compiled_patterns(
+        self, observation: AgentObservation,
+    ) -> list[AgentAction]:
+        """Knowledge Store에서 컴파일된 패턴을 매칭하여 LLM 없이 판단."""
+        if self._knowledge_store is None:
+            return []
+
+        try:
+            from vxis.knowledge.store import KnowledgeStore
+
+            context_sig = KnowledgeStore.build_context_signature(
+                tech_stack=observation.tech_stack,
+                open_ports=[
+                    p.get("port", 0) for p in observation.open_ports
+                    if isinstance(p.get("port"), int)
+                ],
+            )
+
+            patterns = self._knowledge_store.match_patterns(context_sig)
+
+            # 이미 실행한 도구는 제외
+            executed = {t.get("tool") for t in observation.executed_tools}
+
+            actions = []
+            for pattern in patterns:
+                if (
+                    pattern.confidence >= 0.85
+                    and pattern.action_tool not in executed
+                ):
+                    actions.append(AgentAction(
+                        tool=pattern.action_tool,
+                        args=pattern.action_args,
+                        reasoning=f"[컴파일 패턴] {pattern.reasoning}",
+                        priority="high",
+                    ))
+
+            return actions[:3]  # 최대 3개
+        except Exception as exc:
+            logger.debug("컴파일 패턴 매칭 실패 (무시): %s", exc)
+            return []
+
+    # ── Phase 3: Reflection ──────────────────────────────────────
+
+    def _reflect(self, observation: AgentObservation) -> None:
+        """자기 평가: 전략 전환이 필요한지 판단한다."""
+        # 5스텝 연속 발견 없으면 전략 전환 시그널
+        if self._consecutive_no_findings >= 4:
+            logger.info(
+                "반성: %d스텝 연속 발견 없음 — 전략 전환 필요",
+                self._consecutive_no_findings,
+            )
+            # 남은 스텝이 적으면 종료
+            remaining = self.max_steps - self._step_count
+            if remaining <= 2:
+                self.is_done = True
+
+    # ── Phase 3: Enriched Context ────────────────────────────────
+
+    def _build_enriched_context(self, observation: AgentObservation) -> str:
+        """모든 Phase 3 모듈의 컨텍스트를 통합하여 LLM 프롬프트를 풍부하게 만든다."""
+        parts: list[str] = []
+
+        # 1. 기존 Memory 컨텍스트
+        memory_ctx = self._build_memory_context(
+            observation.target, observation.tech_stack
+        )
+        if memory_ctx:
+            parts.append(memory_ctx)
+
+        # 2. Knowledge Store 컨텍스트 (컴파일된 지식, 추천 도구, 상관관계)
+        if self._knowledge_store is not None:
+            try:
+                from vxis.knowledge.store import KnowledgeStore
+
+                context_sig = KnowledgeStore.build_context_signature(
+                    tech_stack=observation.tech_stack,
+                    open_ports=[
+                        p.get("port", 0) for p in observation.open_ports
+                        if isinstance(p.get("port"), int)
+                    ],
+                )
+                ks_ctx = self._knowledge_store.format_for_brain(
+                    context_sig, observation.tech_stack
+                )
+                if ks_ctx:
+                    parts.append(ks_ctx)
+            except Exception as exc:
+                logger.debug("Knowledge Store 컨텍스트 실패 (무시): %s", exc)
+
+        # 3. Chain Reasoner 컨텍스트 (발견된 체인, 완성 가능 체인)
+        if self._chain_reasoner is not None:
+            try:
+                chain_ctx = self._chain_reasoner.format_chains_for_brain()
+                if chain_ctx:
+                    parts.append(chain_ctx)
+            except Exception as exc:
+                logger.debug("Chain Reasoner 컨텍스트 실패 (무시): %s", exc)
+
+        # 4. 반성 컨텍스트
+        if self._consecutive_no_findings >= 3:
+            parts.append(
+                f"\n## 주의: {self._consecutive_no_findings}스텝 연속 발견 없음"
+                "\n다른 공격 벡터나 도구로 전략을 전환하세요."
+            )
+
+        return "\n\n".join(parts)
+
+    # ── Phase 3: Chain-driven Actions ────────────────────────────
+
+    def _get_chain_driven_actions(self) -> list[AgentAction]:
+        """Chain Reasoner의 가설에서 추가 액션을 생성한다."""
+        if self._chain_reasoner is None:
+            return []
+
+        try:
+            hypotheses = self._chain_reasoner.get_chain_hypotheses()
+            actions = []
+            for h in hypotheses[:2]:  # 최대 2개
+                # 체인 완성을 위한 탐색 도구 매핑
+                vuln_to_tool = {
+                    "ssrf": "nuclei",
+                    "sqli": "sqlmap",
+                    "info_disclosure": "ffuf",
+                    "redis_noauth": "nmap",
+                    "mongodb_noauth": "nmap",
+                    "cloud_metadata": "nuclei",
+                    "xss": "nuclei",
+                    "secret_exposure": "trufflehog",
+                }
+                tool = vuln_to_tool.get(
+                    h.get("missing_vuln_type", ""),
+                    "nuclei",
+                )
+                actions.append(AgentAction(
+                    tool=tool,
+                    args={},
+                    reasoning=f"[체인 추론] {h['rationale']}",
+                    priority="high",
+                ))
+            return actions
+        except Exception as exc:
+            logger.debug("체인 기반 액션 생성 실패 (무시): %s", exc)
+            return []
+
+    # ── Phase 3: Learning from Results ───────────────────────────
+
+    def _learn_from_result(
+        self, action: AgentAction, result: dict[str, Any],
+    ) -> None:
+        """실행 결과를 Knowledge Store에 축적한다."""
+        if self._knowledge_store is None:
+            return
+
+        try:
+            from vxis.knowledge.store import ExecutionRecord, KnowledgeStore
+
+            # 현재 관찰에서 tech_stack 가져오기
+            tech_stack = (
+                self.steps[-1].observation_summary
+                if self.steps
+                else ""
+            )
+
+            findings_count = result.get("findings_count", 0)
+            effectiveness = min(1.0, findings_count * 0.3) if findings_count > 0 else 0.0
+
+            record = ExecutionRecord(
+                tool=action.tool,
+                context_signature="",  # Executor에서 설정
+                args_summary=json.dumps(action.args, ensure_ascii=False)[:100],
+                effectiveness=effectiveness,
+                findings_produced=findings_count,
+                finding_types=[],  # Executor에서 설정
+                target_tech=[],  # Executor에서 설정
+            )
+            self._knowledge_store.record_execution(record)
+        except Exception as exc:
+            logger.debug("Knowledge Store 학습 실패 (무시): %s", exc)
+
+    # ── Phase 3: LLM Fallback Chain ──────────────────────────────
+
+    def _call_llm_with_fallback(
+        self, system_prompt: str, user_prompt: str,
+    ) -> str | None:
+        """Fallback 체인을 사용하여 LLM 호출.
+
+        정책 거부(refusal) 시 다음 모델로 자동 전환.
+        """
+        # 먼저 기본 모델 시도
+        response = self._call_llm(system_prompt, user_prompt)
+        if response and not self._is_refusal(response):
+            return response
+
+        if response and self._is_refusal(response):
+            logger.warning(
+                "LLM 정책 거부 감지 (provider=%s) — fallback 시도",
+                self._provider,
+            )
+
+        # Fallback 체인 순회
+        for fallback in self._fallback_providers:
+            if (
+                fallback["provider"] == self._provider
+                and fallback["model"] == self._model
+            ):
+                continue  # 이미 시도한 모델 스킵
+
+            logger.info(
+                "Fallback: %s/%s 시도",
+                fallback["provider"], fallback["model"],
+            )
+
+            response = self._call_llm_direct(
+                system_prompt, user_prompt,
+                provider=fallback["provider"],
+                model=fallback["model"],
+            )
+
+            if response and not self._is_refusal(response):
+                logger.info(
+                    "Fallback 성공: %s/%s",
+                    fallback["provider"], fallback["model"],
+                )
+                return response
+
+            if response and self._is_refusal(response):
+                logger.warning(
+                    "Fallback도 거부: %s/%s — 다음 시도",
+                    fallback["provider"], fallback["model"],
+                )
+
+        logger.error("모든 LLM fallback 실패")
+        return None
+
+    @staticmethod
+    def _is_refusal(response: str) -> bool:
+        """LLM 응답이 정책 거부인지 판단."""
+        refusal_patterns = [
+            "I cannot assist",
+            "I can't help with",
+            "I'm not able to",
+            "I must decline",
+            "against my guidelines",
+            "unable to provide",
+            "ethical guidelines",
+            "I apologize, but I cannot",
+            "도움을 드릴 수 없",
+            "지원할 수 없",
+            "보안 정책",
+        ]
+        response_lower = response.lower()
+        return any(pattern.lower() in response_lower for pattern in refusal_patterns)
+
+    def _call_llm_direct(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        provider: str = "",
+        model: str = "",
+    ) -> str | None:
+        """특정 provider/model을 지정하여 LLM 호출."""
+        provider = provider or self._provider
+        model = model or self._model
+
+        if provider == "anthropic":
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if api_key:
+                return self._call_anthropic(api_key, system_prompt, user_prompt)
+        elif provider == "gemini":
+            return self._call_gemini(system_prompt, user_prompt, model)
+        elif provider == "deepseek":
+            return self._call_deepseek(system_prompt, user_prompt, model)
+        elif provider in ("together", "openai"):
+            return self._call_openai_compatible(
+                system_prompt, user_prompt, provider, model
+            )
+
+        return None
+
+    def _call_openai_compatible(
+        self,
+        system: str,
+        user: str,
+        provider: str,
+        model: str,
+    ) -> str | None:
+        """OpenAI 호환 API 호출 (Together, OpenAI)."""
+        urls = {
+            "together": "https://api.together.xyz/v1/chat/completions",
+            "openai": "https://api.openai.com/v1/chat/completions",
+        }
+        keys = {
+            "together": os.environ.get("TOGETHER_API_KEY", ""),
+            "openai": os.environ.get("OPENAI_API_KEY", ""),
+        }
+
+        url = urls.get(provider)
+        api_key = keys.get(provider)
+        if not url or not api_key:
+            return None
+
+        payload = json.dumps({
+            "model": model,
+            "max_tokens": 2000,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "VXIS-Agent/1.0",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"]
+        except Exception as exc:
+            logger.warning("LLM call failed (%s/%s): %s", provider, model, exc)
+            return None
+
+    def _call_gemini(
+        self, system: str, user: str, model: str = "",
+    ) -> str | None:
+        """Google Gemini API 호출."""
+        api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
+        if not api_key:
+            return None
+
+        model = model or "gemini-2.5-pro"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+
+        payload = json.dumps({
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"parts": [{"text": user}]}],
+            "generationConfig": {"maxOutputTokens": 2000},
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            url, data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "VXIS-Agent/1.0",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as exc:
+            logger.warning("Gemini call failed (%s): %s", model, exc)
+            return None
+
+    def _call_deepseek(
+        self, system: str, user: str, model: str = "",
+    ) -> str | None:
+        """DeepSeek API 호출."""
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+        if not api_key:
+            return None
+
+        model = model or "deepseek-chat"
+        payload = json.dumps({
+            "model": model,
+            "max_tokens": 2000,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            "https://api.deepseek.com/chat/completions",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": "VXIS-Agent/1.0",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return data["choices"][0]["message"]["content"]
+        except Exception as exc:
+            logger.warning("DeepSeek call failed (%s): %s", model, exc)
+            return None
+
+    def _record_step(
+        self, observation: AgentObservation, actions: list[AgentAction],
+    ) -> None:
+        """스텝을 기록한다."""
+        step = AgentStep(
+            step_number=self._step_count,
+            observation_summary=f"Findings: {len(observation.findings)}, "
+            f"Ports: {len(observation.open_ports)}, "
+            f"Tools run: {len(observation.executed_tools)}",
+            actions=actions,
+        )
+        self.steps.append(step)
 
     def get_execution_log(self) -> str:
         """Get a formatted log of all steps for reporting."""
