@@ -120,7 +120,7 @@ class SSLyzePlugin(BasePlugin):
             port: int = server_location.get("port", 443)
             host_label = f"{hostname}:{port}"
 
-            scan_result: dict[str, Any] = server_result.get("scan_result", {})
+            scan_result: dict[str, Any] = server_result.get("scan_result") or {}
 
             host_entry: dict[str, Any] = {
                 "host": host_label,
