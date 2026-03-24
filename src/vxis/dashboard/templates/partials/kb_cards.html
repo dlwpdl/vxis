@@ -1,0 +1,71 @@
+{% for entry in entries %}
+<div class="bg-surface rounded-lg border border-surface-border p-5 hover:border-gray-600 transition-colors">
+  <!-- Header -->
+  <div class="flex items-start justify-between mb-3">
+    <h2 class="text-sm font-semibold text-white leading-snug flex-1 min-w-0 pr-2">{{ entry.title }}</h2>
+    <div class="flex items-center gap-1.5 flex-shrink-0">
+      <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-mono bg-red-900/30 text-red-400 border border-red-800/40">
+        {{ entry.cwe_id }}
+      </span>
+    </div>
+  </div>
+
+  <!-- Vuln type + OWASP -->
+  <div class="flex flex-wrap gap-1.5 mb-3">
+    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-gray-800 text-gray-400 border border-gray-700">
+      {{ entry.vuln_type }}
+    </span>
+    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs bg-cyan-900/30 text-cyan-400 border border-cyan-800/40">
+      {{ entry.owasp_category }}
+    </span>
+  </div>
+
+  <!-- Description snippet -->
+  <p class="text-xs text-gray-400 leading-relaxed mb-4">
+    {{ entry.description[:200] }}{% if entry.description|length > 200 %}...{% endif %}
+  </p>
+
+  <!-- Expandable remediation steps -->
+  <details class="group">
+    <summary class="cursor-pointer text-xs font-medium text-cyan-400 hover:text-cyan-300 transition-colors
+                    flex items-center gap-1.5 select-none">
+      <svg class="w-3.5 h-3.5 transition-transform group-open:rotate-90" viewBox="0 0 24 24" fill="none"
+           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"/>
+      </svg>
+      Remediation Steps ({{ entry.remediation_steps|length }})
+    </summary>
+    <ol class="mt-3 space-y-1.5 pl-5 list-decimal">
+      {% for step in entry.remediation_steps %}
+      <li class="text-xs text-gray-400 leading-relaxed">{{ step }}</li>
+      {% endfor %}
+    </ol>
+    {% if entry.references %}
+    <div class="mt-3 pt-2 border-t border-surface-border">
+      <p class="text-xs font-medium text-gray-600 uppercase tracking-wider mb-1">References</p>
+      <div class="space-y-0.5">
+        {% for ref in entry.references %}
+        <a href="{{ ref }}" target="_blank" rel="noopener"
+           class="block text-xs text-cyan-500 hover:text-cyan-400 truncate transition-colors">
+          {{ ref }}
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </details>
+</div>
+{% endfor %}
+
+{% if not entries %}
+<div class="col-span-full flex flex-col items-center justify-center py-20 text-center">
+  <div class="w-14 h-14 rounded-full bg-gray-800 flex items-center justify-center mb-4">
+    <svg class="w-7 h-7 text-gray-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+    </svg>
+  </div>
+  <p class="text-sm font-medium text-gray-400">No results found</p>
+  <p class="text-xs text-gray-600 mt-1">Try a different search term.</p>
+</div>
+{% endif %}

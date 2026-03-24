@@ -40,6 +40,13 @@ client_app = typer.Typer(help="Manage clients", no_args_is_help=True)
 app.add_typer(client_app, name="client")
 
 # ---------------------------------------------------------------------------
+# Database migration sub-command group
+# ---------------------------------------------------------------------------
+
+db_app = typer.Typer(help="Database migration helpers (Alembic)", no_args_is_help=True)
+app.add_typer(db_app, name="db")
+
+# ---------------------------------------------------------------------------
 # ASCII banner
 # ---------------------------------------------------------------------------
 
@@ -629,7 +636,7 @@ def export(
         "docx",
         "--format",
         "-f",
-        help="Output format: docx | html | attestation",
+        help="Output format: docx | html | json | csv | attestation",
     ),
     output: Optional[Path] = typer.Option(
         None,
@@ -638,8 +645,8 @@ def export(
         help="Output file path (default: ./<scan_id>.<format>)",
     ),
 ) -> None:
-    """Export scan results to DOCX, HTML, or attestation letter."""
-    supported_formats = {"docx", "html", "attestation"}
+    """Export scan results to DOCX, HTML, JSON, CSV, or attestation letter."""
+    supported_formats = {"docx", "html", "json", "csv", "attestation"}
     if format not in supported_formats:
         err_console.print(
             f"[bold red]Unsupported format:[/bold red] '{format}'. "
@@ -648,7 +655,7 @@ def export(
         raise typer.Exit(code=1)
 
     # Resolve default output path
-    ext_map = {"docx": "docx", "html": "html", "attestation": "docx"}
+    ext_map = {"docx": "docx", "html": "html", "json": "json", "csv": "csv", "attestation": "docx"}
     ext = ext_map[format]
     out_path = output or Path(f"{scan_id}.{ext}")
 
@@ -710,6 +717,16 @@ def export(
 
             gen = DOCXReportGenerator()
             generated = gen.generate(report_data, out_path)
+        elif format == "json":
+            from vxis.report.json_export import JSONExporter
+
+            exporter = JSONExporter()
+            generated = exporter.export_report(report_data, out_path)
+        elif format == "csv":
+            from vxis.report.csv_export import CSVExporter
+
+            exporter = CSVExporter()
+            generated = exporter.export_findings(findings, out_path)
         elif format == "attestation":
             from vxis.report.attestation import AttestationGenerator
 
@@ -756,6 +773,160 @@ def dashboard(
         f"[underline cyan]http://{host}:{port}[/underline cyan]"
     )
     uvicorn.run(dash_app, host=host, port=port)
+
+
+@app.command(name="diff")
+def diff_cmd(
+    scan_id_a: int = typer.Argument(help="Baseline scan ID (older)"),
+    scan_id_b: int = typer.Argument(help="Comparison scan ID (newer)"),
+) -> None:
+    """Compare two scans and show new, resolved, unchanged, and changed findings."""
+
+    async def _diff() -> None:
+        from vxis.core.scan_diff import compare_scans
+
+        config = _get_config()
+        result = await compare_scans(scan_id_a, scan_id_b, config.db_url)
+
+        # Summary table
+        summary_table = Table(
+            title=f"Scan Diff: {scan_id_a} vs {scan_id_b}",
+            show_header=True,
+            header_style="bold",
+            border_style="cyan",
+            expand=False,
+        )
+        summary_table.add_column("Category", style="bold", no_wrap=True)
+        summary_table.add_column("Count", justify="right")
+
+        summary_table.add_row("[green]New[/green]", str(len(result.new_findings)))
+        summary_table.add_row("[red]Resolved[/red]", str(len(result.resolved_findings)))
+        summary_table.add_row("[yellow]Changed[/yellow]", str(len(result.changed_findings)))
+        summary_table.add_row("[dim]Unchanged[/dim]", str(len(result.unchanged_findings)))
+        console.print(summary_table)
+
+        # New findings detail
+        if result.new_findings:
+            new_table = Table(
+                title="New Findings",
+                show_header=True,
+                header_style="bold green",
+                border_style="green",
+                expand=False,
+            )
+            new_table.add_column("Title", no_wrap=True)
+            new_table.add_column("Severity", no_wrap=True)
+            new_table.add_column("Target")
+            for f in result.new_findings:
+                new_table.add_row(f.title, f.effective_severity.value, f.target)
+            console.print(new_table)
+
+        # Resolved findings detail
+        if result.resolved_findings:
+            res_table = Table(
+                title="Resolved Findings",
+                show_header=True,
+                header_style="bold red",
+                border_style="red",
+                expand=False,
+            )
+            res_table.add_column("Title", no_wrap=True)
+            res_table.add_column("Severity", no_wrap=True)
+            res_table.add_column("Target")
+            for f in result.resolved_findings:
+                res_table.add_row(f.title, f.effective_severity.value, f.target)
+            console.print(res_table)
+
+        # Changed findings detail
+        if result.changed_findings:
+            chg_table = Table(
+                title="Changed Findings (Severity)",
+                show_header=True,
+                header_style="bold yellow",
+                border_style="yellow",
+                expand=False,
+            )
+            chg_table.add_column("Title", no_wrap=True)
+            chg_table.add_column("Old Severity", no_wrap=True)
+            chg_table.add_column("New Severity", no_wrap=True)
+            chg_table.add_column("Target")
+            for cf in result.changed_findings:
+                chg_table.add_row(
+                    cf.finding.title,
+                    cf.old_severity,
+                    cf.new_severity,
+                    cf.finding.target,
+                )
+            console.print(chg_table)
+
+    try:
+        asyncio.run(_diff())
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[bold red]Diff failed:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command(name="trend")
+def trend_cmd(
+    target: str = typer.Argument(help="Target to show trend for (use '*' for portfolio)"),
+    limit: int = typer.Option(30, "--limit", "-n", help="Maximum number of data points"),
+) -> None:
+    """Show severity trend over time for a target (or all targets with '*')."""
+
+    async def _trend() -> None:
+        from vxis.core.trend import get_portfolio_trend, get_trend
+
+        config = _get_config()
+
+        if target == "*":
+            points = await get_portfolio_trend(config.db_url, limit=limit)
+            title = "Portfolio Trend (all targets)"
+        else:
+            points = await get_trend(target, config.db_url, limit=limit)
+            title = f"Trend: {target}"
+
+        if not points:
+            console.print("[yellow]No scan data found.[/yellow]")
+            return
+
+        table = Table(
+            title=title,
+            show_header=True,
+            header_style="bold",
+            border_style="blue",
+            expand=False,
+        )
+        table.add_column("Scan ID", no_wrap=True, justify="right")
+        table.add_column("Date", no_wrap=True)
+        table.add_column("Critical", no_wrap=True, justify="right", style="bold red")
+        table.add_column("High", no_wrap=True, justify="right", style="red")
+        table.add_column("Medium", no_wrap=True, justify="right", style="yellow")
+        table.add_column("Low", no_wrap=True, justify="right", style="blue")
+        table.add_column("Info", no_wrap=True, justify="right", style="dim")
+        table.add_column("Total", no_wrap=True, justify="right", style="bold")
+        table.add_column("Risk", no_wrap=True, justify="right", style="bold cyan")
+
+        for pt in points:
+            sc = pt.severity_counts
+            table.add_row(
+                str(pt.scan_id),
+                pt.date.strftime("%Y-%m-%d %H:%M"),
+                str(sc.get("critical", 0)),
+                str(sc.get("high", 0)),
+                str(sc.get("medium", 0)),
+                str(sc.get("low", 0)),
+                str(sc.get("informational", 0)),
+                str(pt.total_findings),
+                f"{pt.risk_score:.1f}",
+            )
+
+        console.print(table)
+
+    try:
+        asyncio.run(_trend())
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[bold red]Trend query failed:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command()
@@ -1021,6 +1192,142 @@ def client_scan(
         f"\n[bold]Client scan complete:[/bold] {success_count} succeeded, "
         f"{fail_count} failed out of {len(c.domains)} domain(s)."
     )
+
+
+# ---------------------------------------------------------------------------
+# Knowledge Base commands
+# ---------------------------------------------------------------------------
+
+kb_app = typer.Typer(help="Browse the vulnerability knowledge base", no_args_is_help=True)
+app.add_typer(kb_app, name="kb")
+
+
+@kb_app.command("search")
+def kb_search(
+    keyword: str = typer.Argument(..., help="Search keyword (e.g. 'injection', 'xss', 'CWE-89')"),
+) -> None:
+    """Search the vulnerability knowledge base."""
+    from vxis.knowledge import get_vuln_kb
+
+    kb = get_vuln_kb()
+    results = kb.search(keyword)
+
+    if not results:
+        console.print(f"[yellow]No results for '{keyword}'.[/yellow]")
+        raise typer.Exit(1)
+
+    table = Table(title=f"KB results for '{keyword}' ({len(results)} found)")
+    table.add_column("Type", style="bold cyan", min_width=20)
+    table.add_column("Title", min_width=25)
+    table.add_column("CWE", min_width=10)
+    table.add_column("OWASP Category", min_width=20)
+
+    for r in results:
+        table.add_row(r.vuln_type, r.title, r.cwe_id, r.owasp_category)
+
+    console.print(table)
+
+
+@kb_app.command("show")
+def kb_show(
+    vuln_type: str = typer.Argument(..., help="Vulnerability type key (e.g. 'sql_injection')"),
+) -> None:
+    """Show detailed remediation info for a vulnerability type."""
+    from vxis.knowledge import get_vuln_kb
+
+    kb = get_vuln_kb()
+    info = kb.get_remediation(vuln_type)
+
+    if info is None:
+        console.print(f"[yellow]No KB entry for '{vuln_type}'.[/yellow]")
+        console.print("Use [bold]vxis kb search <keyword>[/bold] to find entries.")
+        raise typer.Exit(1)
+
+    panel_lines = [
+        f"[bold]Title:[/bold]    {info.title}",
+        f"[bold]CWE:[/bold]      {info.cwe_id}",
+        f"[bold]OWASP:[/bold]    {info.owasp_category}",
+        "",
+        f"[bold]Description:[/bold]\n{info.description}",
+        "",
+        "[bold]Remediation Steps:[/bold]",
+    ]
+    for i, step in enumerate(info.remediation_steps, 1):
+        panel_lines.append(f"  {i}. {step}")
+
+    if info.references:
+        panel_lines.append("")
+        panel_lines.append("[bold]References:[/bold]")
+        for ref in info.references:
+            panel_lines.append(f"  • {ref}")
+
+    console.print(Panel("\n".join(panel_lines), title=f"[bold]{info.vuln_type}[/bold]", border_style="cyan"))
+
+
+@kb_app.command("list")
+def kb_list() -> None:
+    """List all vulnerability types in the knowledge base."""
+    from vxis.knowledge import get_vuln_kb
+
+    kb = get_vuln_kb()
+    types = kb.all_types
+
+    table = Table(title=f"Vulnerability Knowledge Base ({len(types)} entries)")
+    table.add_column("#", style="dim", width=4)
+    table.add_column("Type", style="bold cyan")
+
+    for i, t in enumerate(types, 1):
+        table.add_row(str(i), t)
+
+    console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# Database migration commands
+# ---------------------------------------------------------------------------
+
+
+def _alembic_cfg():
+    """Return an Alembic Config pointing at the project's alembic.ini."""
+    from alembic.config import Config
+
+    # Resolve alembic.ini relative to the installed package so it works
+    # regardless of the current working directory.
+    ini_path = Path(__file__).resolve().parents[3] / "alembic.ini"
+    if not ini_path.exists():
+        # Fallback: try CWD (editable install / dev checkout).
+        ini_path = Path("alembic.ini")
+    return Config(str(ini_path))
+
+
+@db_app.command("upgrade")
+def db_upgrade(
+    revision: str = typer.Argument("head", help="Target revision (default: head)"),
+) -> None:
+    """Run database migrations up to the target revision."""
+    from alembic import command
+
+    cfg = _alembic_cfg()
+    command.upgrade(cfg, revision)
+    console.print(f"[bold green]Database upgraded to:[/bold green] {revision}")
+
+
+@db_app.command("current")
+def db_current() -> None:
+    """Show the current migration revision."""
+    from alembic import command
+
+    cfg = _alembic_cfg()
+    command.current(cfg, verbose=True)
+
+
+@db_app.command("history")
+def db_history() -> None:
+    """Show the migration revision history."""
+    from alembic import command
+
+    cfg = _alembic_cfg()
+    command.history(cfg, verbose=True)
 
 
 # ---------------------------------------------------------------------------
