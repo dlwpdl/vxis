@@ -26,7 +26,10 @@ import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vxis.agent.memory import AgentMemory
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +221,7 @@ class AgentBrain:
         max_steps: int = 20,
         provider: str | None = None,
         model: str | None = None,
+        memory: "AgentMemory | None" = None,
     ) -> None:
         self.max_steps = max_steps
         self.steps: list[AgentStep] = []
@@ -225,6 +229,7 @@ class AgentBrain:
         self._provider = provider or os.environ.get("UPSTREAM_LLM_PROVIDER", "together")
         self._model = model or os.environ.get("UPSTREAM_LLM_MODEL", "")
         self._step_count = 0
+        self._memory = memory  # None이면 메모리 기능 비활성화
 
     def think(self, observation: AgentObservation) -> list[AgentAction]:
         """Given current observations, decide next actions via LLM."""
@@ -241,8 +246,11 @@ class AgentBrain:
 
         system = AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)
 
-        # Build user prompt with current state
-        user_prompt = self._build_observation_prompt(observation)
+        # Build user prompt with current state + memory context
+        memory_context = self._build_memory_context(
+            observation.target, observation.tech_stack
+        )
+        user_prompt = self._build_observation_prompt(observation, memory_context)
 
         # Call LLM
         response = self._call_llm(system, user_prompt)
@@ -307,7 +315,43 @@ class AgentBrain:
 
     # ── Internal methods ────────────────────────────────────────
 
-    def _build_observation_prompt(self, obs: AgentObservation) -> str:
+    def _build_memory_context(self, target: str, tech_stack: list[str]) -> str:
+        """과거 스캔 경험을 LLM 프롬프트 컨텍스트로 변환한다.
+
+        AgentMemory가 주입되지 않았거나, 관련 기억이 없으면 빈 문자열을 반환한다.
+
+        Args:
+            target: 현재 스캔 타겟 (도메인 또는 IP).
+            tech_stack: 현재까지 탐지된 기술 스택.
+
+        Returns:
+            포맷된 메모리 컨텍스트 문자열, 또는 빈 문자열.
+        """
+        if self._memory is None:
+            return ""
+
+        try:
+            from vxis.agent.memory import format_memory_context
+
+            similar = self._memory.recall_similar(target, tech_stack)
+            if not similar:
+                return ""
+
+            context = format_memory_context(similar)
+            logger.debug(
+                "메모리 컨텍스트 로드: 유사 스캔 %d개 (타겟: %s)", len(similar), target
+            )
+            return context
+        except Exception as exc:
+            # 메모리 오류가 핵심 스캔 흐름을 방해하지 않도록 방어 처리
+            logger.warning("메모리 컨텍스트 로드 실패 (무시): %s", exc)
+            return ""
+
+    def _build_observation_prompt(
+        self,
+        obs: AgentObservation,
+        memory_context: str = "",
+    ) -> str:
         """Format observations into a prompt for the LLM."""
         sections = [
             f"## 현재 스캔 상태 (Step {self._step_count}/{self.max_steps})\n",
@@ -351,6 +395,10 @@ class AgentBrain:
                     f"  - {t.get('tool')}: {t.get('state', '?')} "
                     f"({t.get('findings', 0)}건 발견)"
                 )
+
+        # 과거 스캔 경험 컨텍스트 삽입 (있을 때만)
+        if memory_context:
+            sections.append(f"\n{memory_context}")
 
         sections.append("\n---\n위 정보를 바탕으로, 다음에 실행할 도구를 JSON으로 결정하세요.")
 

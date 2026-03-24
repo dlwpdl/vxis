@@ -46,6 +46,7 @@ all = [
 
 [project.scripts]
 vxis = "vxis.cli.main:app"
+vxis-mcp = "vxis.mcp_server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vxis"]

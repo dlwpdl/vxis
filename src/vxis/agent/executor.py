@@ -29,11 +29,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from vxis.agent.brain import AgentBrain, AgentAction, AgentObservation
+from vxis.agent.sandbox import DockerSandbox, SandboxManager, get_sandbox_manager
 from vxis.config.schema import VXISConfig
 from vxis.core.context import DAGContext, PluginOutput
 from vxis.core.events import ScanEventBus
 from vxis.core.orchestrator import ScanOrchestrator, ScanResult
-from vxis.core.scanner import run_tool
+from vxis.core.scanner import ToolResult, run_tool
 from vxis.models.finding import Finding
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,18 @@ class AgentExecutor:
         self._orchestrator = ScanOrchestrator(self._config, event_bus=self._event_bus)
         self._observation = AgentObservation(target="")
         self._all_findings: list[Finding] = []
+
+        # ── Sandbox 초기화 ──────────────────────────────────────
+        # Docker가 사용 가능하면 모든 도구를 컨테이너 안에서 실행한다.
+        # 사용 불가 시 기존 direct subprocess 방식으로 폴백한다.
+        self._sandbox_available: bool = DockerSandbox.is_available()
+        self._sandbox_manager: SandboxManager | None = (
+            get_sandbox_manager() if self._sandbox_available else None
+        )
+        if self._sandbox_available:
+            logger.info("Docker sandbox 활성화 — 도구를 컨테이너 안에서 실행합니다.")
+        else:
+            logger.info("Docker 미사용 — 도구를 호스트에서 직접 실행합니다 (폴백 모드).")
 
     async def run(
         self,
@@ -135,6 +148,13 @@ class AgentExecutor:
             len(self._all_findings),
             duration,
         )
+
+        # sandbox 컨테이너 정리 (스캔 완료 후)
+        if self._sandbox_manager is not None:
+            try:
+                await self._sandbox_manager.cleanup_all()
+            except Exception as exc:
+                logger.warning("sandbox 정리 중 오류 (무시): %s", exc)
 
         return AgentScanResult(
             target=target,
@@ -229,22 +249,46 @@ class AgentExecutor:
                 "findings_count": 0,
             }
 
+    # ── Sandbox-aware tool runner ────────────────────────────────
+
+    async def _run_command(
+        self,
+        command: str,
+        target: str,
+        timeout: int = 300,
+    ) -> ToolResult:
+        """Docker sandbox가 가용하면 컨테이너 안에서, 아니면 호스트에서 직접 실행.
+
+        Args:
+            command: 실행할 셸 명령어 문자열.
+            target: 컨테이너 선택에 사용할 타겟 식별자.
+            timeout: 최대 실행 시간(초).
+
+        Returns:
+            ToolResult (sandbox 실행과 직접 실행 모두 동일한 형식).
+        """
+        if self._sandbox_available and self._sandbox_manager is not None:
+            sandbox = await self._sandbox_manager.get_or_create(target)
+            return await sandbox.run_tool(command, timeout=timeout)
+        # 폴백: 기존 직접 실행
+        return await run_tool(command, timeout=timeout, shell=True)
+
     async def _run_ffuf(self, target: str, args: dict) -> dict[str, Any]:
         """Run ffuf directory brute-force."""
         url = args.get("url", f"https://{target}/FUZZ")
         wordlist = args.get("wordlist", "/usr/share/wordlists/dirb/common.txt")
 
-        # Check if ffuf is available
-        import shutil
-        if not shutil.which("ffuf"):
-            return {"success": False, "summary": "ffuf not installed", "findings_count": 0}
+        # sandbox 미사용 시에만 호스트 설치 여부 체크 (sandbox 안에는 이미 설치됨)
+        if not self._sandbox_available:
+            import shutil as _shutil
+            if not _shutil.which("ffuf"):
+                return {"success": False, "summary": "ffuf not installed", "findings_count": 0}
 
         cmd = f"ffuf -u {url} -w {wordlist} -mc 200,301,302,403 -o - -of json -s"
 
         try:
-            result = await run_tool(cmd, timeout=120, shell=True)
-            # Count discovered paths
-            lines = [l for l in result.stdout.splitlines() if l.strip()]
+            result = await self._run_command(cmd, target=target, timeout=120)
+            lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
             self._observation.executed_tools.append({
                 "tool": "ffuf",
                 "state": "completed",
@@ -261,11 +305,11 @@ class AgentExecutor:
     async def _run_sqlmap(self, target: str, args: dict) -> dict[str, Any]:
         """Run sqlmap for SQL injection testing."""
         url = args.get("url", f"https://{target}/")
-        params = args.get("params", "")
 
-        import shutil
-        if not shutil.which("sqlmap"):
-            return {"success": False, "summary": "sqlmap not installed", "findings_count": 0}
+        if not self._sandbox_available:
+            import shutil as _shutil
+            if not _shutil.which("sqlmap"):
+                return {"success": False, "summary": "sqlmap not installed", "findings_count": 0}
 
         cmd = (
             f"sqlmap -u '{url}' --batch --random-agent"
@@ -274,7 +318,7 @@ class AgentExecutor:
         )
 
         try:
-            result = await run_tool(cmd, timeout=300, shell=True)
+            result = await self._run_command(cmd, target=target, timeout=300)
             injectable = "injectable" in result.stdout.lower()
             findings = 1 if injectable else 0
 
