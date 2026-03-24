@@ -158,6 +158,29 @@ def is_available() -> bool:
     return bool(_get_api_key())
 
 
+def _try_provider(
+    provider: str,
+    api_key: str,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+) -> LLMResponse | None:
+    """Attempt a single provider call."""
+    cfg = _PROVIDERS.get(provider, _PROVIDERS["together"])
+    fmt = cfg.get("format", "openai")
+
+    if fmt == "anthropic":
+        return _call_anthropic(api_key, model, system_prompt, user_prompt, max_tokens)
+    elif fmt == "gemini":
+        return _call_gemini(api_key, model, system_prompt, user_prompt, max_tokens)
+    else:
+        return _call_openai_compat(
+            api_key, model, provider,
+            cfg["base_url"], system_prompt, user_prompt, max_tokens,
+        )
+
+
 def chat(
     system_prompt: str,
     user_prompt: str,
@@ -165,36 +188,56 @@ def chat(
 ) -> LLMResponse | None:
     """
     Send a chat completion request to the configured LLM provider.
+    If the primary provider fails, automatically falls back to other
+    providers that have API keys configured.
 
-    Routing:
-    - together, openai, deepseek, kimi, glm → OpenAI-compatible /chat/completions
-    - anthropic → /messages (Anthropic format)
-    - google → Gemini generateContent
-
-    Returns None if no API key is set or the request fails.
+    Returns None if no API key is set or all providers fail.
     """
-    api_key = _get_api_key()
-    if not api_key:
+    primary_provider = _get_provider()
+    primary_key = _get_api_key()
+    if not primary_key:
         return None
 
-    provider = _get_provider()
     model = _get_model()
-    cfg = _PROVIDERS.get(provider, _PROVIDERS["together"])
-    fmt = cfg.get("format", "openai")
 
+    # Try primary provider first
     try:
-        if fmt == "anthropic":
-            return _call_anthropic(api_key, model, system_prompt, user_prompt, max_tokens)
-        elif fmt == "gemini":
-            return _call_gemini(api_key, model, system_prompt, user_prompt, max_tokens)
-        else:
-            return _call_openai_compat(
-                api_key, model, provider,
-                cfg["base_url"], system_prompt, user_prompt, max_tokens,
-            )
+        result = _try_provider(primary_provider, primary_key, model, system_prompt, user_prompt, max_tokens)
+        if result is not None:
+            return result
     except Exception as exc:
-        logger.warning("LLM API call failed (%s/%s): %s", provider, model, exc)
-        return None
+        logger.warning("Primary LLM failed (%s/%s): %s", primary_provider, model, exc)
+
+    # Fallback chain: try other providers that have keys
+    _FALLBACK_ORDER = [
+        ("google", "GOOGLE_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("openai", "OPENAI_API_KEY"),
+        ("deepseek", "DEEPSEEK_API_KEY"),
+        ("together", "TOGETHER_API_KEY"),
+    ]
+
+    for fb_provider, fb_env in _FALLBACK_ORDER:
+        if fb_provider == primary_provider:
+            continue
+        fb_key = os.environ.get(fb_env, "")
+        if not fb_key:
+            continue
+
+        fb_cfg = _PROVIDERS[fb_provider]
+        fb_model = fb_cfg["default_model"]
+        logger.info("Falling back to %s/%s", fb_provider, fb_model)
+
+        try:
+            result = _try_provider(fb_provider, fb_key, fb_model, system_prompt, user_prompt, max_tokens)
+            if result is not None:
+                return result
+        except Exception as exc:
+            logger.warning("Fallback LLM failed (%s/%s): %s", fb_provider, fb_model, exc)
+            continue
+
+    logger.warning("All LLM providers failed")
+    return None
 
 
 # ── OpenAI-compatible (Together, OpenAI, DeepSeek, Kimi, GLM) ──
@@ -224,6 +267,8 @@ def _call_openai_compat(
         headers={
             "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
+            "User-Agent": "VXIS-Upstream-Watch/1.0",
+            "Accept": "application/json",
         },
         method="POST",
     )
@@ -268,6 +313,7 @@ def _call_anthropic(
             "Content-Type": "application/json",
             "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
+            "User-Agent": "VXIS-Upstream-Watch/1.0",
         },
         method="POST",
     )
@@ -310,7 +356,10 @@ def _call_gemini(
     req = urllib.request.Request(
         url,
         data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "VXIS-Upstream-Watch/1.0",
+        },
         method="POST",
     )
 
