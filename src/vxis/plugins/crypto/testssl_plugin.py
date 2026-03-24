@@ -21,7 +21,8 @@ class TestsslPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="testssl.sh",
         category="crypto",
-        depends_on=("nmap",),
+        depends_on=(),
+        optional_depends=("nmap",),
         produces=("tls_findings",),
         timeout_seconds=600,
     )
@@ -59,10 +60,23 @@ class TestsslPlugin(BasePlugin):
         if scan_profile == "stealth":
             flags = "--jsonfile - --fast --sneaky --severity LOW --nodns min"
         elif scan_profile == "aggressive":
-            flags = "--jsonfile - --severity LOW --vulnerable --headers"
+            # Maximum depth: protocols, all cipher suites per protocol,
+            # known vulnerabilities (BEAST, POODLE, Heartbleed, ROBOT, etc.),
+            # HTTP security headers, server defaults, and certificate chain.
+            flags = (
+                "--jsonfile - --severity LOW"
+                " --protocols --vulnerable --headers"
+                " --cipher-per-proto --server-defaults --server-preference"
+                " --certificate"
+            )
         else:
-            # Standard: protocols + vulnerabilities + headers check
-            flags = "--jsonfile - --severity LOW --vulnerable --headers --protocols --server-defaults"
+            # Standard: protocols + vulnerabilities + headers + certificate chain.
+            # Deliberately omits --fast and --sneaky to maximise check depth.
+            flags = (
+                "--jsonfile - --severity LOW"
+                " --protocols --vulnerable --headers"
+                " --server-defaults --certificate"
+            )
 
         return f"testssl.sh {flags} {host}:443"
 

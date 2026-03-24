@@ -29,7 +29,7 @@ class CertipyPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="certipy",
         category="ad",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("adcs_findings",),
         timeout_seconds=600,
@@ -50,10 +50,19 @@ class CertipyPlugin(BasePlugin):
         domain: str = tool_config.get("domain", target)
         password: str = tool_config.get("password", "")
         dc_ip: str = tool_config.get("dc_ip", "")
-        return (
+
+        if not username or not password:
+            raise ValueError(
+                "certipy requires 'username' and 'password' in tool_config"
+            )
+
+        cmd = (
             f"certipy find -u {username}@{domain} -p {password}"
-            f" -dc-ip {dc_ip} -json"
+            f" -json"
         )
+        if dc_ip:
+            cmd += f" -dc-ip {dc_ip}"
+        return cmd
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         """Parse certipy JSON output and extract vulnerable certificate templates."""

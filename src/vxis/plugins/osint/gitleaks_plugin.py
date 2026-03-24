@@ -34,13 +34,36 @@ class GitleaksPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        repo_url = tool_config.get("repo_url", target)
+        # Resolve the scan source.  Preference order:
+        #   1. Explicit source_path (local checkout already on disk)
+        #   2. Explicit repo_url (backward-compatibility alias)
+        #   3. Top-level target string (may be a local path or git URL)
+        source_path = tool_config.get("source_path", "")
+        repo_path = source_path or tool_config.get("repo_url", target)
+
+        # Scan depth: non-aggressive profiles limit history to recent commits to
+        # keep runtime manageable on large repositories.  Aggressive profile
+        # walks the entire git history, which is the most thorough but slowest.
+        log_opts = ""
+        if scan_profile != "aggressive":
+            log_opts = " --log-opts=--since=1.year.ago"
+
+        # --report-format json without --report-path causes gitleaks to emit
+        # the JSON array to stdout, which parse_output consumes directly.
+        # Writing to a file is intentionally avoided here: the DAG executor
+        # captures stdout and passes it to parse_output; a file-based approach
+        # would require an extra read step and create race conditions under
+        # concurrent scans.
+        #
+        # --exit-code 0 prevents gitleaks from returning exit status 1 when
+        # leaks are found — a non-zero exit would be misinterpreted by the
+        # executor as a tool failure rather than a finding.
         return (
             f"gitleaks detect"
-            f" --source={repo_url}"
-            " --report-format json"
-            " --report-path /tmp/vxis/gitleaks.json"
-            " --no-git"
+            f" --source={repo_path}"
+            f" --report-format json"
+            f" --exit-code 0"
+            f"{log_opts}"
         )
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:

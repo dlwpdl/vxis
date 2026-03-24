@@ -19,7 +19,7 @@ class BloodhoundPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="bloodhound-python",
         category="ad",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("ad_graph",),
         timeout_seconds=1800,
@@ -40,10 +40,23 @@ class BloodhoundPlugin(BasePlugin):
         username: str = tool_config.get("username", "")
         password: str = tool_config.get("password", "")
         nameserver: str = tool_config.get("nameserver", "")
-        return (
+
+        if not username or not password:
+            raise ValueError(
+                "bloodhound-python requires 'username' and 'password' in tool_config"
+            )
+
+        # Collection methods: All covers group, localadmin, session, trusts, acl, etc.
+        # bloodhound-python accepts a comma-separated list or the shorthand "All".
+        collection: str = tool_config.get("collection", "All,Group,LocalAdmin,Session,Trusts")
+
+        cmd = (
             f"bloodhound-python -d {domain} -u {username} -p {password}"
-            f" -c All -ns {nameserver} --zip"
+            f" -c {collection} --zip"
         )
+        if nameserver:
+            cmd += f" -ns {nameserver}"
+        return cmd
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         """Parse BloodHound ZIP output containing JSON files.

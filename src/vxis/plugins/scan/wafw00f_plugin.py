@@ -18,7 +18,8 @@ class Wafw00fPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="wafw00f",
         category="scan",
-        depends_on=("httpx",),
+        depends_on=(),
+        optional_depends=("httpx",),
         produces=("waf_results",),
         timeout_seconds=300,
     )

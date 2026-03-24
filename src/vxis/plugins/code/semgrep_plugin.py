@@ -17,7 +17,7 @@ class SemgrepPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="semgrep",
         category="code",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("sast_findings",),
         timeout_seconds=1800,
@@ -35,9 +35,19 @@ class SemgrepPlugin(BasePlugin):
         tool_config: dict[str, Any],
     ) -> str:
         source_path = tool_config.get("source_path", ".")
+        # --config auto pulls the full Semgrep registry ruleset for the detected
+        # language(s).  We additionally include p/security-audit and p/owasp-top-ten
+        # to guarantee OWASP Top-10 coverage even when auto misses a rule pack.
+        # All three severity levels are included so that INFO findings (which often
+        # surface CWE-200 data-exposure issues) are not silently dropped.
         return (
-            f"semgrep scan --config auto --json"
-            f" --severity ERROR --severity WARNING {source_path}"
+            f"semgrep scan"
+            f" --config auto"
+            f" --config p/security-audit"
+            f" --config p/owasp-top-ten"
+            f" --json"
+            f" --severity ERROR --severity WARNING --severity INFO"
+            f" {source_path}"
         )
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:

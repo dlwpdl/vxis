@@ -19,7 +19,7 @@ class ShodanPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="shodan",
         category="osint",
-        depends_on=("subfinder",),
+        depends_on=(),
         optional_depends=(),
         produces=("shodan_results",),
         timeout_seconds=300,

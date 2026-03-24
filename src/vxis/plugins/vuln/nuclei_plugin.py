@@ -18,8 +18,8 @@ class NucleiPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="nuclei",
         category="vuln",
-        depends_on=("httpx",),
-        optional_depends=("wafw00f",),
+        depends_on=(),
+        optional_depends=("httpx", "wafw00f", "subfinder"),
         produces=("vulnerabilities",),
         timeout_seconds=5400,
     )
@@ -77,9 +77,19 @@ class NucleiPlugin(BasePlugin):
 
         severity = "critical,high,medium,low" if scan_profile == "aggressive" else "critical,high,medium"
 
+        # Template categories to cover: CVEs, misconfigurations, exposures,
+        # technologies fingerprinting, and default credentials.
+        tags = "cves,misconfigurations,exposures,technologies,default-logins"
+
+        # Aggressive mode: also include low-severity info templates and
+        # network-layer checks beyond HTTP.
+        if scan_profile == "aggressive":
+            tags += ",network,dns"
+
         return (
             f"nuclei -l {input_file} -severity {severity}"
-            f" -etags dos,fuzz -rate-limit {rate} -json -irr -silent"
+            f" -tags {tags} -etags dos,fuzz"
+            f" -rate-limit {rate} -json -irr -silent"
             f" -header 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)'"
         )
 

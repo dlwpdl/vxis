@@ -27,7 +27,7 @@ class LinpeasPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="bash",
         category="privesc",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("linux_privesc",),
         timeout_seconds=600,
@@ -44,7 +44,12 @@ class LinpeasPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        return "bash /opt/vxis/linpeas.sh -q -a"
+        # LinPEAS runs locally on the compromised host.
+        # The script path can be customised; default assumes it was dropped to
+        # /opt/vxis/linpeas.sh by the VXIS agent upload step.
+        linpeas_path: str = tool_config.get("linpeas_path", "/opt/vxis/linpeas.sh")
+        # -q: quiet (suppress banner), -a: all checks including slow ones
+        return f"bash {linpeas_path} -q -a"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         """Parse linpeas output for severity-marked privilege escalation findings.

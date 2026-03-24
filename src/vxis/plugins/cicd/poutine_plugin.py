@@ -17,7 +17,7 @@ class PoutinePlugin(BasePlugin):
         version="1.0.0",
         tool_binary="poutine",
         category="cicd",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("cicd_findings",),
         timeout_seconds=600,
@@ -34,8 +34,23 @@ class PoutinePlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        repo_url = tool_config.get("repo_url", target)
-        return f"poutine analyze_repo {repo_url} --format json"
+        repo_url = tool_config.get("repo_url", "")
+        source_path = tool_config.get("source_path", "")
+
+        if source_path:
+            # Local filesystem path — use analyze_local_repo so poutine does not
+            # attempt to resolve a GitHub API slug or clone anything.
+            return f"poutine analyze_local_repo {source_path} --format json"
+
+        if repo_url:
+            # Explicit remote URL/slug (e.g. "org/repo" for GitHub) — use the
+            # network-aware subcommand.
+            return f"poutine analyze_repo {repo_url} --format json"
+
+        # Last-resort fallback: treat the target string as a GitHub org/repo slug.
+        # This maintains backward compatibility with callers that pass a GitHub URL
+        # as the top-level target.
+        return f"poutine analyze_repo {target} --format json"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []

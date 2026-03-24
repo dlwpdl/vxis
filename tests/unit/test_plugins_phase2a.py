@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from typing import Any
 
 import pytest
@@ -423,10 +424,16 @@ class TestWinpeasPlugin:
         assert self.plugin.meta.timeout_seconds == 600
 
     def test_build_command(self) -> None:
-        cmd = self.plugin.build_command(TARGET, "standard", self.ctx, {})
-        assert "winpeas.exe" in cmd
-        assert "quiet" in cmd
-        assert "searchall" in cmd
+        if sys.platform != "win32":
+            # WinPEAS raises OSError on non-Windows platforms — that is the
+            # correct behaviour; the orchestrator will skip this plugin.
+            with pytest.raises(OSError, match="Windows"):
+                self.plugin.build_command(TARGET, "standard", self.ctx, {})
+        else:
+            cmd = self.plugin.build_command(TARGET, "standard", self.ctx, {})
+            assert "winpeas.exe" in cmd
+            assert "quiet" in cmd
+            assert "searchall" in cmd
 
     def test_parse_output_count(self) -> None:
         output = self.plugin.parse_output(WINPEAS_SAMPLE, "")

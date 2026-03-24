@@ -25,7 +25,8 @@ class NmapPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="nmap",
         category="scan",
-        depends_on=("httpx",),
+        depends_on=(),
+        optional_depends=("httpx",),
         produces=("open_ports", "services"),
         timeout_seconds=1800,
     )
@@ -82,6 +83,14 @@ class NmapPlugin(BasePlugin):
             port_flag = port_spec
         else:
             port_flag = f"-p {port_spec}"
+
+        if scan_profile == "aggressive":
+            # Full TCP + UDP top-20 ports + vulnerability scripts for maximum depth.
+            return (
+                f"nmap -iL {input_file} -sV -sC -sU --top-ports 20"
+                f" --script=vuln --open --reason -oX -"
+                f" {port_flag} -T{timing}"
+            )
 
         return (
             f"nmap -iL {input_file} -sV -sC --open --reason -oX -"

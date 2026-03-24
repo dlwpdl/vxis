@@ -17,7 +17,7 @@ class CheckovPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="checkov",
         category="code",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("iac_findings",),
         timeout_seconds=900,
@@ -35,9 +35,13 @@ class CheckovPlugin(BasePlugin):
         tool_config: dict[str, Any],
     ) -> str:
         source_path = tool_config.get("source_path", ".")
+        # --framework all covers Terraform, CloudFormation, Kubernetes, Dockerfile,
+        # ARM, Bicep, Ansible, GitHub Actions, and every other checkov framework
+        # in one pass, giving maximum IaC security coverage without maintaining an
+        # explicit allowlist that grows stale as new frameworks are added.
         return (
             f"checkov -d {source_path}"
-            " --framework terraform cloudformation kubernetes"
+            " --framework all"
             " --output json --compact"
         )
 

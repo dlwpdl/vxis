@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
@@ -26,7 +27,7 @@ class WinpeasPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="winpeas.exe",
         category="privesc",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("windows_privesc",),
         timeout_seconds=600,
@@ -43,7 +44,16 @@ class WinpeasPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        return "winpeas.exe quiet searchall"
+        # WinPEAS only runs on Windows. Raise early on non-Windows platforms so
+        # the orchestrator can skip or mark this plugin as not applicable.
+        if sys.platform != "win32":
+            raise OSError(
+                "WinPEAS can only run on Windows; current platform is "
+                f"'{sys.platform}'. Skipping."
+            )
+        winpeas_path: str = tool_config.get("winpeas_path", "winpeas.exe")
+        # quiet: suppress banner/progress bars; searchall: comprehensive checks
+        return f"{winpeas_path} quiet searchall"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         """Parse WinPEAS output for severity-marked privilege escalation findings.

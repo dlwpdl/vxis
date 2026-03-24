@@ -17,6 +17,7 @@ class TrivyPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="trivy",
         category="supply_chain",
+        tier=2,
         depends_on=(),
         produces=("dependency_vulns",),
         timeout_seconds=600,
@@ -34,19 +35,28 @@ class TrivyPlugin(BasePlugin):
         tool_config: dict[str, Any],
     ) -> str:
         repo_url = tool_config.get("repo_url", "")
-        if repo_url:
-            return (
-                f"trivy repo"
-                " --format json"
-                " --severity CRITICAL,HIGH,MEDIUM"
-                f" {repo_url}"
-            )
-        return (
-            "trivy fs"
+        source_path = tool_config.get("source_path", ".")
+
+        # --scanners vuln,secret,misconfig broadens coverage beyond pure CVE
+        # matching: 'secret' catches hard-coded credentials in dependency
+        # manifests or lock files; 'misconfig' catches IaC misconfigurations
+        # embedded in supply-chain artifacts (e.g. Docker images, Helm charts).
+        # LOW severity is excluded to reduce noise; CRITICAL/HIGH/MEDIUM are
+        # the actionable tiers for a supply-chain scan.
+        common_flags = (
+            "--scanners vuln,secret,misconfig"
             " --format json"
             " --severity CRITICAL,HIGH,MEDIUM"
-            " ."
         )
+
+        if repo_url:
+            # Remote repository clone-and-scan path (GitHub URL or git remote).
+            return f"trivy repo {common_flags} {repo_url}"
+
+        # Local filesystem path — preferred for code-scan workflows where the
+        # repo is already checked out.  Falls back to "." when source_path is
+        # not explicitly configured.
+        return f"trivy fs {common_flags} {source_path}"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []

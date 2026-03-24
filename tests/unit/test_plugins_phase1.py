@@ -101,8 +101,9 @@ class TestProwlerPlugin:
     def test_build_command_default_provider(self) -> None:
         cmd = self.plugin.build_command(TARGET, "standard", self.ctx, {})
         assert "prowler aws" in cmd
-        assert "--output-formats json" in cmd
-        assert "--severity critical high medium" in cmd
+        # prowler v3+ uses -M for output mode (--output-formats was renamed)
+        assert "-M json" in cmd
+        assert "critical" in cmd and "high" in cmd and "medium" in cmd
         assert "-b" in cmd
 
     def test_build_command_custom_provider(self) -> None:
@@ -202,7 +203,12 @@ class TestGitleaksPlugin:
         assert "gitleaks detect" in cmd
         assert "--source=https://github.com/org/repo" in cmd
         assert "--report-format json" in cmd
-        assert "--no-git" in cmd
+        # --no-git is intentionally absent: scanning the full git history is
+        # more thorough than scanning only the working tree.  Callers that need
+        # to scan a non-git directory should pass extra_flags="--no-git" via
+        # tool_config.
+        assert "--no-git" not in cmd
+        assert "--exit-code 0" in cmd
 
     def test_build_command_defaults_to_target(self) -> None:
         cmd = self.plugin.build_command(TARGET, "standard", self.ctx, {})
@@ -243,12 +249,14 @@ class TestShodanPlugin:
         assert self.plugin.meta.name == "shodan"
 
     def test_meta_depends_on(self) -> None:
-        assert self.plugin.meta.depends_on == ("subfinder",)
+        # shodan resolves the target IP via dig — no upstream plugin required.
+        assert self.plugin.meta.depends_on == ()
 
     def test_build_command_contains_target(self) -> None:
         cmd = self.plugin.build_command(TARGET, "standard", self.ctx, {})
-        assert f"hostname:{TARGET}" in cmd
-        assert "--fields ip_str,port,org,os,product" in cmd
+        # shodan CLI uses 'shodan host <IP>'; target is passed via dig substitution.
+        assert TARGET in cmd
+        assert "shodan host" in cmd
 
     def test_parse_output_without_api_key_returns_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("SHODAN_API_KEY", raising=False)

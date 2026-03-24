@@ -61,7 +61,8 @@ class HttpxPlugin(BasePlugin):
 
         return (
             f"httpx -l {input_file} -json -title -tech-detect -status-code"
-            f" -follow-redirects -rate-limit {rate} -tls-grab -cdn -cname -asn -silent"
+            f" -follow-redirects -rate-limit {rate} -tls-grab -cdn -cname -asn"
+            f" -response-header -favicon -method -websocket -ip -silent"
         )
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:

@@ -43,7 +43,8 @@ class SSLyzePlugin(BasePlugin):
         version="1.0.0",
         tool_binary="sslyze",
         category="cert",
-        depends_on=("httpx",),
+        depends_on=(),
+        optional_depends=("httpx",),
         produces=("tls_detailed",),
         timeout_seconds=600,
     )
@@ -88,7 +89,27 @@ class SSLyzePlugin(BasePlugin):
             https_hosts = [f"{target}:443"]
 
         hosts_str = " ".join(https_hosts)
-        return f"sslyze --json_out=- {hosts_str}"
+
+        # Run the full suite of sslyze checks:
+        #   --certinfo        — certificate chain, validity, and trust store
+        #   --ssl2 --ssl3     — deprecated protocol probes (SSL 2.0 / 3.0)
+        #   --tlsv1 --tlsv1_1 — deprecated TLS 1.0 / 1.1 probes
+        #   --tlsv1_2 --tlsv1_3 — accepted cipher suites for modern protocols
+        #   --reneg           — session renegotiation vulnerability
+        #   --resum           — session resumption support
+        #   --heartbleed      — Heartbleed (CVE-2014-0160)
+        #   --robot           — ROBOT attack (CVE-2017-13099 / DROWN class)
+        #   --fallback        — TLS_FALLBACK_SCSV downgrade protection
+        #   --compression     — TLS-level CRIME compression
+        #   --openssl_ccs     — OpenSSL CCS injection (CVE-2014-0224)
+        #   --early_data      — TLS 1.3 0-RTT / early-data acceptance
+        return (
+            f"sslyze --json_out=- "
+            f"--certinfo --ssl2 --ssl3 --tlsv1 --tlsv1_1 --tlsv1_2 --tlsv1_3 "
+            f"--reneg --resum --heartbleed --robot --fallback --compression "
+            f"--openssl_ccs --early_data "
+            f"{hosts_str}"
+        )
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []

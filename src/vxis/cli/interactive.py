@@ -34,9 +34,9 @@ SCAN_CATEGORIES = {
         "desc": "웹/네트워크 취약점 + SSL/DNS + 시크릿 탐지",
         "profile": "standard",
         "plugins": [
-            "nuclei", "nmap", "httpx", "testssl", "checkdmarc",
-            "wafw00f", "trufflehog", "sslyze", "subfinder", "crtsh",
-            "dnstwist", "shodan",
+            "subfinder", "httpx", "nmap", "nuclei", "testssl",
+            "sslyze", "checkdmarc", "wafw00f", "trufflehog",
+            "gitleaks", "crtsh", "dnstwist", "shodan",
         ],
     },
     "internal": {
@@ -46,7 +46,7 @@ SCAN_CATEGORIES = {
         "profile": "standard",
         "tier": 2,
         "plugins": [
-            "nmap", "bloodhound", "certipy", "netexec",
+            "nmap", "bloodhound", "certipy", "netexec", "linpeas",
         ],
     },
     "code": {
@@ -65,7 +65,7 @@ SCAN_CATEGORIES = {
         "desc": "AWS / Azure / GCP 설정 감사 + 컨테이너 보안",
         "profile": "standard",
         "plugins": [
-            "prowler", "s3scanner", "trivy_k8s", "kube_bench",
+            "prowler", "s3scanner", "trivy-k8s", "kube-bench",
         ],
     },
     "batch": {

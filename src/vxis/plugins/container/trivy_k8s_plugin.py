@@ -17,7 +17,7 @@ class TrivyK8sPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="trivy",
         category="container",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("k8s_vulns",),
         timeout_seconds=900,
@@ -34,7 +34,7 @@ class TrivyK8sPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        return "trivy k8s --report summary --format json --severity CRITICAL,HIGH"
+        return "trivy k8s --report all --format json --severity CRITICAL,HIGH"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []

@@ -29,7 +29,7 @@ class ActionlintPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="actionlint",
         category="cicd",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("gha_lint",),
         timeout_seconds=120,
@@ -46,7 +46,18 @@ class ActionlintPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        workflow_dir = tool_config.get("workflow_dir", ".github/workflows")
+        # Prefer an explicit workflow_dir override; otherwise derive it from
+        # source_path so that scans of a cloned repository work out of the box.
+        source_path = tool_config.get("source_path", "")
+        default_dir = f"{source_path}/.github/workflows" if source_path else ".github/workflows"
+        workflow_dir = tool_config.get("workflow_dir", default_dir)
+
+        # actionlint's -format flag accepts a Go template.  The built-in
+        # {{json .}} template renders each issue as a single-line JSON object
+        # (JSON Lines / NDJSON), which parse_output processes line by line.
+        # Single braces are used here because Python's f-string escaping
+        # requires doubling, so {{json .}} in the source produces {json .} in
+        # the shell argument — which is the correct Go template syntax.
         return f"actionlint -format '{{{{json .}}}}' {workflow_dir}"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:

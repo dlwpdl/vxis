@@ -213,7 +213,8 @@ class TestNmapPlugin:
         assert self.plugin.meta.name == "nmap"
 
     def test_meta_depends_on(self):
-        assert "httpx" in self.plugin.meta.depends_on
+        # nmap uses httpx output when available but does not hard-require it.
+        assert "httpx" in self.plugin.meta.optional_depends
 
     def test_build_command_contains_timing(self):
         ctx = DAGContext(target=TARGET, scan_profile="standard")
@@ -271,7 +272,8 @@ class TestWafw00fPlugin:
         assert self.plugin.meta.name == "wafw00f"
 
     def test_meta_depends_on(self):
-        assert "httpx" in self.plugin.meta.depends_on
+        # wafw00f enriches from httpx output but does not hard-require it.
+        assert "httpx" in self.plugin.meta.optional_depends
 
     def test_build_command_contains_flags(self):
         ctx = DAGContext(target=TARGET, scan_profile="standard")
@@ -314,7 +316,8 @@ class TestNucleiPlugin:
         assert self.plugin.meta.name == "nuclei"
 
     def test_meta_depends_on(self):
-        assert "httpx" in self.plugin.meta.depends_on
+        # nuclei uses httpx/wafw00f/subfinder output opportunistically; none are hard deps.
+        assert "httpx" in self.plugin.meta.optional_depends
 
     def test_meta_optional_depends(self):
         assert "wafw00f" in self.plugin.meta.optional_depends
@@ -377,7 +380,8 @@ class TestTestsslPlugin:
         assert self.plugin.meta.name == "testssl"
 
     def test_meta_depends_on(self):
-        assert "nmap" in self.plugin.meta.depends_on
+        # testssl enriches from nmap port data but can run without it.
+        assert "nmap" in self.plugin.meta.optional_depends
 
     def test_build_command_contains_port_443(self):
         nmap_hosts = [{
@@ -444,7 +448,8 @@ class TestCheckdmarcPlugin:
     def test_build_command_json_format(self):
         ctx = DAGContext(target=TARGET, scan_profile="standard")
         cmd = self.plugin.build_command(TARGET, "standard", ctx, TOOL_CONFIG)
-        assert "--output-format json" in cmd
+        # checkdmarc uses -f / --format for output format selection
+        assert "-f json" in cmd or "--format json" in cmd
 
     def test_parse_output_spf_softfail_finding(self):
         result = self.plugin.parse_output(CHECKDMARC_SAMPLE, "")

@@ -33,7 +33,16 @@ class DnstwistPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        return f"dnstwist --registered --format json {target}"
+        # --mxcheck: test if lookalike domains have functioning mail servers
+        # (strong indicator of active phishing infrastructure).
+        # --whois: include registrar / creation-date intel for registered domains.
+        # stealth omits --mxcheck (makes extra DNS/SMTP connections per candidate).
+        if scan_profile == "stealth":
+            extra = "--whois"
+        else:
+            extra = "--mxcheck --whois"
+
+        return f"dnstwist --registered --format json {extra} {target}"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []

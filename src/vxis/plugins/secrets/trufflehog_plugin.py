@@ -58,29 +58,23 @@ class TrufflehogPlugin(BasePlugin):
         # If explicit github_org is provided, scan that org
         org = tool_config.get("github_org", "")
 
-        if org:
-            cmd = (
-                f"trufflehog github --org={org}"
-                f" --json --no-verification --concurrency 5"
-            )
-            github_token: str | None = tool_config.get("github_token")
-            if github_token:
-                cmd += f" --token {github_token}"
-        else:
-            # For domain targets, scan the target's web pages for exposed secrets
-            # Use the git scanner against the target to find .git exposure,
-            # or fall back to a simple verification of the domain
-            live_urls: list[str] = ctx.get_data("httpx", "live_urls", [])
-            if live_urls:
-                url = live_urls[0]
-            else:
-                url = f"https://{target}"
-            # Try to find exposed .git repos or leaked secrets in page source
-            cmd = (
-                f"trufflehog git {url}"
-                f" --json --no-verification --concurrency 5"
-                f" --max-depth 3"
-            )
+        github_token: str | None = tool_config.get("github_token")
+
+        if not org:
+            # Best-effort: derive the GitHub org slug from the target domain.
+            # Operators can always override this with tool_config["github_org"].
+            org = _derive_org(target)
+
+        # GitHub organisation scan — covers all public (and private, if a token
+        # is provided) repositories for the org.  This is the most productive
+        # mode for external assessment: it finds hardcoded keys, tokens, and
+        # credentials committed to source code.
+        cmd = (
+            f"trufflehog github --org={org}"
+            f" --json --no-verification --concurrency 5"
+        )
+        if github_token:
+            cmd += f" --token {github_token}"
 
         return cmd
 

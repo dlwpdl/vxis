@@ -17,7 +17,7 @@ class BanditPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="bandit",
         category="code",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("python_sast",),
         timeout_seconds=600,

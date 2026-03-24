@@ -344,7 +344,8 @@ class TestSSLyzePluginMeta:
         assert sslyze.meta.category == "cert"
 
     def test_meta_depends_on_httpx(self, sslyze: SSLyzePlugin) -> None:
-        assert "httpx" in sslyze.meta.depends_on
+        # sslyze enriches from httpx HTTPS host list but can run with fallback target.
+        assert "httpx" in sslyze.meta.optional_depends
 
     def test_meta_produces(self, sslyze: SSLyzePlugin) -> None:
         assert "tls_detailed" in sslyze.meta.produces

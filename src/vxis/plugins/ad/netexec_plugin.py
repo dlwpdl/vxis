@@ -29,7 +29,7 @@ class NetexecPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="nxc",
         category="ad",
-            tier=2,
+        tier=2,
         depends_on=(),
         produces=("ad_enum",),
         timeout_seconds=900,
@@ -48,6 +48,29 @@ class NetexecPlugin(BasePlugin):
     ) -> str:
         username: str = tool_config.get("username", "")
         password: str = tool_config.get("password", "")
+        # Supported protocols: smb (default), ldap, winrm
+        protocol: str = tool_config.get("protocol", "smb").lower()
+
+        if not username or not password:
+            raise ValueError(
+                "nxc requires 'username' and 'password' in tool_config"
+            )
+
+        if protocol == "smb":
+            return (
+                f"nxc smb {target} -u {username} -p {password}"
+                f" --shares --sessions --users --groups --pass-pol"
+            )
+        if protocol == "ldap":
+            return (
+                f"nxc ldap {target} -u {username} -p {password}"
+                f" --users --groups --password-not-required --trusted-for-delegation"
+            )
+        if protocol == "winrm":
+            return (
+                f"nxc winrm {target} -u {username} -p {password}"
+            )
+        # Fallback to SMB for unknown protocols
         return (
             f"nxc smb {target} -u {username} -p {password}"
             f" --shares --sessions --users --groups --pass-pol"

@@ -274,7 +274,10 @@ class TestCheckovBuildCommand:
     def test_default_source_path(self, checkov: CheckovPlugin, ctx: DAGContext) -> None:
         cmd = checkov.build_command("example.com", "standard", ctx, {})
         assert "checkov -d ." in cmd
-        assert "--framework terraform cloudformation kubernetes" in cmd
+        # --framework all covers every framework checkov supports (Terraform,
+        # CloudFormation, Kubernetes, Dockerfile, ARM, Bicep, Ansible, GitHub
+        # Actions, …) without requiring an explicit allowlist.
+        assert "--framework all" in cmd
         assert "--output json" in cmd
         assert "--compact" in cmd
 
@@ -414,7 +417,7 @@ class TestTrivyK8sBuildCommand:
     def test_build_command(self, trivy_k8s: TrivyK8sPlugin, ctx: DAGContext) -> None:
         cmd = trivy_k8s.build_command("cluster", "standard", ctx, {})
         assert "trivy k8s" in cmd
-        assert "--report summary" in cmd
+        assert "--report all" in cmd
         assert "--format json" in cmd
         assert "--severity CRITICAL,HIGH" in cmd
 

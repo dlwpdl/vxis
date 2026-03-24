@@ -17,6 +17,7 @@ class ProwlerPlugin(BasePlugin):
         version="1.0.0",
         tool_binary="prowler",
         category="cloud",
+        tier=2,
         depends_on=(),
         produces=("cloud_findings",),
         timeout_seconds=3600,
@@ -33,13 +34,20 @@ class ProwlerPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        provider = tool_config.get("provider", "aws")
+        # Supported providers: aws (default), azure, gcp
+        provider: str = tool_config.get("provider", "aws").lower()
+        output_dir: str = tool_config.get("output_dir", "/tmp/vxis/prowler")
+
+        # prowler v3+ uses -M for output format and -S for severity filter.
+        # --output-formats was renamed to -M in prowler v3.
+        # -S / --severity accepts: critical, high, medium, low, informational
+        # -b / --no-banner suppresses the banner (valid in all v3+ versions).
         return (
             f"prowler {provider}"
-            " --output-formats json"
-            " --output-directory /tmp/vxis/prowler"
-            " --severity critical high medium"
-            " -b"
+            f" -M json"
+            f" -o {output_dir}"
+            f" -S critical high medium"
+            f" -b"
         )
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
