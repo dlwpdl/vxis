@@ -68,12 +68,19 @@ SCAN_CATEGORIES = {
             "prowler", "s3scanner", "trivy-k8s", "kube-bench",
         ],
     },
+    "full": {
+        "name": "풀 스캔 (Full)",
+        "icon": "\U0001f680",
+        "desc": "외부 + 코드 + 클라우드 모든 플러그인 전체 실행",
+        "profile": "standard",
+        "plugins": None,  # None = all available plugins
+    },
     "batch": {
         "name": "PE 포트폴리오 (Batch)",
         "icon": "\U0001f4ca",
         "desc": "CSV 파일의 다수 대상 일괄 스캔 + 리스크 등급 리포트",
         "profile": "standard",
-        "plugins": [],  # uses all external plugins
+        "plugins": [],
     },
     "custom": {
         "name": "커스텀 스캔",
@@ -189,6 +196,10 @@ def scan_wizard() -> dict | None:
     if scan_type == "batch":
         return _batch_wizard()
 
+    # 코드 스캔은 별도 입력 플로우
+    if scan_type == "code":
+        return _code_scan_wizard(cat)
+
     # Step 2: 타겟 입력
     target = inquirer.text(
         message="스캔 대상을 입력하세요",
@@ -298,6 +309,117 @@ def _batch_wizard() -> dict | None:
         "csv_path": csv_path,
         "profile": profile,
         "concurrent": int(concurrent),
+    }
+
+
+def _code_scan_wizard(cat: dict) -> dict | None:
+    """코드 스캔 위자드 — GitHub URL 또는 로컬 경로 입력."""
+
+    source_type = inquirer.select(
+        message="소스 코드 위치를 선택하세요",
+        choices=[
+            {"name": "\U0001f4c2  로컬 경로 (현재 디렉토리 또는 지정 경로)", "value": "local"},
+            {"name": "\U0001f310  GitHub URL (자동 clone 후 스캔)", "value": "github"},
+            {"name": "\u2b05\ufe0f   취소", "value": "cancel"},
+        ],
+        pointer="\u276f",
+        qmark="\U0001f4bb",
+        amark="\u2705",
+    ).execute()
+
+    if source_type == "cancel":
+        return None
+
+    if source_type == "local":
+        path = inquirer.text(
+            message="스캔할 경로를 입력하세요",
+            qmark="\U0001f4c2",
+            amark="\u2705",
+            default=".",
+            instruction="(현재 디렉토리: .)",
+        ).execute()
+
+        if not path:
+            return None
+
+        import os
+        target = os.path.abspath(path.strip())
+
+        if not os.path.isdir(target):
+            console.print(f"[red]경로를 찾을 수 없습니다: {target}[/red]")
+            return None
+
+    else:
+        # GitHub URL → clone
+        repo_url = inquirer.text(
+            message="GitHub 저장소 URL을 입력하세요",
+            qmark="\U0001f310",
+            amark="\u2705",
+            instruction="(예: https://github.com/owner/repo)",
+            validate=lambda v: "github.com" in v or "gitlab.com" in v or len(v.strip()) > 0,
+        ).execute()
+
+        if not repo_url:
+            return None
+
+        repo_url = repo_url.strip()
+        if not repo_url.startswith("http"):
+            repo_url = f"https://github.com/{repo_url}"
+
+        import tempfile
+        import subprocess
+
+        clone_dir = tempfile.mkdtemp(prefix="vxis_codescan_")
+        console.print(f"[dim]Cloning {repo_url} → {clone_dir}...[/dim]")
+
+        try:
+            result = subprocess.run(
+                ["git", "clone", "--depth", "1", repo_url, clone_dir],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode != 0:
+                console.print(f"[red]Clone 실패:[/red] {result.stderr[:200]}")
+                return None
+            console.print(f"[green]Clone 완료[/green]")
+        except Exception as exc:
+            console.print(f"[red]Clone 실패:[/red] {exc}")
+            return None
+
+        target = clone_dir
+
+    profile = inquirer.select(
+        message="스캔 강도를 선택하세요",
+        choices=[
+            {"name": "\u26a1  Standard (권장)", "value": "standard"},
+            {"name": "\U0001f680  Aggressive (전체 히스토리 포함)", "value": "aggressive"},
+        ],
+        default="standard",
+        pointer="\u276f",
+        qmark="\u26a1",
+        amark="\u2705",
+    ).execute()
+
+    selected_plugins = cat["plugins"]
+
+    _show_plugin_summary(selected_plugins, target, profile, cat["name"])
+
+    confirm = inquirer.confirm(
+        message="스캔을 시작할까요?",
+        default=True,
+        qmark="\U0001f680",
+        amark="\u2705",
+    ).execute()
+
+    if not confirm:
+        console.print("[dim]스캔이 취소되었습니다.[/dim]")
+        return None
+
+    return {
+        "target": target,
+        "profile": profile,
+        "plugins": selected_plugins,
+        "scan_type": "code",
+        "tier": 1,
     }
 
 
