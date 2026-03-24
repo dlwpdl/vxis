@@ -1134,15 +1134,72 @@ def _client_menu() -> None:
 def _execute_agent_scan(params: dict) -> None:
     """AI 자율 에이전트 모드 실행."""
     import asyncio
+    import os
 
     target = params["target"]
     profile = params.get("profile", "standard")
+
+    # Step: LLM 모델 선택
+    llm_choices = [
+        Separator("── Together.ai (통합 게이트웨이) ──"),
+        {"name": "\U0001f9e0 Kimi-K2.5 (1T params, 추론 특화, 권장)", "value": ("together", "moonshotai/Kimi-K2.5")},
+        {"name": "\U0001f9e0 GLM-5 (744B params, 에이전트 특화)", "value": ("together", "zai-org/GLM-5")},
+        {"name": "\U0001f9e0 DeepSeek-R1 (추론 체인)", "value": ("together", "deepseek-ai/DeepSeek-R1")},
+        {"name": "\U0001f9e0 DeepSeek-V3 (범용)", "value": ("together", "deepseek-ai/DeepSeek-V3")},
+        {"name": "\U0001f9e0 Qwen-72B (빠른 응답)", "value": ("together", "Qwen/Qwen2.5-72B-Instruct-Turbo")},
+        {"name": "\U0001f9e0 Llama-3.3-70B (오픈소스)", "value": ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo")},
+        Separator("── 직접 연결 ──"),
+        {"name": "\U0001f7e3 Claude Sonnet 4 (Anthropic)", "value": ("anthropic", "claude-sonnet-4-20250514")},
+        {"name": "\U0001f7e2 Gemini 2.5 Flash (Google)", "value": ("google", "gemini-2.5-flash")},
+        {"name": "\U0001f535 GPT-4o Mini (OpenAI)", "value": ("openai", "gpt-4o-mini")},
+    ]
+
+    llm_selection = inquirer.select(
+        message="AI 에이전트의 두뇌를 선택하세요",
+        choices=llm_choices,
+        pointer="\u276f",
+        qmark="\U0001f9e0",
+        amark="\u2705",
+        instruction="(↑↓ 방향키)",
+    ).execute()
+
+    if llm_selection is None:
+        return
+
+    provider, model = llm_selection
+    os.environ["UPSTREAM_LLM_PROVIDER"] = provider
+    os.environ["UPSTREAM_LLM_MODEL"] = model
+
+    # Check API key
+    from tools.upstream_watch.llm import is_available as llm_is_available
+    if not llm_is_available():
+        key_env = {
+            "together": "TOGETHER_API_KEY",
+            "anthropic": "ANTHROPIC_API_KEY",
+            "google": "GOOGLE_API_KEY",
+            "openai": "OPENAI_API_KEY",
+        }.get(provider, "TOGETHER_API_KEY")
+
+        api_key = inquirer.secret(
+            message=f"{key_env}를 입력하세요",
+            qmark="\U0001f511",
+            amark="\u2705",
+        ).execute()
+
+        if api_key:
+            os.environ[key_env] = api_key.strip()
+        else:
+            console.print("[red]API 키가 필요합니다.[/red]")
+            return
+
+    model_short = model.split("/")[-1] if "/" in model else model
 
     console.print()
     console.print(Panel(
         f"[bold cyan]\U0001f9e0 VXIS AI Agent Mode[/bold cyan]\n\n"
         f"\U0001f3af 타겟: [white]{target}[/white]\n"
-        f"\u26a1 프로필: [yellow]{profile}[/yellow]\n\n"
+        f"\u26a1 프로필: [yellow]{profile}[/yellow]\n"
+        f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
         f"[dim]AI 에이전트가 자율적으로 정찰 → 분석 → 공격 → 검증을 수행합니다.\n"
         f"각 단계마다 AI가 결과를 분석하고 다음 행동을 결정합니다.[/dim]",
         title="\U0001f9e0 Autonomous Pentesting",
@@ -1169,25 +1226,186 @@ def _execute_agent_scan(params: dict) -> None:
     console.print()
 
     try:
-        executor = AgentExecutor(max_steps=15)
-        result = asyncio.run(executor.run(target=target, profile=profile))
+        from rich.live import Live
+        from rich.layout import Layout
+        from rich.spinner import Spinner
+        import time
 
-        # Show results
+        # State for live display
+        agent_state = {
+            "phase": "초기화",
+            "step": 0,
+            "max_steps": 15,
+            "current_team": "",
+            "current_tools": [],
+            "findings": [],
+            "completed_teams": [],
+            "running_tools": [],
+            "log": [],
+        }
+
+        def _render_agent_display() -> Panel:
+            """Render the live agent status display."""
+            lines = []
+
+            # Header
+            elapsed = time.time() - agent_state.get("start_time", time.time())
+            lines.append(
+                f"\U0001f9e0 [bold cyan]VXIS AI Agent[/bold cyan]  |  "
+                f"Step {agent_state['step']}/{agent_state['max_steps']}  |  "
+                f"\U0001f50d {len(agent_state['findings'])}건 발견  |  "
+                f"\u23f1 {elapsed:.0f}초"
+            )
+            lines.append("")
+
+            # Current phase
+            phase = agent_state["phase"]
+            phase_icons = {
+                "초기화": "\u2699\ufe0f",
+                "정찰": "\U0001f50d",
+                "취약점 분석": "\U0001f6e1\ufe0f",
+                "공격 시도": "\u2694\ufe0f",
+                "검증": "\u2705",
+                "완료": "\U0001f3c1",
+                "AI 판단 중": "\U0001f9e0",
+            }
+            icon = phase_icons.get(phase, "\u25b6\ufe0f")
+            lines.append(f"  {icon} [bold]현재 단계:[/bold] [yellow]{phase}[/yellow]")
+
+            # Current team & tools
+            if agent_state["current_team"]:
+                lines.append(f"  \U0001f46a [bold]활성 팀:[/bold] [cyan]{agent_state['current_team']}[/cyan]")
+
+            if agent_state["running_tools"]:
+                tool_str = "  ".join(f"\u25b6 {t}" for t in agent_state["running_tools"])
+                lines.append(f"  \U0001f527 [bold]실행 중:[/bold] {tool_str}")
+
+            lines.append("")
+
+            # Team status grid
+            team_statuses = []
+            for team_id, team in AGENT_TEAMS.items():
+                if team_id in [t.get("id") for t in agent_state.get("completed_teams", [])]:
+                    team_statuses.append(f"[green]\u2713 {team['name']}[/green]")
+                elif team_id == agent_state.get("current_team_id"):
+                    team_statuses.append(f"[cyan]\u25b6 {team['name']}[/cyan]")
+                else:
+                    team_statuses.append(f"[dim]\u25cb {team['name']}[/dim]")
+
+            # Show 3 per line
+            for i in range(0, len(team_statuses), 3):
+                chunk = team_statuses[i:i+3]
+                lines.append("  " + "  ".join(chunk))
+
+            lines.append("")
+
+            # Findings feed
+            if agent_state["findings"]:
+                lines.append("  [bold]\U0001f4cb 발견 사항:[/bold]")
+                severity_colors = {
+                    "critical": "bold red", "high": "red",
+                    "medium": "yellow", "low": "blue", "informational": "dim",
+                }
+                for f in agent_state["findings"][-8:]:
+                    sev = f.get("severity", "?")
+                    color = severity_colors.get(sev, "")
+                    lines.append(f"    [{color}][{sev:13s}][/{color}] {f.get('title', '')[:60]}")
+
+            lines.append("")
+
+            # AI reasoning log
+            if agent_state["log"]:
+                lines.append("  [bold]\U0001f9e0 AI 판단 로그:[/bold]")
+                for entry in agent_state["log"][-5:]:
+                    lines.append(f"    [dim]{entry[:80]}[/dim]")
+
+            return Panel(
+                "\n".join(lines),
+                title=f"\U0001f9e0 VXIS AI Agent — {target}",
+                border_style="cyan",
+            )
+
+        agent_state["start_time"] = time.time()
+
+        # Monkey-patch the executor to emit updates
+        executor = AgentExecutor(max_steps=15)
+
+        # Wrap brain.think to capture reasoning
+        original_think = executor._brain.think
+
+        def patched_think(observation):
+            agent_state["phase"] = "AI 판단 중"
+            agent_state["step"] = executor._brain._step_count + 1
+            actions = original_think(observation)
+            if actions:
+                for a in actions:
+                    if a.tool == "DONE":
+                        agent_state["phase"] = "완료"
+                    else:
+                        # Determine which team this tool belongs to
+                        for tid, team in AGENT_TEAMS.items():
+                            if a.tool in team["tools"]:
+                                agent_state["current_team"] = team["name"]
+                                agent_state["current_team_id"] = tid
+                                break
+                        agent_state["running_tools"].append(a.tool)
+                    if a.reasoning:
+                        agent_state["log"].append(f"Step {agent_state['step']}: {a.reasoning[:100]}")
+            return actions
+
+        executor._brain.think = patched_think
+
+        # Wrap _run_plugin to update status
+        original_run_plugin = executor._run_plugin
+
+        async def patched_run_plugin(plugin_name, target_, profile_):
+            agent_state["phase"] = "스캔 실행"
+            result = await original_run_plugin(plugin_name, target_, profile_)
+            # Remove from running, add findings
+            if plugin_name in agent_state["running_tools"]:
+                agent_state["running_tools"].remove(plugin_name)
+            if result.get("findings_count", 0) > 0:
+                agent_state["findings"].extend(
+                    f for f in executor._observation.findings[-result["findings_count"]:]
+                )
+            return result
+
+        executor._run_plugin = patched_run_plugin
+
+        # Run with live display
+        async def _run_with_live():
+            return await executor.run(target=target, profile=profile)
+
+        with Live(_render_agent_display(), console=console, refresh_per_second=2) as live:
+            async def _run_and_update():
+                task = asyncio.create_task(_run_with_live())
+                while not task.done():
+                    live.update(_render_agent_display())
+                    await asyncio.sleep(0.5)
+                live.update(_render_agent_display())
+                return await task
+
+            result = asyncio.run(_run_and_update())
+
+        # Final results
         console.print(f"\n[bold green]\u2705 AI 에이전트 스캔 완료[/bold green]")
-        console.print(f"  단계: {result.steps_taken}  |  발견: {len(result.findings)}건  |  시간: {result.duration_seconds:.0f}초")
+        console.print(
+            f"  단계: {result.steps_taken}  |  "
+            f"발견: {len(result.findings)}건  |  "
+            f"시간: {result.duration_seconds:.0f}초  |  "
+            f"모델: {model_short}"
+        )
 
         if result.findings:
             severity_colors = {
                 "critical": "bold red", "high": "red",
                 "medium": "yellow", "low": "blue", "informational": "dim",
             }
+            console.print()
             for f in result.findings:
                 sev = f.severity.value
                 color = severity_colors.get(sev, "")
                 console.print(f"  [{color}][{sev}][/{color}] {f.title}")
-
-        # Show execution log
-        console.print(f"\n[dim]{result.execution_log[:1000]}[/dim]")
 
     except Exception as exc:
         console.print(f"\n[bold red]에이전트 스캔 실패:[/bold red] {exc}")
