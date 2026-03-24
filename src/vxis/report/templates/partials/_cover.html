@@ -8,8 +8,9 @@
     <div class="cover-logo-text">{{ report.company_name | upper }}</div>
   {% endif %}
 
-  {# Report title #}
-  <h1 class="cover-title">{{ report.client_name }} Security Assessment</h1>
+  {# Report title — domain on separate line to prevent awkward wrapping #}
+  <h1 class="cover-title">Security Assessment</h1>
+  <div class="cover-target">{{ report.client_name }}</div>
   <div class="cover-subtitle">Penetration Testing &amp; Vulnerability Assessment Report</div>
 
   {# Meta table #}
