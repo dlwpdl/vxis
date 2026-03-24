@@ -51,9 +51,19 @@ class NucleiPlugin(BasePlugin):
             if waf_detected:
                 rate = 25
 
+        # Collect all live URLs from httpx + subdomains for wider coverage
         live_urls: list[str] = ctx.get_data("httpx", "live_urls", [])
         if not live_urls:
             live_urls = [f"https://{target}"]
+
+        # Also add subdomains discovered by subfinder (httpx may not have probed all)
+        subdomains: list[str] = ctx.get_data("subfinder", "subdomains", [])
+        seen = set(live_urls)
+        for sub in subdomains:
+            url = f"https://{sub}"
+            if url not in seen:
+                live_urls.append(url)
+                seen.add(url)
 
         tmp = tempfile.NamedTemporaryFile(
             mode="w",
@@ -65,9 +75,12 @@ class NucleiPlugin(BasePlugin):
         tmp.close()
         input_file = tmp.name
 
+        severity = "critical,high,medium,low" if scan_profile == "aggressive" else "critical,high,medium"
+
         return (
-            f"nuclei -l {input_file} -severity critical,high,medium"
+            f"nuclei -l {input_file} -severity {severity}"
             f" -etags dos,fuzz -rate-limit {rate} -json -irr -silent"
+            f" -header 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)'"
         )
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:

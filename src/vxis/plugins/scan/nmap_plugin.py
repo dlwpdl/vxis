@@ -11,9 +11,9 @@ from vxis.plugins.base import BasePlugin, PluginMeta
 
 # Port lists per scan profile
 _PORT_PROFILES: dict[str, str] = {
-    "stealth": "80,443,8080,8443",
-    "standard": "80,443,8080,8443,22,21,25,53,110,143,3306,5432,6379,27017",
-    "aggressive": "-",  # all ports
+    "stealth": "80,443,8080,8443,22,3389",
+    "standard": "--top-ports 1000",
+    "aggressive": "-",  # all 65535 ports
 }
 
 
@@ -76,7 +76,12 @@ class NmapPlugin(BasePlugin):
         input_file = tmp.name
 
         port_spec = _PORT_PROFILES.get(scan_profile, _PORT_PROFILES["standard"])
-        port_flag = f"-p {port_spec}" if port_spec != "-" else "-p-"
+        if port_spec == "-":
+            port_flag = "-p-"
+        elif port_spec.startswith("--"):
+            port_flag = port_spec
+        else:
+            port_flag = f"-p {port_spec}"
 
         return (
             f"nmap -iL {input_file} -sV -sC --open --reason -oX -"

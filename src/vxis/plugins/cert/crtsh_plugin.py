@@ -72,8 +72,16 @@ class CrtshPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
+        # Extract base domain (e.g., tms.jnf-logistics.com → jnf-logistics.com)
+        # to get ALL certificates for the organization, not just sub-subdomains
+        parts = target.replace("https://", "").replace("http://", "").split("/")[0].split(".")
+        if len(parts) > 2:
+            base_domain = ".".join(parts[-2:])
+        else:
+            base_domain = ".".join(parts)
+
         # %.domain matches the domain and all subdomains in CT logs
-        return f'curl -s "https://crt.sh/?q=%.{target}&output=json"'
+        return f'curl -s "https://crt.sh/?q=%.{base_domain}&output=json"'
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []

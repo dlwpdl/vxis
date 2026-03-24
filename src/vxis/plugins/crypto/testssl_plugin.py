@@ -56,10 +56,15 @@ class TestsslPlugin(BasePlugin):
         # would fan out across hosts.
         host = https_targets[0]
 
-        return (
-            f"testssl.sh --jsonfile - --fast --sneaky --severity LOW"
-            f" --nodns min {host}:443"
-        )
+        if scan_profile == "stealth":
+            flags = "--jsonfile - --fast --sneaky --severity LOW --nodns min"
+        elif scan_profile == "aggressive":
+            flags = "--jsonfile - --severity LOW --vulnerable --headers"
+        else:
+            # Standard: protocols + vulnerabilities + headers check
+            flags = "--jsonfile - --severity LOW --vulnerable --headers --protocols --server-defaults"
+
+        return f"testssl.sh {flags} {host}:443"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []

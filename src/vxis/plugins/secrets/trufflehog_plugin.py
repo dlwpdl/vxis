@@ -55,16 +55,32 @@ class TrufflehogPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        org = tool_config.get("github_org") or _derive_org(target)
+        # If explicit github_org is provided, scan that org
+        org = tool_config.get("github_org", "")
 
-        cmd = (
-            f"trufflehog github --org={org}"
-            f" --json --no-verification --concurrency 5"
-        )
-
-        github_token: str | None = tool_config.get("github_token")
-        if github_token:
-            cmd += f" --token {github_token}"
+        if org:
+            cmd = (
+                f"trufflehog github --org={org}"
+                f" --json --no-verification --concurrency 5"
+            )
+            github_token: str | None = tool_config.get("github_token")
+            if github_token:
+                cmd += f" --token {github_token}"
+        else:
+            # For domain targets, scan the target's web pages for exposed secrets
+            # Use the git scanner against the target to find .git exposure,
+            # or fall back to a simple verification of the domain
+            live_urls: list[str] = ctx.get_data("httpx", "live_urls", [])
+            if live_urls:
+                url = live_urls[0]
+            else:
+                url = f"https://{target}"
+            # Try to find exposed .git repos or leaked secrets in page source
+            cmd = (
+                f"trufflehog git {url}"
+                f" --json --no-verification --concurrency 5"
+                f" --max-depth 3"
+            )
 
         return cmd
 
