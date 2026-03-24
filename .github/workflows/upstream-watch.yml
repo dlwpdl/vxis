@@ -27,6 +27,9 @@ on:
         default: false
         type: boolean
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: write
   issues: write
@@ -38,14 +41,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        run: echo "No external dependencies needed — using stdlib urllib"
 
       - name: Restore state
         uses: actions/cache@v4
@@ -61,10 +64,8 @@ jobs:
 
       - name: Run daily watch
         env:
-          # LLM: together (default) | anthropic | google | openai | deepseek | kimi | glm
           UPSTREAM_LLM_PROVIDER: ${{ vars.UPSTREAM_LLM_PROVIDER || 'together' }}
           UPSTREAM_LLM_MODEL: ${{ vars.UPSTREAM_LLM_MODEL || '' }}
-          # API keys — set whichever provider you use
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
@@ -94,7 +95,7 @@ jobs:
                   tools/upstream_watch/decisions.json || true
           if ! git diff --staged --quiet; then
             git commit -m "chore: upstream watch digest $(date -u +%Y-%m-%dT%H:%M)"
-            git pull --rebase origin "${{ github.ref_name }}"
+            git pull --rebase origin main
             git push
           fi
 
@@ -116,14 +117,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        run: echo "No external dependencies needed — using stdlib urllib"
 
       - name: Run weekly digest
         run: python -m tools.upstream_watch --mode weekly
@@ -135,7 +136,7 @@ jobs:
           git add tools/upstream_watch/digests/ || true
           if ! git diff --staged --quiet; then
             git commit -m "chore: upstream watch weekly digest $(date -u +%Y-%m-%d)"
-            git pull --rebase origin "${{ github.ref_name }}"
+            git pull --rebase origin main
             git push
           fi
 
@@ -154,16 +155,15 @@ jobs:
       - name: Checkout
         if: steps.check-day.outputs.is_sunday == 'true'
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Setup Python
         if: steps.check-day.outputs.is_sunday == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      - name: Install dependencies
-        if: steps.check-day.outputs.is_sunday == 'true'
-        run: echo "No external dependencies needed — using stdlib urllib"
 
       - name: Run weekly digest
         if: steps.check-day.outputs.is_sunday == 'true'
@@ -177,6 +177,6 @@ jobs:
           git add tools/upstream_watch/digests/ || true
           if ! git diff --staged --quiet; then
             git commit -m "chore: upstream watch weekly digest $(date -u +%Y-%m-%d)"
-            git pull --rebase origin "${{ github.ref_name }}"
+            git pull --rebase origin main
             git push
           fi
