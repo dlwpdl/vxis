@@ -253,35 +253,59 @@ class AgentBrain:
         """LLM Fallback 체인을 구성한다.
 
         정책 거부 시 순차적으로 다음 모델로 전환.
-        순서: Opus → Sonnet → Haiku → Together → OpenAI → Gemini → DeepSeek
+
+        전략:
+        - Tier 1: Anthropic (추론 최강, 하지만 보안 정책 엄격)
+        - Tier 2: Together.ai 통합 게이트웨이 (중국 모델 포함, 정책 느슨)
+          → Kimi K2.5 (1T, 추론 특화)
+          → GLM-5 (744B, 에이전트 특화)
+          → GLM-4.7 (202K 컨텍스트)
+          → DeepSeek-V3.1 (671B, 코드/분석 강력)
+          → DeepSeek-R1 (추론 체인)
+          → Qwen3-235B (빠른 응답)
+          → OpenAI GPT-OSS-120B (저렴한 범용)
+          → Llama-3.3-70B (오픈소스 최강)
+
+        Together.ai 하나로 거의 모든 모델을 커버.
+        별도 API 키 없이 중국 모델까지 사용 가능.
         """
         chain: list[dict[str, str]] = []
 
-        # Tier 1: Anthropic (기본)
+        # Tier 1: Anthropic (기본 Brain — 추론/전략 최강)
         if os.environ.get("ANTHROPIC_API_KEY"):
             chain.append({"provider": "anthropic", "model": "claude-opus-4-6"})
             chain.append({"provider": "anthropic", "model": "claude-sonnet-4-6"})
             chain.append({"provider": "anthropic", "model": "claude-haiku-4-5-20251001"})
 
-        # Tier 2: Together.ai (오픈소스 모델)
+        # Tier 2: Together.ai 통합 게이트웨이 (중국 모델 전부 여기서 사용)
+        # → API 키 하나로 Kimi, GLM, DeepSeek, Qwen, Llama 전부 접근
         if os.environ.get("TOGETHER_API_KEY"):
+            # 추론 특화 (Opus 대체 후보)
             chain.append({"provider": "together", "model": "moonshotai/Kimi-K2.5"})
+            # 에이전트 특화 (도구 사용, function calling)
+            chain.append({"provider": "together", "model": "zai-org/GLM-5"})
+            # 긴 컨텍스트 (202K)
+            chain.append({"provider": "together", "model": "zai-org/GLM-4.7"})
+            # 코드/분석 강력 (보안 정책 느슨)
+            chain.append({"provider": "together", "model": "deepseek-ai/DeepSeek-V3.1"})
+            # 추론 체인 (단계별 사고)
+            chain.append({"provider": "together", "model": "deepseek-ai/DeepSeek-R1"})
+            # 빠른 범용
             chain.append({"provider": "together", "model": "Qwen/Qwen3-235B-A22B"})
+            # 저렴한 범용 ($0.15/M)
+            chain.append({"provider": "together", "model": "openai/gpt-oss-120b"})
+            # 오픈소스 최강
+            chain.append({"provider": "together", "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo"})
 
-        # Tier 3: OpenAI
+        # Tier 3: OpenAI 직접 (Together에 없는 경우 대비)
         if os.environ.get("OPENAI_API_KEY"):
             chain.append({"provider": "openai", "model": "gpt-4o"})
             chain.append({"provider": "openai", "model": "gpt-4o-mini"})
 
-        # Tier 4: Google Gemini
+        # Tier 4: Google Gemini 직접
         if os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY"):
             chain.append({"provider": "gemini", "model": "gemini-2.5-pro"})
             chain.append({"provider": "gemini", "model": "gemini-2.5-flash"})
-
-        # Tier 5: DeepSeek (중국 모델, 보안 정책 느슨)
-        if os.environ.get("DEEPSEEK_API_KEY"):
-            chain.append({"provider": "deepseek", "model": "deepseek-chat"})
-            chain.append({"provider": "deepseek", "model": "deepseek-reasoner"})
 
         return chain
 

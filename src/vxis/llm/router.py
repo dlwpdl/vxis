@@ -105,12 +105,22 @@ _TIER_COST: dict[ModelTier, float] = {
 }
 
 # 모델 등급별 기본 모델 ID
+# Anthropic 기본값 + Together.ai 대체 모델
 _TIER_MODEL_ID: dict[ModelTier, str] = {
     ModelTier.CODE: "",  # LLM 불필요
     ModelTier.COMPILED: "",  # LLM 불필요
     ModelTier.HAIKU: "claude-haiku-4-5-20251001",
     ModelTier.SONNET: "claude-sonnet-4-6",
     ModelTier.OPUS: "claude-opus-4-6",
+}
+
+# Together.ai 대체 모델 (Anthropic 사용 불가 시)
+_TOGETHER_FALLBACK_MODEL: dict[ModelTier, str] = {
+    ModelTier.CODE: "",
+    ModelTier.COMPILED: "",
+    ModelTier.HAIKU: "meta-llama/Llama-3.3-70B-Instruct-Turbo",  # $0.88/M
+    ModelTier.SONNET: "zai-org/GLM-5",  # $1.00/M, agent 특화
+    ModelTier.OPUS: "moonshotai/Kimi-K2.5",  # $0.50/M, 1T params 추론 특화
 }
 
 
@@ -242,9 +252,27 @@ class TokenRouter:
         return base_tier
 
     def _get_model_id(self, tier: ModelTier) -> str:
-        """환경 변수 오버라이드를 지원하는 모델 ID 조회."""
+        """환경 변수 오버라이드를 지원하는 모델 ID 조회.
+
+        우선순위:
+        1. 환경변수 오버라이드 (VXIS_MODEL_OPUS 등)
+        2. Anthropic 기본 모델
+        3. Together.ai 대체 모델 (Anthropic 키 없을 때)
+        """
         env_key = f"VXIS_MODEL_{tier.value.upper()}"
-        return os.environ.get(env_key, _TIER_MODEL_ID.get(tier, ""))
+        env_override = os.environ.get(env_key)
+        if env_override:
+            return env_override
+
+        # Anthropic 키가 있으면 기본 모델 사용
+        if os.environ.get("ANTHROPIC_API_KEY"):
+            return _TIER_MODEL_ID.get(tier, "")
+
+        # Together.ai 대체 모델
+        if os.environ.get("TOGETHER_API_KEY"):
+            return _TOGETHER_FALLBACK_MODEL.get(tier, "")
+
+        return _TIER_MODEL_ID.get(tier, "")
 
     @staticmethod
     def _estimate_cost(
