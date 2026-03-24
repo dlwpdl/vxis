@@ -88,11 +88,15 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tools/upstream_watch/digests/ tools/upstream_watch/.state.json \
-                  tools/upstream_watch/.metrics_history.json \
-                  tools/upstream_watch/.telegram_state.json \
-                  tools/upstream_watch/proposals/ \
-                  tools/upstream_watch/decisions.json || true
+          for p in \
+            tools/upstream_watch/digests/ \
+            tools/upstream_watch/.state.json \
+            tools/upstream_watch/.metrics_history.json \
+            tools/upstream_watch/.telegram_state.json \
+            tools/upstream_watch/proposals/ \
+            tools/upstream_watch/decisions.json; do
+            [ -e "$p" ] && git add "$p" 2>/dev/null || true
+          done
           if ! git diff --staged --quiet; then
             git commit -m "chore: upstream watch digest $(date -u +%Y-%m-%dT%H:%M)"
             git pull --rebase origin main
