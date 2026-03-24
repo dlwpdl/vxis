@@ -33,7 +33,7 @@ class CheckdmarcPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        return f"checkdmarc {target} --output-format json"
+        return f"checkdmarc {target} -f json"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []
