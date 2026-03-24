@@ -39,25 +39,31 @@ class GitleaksPlugin(BasePlugin):
         #   2. Explicit repo_url (backward-compatibility alias)
         #   3. Top-level target string (may be a local path or git URL)
         source_path = tool_config.get("source_path", "")
-        repo_path = source_path or tool_config.get("repo_url", target)
+        repo_url = tool_config.get("repo_url", "")
 
-        # Scan depth: non-aggressive profiles limit history to recent commits to
-        # keep runtime manageable on large repositories.  Aggressive profile
-        # walks the entire git history, which is the most thorough but slowest.
+        # Determine scan source
+        if source_path:
+            repo_path = source_path
+        elif repo_url:
+            repo_path = repo_url
+        elif target.startswith("/") or target.startswith("./") or target == ".":
+            # Local path target
+            repo_path = target
+        else:
+            # Domain target (e.g., tms.jnf-logistics.com) — not a git repo.
+            # Scan current directory as fallback (may be the VXIS project itself,
+            # or the user's working directory).
+            import os
+            if os.path.isdir(".git"):
+                repo_path = "."
+            else:
+                # No git repo available — return a no-op command that exits cleanly
+                return "echo '[]'"
+
         log_opts = ""
         if scan_profile != "aggressive":
             log_opts = " --log-opts=--since=1.year.ago"
 
-        # --report-format json without --report-path causes gitleaks to emit
-        # the JSON array to stdout, which parse_output consumes directly.
-        # Writing to a file is intentionally avoided here: the DAG executor
-        # captures stdout and passes it to parse_output; a file-based approach
-        # would require an extra read step and create race conditions under
-        # concurrent scans.
-        #
-        # --exit-code 0 prevents gitleaks from returning exit status 1 when
-        # leaks are found — a non-zero exit would be misinterpreted by the
-        # executor as a tool failure rather than a finding.
         return (
             f"gitleaks detect"
             f" --source={repo_path}"

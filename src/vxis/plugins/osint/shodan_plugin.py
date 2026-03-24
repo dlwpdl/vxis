@@ -29,6 +29,24 @@ class ShodanPlugin(BasePlugin):
     def meta(self) -> PluginMeta:
         return self._meta
 
+    def validate_environment(self) -> bool:
+        """Check if shodan CLI is available AND has API credits."""
+        import shutil
+        import subprocess
+        if shutil.which("shodan") is None:
+            return False
+        try:
+            r = subprocess.run(
+                ["shodan", "info"],
+                capture_output=True, text=True, timeout=10,
+            )
+            # "Query credits available: 0" means no credits
+            if "Query credits available: 0" in r.stdout:
+                return False
+            return r.returncode == 0
+        except Exception:
+            return False
+
     def build_command(
         self,
         target: str,
@@ -36,9 +54,9 @@ class ShodanPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        # Resolve target to IP, then use 'shodan host' (works with free API).
-        # 'shodan search/domain' requires a paid plan.
-        return f"shodan host $(dig +short {target} A | head -1)"
+        # 'shodan host' requires API credits (paid plan).
+        # Check credits first; if zero, return a no-op to avoid 403 errors.
+        return f"shodan host $(dig +short {target} A | head -1) 2>&1 || echo '{{}}'"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         # Require SHODAN_API_KEY — skip gracefully if absent.
