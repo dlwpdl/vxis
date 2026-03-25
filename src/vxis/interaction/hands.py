@@ -431,6 +431,7 @@ class TargetSession:
         max_redirects: int = 5,
         verify_ssl: bool = False,
         user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        proxy: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.auth_state = AuthState.ANONYMOUS
@@ -442,19 +443,22 @@ class TargetSession:
         self._max_history = 500  # OOM 방지
         self._discovered_endpoints: set[str] = set()
 
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=httpx.Timeout(timeout),
-            follow_redirects=True,
-            max_redirects=max_redirects,
-            verify=verify_ssl,
-            headers={
+        client_kwargs: dict[str, Any] = {
+            "base_url": self.base_url,
+            "timeout": httpx.Timeout(timeout),
+            "follow_redirects": True,
+            "max_redirects": max_redirects,
+            "verify": verify_ssl,
+            "headers": {
                 "User-Agent": user_agent,
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
                 "Accept-Language": "en-US,en;q=0.9,ko;q=0.8",
                 "Accept-Encoding": "gzip, deflate, br",
             },
-        )
+        }
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        self._client = httpx.AsyncClient(**client_kwargs)
 
     async def close(self) -> None:
         await self._client.aclose()

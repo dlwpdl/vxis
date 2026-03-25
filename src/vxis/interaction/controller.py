@@ -304,11 +304,8 @@ class InteractionController:
 
     async def start(self) -> None:
         """모든 컴포넌트 초기화."""
-        # Hands — 항상 시작
-        self._session = await self._session_mgr.get_session(self._target)
-        logger.info("Hands ready: %s", self._target)
-
-        # X-Ray — mitmproxy 있으면 시작
+        # X-Ray — mitmproxy 있으면 먼저 시작 (Hands/Eyes의 프록시로 사용)
+        proxy_url: str | None = None
         if self._enable_xray and MitmProxyManager.is_available():
             self._mitm = MitmProxyManager(port=self._proxy_port)
             try:
@@ -318,14 +315,21 @@ class InteractionController:
                 logger.warning("X-Ray failed to start: %s", exc)
                 self._mitm = None
 
-        # Eyes — Playwright 있으면 시작
+        # Hands — 항상 시작 (mitmproxy가 있으면 프록시 경유)
+        # INT-C6 fix: Hands 트래픽도 프록시를 통과하도록
+        session_kwargs: dict[str, Any] = {}
+        if proxy_url:
+            session_kwargs["proxy"] = proxy_url
+        self._session = await self._session_mgr.get_session(self._target, **session_kwargs)
+        logger.info("Hands ready: %s (proxy: %s)", self._target, proxy_url)
+
+        # Eyes — Playwright 있으면 시작 (같은 프록시 사용)
         if self._enable_eyes and EYES_AVAILABLE:
             try:
-                proxy = self._mitm.proxy_url if self._mitm else None
-                self._browser = BrowserEngine(proxy=proxy)
+                self._browser = BrowserEngine(proxy=proxy_url)
                 await self._browser.start()
                 self._page = await self._browser.new_page()
-                logger.info("Eyes ready (proxy: %s)", proxy)
+                logger.info("Eyes ready (proxy: %s)", proxy_url)
             except Exception as exc:
                 logger.warning("Eyes failed to start: %s", exc)
                 self._browser = None
@@ -343,11 +347,21 @@ class InteractionController:
         )
 
     async def stop(self) -> None:
-        if self._browser:
-            await self._browser.stop()
-        if self._mitm:
-            await self._mitm.stop()
-        await self._session_mgr.close_all()
+        # 각 컴포넌트 개별 정리 — 하나 실패해도 나머지 정리 보장
+        for name, cleanup in [
+            ("Eyes", lambda: self._browser.stop() if self._browser else None),
+            ("X-Ray", lambda: self._mitm.stop() if self._mitm else None),
+            ("Hands", lambda: self._session_mgr.close_all()),
+        ]:
+            try:
+                coro = cleanup()
+                if coro:
+                    await coro
+            except Exception as exc:
+                logger.warning("CPR %s cleanup failed: %s", name, exc)
+        self._browser = None
+        self._page = None
+        self._mitm = None
         self._started = False
         logger.info("CPR stopped")
 
@@ -397,6 +411,24 @@ class InteractionController:
             logger.error("Execute failed: %s", exc)
             return InteractionResult(success=False, error=str(exc), mode_used=mode)
 
+    # ── X-Ray Flow Recording ────────────────────────────────────
+
+    def _record_flow(self, resp: AnalyzedResponse, request_body: str = "") -> None:
+        """모든 HTTP 인터랙션을 X-Ray FlowAnalyzer에 기록."""
+        flow = self._analyzer.create_flow_from_request(
+            method=resp.response.request.method,
+            url=str(resp.response.request.url),
+            headers=dict(resp.response.request.headers),
+            body=request_body,
+        )
+        self._analyzer.update_flow_response(
+            flow,
+            status_code=resp.status,
+            headers=dict(resp.headers),
+            body=resp.text[:10000] if resp.text else "",
+        )
+        self._analyzer.add_flow(flow)
+
     # ── Execution Strategies ─────────────────────────────────────
 
     async def _execute_http(
@@ -418,19 +450,7 @@ class InteractionController:
         )
 
         # X-Ray에 플로우 기록
-        flow = self._analyzer.create_flow_from_request(
-            method=action.method,
-            url=f"{self._target}{action.url}",
-            headers=dict(resp.response.request.headers),
-            body=str(action.data or action.json_data or ""),
-        )
-        self._analyzer.update_flow_response(
-            flow,
-            status_code=resp.status,
-            headers=dict(resp.headers),
-            body=resp.text[:10000],
-        )
-        self._analyzer.add_flow(flow)
+        self._record_flow(resp, str(action.data or action.json_data or ""))
 
         result = InteractionResult(
             success=not resp.is_error,
@@ -478,6 +498,9 @@ class InteractionController:
             data=action.data,
             json_data=action.json_data,
         )
+
+        # 로그인 트래픽을 X-Ray에 기록 (인증 토큰 분석용)
+        self._record_flow(resp, str(action.data or ""))
 
         return InteractionResult(
             success=session.auth_state == AuthState.AUTHENTICATED,
