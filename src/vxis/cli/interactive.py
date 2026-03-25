@@ -1778,14 +1778,49 @@ def _execute_agent_scan(params: dict) -> None:
 
     model_short = model.split("/")[-1] if "/" in model else model
 
+    # Ceiling 선택 — AI 추론은 100%, 실행만 천장 이내
+    ceiling = inquirer.select(
+        message="실행 천장(ceiling)을 설정하세요 — AI 추론은 항상 100%",
+        choices=[
+            {"name": "\U0001f50d  Passive — OSINT만, 대상 접촉 없음 (안전)", "value": "passive"},
+            {"name": "\U0001f310  Standard — 일반 스캔 도구 허용 (권장)", "value": "standard"},
+            {"name": "\U0001f680  Aggressive — 깊은 익스플로잇 허용", "value": "aggressive"},
+            {"name": "\U0001f480  Elite — Zero-Day 탐색 + 전체 도구 (랩 전용)", "value": "elite"},
+        ],
+        default="standard",
+        pointer="\u276f",
+        qmark="\U0001f6e1\ufe0f",
+        amark="\u2705",
+        instruction="AI가 이 천장 이내에서 자율 판단합니다",
+    ).execute()
+
+    if ceiling is None:
+        return
+
+    # Ceiling → profile 매핑
+    ceiling_profile_map = {
+        "passive": "passive",
+        "standard": "standard",
+        "aggressive": "aggressive",
+        "elite": "aggressive",
+    }
+    profile = ceiling_profile_map.get(ceiling, "standard")
+
+    ceiling_kr = {
+        "passive": "Passive (접촉 없음)",
+        "standard": "Standard (일반 스캔)",
+        "aggressive": "Aggressive (익스플로잇)",
+        "elite": "Elite (전체 허용)",
+    }
+
     console.print()
     console.print(Panel(
         f"[bold cyan]\U0001f9e0 VXIS AI Agent Mode[/bold cyan]\n\n"
         f"\U0001f3af 타겟: [white]{target}[/white]\n"
-        f"\u26a1 프로필: [yellow]{profile}[/yellow]\n"
+        f"\U0001f6e1\ufe0f 천장: [yellow]{ceiling_kr.get(ceiling, ceiling)}[/yellow]\n"
         f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
-        f"[dim]AI 에이전트가 자율적으로 정찰 → 분석 → 공격 → 검증을 수행합니다.\n"
-        f"각 단계마다 AI가 결과를 분석하고 다음 행동을 결정합니다.[/dim]",
+        f"[dim]AI의 추론 능력은 항상 100%. 실행만 천장 이내.\n"
+        f"Passive여도 OSINT에서 critical 발견하면 보고합니다.[/dim]",
         title="\U0001f9e0 Autonomous Pentesting",
         border_style="cyan",
     ))
