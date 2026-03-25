@@ -256,13 +256,25 @@ class TokenRouter:
 
         우선순위:
         1. 환경변수 오버라이드 (VXIS_MODEL_OPUS 등)
-        2. Anthropic 기본 모델
-        3. Together.ai 대체 모델 (Anthropic 키 없을 때)
+        2. CLI 구독 (claude/gemini/codex CLI 감지 시 → $0)
+        3. Anthropic 기본 모델
+        4. Together.ai 대체 모델
         """
+        import shutil
+
         env_key = f"VXIS_MODEL_{tier.value.upper()}"
         env_override = os.environ.get(env_key)
         if env_override:
             return env_override
+
+        # CLI 구독 우선 — $0 (Tier 2+ 에서만, CODE/COMPILED은 LLM 불필요)
+        if tier not in (ModelTier.CODE, ModelTier.COMPILED):
+            if shutil.which("claude"):
+                return "claude-cli"
+            if shutil.which("gemini"):
+                return "gemini-cli"
+            if shutil.which("codex"):
+                return "codex-cli"
 
         # Anthropic 키가 있으면 기본 모델 사용
         if os.environ.get("ANTHROPIC_API_KEY"):
