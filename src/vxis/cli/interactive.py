@@ -151,6 +151,7 @@ def main_menu() -> str | None:
     """메인 메뉴를 표시하고 선택된 액션을 반환."""
     choices = [
         {"name": "\U0001f50d  스캔 시작", "value": "scan"},
+        {"name": "\U0001f3ed  산업 스캔", "value": "industry"},
         {"name": "\U0001f4ca  스캔 결과 조회", "value": "results"},
         {"name": "\U0001f4c4  리포트 생성 / 내보내기", "value": "report"},
         {"name": "\U0001f50c  플러그인 관리", "value": "plugins"},
@@ -672,6 +673,9 @@ def _dispatch(action: str) -> None:
         from vxis.cli.main import dashboard
         dashboard(host="127.0.0.1", port=8080)
 
+    elif action == "industry":
+        _industry_menu()
+
     elif action == "settings":
         console.print("[dim]설정은 .env 파일 또는 VXIS_ 환경변수로 관리합니다.[/dim]")
         console.print("[dim]  예: VXIS_DB_URL, VXIS_LOG_LEVEL, VXIS_SHODAN_API_KEY[/dim]")
@@ -1096,6 +1100,586 @@ def _generate_report(params: dict) -> None:
     output = Path(f"report_{scan_id}.{ext}")
 
     export(scan_id=scan_id, format=fmt, output=output)
+
+
+def _industry_menu() -> None:
+    """산업 스캔 메인 메뉴."""
+    action = inquirer.select(
+        message="산업 스캔 메뉴",
+        choices=[
+            {"name": "\U0001f4cb  도메인 리스트로 스캔 (CSV/텍스트)", "value": "csv_scan"},
+            {"name": "\U0001f50d  GitHub에서 기업 발굴", "value": "github_discover"},
+            {"name": "\U0001f4ca  이전 산업 스캔 결과 보기", "value": "view_results"},
+            {"name": "\U0001f4e4  아웃리치 큐 관리 (승인/거절)", "value": "outreach"},
+            {"name": "\u2b05\ufe0f   뒤로", "value": "back"},
+        ],
+        pointer="\u276f",
+        qmark="\U0001f3ed",
+        amark="\u2705",
+    ).execute()
+
+    if action == "back" or action is None:
+        return
+
+    if action == "csv_scan":
+        _industry_csv_scan()
+    elif action == "github_discover":
+        _industry_github_discover()
+    elif action == "view_results":
+        _industry_view_results()
+    elif action == "outreach":
+        _industry_outreach_menu()
+
+
+def _industry_csv_scan() -> None:
+    """CSV 또는 텍스트 파일로 산업 스캔을 실행합니다."""
+    import asyncio
+    from pathlib import Path
+
+    source_type = inquirer.select(
+        message="도메인 소스를 선택하세요",
+        choices=[
+            {"name": "\U0001f4c4  CSV 파일 (name, domain, industry 컬럼)", "value": "csv"},
+            {"name": "\U0001f4dd  텍스트 파일 (한 줄에 도메인 하나)", "value": "text"},
+            {"name": "\u2b05\ufe0f   취소", "value": "cancel"},
+        ],
+        pointer="\u276f",
+        qmark="\U0001f4cb",
+        amark="\u2705",
+    ).execute()
+
+    if source_type == "cancel" or source_type is None:
+        return
+
+    file_path = inquirer.filepath(
+        message="파일 경로를 입력하세요",
+        qmark="\U0001f4c1",
+        amark="\u2705",
+    ).execute()
+
+    if not file_path:
+        return
+
+    file_path = file_path.strip()
+
+    industry_name = inquirer.text(
+        message="산업 분류 이름을 입력하세요",
+        qmark="\U0001f3ed",
+        amark="\u2705",
+        default="tech",
+        instruction="(예: fintech, healthcare, ecommerce)",
+    ).execute()
+
+    max_concurrent = inquirer.number(
+        message="동시 스캔 수",
+        default=5,
+        min_allowed=1,
+        max_allowed=20,
+        qmark="\U0001f504",
+        amark="\u2705",
+    ).execute()
+
+    profile_choices = [
+        {"name": "\U0001f441\ufe0f  Passive (OSINT만)", "value": "passive"},
+        {"name": "\u26a1  Standard (권장)", "value": "standard"},
+        {"name": "\U0001f680  Aggressive (최대 속도)", "value": "aggressive"},
+    ]
+
+    profile = inquirer.select(
+        message="스캔 강도를 선택하세요",
+        choices=profile_choices,
+        default="standard",
+        pointer="\u276f",
+        qmark="\u26a1",
+        amark="\u2705",
+    ).execute()
+
+    # 기업 발굴
+    from vxis.industry.discovery import IndustryDiscovery
+
+    discovery = IndustryDiscovery(industry=industry_name or "tech")
+    try:
+        if source_type == "csv":
+            companies = discovery.discover_from_csv(file_path)
+        else:
+            text = Path(file_path).expanduser().read_text(encoding="utf-8")
+            companies = discovery.discover_from_text(text)
+    except Exception as exc:
+        console.print(f"[red]파일 로드 실패:[/red] {exc}")
+        return
+
+    if not companies:
+        console.print("[yellow]로드된 기업이 없습니다.[/yellow]")
+        return
+
+    console.print(
+        f"\n[bold cyan]{len(companies)}개 기업[/bold cyan]을 발굴했습니다. "
+        f"스캔을 시작합니다...\n"
+    )
+
+    confirm = inquirer.confirm(
+        message=f"{len(companies)}개 기업을 스캔할까요? (profile={profile})",
+        default=True,
+        qmark="\U0001f3ed",
+        amark="\u2705",
+    ).execute()
+
+    if not confirm:
+        console.print("[dim]취소되었습니다.[/dim]")
+        return
+
+    # 진행 상황 콜백
+    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("산업 스캔 중...", total=len(companies))
+
+        def _on_progress(completed: int, total: int, company) -> None:
+            progress.update(
+                task,
+                completed=completed,
+                description=f"[cyan]{company.name}[/cyan] 완료 ({completed}/{total})",
+            )
+
+        from vxis.industry.scanner import IndustryScanner
+
+        scanner = IndustryScanner(
+            max_concurrent=int(max_concurrent),
+            on_progress=_on_progress,
+        )
+
+        try:
+            result = asyncio.run(
+                scanner.scan_industry(companies, profile=profile)
+            )
+        except Exception as exc:
+            console.print(f"[red]산업 스캔 실패:[/red] {exc}")
+            return
+
+    # 결과 요약 출력
+    _show_industry_summary(result)
+
+    # 리포트 생성 여부 묻기
+    _offer_heatmap_report(result)
+
+
+def _industry_github_discover() -> None:
+    """GitHub에서 기업을 발굴하고 스캔합니다."""
+    import asyncio
+
+    keyword = inquirer.text(
+        message="검색 키워드를 입력하세요",
+        qmark="\U0001f50d",
+        amark="\u2705",
+        instruction="(예: SaaS, fintech, security, ecommerce)",
+        validate=lambda v: len(v.strip()) > 0,
+        invalid_message="키워드를 입력해주세요",
+    ).execute()
+
+    if not keyword:
+        return
+
+    country = inquirer.text(
+        message="국가 필터 키워드",
+        qmark="\U0001f310",
+        amark="\u2705",
+        default="korea",
+        instruction="(예: korea, japan, singapore)",
+    ).execute()
+
+    max_results = inquirer.number(
+        message="최대 발굴 기업 수",
+        default=30,
+        min_allowed=1,
+        max_allowed=100,
+        qmark="\U0001f522",
+        amark="\u2705",
+    ).execute()
+
+    industry_name = inquirer.text(
+        message="산업 분류 이름",
+        qmark="\U0001f3ed",
+        amark="\u2705",
+        default=keyword.strip(),
+    ).execute()
+
+    console.print(f"\n[dim]GitHub에서 기업 발굴 중 (키워드: {keyword})...[/dim]\n")
+
+    from vxis.industry.discovery import IndustryDiscovery
+
+    discovery = IndustryDiscovery(industry=industry_name or keyword)
+
+    try:
+        companies = discovery.discover_by_github(
+            keyword=keyword.strip(),
+            country=country.strip() if country else "korea",
+            max_results=int(max_results),
+        )
+    except Exception as exc:
+        console.print(f"[red]GitHub 발굴 실패:[/red] {exc}")
+        console.print("[dim]gh CLI가 설치 및 인증된 상태인지 확인하세요: gh auth login[/dim]")
+        return
+
+    if not companies:
+        console.print("[yellow]발굴된 기업이 없습니다.[/yellow]")
+        console.print("[dim]도메인이 공개된 GitHub 조직/사용자가 필요합니다.[/dim]")
+        return
+
+    console.print(f"\n[bold cyan]{len(companies)}개 기업[/bold cyan] 발굴 완료:")
+    for c in companies[:10]:
+        console.print(f"  [dim]-[/dim] {c.name} ({c.domain})")
+    if len(companies) > 10:
+        console.print(f"  [dim]... 외 {len(companies) - 10}개[/dim]")
+    console.print()
+
+    scan_now = inquirer.confirm(
+        message="발굴된 기업을 지금 바로 스캔할까요?",
+        default=True,
+        qmark="\U0001f680",
+        amark="\u2705",
+    ).execute()
+
+    if not scan_now:
+        console.print("[dim]발굴만 완료했습니다. 스캔은 나중에 CSV로 진행할 수 있습니다.[/dim]")
+        # CSV로 저장 제안
+        save_csv = inquirer.confirm(
+            message="발굴된 기업 목록을 CSV로 저장할까요?",
+            default=True,
+            qmark="\U0001f4c4",
+            amark="\u2705",
+        ).execute()
+        if save_csv:
+            _save_companies_csv(companies)
+        return
+
+    max_concurrent = inquirer.number(
+        message="동시 스캔 수",
+        default=5,
+        min_allowed=1,
+        max_allowed=20,
+        qmark="\U0001f504",
+        amark="\u2705",
+    ).execute()
+
+    from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+    from vxis.industry.scanner import IndustryScanner
+
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        TimeElapsedColumn(),
+        console=console,
+    ) as progress:
+        task = progress.add_task("산업 스캔 중...", total=len(companies))
+
+        def _on_progress(completed: int, total: int, company) -> None:
+            progress.update(
+                task,
+                completed=completed,
+                description=f"[cyan]{company.name}[/cyan] 완료 ({completed}/{total})",
+            )
+
+        scanner = IndustryScanner(
+            max_concurrent=int(max_concurrent),
+            on_progress=_on_progress,
+        )
+
+        try:
+            result = asyncio.run(scanner.scan_industry(companies, profile="standard"))
+        except Exception as exc:
+            console.print(f"[red]산업 스캔 실패:[/red] {exc}")
+            return
+
+    _show_industry_summary(result)
+    _offer_heatmap_report(result)
+
+
+def _industry_view_results() -> None:
+    """이전 산업 스캔 결과(히트맵 파일) 목록을 보여줍니다."""
+    from pathlib import Path
+
+    heatmap_dir = Path.home() / ".vxis" / "industry"
+    if not heatmap_dir.exists():
+        console.print("[yellow]저장된 산업 스캔 결과가 없습니다.[/yellow]")
+        console.print(f"[dim]결과는 {heatmap_dir} 에 저장됩니다.[/dim]")
+        return
+
+    html_files = sorted(heatmap_dir.glob("*.html"), reverse=True)
+    md_files = sorted(heatmap_dir.glob("*.md"), reverse=True)
+
+    all_files = html_files + md_files
+    if not all_files:
+        console.print("[yellow]저장된 파일이 없습니다.[/yellow]")
+        return
+
+    from rich.table import Table
+
+    table = Table(
+        title="\U0001f4ca 산업 스캔 결과 파일",
+        show_header=True,
+        header_style="bold",
+        border_style="cyan",
+    )
+    table.add_column("파일명", style="cyan")
+    table.add_column("유형")
+    table.add_column("크기", justify="right")
+    table.add_column("수정일")
+
+    from datetime import datetime
+
+    for f in all_files[:20]:
+        stat = f.stat()
+        size = f"{stat.st_size / 1024:.1f} KB"
+        mtime = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+        ftype = "HTML" if f.suffix == ".html" else "Markdown"
+        table.add_row(f.name, ftype, size, mtime)
+
+    console.print(table)
+    console.print(f"\n[dim]저장 경로: {heatmap_dir}[/dim]")
+
+
+def _industry_outreach_menu() -> None:
+    """아웃리치 큐 관리 메뉴 (승인/거절)."""
+    from vxis.industry.outreach import OutreachQueue
+
+    queue = OutreachQueue()
+
+    action = inquirer.select(
+        message="아웃리치 큐 관리",
+        choices=[
+            {"name": "\U0001f4cb  대기 중인 항목 보기", "value": "list_pending"},
+            {"name": "\u2705  항목 승인", "value": "approve"},
+            {"name": "\u274c  항목 거절", "value": "reject"},
+            {"name": "\U0001f4cb  전체 큐 보기", "value": "list_all"},
+            {"name": "\u2b05\ufe0f   뒤로", "value": "back"},
+        ],
+        pointer="\u276f",
+        qmark="\U0001f4e4",
+        amark="\u2705",
+    ).execute()
+
+    if action == "back" or action is None:
+        return
+
+    if action in ("list_pending", "list_all"):
+        items = queue.get_pending() if action == "list_pending" else queue.get_all()
+        if not items:
+            console.print("[yellow]항목이 없습니다.[/yellow]")
+            return
+
+        from rich.table import Table
+
+        status_colors = {
+            "pending": "yellow", "approved": "green",
+            "rejected": "red", "sent": "blue",
+        }
+        table = Table(
+            title="\U0001f4e4 아웃리치 큐",
+            show_header=True, header_style="bold", border_style="cyan",
+        )
+        table.add_column("ID (앞 8자)", style="dim")
+        table.add_column("기업명")
+        table.add_column("도메인")
+        table.add_column("등급")
+        table.add_column("상태")
+        table.add_column("생성일")
+
+        for item in items:
+            status = item.status
+            color = status_colors.get(status, "white")
+            table.add_row(
+                item.item_id[:8],
+                item.company.name,
+                item.company.domain,
+                item.company.security_grade or "-",
+                f"[{color}]{status}[/{color}]",
+                item.created_at[:10] if item.created_at else "-",
+            )
+        console.print(table)
+        console.print(
+            "\n[dim]승인/거절하려면 '아웃리치 큐 관리'에서 해당 액션을 선택하세요.[/dim]"
+        )
+
+    elif action in ("approve", "reject"):
+        pending = queue.get_pending()
+        if not pending:
+            console.print("[yellow]대기 중인 항목이 없습니다.[/yellow]")
+            return
+
+        item_choices = [
+            {
+                "name": f"{item.item_id[:8]} — {item.company.name} ({item.company.domain})",
+                "value": item.item_id,
+            }
+            for item in pending
+        ]
+
+        selected_id = inquirer.select(
+            message="항목을 선택하세요",
+            choices=item_choices,
+            pointer="\u276f",
+            qmark="\U0001f4e4",
+            amark="\u2705",
+        ).execute()
+
+        if not selected_id:
+            return
+
+        notes = inquirer.text(
+            message="메모를 입력하세요 (선택사항)",
+            qmark="\U0001f4dd",
+            amark="\u2705",
+        ).execute()
+
+        try:
+            if action == "approve":
+                updated = queue.approve(selected_id, notes=notes or "")
+                console.print(
+                    f"[green]승인됨:[/green] {updated.company.name} ({updated.item_id[:8]})"
+                )
+                console.print(
+                    "[dim]주의: 실제 발송은 사람이 직접 처리해야 합니다. "
+                    "VXIS는 자동 발송하지 않습니다.[/dim]"
+                )
+            else:
+                updated = queue.reject(selected_id, reason=notes or "")
+                console.print(
+                    f"[red]거절됨:[/red] {updated.company.name} ({updated.item_id[:8]})"
+                )
+        except Exception as exc:
+            console.print(f"[red]처리 실패:[/red] {exc}")
+
+
+def _show_industry_summary(result: object) -> None:
+    """산업 스캔 결과 요약을 콘솔에 출력합니다."""
+    from rich.table import Table
+
+    console.print(
+        f"\n[bold green]산업 스캔 완료[/bold green] "
+        f"({getattr(result, 'scan_duration', 0):.0f}초) — "
+        f"[bold]{getattr(result, 'total_companies', 0)}[/bold]개 기업 분석\n"
+    )
+
+    grade_dist = getattr(result, "grade_distribution", {})
+    avg_grade = getattr(result, "average_grade", "N/A")
+
+    grade_table = Table(
+        title="\U0001f4ca 보안 등급 분포",
+        show_header=True, header_style="bold", border_style="cyan",
+    )
+    grade_table.add_column("등급", width=8)
+    grade_table.add_column("기업 수", justify="right")
+
+    grade_colors = {"A": "green", "B": "blue", "C": "yellow", "D": "red", "F": "bold red"}
+    for grade in ["A", "B", "C", "D", "F"]:
+        count = grade_dist.get(grade, 0)
+        color = grade_colors.get(grade, "white")
+        grade_table.add_row(f"[{color}]{grade}[/{color}]", str(count))
+
+    console.print(grade_table)
+    console.print(f"\n  평균 등급: [bold cyan]{avg_grade}[/bold cyan]")
+
+    findings = getattr(result, "industry_findings", {})
+    console.print(
+        f"  Critical: [red]{findings.get('critical', 0)}[/red] | "
+        f"High: [yellow]{findings.get('high', 0)}[/yellow] | "
+        f"총 취약점: {sum(findings.values())}"
+    )
+    console.print()
+
+
+def _offer_heatmap_report(result: object) -> None:
+    """히트맵 리포트 생성 여부를 묻고 파일로 저장합니다."""
+    from pathlib import Path
+
+    gen_report = inquirer.confirm(
+        message="히트맵 리포트를 생성할까요?",
+        default=True,
+        qmark="\U0001f4ca",
+        amark="\u2705",
+    ).execute()
+
+    if not gen_report:
+        return
+
+    fmt = inquirer.select(
+        message="리포트 형식을 선택하세요",
+        choices=[
+            {"name": "\U0001f310  HTML (시각적 히트맵)", "value": "html"},
+            {"name": "\U0001f4dd  Markdown (텍스트)", "value": "md"},
+            {"name": "\u2705  둘 다", "value": "both"},
+        ],
+        pointer="\u276f",
+        qmark="\U0001f4ca",
+        amark="\u2705",
+    ).execute()
+
+    if not fmt:
+        return
+
+    from datetime import datetime as _dt
+    from vxis.industry.heatmap import generate_heatmap_report, generate_heatmap_html
+
+    save_dir = Path.home() / ".vxis" / "industry"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+
+    saved = []
+
+    if fmt in ("html", "both"):
+        try:
+            html_content = generate_heatmap_html(result)
+            html_path = save_dir / f"industry_heatmap_{ts}.html"
+            html_path.write_text(html_content, encoding="utf-8")
+            saved.append(str(html_path))
+        except Exception as exc:
+            console.print(f"[red]HTML 리포트 생성 실패:[/red] {exc}")
+
+    if fmt in ("md", "both"):
+        try:
+            md_content = generate_heatmap_report(result)
+            md_path = save_dir / f"industry_heatmap_{ts}.md"
+            md_path.write_text(md_content, encoding="utf-8")
+            saved.append(str(md_path))
+        except Exception as exc:
+            console.print(f"[red]Markdown 리포트 생성 실패:[/red] {exc}")
+
+    for path in saved:
+        console.print(f"[green]리포트 저장됨:[/green] {path}")
+
+
+def _save_companies_csv(companies: list) -> None:
+    """발굴된 기업 목록을 CSV 파일로 저장합니다."""
+    import csv
+    from datetime import datetime as _dt
+    from pathlib import Path
+
+    save_dir = Path.home() / ".vxis" / "industry"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    csv_path = save_dir / f"discovered_{ts}.csv"
+
+    with csv_path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["name", "domain", "industry", "notes"])
+        writer.writeheader()
+        for c in companies:
+            writer.writerow({
+                "name": c.name,
+                "domain": c.domain,
+                "industry": c.industry,
+                "notes": c.notes,
+            })
+
+    console.print(f"[green]CSV 저장됨:[/green] {csv_path}")
 
 
 def _client_menu() -> None:
