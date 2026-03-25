@@ -121,6 +121,16 @@ class AgentExecutor:
         else:
             logger.info("Docker 미사용 — 도구를 호스트에서 직접 실행합니다 (폴백 모드).")
 
+        # ── Phase 4: CPR (Cognitive Pentesting Runtime) 초기화 ──
+        self._interaction_controller = None
+        try:
+            from vxis.interaction.controller import InteractionController
+            self._interaction_controller_cls = InteractionController
+            logger.info("CPR Interaction Layer 활성화")
+        except Exception as exc:
+            self._interaction_controller_cls = None
+            logger.debug("CPR 초기화 실패 (무시): %s", exc)
+
     async def run(
         self,
         target: str,
@@ -131,6 +141,18 @@ class AgentExecutor:
         self._observation.target = target
 
         logger.info("VXIS Agent starting autonomous scan: %s", target)
+
+        # ── Phase 0: CPR 인터랙션 레이어 시작 ──
+        if self._interaction_controller_cls is not None:
+            try:
+                # HTTP(S) 타겟으로 변환
+                target_url = target if target.startswith("http") else f"https://{target}"
+                self._interaction_controller = self._interaction_controller_cls(target_url)
+                await self._interaction_controller.start()
+                logger.info("[CPR] 인터랙션 레이어 시작 — 타겟: %s", target_url)
+            except Exception as exc:
+                logger.warning("[CPR] 인터랙션 레이어 시작 실패 (무시): %s", exc)
+                self._interaction_controller = None
 
         # ── Phase 1: Initial Recon (parallel) ──
         logger.info("[Phase 1] 정찰 시작 — 공격 표면 수집")
@@ -202,6 +224,30 @@ class AgentExecutor:
             duration,
         )
 
+        # CPR 인터랙션 레이어 정리
+        if self._interaction_controller is not None:
+            try:
+                # CPR 타겟 프로필을 실행 로그에 추가
+                profile_data = self._interaction_controller.get_target_profile()
+                execution_log += (
+                    f"\n\n## CPR Target Profile\n"
+                    f"- Tech stack: {profile_data.get('tech_stack', [])}\n"
+                    f"- WAF detected: {profile_data.get('waf_detected', False)}\n"
+                    f"- Endpoints discovered: {profile_data.get('endpoints_discovered', 0)}\n"
+                    f"- Auth state: {profile_data.get('auth_state', 'unknown')}\n"
+                    f"- Available senses: {profile_data.get('available_senses', {})}\n"
+                )
+                traffic = profile_data.get("traffic_analysis", {})
+                if traffic:
+                    execution_log += (
+                        f"- API endpoints: {len(traffic.get('api_endpoints', []))}\n"
+                        f"- Auth tokens found: {traffic.get('auth_tokens_found', 0)}\n"
+                        f"- Passive vulns: {traffic.get('passive_vulns', [])}\n"
+                    )
+                await self._interaction_controller.stop()
+            except Exception as exc:
+                logger.warning("CPR 정리 중 오류 (무시): %s", exc)
+
         # sandbox 컨테이너 정리 (스캔 완료 후)
         if self._sandbox_manager is not None:
             try:
@@ -261,8 +307,85 @@ class AgentExecutor:
             return await self._run_ffuf(target, args)
         elif tool == "sqlmap":
             return await self._run_sqlmap(target, args)
+        elif tool.startswith("interact_"):
+            return await self._run_interaction(tool, target, args)
         else:
             return {"success": False, "summary": f"Unknown tool: {tool}", "findings_count": 0}
+
+    async def _run_interaction(
+        self, tool: str, target: str, args: dict,
+    ) -> dict[str, Any]:
+        """CPR 인터랙션 도구 실행."""
+        if self._interaction_controller is None:
+            return {"success": False, "summary": "CPR not available (httpx not installed?)", "findings_count": 0}
+
+        from vxis.interaction.controller import InteractionAction, InteractionIntent
+
+        # tool name → intent 매핑
+        intent_map = {
+            "interact_explore": InteractionIntent.EXPLORE,
+            "interact_login": InteractionIntent.LOGIN,
+            "interact_api": InteractionIntent.API_CALL,
+            "interact_crawl": InteractionIntent.CRAWL,
+            "interact_fuzz": InteractionIntent.FUZZ,
+            "interact_chain": InteractionIntent.EXPLOIT_CHAIN,
+            "interact_js": InteractionIntent.JS_ANALYSIS,
+            "interact_screenshot": InteractionIntent.SCREENSHOT,
+        }
+
+        intent = intent_map.get(tool, InteractionIntent.EXPLORE)
+
+        action = InteractionAction(
+            intent=intent,
+            url=args.get("url", "/"),
+            method=args.get("method", "GET"),
+            data=args.get("data"),
+            json_data=args.get("json"),
+            headers=args.get("headers"),
+            chain_steps=args.get("steps"),
+        )
+
+        try:
+            result = await self._interaction_controller.execute(action)
+            obs = result.to_observation()
+
+            # 발견된 취약점을 observation에 추가
+            for vuln in result.vulnerabilities:
+                self._observation.findings.append({
+                    "severity": "medium",
+                    "title": f"[CPR] {vuln.get('type', 'Unknown')}: {vuln.get('url', '')}",
+                    "source": f"cpr/{tool}",
+                    "target": target,
+                })
+
+            # 실행 기록
+            self._observation.executed_tools.append({
+                "tool": tool,
+                "state": "completed",
+                "findings": str(len(result.vulnerabilities)),
+                "details": obs,
+            })
+
+            summary_parts = [f"{tool}: {result.mode_used.value}"]
+            if result.forms_found:
+                summary_parts.append(f"{len(result.forms_found)} forms")
+            if result.links_found:
+                summary_parts.append(f"{len(result.links_found)} links")
+            if result.vulnerabilities:
+                summary_parts.append(f"{len(result.vulnerabilities)} vulns")
+            if result.dom_analysis:
+                summary_parts.append(f"{len(result.dom_analysis.api_endpoints)} API endpoints")
+            if result.extracted_values:
+                summary_parts.append(f"extracted: {list(result.extracted_values.keys())}")
+
+            return {
+                "success": result.success,
+                "summary": ", ".join(summary_parts),
+                "findings_count": len(result.vulnerabilities),
+                "interaction_data": obs,
+            }
+        except Exception as exc:
+            return {"success": False, "summary": f"{tool} failed: {exc}", "findings_count": 0}
 
     async def _run_plugin(
         self, plugin_name: str, target: str, profile: str,

@@ -168,6 +168,15 @@ AGENT_TEAMS = {
         "desc": "내부 네트워크, Active Directory, 권한 상승",
         "tools": ["bloodhound", "certipy", "netexec", "linpeas"],
     },
+    "interact": {
+        "name": "직접 상호작용팀 (CPR Interaction)",
+        "desc": "타겟 앱과 직접 상호작용 — 로그인, 폼, API, 퍼징, 익스플로잇 체인",
+        "tools": [
+            "interact_explore", "interact_login", "interact_api",
+            "interact_crawl", "interact_fuzz", "interact_chain",
+            "interact_js", "interact_screenshot",
+        ],
+    },
 }
 
 TOOL_DESCRIPTIONS = {
@@ -201,6 +210,18 @@ TOOL_DESCRIPTIONS = {
     # Cloud
     "prowler": "AWS/Azure/GCP 보안 감사. args: provider(str)",
     "s3scanner": "S3 버킷 권한 스캔. args: domain(str)",
+    # Cloud
+    "prowler": "AWS/Azure/GCP 보안 감사. args: provider(str)",
+    "s3scanner": "S3 버킷 권한 스캔. args: domain(str)",
+    # ── CPR (Cognitive Pentesting Runtime) — 직접 앱 상호작용 ──
+    "interact_explore": "타겟 웹앱 탐색 — 폼, 링크, 기술 스택 자동 수집. args: url(str)",
+    "interact_login": "로그인 시도 (CSRF 자동 처리). args: url(str), data(dict)",
+    "interact_api": "API 직접 호출. args: method(str), url(str), data(dict), json(dict)",
+    "interact_crawl": "딥 크롤링 — 엔드포인트 수집. args: url(str), depth(int)",
+    "interact_fuzz": "파라미터 퍼징 (X-Ray 트래픽 분석 포함). args: url(str), params(dict)",
+    "interact_chain": "멀티스텝 익스플로잇 체인. args: steps(list[dict])",
+    "interact_js": "JS/DOM 분석 (Playwright 사용). args: url(str)",
+    "interact_screenshot": "페이지 스크린샷 캡처. args: url(str)",
     # Special
     "DONE": "테스트 완료 — 충분한 커버리지를 달성했을 때 사용",
 }

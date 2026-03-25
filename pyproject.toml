@@ -20,6 +20,7 @@ dependencies = [
     "InquirerPy>=0.3,<1",
     "networkx>=3.3",
     "anthropic>=0.40.0",
+    "httpx>=0.28,<1",  # CPR Hands — HTTP 세션 매니저
 ]
 
 [project.optional-dependencies]
@@ -40,10 +41,18 @@ export = [
 pdf = [
     "weasyprint>=63,<64",
 ]
+browser = [
+    "playwright>=1.49",  # CPR Eyes — Playwright + CDP 브라우저
+]
+proxy = [
+    "mitmproxy>=11.0",   # CPR X-Ray — 트래픽 인터셉트
+]
 all = [
     "vxis[dashboard]",
     "vxis[export]",
     "vxis[pdf]",
+    "vxis[browser]",
+    "vxis[proxy]",
 ]
 
 [project.scripts]
