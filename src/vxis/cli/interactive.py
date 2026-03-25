@@ -814,6 +814,41 @@ def _execute_scan(params: dict) -> None:
             # Delta comparison is optional — silently skip on any error
             pass
 
+    # ── 학습 결과 표시 ─────────────────────────────────────────────────────
+    try:
+        effective = []
+        ineffective = []
+        failed_tools = []
+
+        for tr in result.tool_runs:
+            plugin = tr.get("plugin", "")
+            state = tr.get("state", "")
+            if state == "completed":
+                plugin_findings = [f for f in result.findings if f.source_plugin == plugin]
+                if plugin_findings:
+                    effective.append(f"\u2705 {plugin} ({len(plugin_findings)}건)")
+                else:
+                    ineffective.append(f"\u26aa {plugin}")
+            elif state in ("failed", "timed_out"):
+                err = tr.get("error", "")[:40]
+                failed_tools.append(f"\u274c {plugin}: {err}")
+            elif state == "skipped":
+                failed_tools.append(f"\u23ed {plugin} (스킵)")
+
+        learn_lines = ["\U0001f9e0 [bold]학습 결과[/bold]"]
+        if effective:
+            learn_lines.append(f"  [green]효과적:[/green] {', '.join(effective)}")
+        if ineffective:
+            learn_lines.append(f"  [dim]발견 없음:[/dim] {', '.join(ineffective)}")
+        if failed_tools:
+            learn_lines.append(f"  [red]실패/스킵:[/red] {', '.join(failed_tools)}")
+        learn_lines.append("  [dim]→ 다음 스캔에 자동 반영됩니다[/dim]")
+
+        console.print()
+        console.print("\n".join(learn_lines))
+    except Exception:
+        pass
+
     # ── Post-scan action menu ─────────────────────────────────────────────
     console.print()
     try:

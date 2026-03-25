@@ -377,6 +377,9 @@ class ScanOrchestrator:
             (finished_at - started_at).total_seconds(),
         )
 
+        # --- 14. Auto-learn: 스캔 결과를 메모리에 저장 ---
+        self._auto_learn(target, enriched, tool_runs, plugin_errors, dag_context)
+
         return ScanResult(
             scan_id=scan_id,
             target=target,
@@ -662,6 +665,80 @@ class ScanOrchestrator:
                     tech.add(waf_name)
 
         return list(tech)
+
+    def _auto_learn(
+        self,
+        target: str,
+        findings: list[Finding],
+        tool_runs: list[dict[str, Any]],
+        errors: list[dict[str, str]],
+        dag_context: DAGContext,
+    ) -> None:
+        """스캔 완료 후 결과를 메모리에 자동 저장.
+
+        뭐가 됐고, 뭐가 안 됐고, 뭘 찾았는지 기록하여
+        다음 스캔에서 더 효과적인 전략을 선택할 수 있게 한다.
+        """
+        try:
+            from vxis.agent.memory import AgentMemory, ScanMemory
+
+            # 효과적/비효과적 도구 분류
+            effective = []
+            ineffective = []
+            failed = []
+
+            for run in tool_runs:
+                plugin = run.get("plugin", "")
+                state = run.get("state", "")
+                if state == "completed":
+                    # 이 도구가 실제로 finding을 냈는지 확인
+                    plugin_findings = [
+                        f for f in findings if f.source_plugin == plugin
+                    ]
+                    if plugin_findings:
+                        effective.append(plugin)
+                    else:
+                        ineffective.append(plugin)
+                elif state in ("failed", "timed_out"):
+                    failed.append(plugin)
+                # skipped는 무시
+
+            # 기술 스택
+            tech_stack = self._detect_tech_stack(dag_context)
+
+            # findings 요약
+            findings_summary = [
+                {
+                    "severity": f.severity.value,
+                    "type": f.finding_type,
+                    "title": f.title[:100],
+                }
+                for f in findings[:50]
+            ]
+
+            memory = AgentMemory()
+            scan_mem = ScanMemory(
+                target=target,
+                tech_stack=tech_stack,
+                findings_summary=findings_summary,
+                effective_tools=effective,
+                ineffective_tools=ineffective + failed,
+                total_findings=len(findings),
+            )
+            memory.remember_scan(scan_mem)
+
+            # 로그에 학습 결과 표시
+            logger.info(
+                "학습 저장: %s — %d건 발견, 효과적: %s, 비효과적: %s, 실패: %s",
+                target,
+                len(findings),
+                ", ".join(effective) or "없음",
+                ", ".join(ineffective) or "없음",
+                ", ".join(failed) or "없음",
+            )
+
+        except Exception as exc:
+            logger.debug("메모리 자동 저장 실패 (무시): %s", exc)
 
     async def _persist(
         self,
