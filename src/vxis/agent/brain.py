@@ -972,21 +972,42 @@ class AgentBrain:
         except ImportError:
             pass
 
-        # Fallback: direct urllib call
-        api_key = os.environ.get("TOGETHER_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
-        if not api_key:
-            return None
+        # Fallback: direct urllib call — 프로바이더별 올바른 키 사용
+        _PROVIDER_KEYS = {
+            "together": ("TOGETHER_API_KEY", "https://api.together.xyz/v1/chat/completions", "moonshotai/Kimi-K2.5"),
+            "openai": ("OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions", "gpt-4o-mini"),
+            "deepseek": ("DEEPSEEK_API_KEY", "https://api.deepseek.com/v1/chat/completions", "deepseek-chat"),
+        }
 
         provider = self._provider
-        if provider == "together":
-            url = "https://api.together.xyz/v1/chat/completions"
-            model = self._model or "moonshotai/Kimi-K2.5"
-        elif provider == "anthropic":
-            # Use Anthropic format
+
+        # Anthropic는 별도 포맷
+        if provider == "anthropic":
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if not api_key:
+                return None
             return self._call_anthropic(api_key, system_prompt, user_prompt)
-        else:
-            url = "https://api.openai.com/v1/chat/completions"
-            model = self._model or "gpt-4o-mini"
+
+        # OpenAI-compatible providers
+        key_env, url, default_model = _PROVIDER_KEYS.get(
+            provider, _PROVIDER_KEYS["together"],
+        )
+        api_key = os.environ.get(key_env, "")
+        if not api_key:
+            # 키가 없으면 Together → Anthropic 순으로 폴백
+            for fb_env, fb_url, fb_model in _PROVIDER_KEYS.values():
+                api_key = os.environ.get(fb_env, "")
+                if api_key:
+                    url = fb_url
+                    default_model = fb_model
+                    break
+        if not api_key:
+            api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+            if api_key:
+                return self._call_anthropic(api_key, system_prompt, user_prompt)
+            return None
+
+        model = self._model or default_model
 
         payload = json.dumps({
             "model": model,
@@ -1015,9 +1036,11 @@ class AgentBrain:
             logger.warning("Agent LLM call failed: %s", exc)
             return None
 
-    def _call_anthropic(self, api_key: str, system: str, user: str) -> str | None:
+    def _call_anthropic(
+        self, api_key: str, system: str, user: str, model: str = "",
+    ) -> str | None:
         """Anthropic-specific call."""
-        model = self._model or "claude-sonnet-4-20250514"
+        model = model or self._model or "claude-sonnet-4-20250514"
         payload = json.dumps({
             "model": model,
             "max_tokens": 2000,

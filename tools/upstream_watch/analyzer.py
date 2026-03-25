@@ -226,7 +226,7 @@ Analyze these changes and return JSON with relevance score and actionable items 
             raw_response=raw_text,
         )
 
-    except (json.JSONDecodeError, KeyError, IndexError) as e:
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as e:
         return AnalysisResult(
             repo=repo_name, relevance_score=0.0,
             summary=f"AI analysis parse error: {e}",

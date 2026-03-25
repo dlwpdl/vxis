@@ -58,6 +58,7 @@ _PROVIDERS: dict[str, dict[str, str]] = {
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
         "default_model": "gemini-2.5-flash",
         "env_key": "GOOGLE_API_KEY",
+        "env_key_alt": "GEMINI_API_KEY",  # brain.py와 일관성
         "format": "gemini",
     },
     "openai": {
@@ -128,6 +129,12 @@ def _get_api_key() -> str:
     env_key = cfg.get("env_key", "")
     if env_key:
         key = os.environ.get(env_key, "")
+        if key:
+            return key
+    # 대체 환경변수 (GEMINI_API_KEY 등)
+    env_key_alt = cfg.get("env_key_alt", "")
+    if env_key_alt:
+        key = os.environ.get(env_key_alt, "")
         if key:
             return key
 
@@ -378,9 +385,13 @@ def _call_anthropic(
 
     content = data.get("content", [])
     if not content:
+        logger.warning("Anthropic empty content from %s", model)
         return None
 
     text = content[0].get("text", "")
+    if not text:
+        logger.warning("Anthropic empty text from %s", model)
+        return None
     return LLMResponse(text=text, model=model, provider="anthropic")
 
 
@@ -442,11 +453,16 @@ def _call_gemini(
 
     candidates = data.get("candidates", [])
     if not candidates:
+        logger.warning("Gemini empty candidates from %s", model)
         return None
 
     parts = candidates[0].get("content", {}).get("parts", [])
     if not parts:
+        logger.warning("Gemini empty parts from %s", model)
         return None
 
     text = parts[0].get("text", "")
+    if not text:
+        logger.warning("Gemini empty text from %s", model)
+        return None
     return LLMResponse(text=text, model=model, provider="google")
