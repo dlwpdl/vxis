@@ -1207,22 +1207,26 @@ def _execute_agent_scan(params: dict) -> None:
     ))
     console.print()
 
-    from vxis.agent.executor import AgentExecutor
-    from vxis.agent.brain import AGENT_TEAMS
+    from vxis.agent.runner import AgentRunner, SCAN_TYPE_MISSIONS
 
-    # Show team lineup
-    team_table = Table(title="\U0001f46a 에이전트 팀 구성", border_style="cyan", expand=True)
-    team_table.add_column("팀", style="bold cyan", min_width=12)
-    team_table.add_column("역할", min_width=20)
-    team_table.add_column("도구")
+    # Show agent lineup for selected scan type
+    scan_type_key = params.get("scan_type", "external")
+    if scan_type_key == "ai_auto":
+        scan_type_key = "external"  # default mission type
 
-    for team_id, team in AGENT_TEAMS.items():
-        team_table.add_row(
-            team["name"],
-            team["desc"],
-            ", ".join(team["tools"]),
-        )
-    console.print(team_table)
+    mission_def = SCAN_TYPE_MISSIONS.get(scan_type_key, SCAN_TYPE_MISSIONS["external"])
+    agent_list = mission_def.get("agents", [])
+
+    if agent_list:
+        agent_table = Table(title=f"\U0001f46a 투입 에이전트 ({len(agent_list)}개)", border_style="cyan", expand=True)
+        agent_table.add_column("#", style="dim", width=4)
+        agent_table.add_column("에이전트", style="bold cyan", min_width=20)
+
+        for i, aid in enumerate(agent_list, 1):
+            agent_table.add_row(str(i), aid)
+        console.print(agent_table)
+    else:
+        console.print("[dim]Director가 타겟 분석 후 자동으로 에이전트를 선택합니다.[/dim]")
     console.print()
 
     try:
@@ -1328,53 +1332,28 @@ def _execute_agent_scan(params: dict) -> None:
         agent_state["start_time"] = time.time()
 
         # Monkey-patch the executor to emit updates
-        executor = AgentExecutor(max_steps=15)
+        def _on_agent_status(phase, details):
+            agent_state["phase"] = phase
+            if "agent" in details:
+                agent_state["current_team"] = details["agent"]
+            if phase == "에이전트 실행":
+                agent_state["running_tools"].append(details.get("agent", ""))
+            elif phase == "에이전트 완료":
+                tool = details.get("agent", "")
+                if tool in agent_state["running_tools"]:
+                    agent_state["running_tools"].remove(tool)
+                agent_state["completed_teams"].append({"id": tool})
+            agent_state["log"].append(f"{phase}: {details}")
 
-        # Wrap brain.think to capture reasoning
-        original_think = executor._brain.think
-
-        def patched_think(observation):
-            agent_state["phase"] = "AI 판단 중"
-            agent_state["step"] = executor._brain._step_count + 1
-            actions = original_think(observation)
-            if actions:
-                for a in actions:
-                    if a.tool == "DONE":
-                        agent_state["phase"] = "완료"
-                    else:
-                        # Determine which team this tool belongs to
-                        for tid, team in AGENT_TEAMS.items():
-                            if a.tool in team["tools"]:
-                                agent_state["current_team"] = team["name"]
-                                agent_state["current_team_id"] = tid
-                                break
-                        agent_state["running_tools"].append(a.tool)
-                    if a.reasoning:
-                        agent_state["log"].append(f"Step {agent_state['step']}: {a.reasoning[:100]}")
-            return actions
-
-        executor._brain.think = patched_think
-
-        # Wrap _run_plugin to update status
-        original_run_plugin = executor._run_plugin
-
-        async def patched_run_plugin(plugin_name, target_, profile_):
-            agent_state["phase"] = "스캔 실행"
-            result = await original_run_plugin(plugin_name, target_, profile_)
-            # Remove from running, add findings
-            if plugin_name in agent_state["running_tools"]:
-                agent_state["running_tools"].remove(plugin_name)
-            if result.get("findings_count", 0) > 0:
-                agent_state["findings"].extend(
-                    f for f in executor._observation.findings[-result["findings_count"]:]
-                )
-            return result
-
-        executor._run_plugin = patched_run_plugin
+        runner = AgentRunner(on_status=_on_agent_status)
 
         # Run with live display
         async def _run_with_live():
-            return await executor.run(target=target, profile=profile)
+            return await runner.run(
+                target=target,
+                scan_type=scan_type_key,
+                profile=profile,
+            )
 
         with Live(_render_agent_display(), console=console, refresh_per_second=2) as live:
             async def _run_and_update():
@@ -1392,20 +1371,48 @@ def _execute_agent_scan(params: dict) -> None:
         console.print(
             f"  단계: {result.steps_taken}  |  "
             f"발견: {len(result.findings)}건  |  "
+            f"에이전트: {len(result.agents_completed)}개  |  "
+            f"체인: {len(result.attack_chains)}개  |  "
             f"시간: {result.duration_seconds:.0f}초  |  "
             f"모델: {model_short}"
         )
 
+        # Severity summary
+        counts = result.severity_counts
+        sev_parts = []
+        for sev, color in [("critical", "bold red"), ("high", "red"), ("medium", "yellow"), ("low", "blue")]:
+            if counts.get(sev, 0) > 0:
+                sev_parts.append(f"[{color}]{sev}: {counts[sev]}[/{color}]")
+        if sev_parts:
+            console.print("  " + " | ".join(sev_parts))
+
+        # Attack chains
+        if result.attack_chains:
+            console.print(f"\n  [bold]\u26d3 공격 체인 {len(result.attack_chains)}개 발견:[/bold]")
+            for chain in result.attack_chains:
+                console.print(f"    [red]{chain.get('title', '')}[/red] ({chain.get('steps', 0)}단계)")
+
+        # Findings detail
         if result.findings:
+            console.print(f"\n  [bold]\U0001f4cb 발견 사항:[/bold]")
             severity_colors = {
                 "critical": "bold red", "high": "red",
                 "medium": "yellow", "low": "blue", "informational": "dim",
             }
-            console.print()
-            for f in result.findings:
-                sev = f.severity.value
-                color = severity_colors.get(sev, "")
-                console.print(f"  [{color}][{sev}][/{color}] {f.title}")
+            for f in result.findings[:20]:
+                sev = getattr(f, "severity", None)
+                sev_str = sev.value if hasattr(sev, "value") else str(sev or "?")
+                color = severity_colors.get(sev_str.lower(), "")
+                title = getattr(f, "title", str(f))
+                console.print(f"    [{color}][{sev_str}][/{color}] {title}")
+            if len(result.findings) > 20:
+                console.print(f"    [dim]... +{len(result.findings) - 20}건 더[/dim]")
+
+        # Execution log summary
+        if result.execution_log:
+            console.print(f"\n  [dim]실행 로그 ({len(result.execution_log)}줄):[/dim]")
+            for entry in result.execution_log[-5:]:
+                console.print(f"    [dim]{entry}[/dim]")
 
     except Exception as exc:
         console.print(f"\n[bold red]에이전트 스캔 실패:[/bold red] {exc}")
