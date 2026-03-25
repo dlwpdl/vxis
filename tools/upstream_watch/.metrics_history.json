@@ -23,6 +23,14 @@
       "open_issues": 135,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "projectdiscovery/nuclei",
+      "stars": 27618,
+      "forks": 3322,
+      "open_issues": 131,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "usestrix/strix": [
@@ -49,6 +57,14 @@
       "open_issues": 76,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "usestrix/strix",
+      "stars": 21604,
+      "forks": 2299,
+      "open_issues": 77,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "0x4m4/hexstrike-ai": [
@@ -67,6 +83,14 @@
       "open_issues": 73,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "0x4m4/hexstrike-ai",
+      "stars": 7675,
+      "forks": 1687,
+      "open_issues": 73,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "GH05TCREW/pentestagent": [
@@ -85,6 +109,14 @@
       "open_issues": 10,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "GH05TCREW/pentestagent",
+      "stars": 1795,
+      "forks": 375,
+      "open_issues": 10,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "GreyDGL/PentestGPT": [
@@ -103,6 +135,14 @@
       "open_issues": 48,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "GreyDGL/PentestGPT",
+      "stars": 12248,
+      "forks": 2090,
+      "open_issues": 49,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "Hacker-GPT/HackerGPT-2.0": [
@@ -121,6 +161,14 @@
       "open_issues": 0,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "Hacker-GPT/HackerGPT-2.0",
+      "stars": 0,
+      "forks": 0,
+      "open_issues": 0,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "aquasecurity/trivy": [
@@ -139,6 +187,14 @@
       "open_issues": 234,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "aquasecurity/trivy",
+      "stars": 34112,
+      "forks": 202,
+      "open_issues": 234,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "blacklanternsecurity/bbot": [
@@ -157,6 +213,14 @@
       "open_issues": 84,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "blacklanternsecurity/bbot",
+      "stars": 9539,
+      "forks": 786,
+      "open_issues": 84,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "caido/caido": [
@@ -175,6 +239,14 @@
       "open_issues": 720,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "caido/caido",
+      "stars": 2222,
+      "forks": 115,
+      "open_issues": 721,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "j3ssie/osmedeus": [
@@ -193,6 +265,14 @@
       "open_issues": 2,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "j3ssie/osmedeus",
+      "stars": 6158,
+      "forks": 974,
+      "open_issues": 2,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "mitre/caldera": [
@@ -211,6 +291,14 @@
       "open_issues": 72,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "mitre/caldera",
+      "stars": 6846,
+      "forks": 1302,
+      "open_issues": 70,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "projectdiscovery/httpx": [
@@ -229,6 +317,14 @@
       "open_issues": 8,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "projectdiscovery/httpx",
+      "stars": 9735,
+      "forks": 1049,
+      "open_issues": 6,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "projectdiscovery/nuclei-templates": [
@@ -247,6 +343,14 @@
       "open_issues": 129,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "projectdiscovery/nuclei-templates",
+      "stars": 12093,
+      "forks": 3406,
+      "open_issues": 130,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "projectdiscovery/subfinder": [
@@ -265,6 +369,14 @@
       "open_issues": 8,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "projectdiscovery/subfinder",
+      "stars": 13312,
+      "forks": 1521,
+      "open_issues": 9,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "prowler-cloud/prowler": [
@@ -283,6 +395,14 @@
       "open_issues": 191,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "prowler-cloud/prowler",
+      "stars": 13399,
+      "forks": 2056,
+      "open_issues": 193,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "redcanaryco/atomic-red-team": [
@@ -301,6 +421,14 @@
       "open_issues": 5,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "redcanaryco/atomic-red-team",
+      "stars": 11730,
+      "forks": 3080,
+      "open_issues": 5,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "six2dez/reconftw": [
@@ -319,6 +447,14 @@
       "open_issues": 1,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "six2dez/reconftw",
+      "stars": 7373,
+      "forks": 1146,
+      "open_issues": 0,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "trufflesecurity/trufflehog": [
@@ -337,6 +473,14 @@
       "open_issues": 400,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "trufflesecurity/trufflehog",
+      "stars": 25203,
+      "forks": 2270,
+      "open_issues": 405,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ],
   "vxcontrol/pentagi": [
@@ -355,6 +499,14 @@
       "open_issues": 19,
       "commit_count_today": 0,
       "fetched_at": "2026-03-24"
+    },
+    {
+      "repo": "vxcontrol/pentagi",
+      "stars": 13581,
+      "forks": 1691,
+      "open_issues": 15,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-25"
     }
   ]
 }
