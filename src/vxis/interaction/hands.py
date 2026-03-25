@@ -41,7 +41,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import html.parser
 import logging
 import re
@@ -223,10 +222,11 @@ _WAF_SIGNATURES = [
     (r"wallarm", "Wallarm"),
 ]
 
-_AUTH_PATTERNS = [
-    r"(login|sign.?in|auth)",
-    r"(401|403|unauthorized|forbidden)",
-    r"(session.?expired|token.?expired|please.?log.?in)",
+_AUTH_REQUIRED_PATTERNS = [
+    # 인증 필요를 나타내는 명확한 패턴만 (단순 "login" 링크는 제외)
+    r"(session.?expired|token.?expired|please.?log.?in|login.?required)",
+    r"(unauthorized.?access|authentication.?required|access.?denied)",
+    r"(you.?must.?be.?logged|sign.?in.?to.?continue|redirect.*login)",
 ]
 
 _ERROR_PATTERNS = [
@@ -265,8 +265,14 @@ def _detect_waf(headers: httpx.Headers, body: str) -> tuple[bool, str]:
 
 def _analyze_response(resp: httpx.Response, base_url: str) -> AnalyzedResponse:
     """HTTP 응답을 분석."""
-    body = resp.text if resp.headers.get("content-type", "").startswith("text") else ""
     ct = resp.headers.get("content-type", "")
+    # text, json, xml, javascript 등 텍스트 기반 응답만 분석
+    _text_types = ("text/", "application/json", "application/xml", "application/javascript")
+    is_text = any(ct.lower().startswith(t) for t in _text_types) or not ct
+    try:
+        body = resp.text if is_text else ""
+    except Exception:
+        body = ""
     is_html = "html" in ct.lower()
 
     # WAF 감지
@@ -318,20 +324,26 @@ def _analyze_response(resp: httpx.Response, base_url: str) -> AnalyzedResponse:
     # 쿠키
     cookies_set = [c.split("=")[0] for c in resp.headers.get_list("set-cookie")]
 
-    # 인증 필요 여부
+    # 인증 필요 여부 — 상태 코드 + WWW-Authenticate 헤더 + 명확한 패턴만
     is_auth_required = resp.status_code in (401, 403)
-    if not is_auth_required and body:
+    if not is_auth_required and resp.headers.get("www-authenticate"):
+        is_auth_required = True
+    if not is_auth_required and body and resp.status_code >= 400:
+        # 에러 응답에서만 인증 패턴 검색 (일반 페이지의 "login" 링크 오탐 방지)
         is_auth_required = any(
-            re.search(p, body, re.IGNORECASE) for p in _AUTH_PATTERNS
+            re.search(p, body, re.IGNORECASE) for p in _AUTH_REQUIRED_PATTERNS
         )
+
+    # 리다이렉트 감지 — follow_redirects=True라서 resp.history로 판단
+    was_redirected = bool(resp.history)
 
     return AnalyzedResponse(
         response=resp,
         status=resp.status_code,
         url=str(resp.url),
         content_type=ct,
-        body_length=len(body),
-        is_redirect=resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308),
+        body_length=len(resp.content) if resp.content else 0,
+        is_redirect=was_redirected,
         is_error=resp.status_code >= 400,
         is_waf_block=is_waf,
         is_auth_required=is_auth_required,
@@ -370,11 +382,20 @@ class CSRFTracker:
                 logger.debug("CSRF header token: %s=%s...", name, val[:8])
 
     def update_from_cookies(self, cookies: httpx.Cookies) -> None:
-        for name in ("csrftoken", "csrf_token", "_csrf", "XSRF-TOKEN"):
-            val = cookies.get(name)
+        # 쿠키 이름 → 요청 헤더 이름 매핑 (프레임워크별)
+        _cookie_header_map = {
+            "csrftoken": "X-CSRFToken",        # Django
+            "csrf_token": "X-CSRF-Token",       # Rails, general
+            "_csrf": "X-CSRF-Token",            # Express
+            "XSRF-TOKEN": "X-XSRF-TOKEN",      # Angular, Axios
+            "_csrf_token": "X-CSRF-Token",      # Phoenix
+        }
+        for cookie_name, header_name in _cookie_header_map.items():
+            val = cookies.get(cookie_name)
             if val:
-                self._header_name = "x-csrftoken"
+                self._header_name = header_name
                 self._header_token = val
+                break
 
     def inject_into_data(self, data: dict[str, Any]) -> dict[str, Any]:
         result = dict(data)
@@ -418,6 +439,7 @@ class TargetSession:
         self._last_request_time = 0.0
         self._min_delay = 0.0  # 적응형 딜레이 (WAF 우회)
         self._history: list[AnalyzedResponse] = []
+        self._max_history = 500  # OOM 방지
         self._discovered_endpoints: set[str] = set()
 
         self._client = httpx.AsyncClient(
@@ -459,8 +481,6 @@ class TargetSession:
             if data is not None:
                 data = self.csrf.inject_into_data(data)
 
-        url = path if path.startswith("http") else path
-
         try:
             resp = await self._client.request(
                 method=method.upper(),
@@ -483,6 +503,8 @@ class TargetSession:
         # 응답 분석
         analyzed = _analyze_response(resp, self.base_url)
         self._history.append(analyzed)
+        if len(self._history) > self._max_history:
+            self._history = self._history[-self._max_history:]
 
         # CSRF 토큰 갱신
         for form in analyzed.forms:
@@ -658,7 +680,14 @@ class TargetSession:
             if resp.is_auth_required:
                 self.auth_state = AuthState.EXPIRED
                 logger.warning("Session expired detected")
-        if resp.is_waf_block:
+        elif self.auth_state == AuthState.BLOCKED:
+            # WAF 차단 후 정상 응답이면 복구
+            if not resp.is_waf_block and not resp.is_rate_limited and resp.status < 400:
+                self.auth_state = AuthState.ANONYMOUS
+                self._min_delay = max(self._min_delay - 0.5, 0.0)
+                logger.info("WAF block recovered — session unblocked")
+
+        if resp.is_waf_block and self.auth_state != AuthState.BLOCKED:
             self.auth_state = AuthState.BLOCKED
             logger.warning("WAF block detected — session marked as blocked")
 
@@ -667,6 +696,9 @@ class TargetSession:
             elapsed = time.monotonic() - self._last_request_time
             if elapsed < self._min_delay:
                 await asyncio.sleep(self._min_delay - elapsed)
+            # 성공 시 딜레이 점진적 감소 (cooldown)
+            elif self._min_delay > 0 and elapsed > self._min_delay * 3:
+                self._min_delay = max(self._min_delay - 0.2, 0.0)
 
 
 # ── Request Chain ────────────────────────────────────────────────

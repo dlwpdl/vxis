@@ -111,6 +111,20 @@ class TrafficSummary:
     status_codes: dict[int, int] = field(default_factory=dict)
     interesting_headers: list[dict[str, str]] = field(default_factory=list)
 
+    def to_dict(self) -> dict[str, Any]:
+        """JSON 직렬화 가능한 딕셔너리 반환."""
+        return {
+            "total_flows": self.total_flows,
+            "unique_hosts": sorted(self.unique_hosts),
+            "api_endpoints": sorted(self.api_endpoints),
+            "auth_tokens_found": self.auth_tokens_found,
+            "secrets_found": self.secrets_found,
+            "vulnerabilities": self.vulnerabilities,
+            "content_types": self.content_types,
+            "status_codes": {str(k): v for k, v in self.status_codes.items()},
+            "interesting_headers": self.interesting_headers,
+        }
+
 
 # ── Passive Traffic Analyzer (mitmproxy 없이도 동작) ─────────────
 
@@ -165,10 +179,12 @@ class FlowAnalyzer:
     def __init__(self) -> None:
         self._flows: list[CapturedFlow] = []
         self._intercept_rules: list[InterceptRule] = []
+        self._flow_counter = 0
 
     def add_flow(self, flow: CapturedFlow) -> CapturedFlow:
-        """플로우 추가 + 자동 분석."""
-        self._analyze_flow(flow)
+        """플로우 추가 + 자동 분석 (이미 분석된 경우 건너뜀)."""
+        if not flow.detected_tokens and not flow.vulnerabilities:
+            self._analyze_flow(flow)
         self._flows.append(flow)
         return flow
 
@@ -180,8 +196,9 @@ class FlowAnalyzer:
         body: str = "",
     ) -> CapturedFlow:
         """요청 정보로 CapturedFlow 생성."""
+        self._flow_counter += 1
         flow = CapturedFlow(
-            id=f"flow-{len(self._flows):04d}",
+            id=f"flow-{self._flow_counter:04d}",
             timestamp=time.time(),
             method=method,
             url=url,

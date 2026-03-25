@@ -265,8 +265,11 @@ class BrowserPage:
         self._js_errors.clear()
 
         await self._page.goto(url, wait_until=wait_until, timeout=timeout)
-        # SPA 앱 대비 — JS 실행 대기
-        await self._page.wait_for_load_state("networkidle", timeout=10000)
+        # SPA 앱 대비 — JS 실행 대기 (long-polling 사이트에서 타임아웃 허용)
+        try:
+            await self._page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:
+            logger.debug("networkidle timeout for %s — proceeding with current state", url)
 
         return await self.snapshot()
 
@@ -277,7 +280,10 @@ class BrowserPage:
 
         # HTML + 텍스트
         html_content = await self._page.content()
-        text_content = await self._page.inner_text("body") if await self._page.query_selector("body") else ""
+        try:
+            text_content = await self._page.inner_text("body")
+        except Exception:
+            text_content = ""
 
         # 폼 추출
         forms = await self._extract_forms()
@@ -285,7 +291,7 @@ class BrowserPage:
         # 링크 추출
         links = await self._page.eval_on_selector_all(
             "a[href]",
-            "elements => elements.map(e => e.href).filter(h => h && !h.startswith('javascript:'))",
+            "elements => elements.map(e => e.href).filter(h => h && !h.startsWith('javascript:'))",
         )
 
         # Input 필드
@@ -304,10 +310,13 @@ class BrowserPage:
         # 쿠키
         cookies = await self._context.cookies()
 
-        # localStorage
-        local_storage = await self._page.evaluate(
-            "() => Object.fromEntries(Object.entries(localStorage))"
-        )
+        # localStorage (opaque origin에서는 접근 불가)
+        try:
+            local_storage = await self._page.evaluate(
+                "() => { try { return Object.fromEntries(Object.entries(localStorage)); } catch(e) { return {}; } }"
+            )
+        except Exception:
+            local_storage = {}
 
         return PageSnapshot(
             url=url,
@@ -329,7 +338,10 @@ class BrowserPage:
     async def click(self, selector: str, timeout: float = 5000) -> None:
         """요소 클릭."""
         await self._page.click(selector, timeout=timeout)
-        await self._page.wait_for_load_state("networkidle", timeout=5000)
+        try:
+            await self._page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass  # long-polling 사이트에서 타임아웃 허용
 
     async def fill(self, selector: str, value: str) -> None:
         """입력 필드에 값 입력."""
@@ -515,14 +527,20 @@ class BrowserPage:
         await self._context.clear_cookies()
 
     async def get_local_storage(self) -> dict[str, str]:
-        return await self._page.evaluate(
-            "() => Object.fromEntries(Object.entries(localStorage))"
-        )
+        try:
+            return await self._page.evaluate(
+                "() => { try { return Object.fromEntries(Object.entries(localStorage)); } catch(e) { return {}; } }"
+            )
+        except Exception:
+            return {}
 
     async def get_session_storage(self) -> dict[str, str]:
-        return await self._page.evaluate(
-            "() => Object.fromEntries(Object.entries(sessionStorage))"
-        )
+        try:
+            return await self._page.evaluate(
+                "() => { try { return Object.fromEntries(Object.entries(sessionStorage)); } catch(e) { return {}; } }"
+            )
+        except Exception:
+            return {}
 
     # ── Waiting ────────────────────────────────────────────────
 
@@ -602,11 +620,13 @@ class DockerBrowserManager:
         await mgr.stop()
     """
 
-    _IMAGE = "mcr.microsoft.com/playwright:v1.49.0-jammy"
-    _CONTAINER_NAME = "vxis-browser"
+    # Chromium standalone (Playwright 이미지의 chromium은 PATH에 없음)
+    _IMAGE = "zenika/alpine-chrome:latest"
+    _CONTAINER_PREFIX = "vxis-browser"
 
     def __init__(self) -> None:
         self._container_id: str | None = None
+        self._container_name: str = f"{self._CONTAINER_PREFIX}-{os.getpid()}"
         self._cdp_port: int = 9222
 
     @staticmethod
@@ -624,18 +644,17 @@ class DockerBrowserManager:
 
     async def start(self) -> str:
         """Docker 안에서 Chromium 시작, CDP endpoint URL 반환."""
+        # zenika/alpine-chrome 이미지는 chromium-browser가 ENTRYPOINT로 설정됨
         cmd = [
             "docker", "run", "-d",
-            "--name", self._CONTAINER_NAME,
+            "--name", self._container_name,
             "-p", f"{self._cdp_port}:9222",
             "--shm-size=2g",
-            "--cap-add=SYS_ADMIN",
             self._IMAGE,
-            "chromium",
             "--headless",
             "--disable-gpu",
             "--remote-debugging-address=0.0.0.0",
-            f"--remote-debugging-port=9222",
+            "--remote-debugging-port=9222",
             "--no-sandbox",
             "--disable-dev-shm-usage",
         ]
@@ -660,7 +679,7 @@ class DockerBrowserManager:
     async def stop(self) -> None:
         if self._container_id:
             proc = await asyncio.create_subprocess_exec(
-                "docker", "rm", "-f", self._CONTAINER_NAME,
+                "docker", "rm", "-f", self._container_name,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             )
             await proc.communicate()
