@@ -201,12 +201,15 @@ def chat(
     model = _get_model()
 
     # Try primary provider first
+    logger.info("LLM request: %s/%s (prompt ~%d chars)", primary_provider, model, len(user_prompt))
     try:
         result = _try_provider(primary_provider, primary_key, model, system_prompt, user_prompt, max_tokens)
         if result is not None:
+            logger.info("LLM success: %s/%s (%d chars response)", result.provider, result.model, len(result.text))
             return result
+        logger.warning("Primary LLM returned None (%s/%s)", primary_provider, model)
     except Exception as exc:
-        logger.warning("Primary LLM failed (%s/%s): %s", primary_provider, model, exc)
+        logger.warning("Primary LLM failed (%s/%s): %s: %s", primary_provider, model, type(exc).__name__, exc)
 
     # Fallback chain: try other providers that have keys
     _FALLBACK_ORDER = [
@@ -231,12 +234,14 @@ def chat(
         try:
             result = _try_provider(fb_provider, fb_key, fb_model, system_prompt, user_prompt, max_tokens)
             if result is not None:
+                logger.info("Fallback success: %s/%s", fb_provider, fb_model)
                 return result
+            logger.warning("Fallback returned None (%s/%s)", fb_provider, fb_model)
         except Exception as exc:
-            logger.warning("Fallback LLM failed (%s/%s): %s", fb_provider, fb_model, exc)
+            logger.warning("Fallback LLM failed (%s/%s): %s: %s", fb_provider, fb_model, type(exc).__name__, exc)
             continue
 
-    logger.warning("All LLM providers failed")
+    logger.error("All LLM providers exhausted — no response generated")
     return None
 
 
@@ -274,18 +279,44 @@ def _call_openai_compat(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")[:500]
-        logger.warning("LLM HTTP %d from %s: %s", e.code, provider, body)
+        logger.warning("LLM HTTP %d from %s/%s: %s", e.code, provider, model, body)
+        return None
+    except urllib.error.URLError as e:
+        logger.warning("LLM network error from %s/%s: %s", provider, model, e.reason)
+        return None
+    except (TimeoutError, OSError) as e:
+        logger.warning("LLM timeout/connection error from %s/%s: %s", provider, model, e)
+        return None
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.warning("LLM invalid JSON from %s/%s: %s (first 200 chars: %s)",
+                        provider, model, e, raw[:200])
+        return None
+
+    # Some providers return errors inside the JSON body
+    if "error" in data:
+        err_msg = data["error"]
+        if isinstance(err_msg, dict):
+            err_msg = err_msg.get("message", str(err_msg))
+        logger.warning("LLM API error from %s/%s: %s", provider, model, err_msg)
         return None
 
     choices = data.get("choices", [])
     if not choices:
+        logger.warning("LLM empty choices from %s/%s", provider, model)
         return None
 
     text = choices[0].get("message", {}).get("content", "")
+    if not text:
+        logger.warning("LLM empty content from %s/%s", provider, model)
+        return None
+
     return LLMResponse(text=text, model=model, provider=provider)
 
 
@@ -319,11 +350,30 @@ def _call_anthropic(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")[:500]
         logger.warning("Anthropic HTTP %d: %s", e.code, body)
+        return None
+    except urllib.error.URLError as e:
+        logger.warning("Anthropic network error: %s", e.reason)
+        return None
+    except (TimeoutError, OSError) as e:
+        logger.warning("Anthropic timeout/connection error: %s", e)
+        return None
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.warning("Anthropic invalid JSON: %s", e)
+        return None
+
+    if "error" in data:
+        err_msg = data["error"]
+        if isinstance(err_msg, dict):
+            err_msg = err_msg.get("message", str(err_msg))
+        logger.warning("Anthropic API error: %s", err_msg)
         return None
 
     content = data.get("content", [])
@@ -364,11 +414,30 @@ def _call_gemini(
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            raw = resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")[:500]
         logger.warning("Gemini HTTP %d: %s", e.code, body)
+        return None
+    except urllib.error.URLError as e:
+        logger.warning("Gemini network error: %s", e.reason)
+        return None
+    except (TimeoutError, OSError) as e:
+        logger.warning("Gemini timeout/connection error: %s", e)
+        return None
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.warning("Gemini invalid JSON: %s", e)
+        return None
+
+    if "error" in data:
+        err_msg = data["error"]
+        if isinstance(err_msg, dict):
+            err_msg = err_msg.get("message", str(err_msg))
+        logger.warning("Gemini API error: %s", err_msg)
         return None
 
     candidates = data.get("candidates", [])

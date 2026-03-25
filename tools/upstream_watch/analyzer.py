@@ -11,9 +11,13 @@ import json
 import os
 from dataclasses import dataclass, field
 
+import logging
+
 from .config import VXIS_CONTEXT, WatchTarget
 from .fetcher import CommitCluster, CommitInfo, ReleaseInfo, RepoChanges
 from .llm import chat as llm_chat, is_available as llm_is_available
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -174,6 +178,9 @@ Here are the latest changes from an upstream repository:
 Analyze these changes and return JSON with relevance score and actionable items for VXIS.\
 """
 
+    prompt_len = len(user_prompt)
+    logger.info("Analyzing %s (%d chars prompt)", repo_name, prompt_len)
+
     response = llm_chat(
         system_prompt=SYSTEM_PROMPT,
         user_prompt=user_prompt,
@@ -181,9 +188,10 @@ Analyze these changes and return JSON with relevance score and actionable items 
     )
 
     if response is None:
+        logger.error("All LLM providers failed for %s (prompt %d chars)", repo_name, prompt_len)
         return AnalysisResult(
             repo=repo_name, relevance_score=0.0,
-            summary="LLM API call failed — see logs for details.",
+            summary=f"LLM API call failed for {repo_name} — all providers exhausted (prompt {prompt_len} chars). Check TOGETHER_API_KEY or ANTHROPIC_API_KEY.",
         )
 
     raw_text = response.text
