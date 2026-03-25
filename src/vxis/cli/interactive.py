@@ -1732,10 +1732,13 @@ def _execute_agent_scan(params: dict) -> None:
         {"name": "\U0001f9e0 DeepSeek-V3 (범용)", "value": ("together", "deepseek-ai/DeepSeek-V3")},
         {"name": "\U0001f9e0 Qwen-72B (빠른 응답)", "value": ("together", "Qwen/Qwen2.5-72B-Instruct-Turbo")},
         {"name": "\U0001f9e0 Llama-3.3-70B (오픈소스)", "value": ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo")},
-        Separator("── 직접 연결 ──"),
-        {"name": "\U0001f7e3 Claude Sonnet 4 (Anthropic)", "value": ("anthropic", "claude-sonnet-4-20250514")},
-        {"name": "\U0001f7e2 Gemini 2.5 Flash (Google)", "value": ("google", "gemini-2.5-flash")},
-        {"name": "\U0001f535 GPT-4o Mini (OpenAI)", "value": ("openai", "gpt-4o-mini")},
+        Separator("── 직접 연결 (API 키 필요) ──"),
+        {"name": "\U0001f7e3 Claude Opus 4.6 (Anthropic, 최강)", "value": ("anthropic", "claude-opus-4-6")},
+        {"name": "\U0001f7e3 Claude Sonnet 4.6 (Anthropic, 균형)", "value": ("anthropic", "claude-sonnet-4-6")},
+        {"name": "\U0001f7e2 Gemini 3.1 Pro (Google, 최신)", "value": ("google", "gemini-3.1-pro")},
+        {"name": "\U0001f7e2 Gemini 2.5 Flash (Google, 빠름)", "value": ("google", "gemini-2.5-flash")},
+        {"name": "\U0001f535 GPT-5.4 (OpenAI, 최신)", "value": ("openai", "gpt-5.4")},
+        {"name": "\U0001f535 GPT-4o Mini (OpenAI, 저렴)", "value": ("openai", "gpt-4o-mini")},
     ]
 
     llm_selection = inquirer.select(
