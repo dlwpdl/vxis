@@ -18,8 +18,18 @@ from datetime import datetime, timezone
 
 from .signals import Signal
 
-# upstream_watch의 LLM 모듈 재사용
-from tools.upstream_watch.llm import chat as llm_chat, is_available as llm_is_available
+# upstream_watch의 LLM 모듈 재사용 (같은 프로젝트 내 tools/)
+try:
+    from tools.upstream_watch.llm import chat as llm_chat, is_available as llm_is_available
+except ImportError:
+    # 폴백: 직접 경로로 시도
+    import importlib.util, os
+    _llm_path = os.path.join(os.path.dirname(__file__), "..", "upstream_watch", "llm.py")
+    _spec = importlib.util.spec_from_file_location("upstream_watch_llm", _llm_path)
+    _mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    llm_chat = _mod.chat
+    llm_is_available = _mod.is_available
 
 logger = logging.getLogger(__name__)
 

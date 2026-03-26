@@ -12,6 +12,7 @@ import os
 from dataclasses import dataclass, field
 
 import logging
+import re
 
 from .config import VXIS_CONTEXT, WatchTarget
 from .fetcher import CommitCluster, CommitInfo, ReleaseInfo, RepoChanges
@@ -148,6 +149,76 @@ def _format_changes(changes: RepoChanges) -> str:
     return "\n".join(parts)
 
 
+# ── LLM 호출 전 규칙 기반 필터 (비용 90% 절감) ──────────────────
+
+# LLM 부를 필요 없는 노이즈 커밋 패턴
+_NOISE_COMMIT_PATTERNS = re.compile(
+    r"^("
+    r"fix\s*(?:typo|spelling|whitespace|indent|format)|"
+    r"update\s*(?:readme|changelog|license|contributing)|"
+    r"bump\s*(?:version|deps?|depend)|"
+    r"chore\s*[\(:]|"
+    r"docs?\s*[\(:]|"
+    r"ci\s*[\(:]|"
+    r"style\s*[\(:]|"
+    r"merge\s+(?:branch|pull|pr)|"
+    r"release\s+v?\d|"
+    r"update\s+\.\w+|"  # .gitignore, .eslintrc 등
+    r"renovate|dependabot|snyk"
+    r")",
+    re.IGNORECASE,
+)
+
+# LLM 부를 필요 없는 파일 확장자 (코드가 아닌 것)
+_NOISE_FILE_EXTENSIONS = {
+    ".md", ".txt", ".rst", ".yml", ".yaml", ".toml",
+    ".json", ".lock", ".sum", ".mod",
+    ".png", ".jpg", ".svg", ".gif", ".ico",
+    ".gitignore", ".dockerignore", ".editorconfig",
+    ".eslintrc", ".prettierrc", ".flake8",
+}
+
+
+def _is_noise_only(changes: RepoChanges) -> tuple[bool, str]:
+    """LLM 없이 노이즈인지 판단. (True, 이유) 반환."""
+    # 릴리스가 있으면 항상 LLM 호출 (중요할 수 있음)
+    if changes.releases:
+        return False, ""
+
+    if not changes.commits:
+        return True, "No commits"
+
+    # 모든 커밋 메시지가 노이즈 패턴이면 스킵
+    all_noise_messages = all(
+        _NOISE_COMMIT_PATTERNS.match(c.message.strip())
+        for c in changes.commits
+        if c.message.strip()
+    )
+    if all_noise_messages:
+        return True, f"All {len(changes.commits)} commits are noise (typo/docs/ci/bump)"
+
+    # 모든 변경 파일이 비코드 파일이면 스킵
+    all_files: list[str] = []
+    for c in changes.commits:
+        all_files.extend(c.files_changed)
+
+    if all_files:
+        all_noise_files = all(
+            any(f.endswith(ext) for ext in _NOISE_FILE_EXTENSIONS)
+            for f in all_files
+        )
+        if all_noise_files:
+            return True, f"All {len(all_files)} changed files are non-code ({', '.join(set(f.rsplit('.', 1)[-1] for f in all_files[:5]))})"
+
+    # 커밋 1개 + 파일 1개 + 메시지가 짧으면 스킵
+    if len(changes.commits) == 1 and len(all_files) <= 1:
+        msg = changes.commits[0].message.strip()
+        if len(msg) < 20 and not any(kw in msg.lower() for kw in ("feat", "fix", "security", "vuln", "exploit", "attack")):
+            return True, f"Single trivial commit: '{msg}'"
+
+    return False, ""
+
+
 def analyze_changes(changes: RepoChanges) -> AnalysisResult:
     """Use the configured LLM to analyze upstream changes for VXIS relevance."""
     repo_name = f"{changes.target.owner}/{changes.target.repo}"
@@ -156,6 +227,15 @@ def analyze_changes(changes: RepoChanges) -> AnalysisResult:
         return AnalysisResult(
             repo=repo_name, relevance_score=0.0,
             summary="No new changes detected.",
+        )
+
+    # ── 규칙 기반 노이즈 필터 (LLM 호출 전) ──
+    is_noise, reason = _is_noise_only(changes)
+    if is_noise:
+        logger.info("[SKIP-LLM] %s — %s", repo_name, reason)
+        return AnalysisResult(
+            repo=repo_name, relevance_score=0.0,
+            summary=f"Skipped (noise filter): {reason}",
         )
 
     if not llm_is_available():
