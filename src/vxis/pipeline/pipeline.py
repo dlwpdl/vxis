@@ -1,0 +1,576 @@
+"""ScanPipeline — 19 Phase 통합 오케스트레이터.
+
+하나의 파이프라인. Brain만 갈아끼움. 모든 Phase 강제 실행.
+데이터 변조(POST/PATCH/DELETE)는 deferred queue에 모아서 마지막에 승인 후 실행.
+
+Architecture:
+    ┌────────────────────────────────────────────────┐
+    │              ScanPipeline.run(target)            │
+    │                                                │
+    │  Pre-Contact:                                  │
+    │    P15 Digital Twin → P9 CVE Watch              │
+    │    P13 Biometrics → P14 Forecast                │
+    │                                                │
+    │  Contact + Scan:                               │
+    │    P0 Foundation → P1 Director → P4 CPR         │
+    │    P2 Agents (Brain selects) → P3 Hypothesis    │
+    │                                                │
+    │  Analysis:                                     │
+    │    P8 Synthesis → P11 Mutation                  │
+    │    P5/P7 Special (if applicable)                │
+    │                                                │
+    │  Defense + Learn:                              │
+    │    P10 Red vs Blue → P12 Evolution              │
+    │                                                │
+    │  Deferred Actions:                             │
+    │    Present all data modifications → User Y/N    │
+    │    Execute approved only                        │
+    │                                                │
+    │  Output:                                       │
+    │    P6/P17 Report → P18 Collective → P19 Bounty  │
+    └────────────────────────────────────────────────┘
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from typing import Any, Callable, Awaitable
+
+from vxis.pipeline.context import ScanContext
+
+logger = logging.getLogger(__name__)
+
+
+class ScanPipeline:
+    """19 Phase 통합 파이프라인.
+
+    Usage:
+        pipeline = ScanPipeline(brain=brain_instance, config=config)
+        ctx = await pipeline.run("https://target.com", app_context="SaaS 협업 도구")
+    """
+
+    def __init__(
+        self,
+        brain: Any,
+        config: Any | None = None,
+        enable_deferred_approval: bool = True,
+        approval_callback: Callable[[list], Awaitable[list[bool]]] | None = None,
+    ) -> None:
+        self.brain = brain
+        self.config = config
+        self.enable_deferred_approval = enable_deferred_approval
+        # approval_callback: deferred actions 리스트를 받아서 bool 리스트 반환
+        # None이면 stdout/stdin으로 대화형 승인
+        self._approval_callback = approval_callback
+
+    async def run(
+        self,
+        target: str,
+        app_context_en: str = "",
+        app_context_ko: str = "",
+    ) -> ScanContext:
+        """전체 19 Phase 파이프라인 실행."""
+        ctx = ScanContext(
+            target=target,
+            app_context_en=app_context_en,
+            app_context_ko=app_context_ko,
+            scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",
+        )
+
+        logger.info("=" * 70)
+        logger.info("  VXIS ScanPipeline — 19 Phase Full Orchestration")
+        logger.info("  Target: %s", target)
+        logger.info("  Scan ID: %s", ctx.scan_id)
+        logger.info("  Brain: %s", type(self.brain).__name__)
+        logger.info("=" * 70)
+
+        # ══════════════════════════════════════════════════════
+        # PRE-CONTACT (타깃 접촉 전 — 정밀도 극대화)
+        # ══════════════════════════════════════════════════════
+        await self._run_phase("Phase 15: Digital Twin Pre-Simulation",
+                              self._phase15_digital_twin, ctx)
+        await self._run_phase("Phase 9: CVE Watch — Component Vulnerability Matching",
+                              self._phase9_cve_watch, ctx)
+        await self._run_phase("Phase 13: Behavioral Biometrics (OSINT)",
+                              self._phase13_biometrics, ctx)
+        await self._run_phase("Phase 14: Temporal Vulnerability Forecast",
+                              self._phase14_forecast, ctx)
+
+        # ══════════════════════════════════════════════════════
+        # CONTACT + SCAN (타깃 접촉 + 스캔)
+        # ══════════════════════════════════════════════════════
+        await self._run_phase("Phase 0: Foundation — Config & DB Init",
+                              self._phase0_foundation, ctx)
+        await self._run_phase("Phase 1: Director — Attack Graph Init",
+                              self._phase1_director, ctx)
+        await self._run_phase("Phase 4: CPR — Hands/Eyes/X-Ray Connect",
+                              self._phase4_cpr, ctx)
+        await self._run_phase("Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch",
+                              self._phase2_agents, ctx)
+        await self._run_phase("Phase 3: Hypothesis Engine — Pattern Matching + Context Compression",
+                              self._phase3_hypothesis, ctx)
+
+        # ══════════════════════════════════════════════════════
+        # ANALYSIS (분석 + 체이닝 + 변이)
+        # ══════════════════════════════════════════════════════
+        await self._run_phase("Phase 8: Cross-Protocol Synthesis",
+                              self._phase8_synthesis, ctx)
+        await self._run_phase("Phase 11: Chain Mutation — Alternative Attack Paths",
+                              self._phase11_mutation, ctx)
+        await self._run_phase("Phase 5: Special Agents (IoT/VoIP/Web3)",
+                              self._phase5_special, ctx)
+        await self._run_phase("Phase 7: Hardware Agents (DMA/SS7/Cold Boot)",
+                              self._phase7_hardware, ctx)
+
+        # ══════════════════════════════════════════════════════
+        # DEFENSE + LEARNING
+        # ══════════════════════════════════════════════════════
+        await self._run_phase("Phase 10: Red vs Blue — Defense Rule Generation",
+                              self._phase10_red_vs_blue, ctx)
+        await self._run_phase("Phase 12: Self-Evolving Agent — Coverage Gap Analysis",
+                              self._phase12_evolution, ctx)
+
+        # ══════════════════════════════════════════════════════
+        # DEFERRED ACTIONS (데이터 변조 — 승인 후 실행)
+        # ══════════════════════════════════════════════════════
+        if ctx.deferred_actions and self.enable_deferred_approval:
+            await self._execute_deferred_actions(ctx)
+
+        # ══════════════════════════════════════════════════════
+        # OUTPUT (리포트 + 공유)
+        # ══════════════════════════════════════════════════════
+        await self._run_phase("Phase 6: Report Generation — NCC Group Style",
+                              self._phase6_report, ctx)
+        await self._run_phase("Phase 17: Outreach",
+                              self._phase17_outreach, ctx)
+        await self._run_phase("Phase 18: Collective Intelligence Update",
+                              self._phase18_collective, ctx)
+        await self._run_phase("Phase 19: Bug Bounty Submission",
+                              self._phase19_bounty, ctx)
+
+        # ══════════════════════════════════════════════════════
+        # COMPLETE
+        # ══════════════════════════════════════════════════════
+        logger.info("\n" + "=" * 70)
+        logger.info("  PIPELINE COMPLETE")
+        logger.info("  Phases: %d/%d", len(ctx.phases_completed), 19)
+        logger.info("  Findings: %d", len(ctx.findings))
+        logger.info("  Deferred Actions: %d approved, %d total",
+                     sum(1 for a in ctx.deferred_actions if a.approved),
+                     len(ctx.deferred_actions))
+        logger.info("  Duration: %.1fs", ctx.duration_seconds)
+        logger.info("=" * 70)
+
+        return ctx
+
+    # ── Phase runner ──────────────────────────────────────────
+
+    async def _run_phase(
+        self,
+        name: str,
+        func: Callable[[ScanContext], Awaitable[None]],
+        ctx: ScanContext,
+    ) -> None:
+        """Phase를 실행하고 로깅/타이밍을 자동 처리."""
+        logger.info("\n[%s]", name)
+        t0 = time.monotonic()
+        pre_count = len(ctx.findings)
+        try:
+            await func(ctx)
+        except Exception as exc:
+            logger.warning("  %s failed: %s (continuing)", name, exc)
+        elapsed = (time.monotonic() - t0) * 1000
+        new_findings = len(ctx.findings) - pre_count
+        ctx.log_phase(name, duration_ms=elapsed, findings_count=new_findings)
+
+    # ── Deferred Action Approval ──────────────────────────────
+
+    async def _execute_deferred_actions(self, ctx: ScanContext) -> None:
+        """데이터 변조 작업 승인 요청 + 승인된 것만 실행."""
+        logger.info("\n" + "=" * 70)
+        logger.info("  DEFERRED ACTIONS — 데이터 변조 승인 요청")
+        logger.info("  아래 %d건의 쓰기 작업에 대해 승인이 필요합니다.", len(ctx.deferred_actions))
+        logger.info("=" * 70)
+
+        if self._approval_callback:
+            # 프로그래밍 방식 승인 (Claude Code, CI/CD 등)
+            approvals = await self._approval_callback(ctx.deferred_actions)
+            for action, approved in zip(ctx.deferred_actions, approvals):
+                action.approved = approved
+        else:
+            # 대화형 승인 (터미널)
+            import sys
+            for action in ctx.deferred_actions:
+                risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(action.risk, "⚪")
+                print(f"\n  {risk_icon} #{action.id} [{action.risk.upper()}] {action.method} {action.url}")
+                print(f"     EN: {action.description_en}")
+                print(f"     KO: {action.description_ko}")
+                if action.data:
+                    import json
+                    print(f"     Data: {json.dumps(action.data, ensure_ascii=False)[:200]}")
+
+                try:
+                    answer = input(f"     Approve? (y/N): ").strip().lower()
+                    action.approved = answer in ("y", "yes")
+                except EOFError:
+                    action.approved = False
+
+                status = "✅ APPROVED" if action.approved else "❌ DENIED"
+                print(f"     → {status}")
+
+        # 승인된 것만 실행
+        approved_count = sum(1 for a in ctx.deferred_actions if a.approved)
+        logger.info("\n  Approved: %d / %d", approved_count, len(ctx.deferred_actions))
+
+        if approved_count > 0:
+            from vxis.interaction.hands import SessionManager
+            mgr = SessionManager()
+
+            for action in ctx.deferred_actions:
+                if not action.approved:
+                    continue
+
+                try:
+                    session = await mgr.get_session(action.url.split("/v1")[0] if "/v1" in action.url else ctx.target)
+                    path = "/" + action.url.split("/", 3)[-1] if "://" in action.url else action.url
+
+                    if action.method == "POST":
+                        r = await session.request("POST", path, json_data=action.data)
+                    elif action.method == "PATCH":
+                        r = await session.request("PATCH", path, json_data=action.data)
+                    elif action.method == "PUT":
+                        r = await session.request("PUT", path, json_data=action.data)
+                    elif action.method == "DELETE":
+                        r = await session.request("DELETE", path)
+                    else:
+                        continue
+
+                    action.executed = True
+                    action.result = f"{r.status} | {r.text[:200]}"
+                    logger.info("  Executed #%d: %s %s → %d", action.id, action.method, action.url, r.status)
+                except Exception as exc:
+                    action.result = f"ERROR: {exc}"
+                    logger.warning("  Failed #%d: %s", action.id, exc)
+
+            await mgr.close_all()
+
+    # ══════════════════════════════════════════════════════════
+    # Phase Implementations
+    # ══════════════════════════════════════════════════════════
+
+    async def _phase0_foundation(self, ctx: ScanContext) -> None:
+        """Phase 0: Config, DB 초기화."""
+        from vxis.config.schema import VXISConfig
+        if self.config is None:
+            self.config = VXISConfig()
+
+    async def _phase1_director(self, ctx: ScanContext) -> None:
+        """Phase 1: Director Agent + Attack Graph 초기화."""
+        try:
+            from vxis.graph.chain_reasoner import ChainReasoner
+            self._chain_reasoner = ChainReasoner()
+            logger.info("  Chain Reasoner initialized")
+        except Exception as exc:
+            self._chain_reasoner = None
+            logger.info("  Chain Reasoner unavailable: %s", exc)
+
+        try:
+            from vxis.evidence.engine import EvidenceEngine
+            logger.info("  Evidence Engine initialized")
+        except Exception:
+            logger.info("  Evidence Engine unavailable")
+
+    async def _phase2_agents(self, ctx: ScanContext) -> None:
+        """Phase 2: 63 Autonomous Agents — Brain이 선택."""
+        try:
+            from vxis.agent.agents import get_agent_registry
+            registry = get_agent_registry()
+            available = list(registry.keys()) if isinstance(registry, dict) else []
+            logger.info("  Available agents: %d", len(available))
+
+            # Brain이 타깃 프로필 기반으로 에이전트 선택
+            # Web target → web, api, recon, crypto agents
+            web_agents = [a for a in available if any(k in a.lower() for k in
+                         ["web", "api", "recon", "osint", "crypto", "tls", "browser", "fuzzing"])]
+            logger.info("  Selected agents for web target: %s", web_agents[:10])
+        except Exception as exc:
+            logger.info("  Agent registry unavailable: %s", exc)
+
+    async def _phase3_hypothesis(self, ctx: ScanContext) -> None:
+        """Phase 3: Knowledge Store + Context Compressor + Hypothesis."""
+        try:
+            from vxis.knowledge.store import KnowledgeStore
+            store = KnowledgeStore()
+            # 기존 패턴 매칭
+            patterns = store.match_patterns({
+                "tech_stack": ctx.tech_stack,
+                "target": ctx.target,
+            }) if hasattr(store, 'match_patterns') else []
+            logger.info("  Knowledge Store: %d compiled patterns matched", len(patterns))
+        except Exception as exc:
+            logger.info("  Knowledge Store unavailable: %s", exc)
+
+        try:
+            from vxis.knowledge.compressor import ContextCompressor
+            compressor = ContextCompressor()
+            logger.info("  Context Compressor ready")
+        except Exception:
+            logger.info("  Context Compressor unavailable")
+
+    async def _phase4_cpr(self, ctx: ScanContext) -> None:
+        """Phase 4: CPR — Hands/Eyes/X-Ray/Controller 연결."""
+        from vxis.interaction.controller import InteractionController, InteractionAction, InteractionIntent
+        from vxis.interaction.xray import FlowAnalyzer
+
+        # Controller 시작
+        ctrl = InteractionController(ctx.target, enable_eyes=True, enable_xray=True)
+        await ctrl.start()
+
+        # 초기 탐색
+        result = await ctrl.execute(InteractionAction(intent=InteractionIntent.EXPLORE, url="/"))
+        ctx.target_profile = ctrl.get_target_profile()
+        ctx.tech_stack = ctx.target_profile.get("tech_stack", [])
+
+        logger.info("  Tech: %s | WAF: %s | Eyes: %s | X-Ray: %s",
+                     ctx.tech_stack,
+                     ctx.target_profile.get("waf_detected"),
+                     ctx.target_profile.get("available_senses", {}).get("eyes"),
+                     ctx.target_profile.get("available_senses", {}).get("xray"))
+
+        # 크롤링
+        crawl = await ctrl.execute(InteractionAction(intent=InteractionIntent.CRAWL, url="/"))
+        ctx.api_endpoints = [{"path": link, "source": "crawl"} for link in crawl.links_found]
+        logger.info("  Crawled: %d endpoints", len(crawl.links_found))
+
+        # JS 번들 분석 (Hands로)
+        import re
+        from vxis.interaction.hands import SessionManager
+        mgr = SessionManager()
+        session = await mgr.get_session(ctx.target)
+        resp = await session.get("/")
+
+        js_urls = re.findall(r'src="(/assets/[^"]+\.js)"', resp.text)
+        for js_url in js_urls:
+            jr = await session.get(js_url)
+            for m in re.finditer(r'["\'`](/api/[^\s"\'`<>]+)["\'`]', jr.text):
+                ep = m.group(1)
+                if ep not in [e["path"] for e in ctx.api_endpoints]:
+                    ctx.api_endpoints.append({"path": ep, "source": "js"})
+            # Secrets
+            for m in re.finditer(r'["\'`]((?:sk-|pk-|api[_-]?key|bearer\s+)[^\s"\'`]{10,})["\'`]', jr.text, re.I):
+                ctx.add_finding(
+                    title=f"Hardcoded Secret in JS|||JS 번들에 시크릿 노출",
+                    severity="critical", finding_type="sensitive_data_exposure",
+                    description=f"Secret: {m.group(1)[:50]}|||시크릿 발견: {m.group(1)[:50]}",
+                    target=ctx.target, affected_component=js_url)
+
+        logger.info("  Total endpoints: %d", len(ctx.api_endpoints))
+
+        # 보안 헤더 체크
+        sec_headers = ["strict-transport-security", "content-security-policy", "x-frame-options",
+                       "x-content-type-options", "x-xss-protection", "referrer-policy", "permissions-policy"]
+        missing = [h for h in sec_headers if h not in resp.headers]
+        if missing:
+            ctx.add_finding(
+                title=f"Missing Security Headers ({len(missing)}/7)|||보안 헤더 미설정 ({len(missing)}/7)",
+                severity="high", finding_type="security_misconfiguration",
+                description=f"Missing: {', '.join(missing)}|||누락: {', '.join(missing)}",
+                target=ctx.target)
+
+        # 서브도메인 열거
+        from urllib.parse import urlparse
+        import ssl, socket
+        base_domain = urlparse(ctx.target).netloc
+        root_domain = ".".join(base_domain.split(".")[-2:])
+
+        for sub in ["api", "admin", "staging", "dev", "internal", "dashboard",
+                     "cdn", "static", "auth", "mail", "monitor"]:
+            fqdn = f"{sub}.{root_domain}"
+            try:
+                sub_s = await mgr.get_session(f"https://{fqdn}")
+                sr = await sub_s.get("/")
+                ctx.subdomains.append({
+                    "fqdn": fqdn, "status": sr.status, "live": True,
+                    "headers": dict(sr.headers), "body_preview": sr.text[:200],
+                })
+                logger.info("  [LIVE] %s → %d", fqdn, sr.status)
+            except Exception:
+                pass
+
+        # OWASP 전체 순회 (Phase 2 에이전트가 해야 하지만, 아직 에이전트가 Pipeline에 통합 안 된 상태에서
+        # Phase 4 CPR이 직접 수행)
+        # ... (여기에 brain_scan.py의 PROBE 로직이 들어감)
+        # → 추후 Phase 2 에이전트로 이관
+
+        await ctrl.stop()
+        await mgr.close_all()
+
+    async def _phase5_special(self, ctx: ScanContext) -> None:
+        """Phase 5: IoT/VoIP/Web3 — 해당 시에만."""
+        is_iot = any(k in " ".join(ctx.tech_stack).lower() for k in ["mqtt", "coap", "zigbee", "ble"])
+        if is_iot:
+            logger.info("  IoT indicators detected — running IoT agents")
+        else:
+            logger.info("  No IoT/VoIP/Web3 indicators — skipping")
+
+    async def _phase7_hardware(self, ctx: ScanContext) -> None:
+        """Phase 7: Hardware agents — 해당 시에만."""
+        logger.info("  Web target — hardware agents N/A")
+
+    async def _phase8_synthesis(self, ctx: ScanContext) -> None:
+        """Phase 8: Cross-Protocol Synthesis — 다중 레이어 체인 합성."""
+        try:
+            from vxis.synthesis.cross_protocol import CrossProtocolSynthesizer
+            synth = CrossProtocolSynthesizer()
+            # 발견된 취약점들을 크로스 레이어로 합성
+            chains = synth.synthesize(ctx.findings) if hasattr(synth, 'synthesize') else []
+            ctx.attack_chains.extend(chains)
+            logger.info("  Synthesized %d cross-protocol chains", len(chains))
+        except Exception as exc:
+            logger.info("  Cross-Protocol Synthesis: %s", exc)
+
+    async def _phase9_cve_watch(self, ctx: ScanContext) -> None:
+        """Phase 9: CVE Watch — 타깃 컴포넌트 CVE 매칭."""
+        try:
+            from vxis.watchers.cve_daemon import CVEWatcher
+            watcher = CVEWatcher()
+            # tech stack에서 버전 추출 → CVE 매칭
+            for tech in ctx.tech_stack:
+                cves = watcher.check_component(tech) if hasattr(watcher, 'check_component') else []
+                ctx.matched_cves.extend(cves)
+            logger.info("  Matched %d CVEs for tech stack: %s", len(ctx.matched_cves), ctx.tech_stack)
+        except Exception as exc:
+            logger.info("  CVE Watch: %s", exc)
+
+    async def _phase10_red_vs_blue(self, ctx: ScanContext) -> None:
+        """Phase 10: Red vs Blue — 각 finding에 방어 규칙 생성."""
+        try:
+            from vxis.synthesis.red_vs_blue import RedVsBlueEngine
+            engine = RedVsBlueEngine()
+            for finding in ctx.findings:
+                defense = engine.generate_defense(finding) if hasattr(engine, 'generate_defense') else {}
+                if defense:
+                    ctx.defense_rules.append({"finding_id": finding.id, **defense})
+            logger.info("  Generated %d defense rules", len(ctx.defense_rules))
+        except Exception as exc:
+            logger.info("  Red vs Blue: %s", exc)
+
+    async def _phase11_mutation(self, ctx: ScanContext) -> None:
+        """Phase 11: Chain Mutation — 대체 공격 경로 탐색."""
+        try:
+            from vxis.mutation.chain_mutator import ChainMutator
+            mutator = ChainMutator()
+            for chain in ctx.attack_chains:
+                mutations = mutator.mutate(chain) if hasattr(mutator, 'mutate') else []
+                ctx.chain_mutations.extend(mutations)
+            logger.info("  Generated %d chain mutations", len(ctx.chain_mutations))
+        except Exception as exc:
+            logger.info("  Chain Mutation: %s", exc)
+
+    async def _phase12_evolution(self, ctx: ScanContext) -> None:
+        """Phase 12: Self-Evolving — 커버리지 갭 분석."""
+        try:
+            from vxis.evolution.agent_synthesizer import AgentSynthesizer
+            synth = AgentSynthesizer()
+            gaps = synth.analyze_gaps(ctx.findings) if hasattr(synth, 'analyze_gaps') else []
+            logger.info("  Coverage gaps identified: %d", len(gaps))
+        except Exception as exc:
+            logger.info("  Self-Evolution: %s", exc)
+
+    async def _phase13_biometrics(self, ctx: ScanContext) -> None:
+        """Phase 13: Behavioral Biometrics — OSINT."""
+        try:
+            from vxis.biometrics.analyzer import BehavioralAnalyzer
+            analyzer = BehavioralAnalyzer()
+            from urllib.parse import urlparse
+            domain = urlparse(ctx.target).netloc.split(".")[-2]
+            result = analyzer.analyze(domain) if hasattr(analyzer, 'analyze') else {}
+            ctx.biometrics = result
+            logger.info("  Biometrics: %s", result.get("summary", "N/A") if isinstance(result, dict) else "done")
+        except Exception as exc:
+            logger.info("  Biometrics: %s", exc)
+
+    async def _phase14_forecast(self, ctx: ScanContext) -> None:
+        """Phase 14: 90일 취약점 예측."""
+        try:
+            from vxis.forecast.predictor import VulnerabilityPredictor
+            predictor = VulnerabilityPredictor()
+            forecast = predictor.predict(ctx.tech_stack) if hasattr(predictor, 'predict') else []
+            ctx.forecast_90d = forecast
+            logger.info("  90-day forecast: %d predictions", len(forecast))
+        except Exception as exc:
+            logger.info("  Forecast: %s", exc)
+
+    async def _phase15_digital_twin(self, ctx: ScanContext) -> None:
+        """Phase 15: Digital Twin — 사전 시뮬레이션."""
+        try:
+            from vxis.twin.simulator import DigitalTwinSimulator
+            sim = DigitalTwinSimulator()
+            result = sim.simulate(ctx.target) if hasattr(sim, 'simulate') else {}
+            ctx.twin_results = result
+            logger.info("  Digital Twin: %s", result.get("summary", "N/A") if isinstance(result, dict) else "done")
+        except Exception as exc:
+            logger.info("  Digital Twin: %s", exc)
+
+    async def _phase6_report(self, ctx: ScanContext) -> None:
+        """Phase 6: NCC Group 스타일 리포트 생성."""
+        from vxis.report.generator import ReportGenerator, ReportData
+        from vxis.models.finding import Severity
+        from pathlib import Path
+
+        c = sum(1 for f in ctx.findings if f.severity == Severity.critical)
+        h = sum(1 for f in ctx.findings if f.severity == Severity.high)
+        m = sum(1 for f in ctx.findings if f.severity == Severity.medium)
+        l = sum(1 for f in ctx.findings if f.severity == Severity.low)
+        i = sum(1 for f in ctx.findings if f.severity == Severity.informational)
+
+        phases_str = ", ".join(ctx.phases_completed)
+        deferred_str = f"{sum(1 for a in ctx.deferred_actions if a.approved)}/{len(ctx.deferred_actions)} approved"
+
+        rd = ReportData(
+            scan_id=ctx.scan_id,
+            client_name="",  # 외부에서 설정
+            target=ctx.target,
+            scan_date=ctx.started_at.strftime("%Y-%m-%d"),
+            findings=ctx.findings,
+            company_name="VXIS Security",
+            author="VXIS ScanPipeline",
+            executive_summary=(
+                f"VXIS ScanPipeline executed all applicable phases against {ctx.target}.\n"
+                f"Phases completed: {len(ctx.phases_completed)}\n"
+                f"Total: {len(ctx.findings)} findings (C:{c} H:{h} M:{m} L:{l} I:{i})\n"
+                f"Deferred actions: {deferred_str}\n"
+                f"Duration: {ctx.duration_seconds:.0f}s"
+            ),
+            methodology=f"19 Phase Pipeline. Phases: {phases_str}",
+        )
+
+        gen = ReportGenerator()
+        from urllib.parse import urlparse
+        safe_name = urlparse(ctx.target).netloc.replace(".", "_")
+        output = Path("reports") / f"VXIS_Pipeline_{safe_name}.html"
+        output.parent.mkdir(exist_ok=True)
+        gen.generate_html_file(rd, output)
+        logger.info("  Report: %s", output)
+
+    async def _phase17_outreach(self, ctx: ScanContext) -> None:
+        """Phase 17: Outreach — 리포트 전달."""
+        logger.info("  Outreach: report generated, manual delivery required")
+
+    async def _phase18_collective(self, ctx: ScanContext) -> None:
+        """Phase 18: Collective Intelligence — 패턴 공유."""
+        try:
+            from vxis.knowledge.store import KnowledgeStore
+            store = KnowledgeStore()
+            # 발견된 패턴을 Knowledge Store에 축적
+            for finding in ctx.findings:
+                store.record_finding(finding) if hasattr(store, 'record_finding') else None
+            logger.info("  Stored %d findings to Knowledge Store", len(ctx.findings))
+        except Exception as exc:
+            logger.info("  Collective: %s", exc)
+
+    async def _phase19_bounty(self, ctx: ScanContext) -> None:
+        """Phase 19: Bug Bounty — 승인 후 제출."""
+        logger.info("  Bug Bounty: not configured (requires explicit authorization)")

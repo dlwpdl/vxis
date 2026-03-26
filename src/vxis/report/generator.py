@@ -146,6 +146,23 @@ def _filter_severity_color(severity: str) -> str:
     return colours.get(severity.lower(), "#888888")
 
 
+def _filter_bilingual(text: str) -> str:
+    """Split bilingual text on ||| separator into EN/KO spans.
+
+    Input:  "English text|||한국어 텍스트"
+    Output: '<span class="en">English text</span><span class="ko">한국어 텍스트</span>'
+
+    If no separator, returns the text as-is (shown in both languages).
+    Line breaks within each part are preserved as <br>.
+    """
+    if "|||" in text:
+        en, ko = text.split("|||", 1)
+        en_html = en.strip().replace("\n", "<br>")
+        ko_html = ko.strip().replace("\n", "<br>")
+        return f'<span class="en">{en_html}</span><span class="ko">{ko_html}</span>'
+    return text.replace("\n", "<br>")
+
+
 def _filter_severity_badge(severity: str) -> str:
     """Return an HTML <span> badge for the given severity level."""
     colour = _filter_severity_color(severity)
@@ -178,6 +195,7 @@ class ReportGenerator:
         # Register custom filters
         self._env.filters["severity_color"] = _filter_severity_color
         self._env.filters["severity_badge"] = _filter_severity_badge
+        self._env.filters["bilingual"] = _filter_bilingual
 
         # Register chart helpers as global functions accessible from templates
         self._env.globals["severity_donut_svg"] = severity_donut_svg

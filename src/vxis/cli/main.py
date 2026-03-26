@@ -929,6 +929,97 @@ def trend_cmd(
         raise typer.Exit(code=1) from exc
 
 
+@app.command(name="agent-scan")
+def agent_scan(
+    target: str = typer.Argument(help="Target URL or domain"),
+    brain: str = typer.Option(
+        "auto",
+        "--brain",
+        "-b",
+        help="Brain mode: auto (LLM API 자율) | claude-code (stdin/stdout JSON)",
+    ),
+    max_steps: int = typer.Option(15, "--max-steps", "-s", help="최대 스캔 단계"),
+    profile: str = typer.Option("standard", "--profile", "-p", help="스캔 프로필"),
+) -> None:
+    """AI 자율 펜테스트 — Brain이 판단하고 실행하는 풀오토 스캔.
+
+    \b
+    Mode 1: --brain=auto       → 등록된 LLM API 키로 자율 실행
+    Mode 2: --brain=claude-code → Claude Code가 Brain (stdin/stdout JSON)
+    """
+    async def _run() -> None:
+        from vxis.agent.executor import AgentExecutor
+
+        brain_instance = None
+
+        if brain == "claude-code":
+            from vxis.agent.brain_interactive import InteractiveBrain
+            brain_instance = InteractiveBrain(max_steps=max_steps)
+            # claude-code 모드: 로깅은 stderr, stdout은 JSON 프로토콜 전용
+            logging.basicConfig(
+                stream=sys.stderr,
+                level=logging.INFO,
+                format="%(asctime)s [%(name)s] %(message)s",
+                datefmt="%H:%M:%S",
+            )
+            err_console.print(
+                f"[bold cyan]VXIS Agent Scan[/bold cyan] — "
+                f"Brain: [bold yellow]Claude Code (Interactive)[/bold yellow]"
+            )
+            err_console.print(f"Target: [bold]{target}[/bold] | Max steps: {max_steps}")
+        else:
+            logging.basicConfig(
+                level=logging.INFO,
+                format="%(asctime)s [%(name)s] %(message)s",
+                datefmt="%H:%M:%S",
+            )
+            console.print(
+                f"[bold cyan]VXIS Agent Scan[/bold cyan] — "
+                f"Brain: [bold green]Auto (LLM API)[/bold green]"
+            )
+            console.print(f"Target: [bold]{target}[/bold] | Max steps: {max_steps}")
+
+        executor = AgentExecutor(max_steps=max_steps, brain=brain_instance)
+        result = await executor.run(target=target, profile=profile)
+
+        # 결과 출력
+        if brain == "claude-code":
+            # JSON 완료 메시지
+            import json as _json
+            sys.stdout.write(_json.dumps({
+                "type": "complete",
+                "target": result.target,
+                "findings_count": len(result.findings),
+                "steps_taken": result.steps_taken,
+                "duration_seconds": result.duration_seconds,
+            }, ensure_ascii=False) + "\n")
+            sys.stdout.flush()
+        else:
+            console.print(f"\n[bold green]Scan Complete[/bold green]")
+            console.print(f"  Steps: {result.steps_taken}")
+            console.print(f"  Duration: {result.duration_seconds:.1f}s")
+            console.print(f"  Findings: {len(result.findings)}")
+            if result.findings:
+                table = Table(title="Findings")
+                table.add_column("Severity", style="bold")
+                table.add_column("Title")
+                table.add_column("Source")
+                for f in result.findings:
+                    sev = f.severity.value.upper()
+                    style = {
+                        "CRITICAL": "bold red",
+                        "HIGH": "red",
+                        "MEDIUM": "yellow",
+                        "LOW": "blue",
+                        "INFO": "dim",
+                    }.get(sev, "")
+                    table.add_row(f"[{style}]{sev}[/{style}]", f.title, f.source_plugin)
+                console.print(table)
+            console.print(f"\n{result.execution_log}")
+
+    asyncio.run(_run())
+
+
 @app.command()
 def version() -> None:
     """Show VXIS version information."""

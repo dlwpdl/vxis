@@ -260,11 +260,11 @@
       color: #c0392b;
     }
 
-    /* Title — sits below the dark band on white background */
+    /* Title — inside the dark band, white text */
     .cover-title {
       font-size: 28pt;
       font-weight: 700;
-      color: #1a1a2e;
+      color: #ffffff;
       line-height: 1.25;
       margin: 48pt 40pt 0;
       border: none;
@@ -293,7 +293,7 @@
 
     .cover-subtitle {
       font-size: 13pt;
-      color: #555;
+      color: rgba(255, 255, 255, 0.7);
       margin: 14pt 40pt 36pt;
       font-weight: 400;
     }
@@ -555,6 +555,26 @@
       font-size: 8.5pt;
       line-height: 1.55;
       word-break: break-all;
+    }
+
+    .evidence-block pre.evidence-content {
+      margin: 0;
+      padding: 8pt;
+      background: #1e2130;
+      border-radius: 0 0 4px 4px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .evidence-block pre.evidence-content code {
+      background: none;
+      color: #abb2bf;
+      font-family: "SFMono-Regular", "Cascadia Code", "Courier New", monospace;
+      font-size: 8.5pt;
+      line-height: 1.55;
+      padding: 0;
+      border-radius: 0;
     }
 
     .evidence-type-badge {
@@ -821,9 +841,69 @@
         print-color-adjust: exact;
       }
     }
+    /* ---------- Language toggle ---------- */
+    .lang-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 9999;
+      display: flex;
+      background: #1a1a2e;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      font-family: system-ui, -apple-system, Arial, sans-serif;
+    }
+    .lang-toggle button {
+      border: none;
+      padding: 8px 16px;
+      font-size: 9pt;
+      font-weight: 700;
+      cursor: pointer;
+      color: #8899aa;
+      background: #1a1a2e;
+      transition: all 0.2s;
+      letter-spacing: 0.5px;
+    }
+    .lang-toggle button.active {
+      color: #ffffff;
+      background: #c0392b;
+    }
+    .lang-toggle button:hover:not(.active) {
+      color: #ffffff;
+      background: #2d3250;
+    }
+
+    body.lang-en .ko { display: none !important; }
+    body.lang-ko .en { display: none !important; }
+
+    @media print {
+      .lang-toggle { display: none; }
+    }
   </style>
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    function setLang(lang) {
+      document.body.className = document.body.className.replace(/lang-(en|ko)/g, '').trim() + ' lang-' + lang;
+      document.getElementById('btn-en').className = (lang === 'en') ? 'active' : '';
+      document.getElementById('btn-ko').className = (lang === 'ko') ? 'active' : '';
+      try { localStorage.setItem('vxis-report-lang', lang); } catch(e) {}
+    }
+    document.getElementById('btn-en').addEventListener('click', function() { setLang('en'); });
+    document.getElementById('btn-ko').addEventListener('click', function() { setLang('ko'); });
+    try {
+      var saved = localStorage.getItem('vxis-report-lang');
+      if (saved) setLang(saved);
+    } catch(e) {}
+  });
+  </script>
 </head>
-<body>
+<body class="lang-en">
+
+  <div class="lang-toggle" id="lang-toggle">
+    <button id="btn-en" class="active">EN</button>
+    <button id="btn-ko">KO</button>
+  </div>
 
   {# ============================================================
      COVER PAGE
@@ -834,22 +914,22 @@
   {# ============================================================
      TABLE OF CONTENTS
      ============================================================ #}
-  <div class="section-label">Contents</div>
-  <h1>Table of Contents</h1>
+  <div class="section-label"><span class="en">Contents</span><span class="ko">목차</span></div>
+  <h1><span class="en">Table of Contents</span><span class="ko">목차</span></h1>
 
   <div class="toc">
     <div class="toc-entry">
-      <span class="toc-entry-title">1. Executive Summary</span>
+      <span class="toc-entry-title"><span class="en">1. Executive Summary</span><span class="ko">1. 경영진 요약</span></span>
       <span class="toc-dots"></span>
       <span class="toc-entry-page">3</span>
     </div>
     <div class="toc-entry">
-      <span class="toc-entry-title">2. Methodology</span>
+      <span class="toc-entry-title"><span class="en">2. Methodology</span><span class="ko">2. 수행 방법론</span></span>
       <span class="toc-dots"></span>
       <span class="toc-entry-page">4</span>
     </div>
     <div class="toc-entry">
-      <span class="toc-entry-title">3. Findings</span>
+      <span class="toc-entry-title"><span class="en">3. Findings</span><span class="ko">3. 발견 사항</span></span>
       <span class="toc-dots"></span>
       <span class="toc-entry-page">5</span>
     </div>
@@ -869,7 +949,7 @@
       {% endif %}
     {% endfor %}
     <div class="toc-entry">
-      <span class="toc-entry-title">4. Attestation</span>
+      <span class="toc-entry-title"><span class="en">4. Attestation</span><span class="ko">4. 확인서</span></span>
       <span class="toc-dots"></span>
       <span class="toc-entry-page">—</span>
     </div>
@@ -887,9 +967,9 @@
      SECTION 2: METHODOLOGY
      ============================================================ #}
   <div class="section-label">Section 2</div>
-  <h1>Methodology</h1>
+  <h1><span class="en">Methodology</span><span class="ko">수행 방법론</span></h1>
 
-  <p>{{ report.methodology | replace('\n', '<br>') | safe }}</p>
+  <p>{{ report.methodology | bilingual | safe }}</p>
 
   <div class="page-break"></div>
 
@@ -897,10 +977,10 @@
      SECTION 3: FINDINGS
      ============================================================ #}
   <div class="section-label">Section 3</div>
-  <h1>Findings</h1>
+  <h1><span class="en">Findings</span><span class="ko">발견 사항</span></h1>
 
   {% if report.total_findings == 0 %}
-    <p>No security findings were identified during this assessment.</p>
+    <p><span class="en">No security findings were identified during this assessment.</span><span class="ko">본 평가에서 보안 취약점이 발견되지 않았습니다.</span></p>
   {% else %}
     {% for severity in ["critical", "high", "medium", "low", "informational"] %}
       {% set findings_list = report.findings_by_severity[severity] %}
@@ -927,13 +1007,14 @@
      SECTION 4: ATTESTATION
      ============================================================ #}
   <div class="section-label">Section 4</div>
-  <h1>Attestation</h1>
+  <h1><span class="en">Attestation</span><span class="ko">확인서</span></h1>
 
   {% include "partials/_attestation.html" %}
 
   <div class="report-screen-footer">
     {{ report.company_name }} &mdash; Client Confidential &mdash; Not for Distribution
   </div>
+
 
 </body>
 </html>

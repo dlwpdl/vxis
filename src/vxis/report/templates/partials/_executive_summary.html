@@ -1,16 +1,16 @@
-{# Executive summary partial — section 1 #}
+{# Executive summary partial — section 1 — bilingual #}
 {% set counts = report.severity_counts %}
 
 <div class="section-label">Section 1</div>
-<h1>Executive Summary</h1>
+<h1><span class="en">Executive Summary</span><span class="ko">경영진 요약</span></h1>
 
 {# Severity summary table #}
-<h3>Finding Summary</h3>
+<h3><span class="en">Finding Summary</span><span class="ko">발견 사항 요약</span></h3>
 <table>
   <thead>
     <tr>
-      <th>Severity</th>
-      <th style="text-align:center;">Count</th>
+      <th><span class="en">Severity</span><span class="ko">심각도</span></th>
+      <th style="text-align:center;"><span class="en">Count</span><span class="ko">건수</span></th>
     </tr>
   </thead>
   <tbody>
@@ -28,7 +28,7 @@
     </tr>
     {% endfor %}
     <tr style="border-top: 2px solid #1a1a2e;">
-      <td style="font-weight:700;">Total</td>
+      <td style="font-weight:700;"><span class="en">Total</span><span class="ko">합계</span></td>
       <td style="text-align:center; font-weight:700;">{{ report.total_findings }}</td>
     </tr>
   </tbody>
@@ -48,16 +48,23 @@
 
 {# Executive summary narrative #}
 {% if report.executive_summary %}
-<h3>Assessment Overview</h3>
+<h3><span class="en">Assessment Overview</span><span class="ko">평가 개요</span></h3>
 <div class="attestation-body">
-  {{ report.executive_summary | replace('\n\n', '</p><p>') | replace('\n', '<br>') | safe }}
+  {{ report.executive_summary | bilingual | safe }}
 </div>
 {% endif %}
 
 {# Risk score #}
-<h3>Overall Risk Score</h3>
+<h3><span class="en">Overall Risk Score</span><span class="ko">종합 위험 점수</span></h3>
 <p>
-  The overall risk score for this assessment is
-  <strong>{{ "%.1f" | format(report.risk_score) }} / 10.0</strong>,
-  calculated as a weighted composite across all identified findings.
+  <span class="en">
+    The overall risk score for this assessment is
+    <strong>{{ "%.1f" | format(report.risk_score) }} / 10.0</strong>,
+    calculated as a weighted composite across all identified findings.
+  </span>
+  <span class="ko">
+    본 평가의 종합 위험 점수는
+    <strong>{{ "%.1f" | format(report.risk_score) }} / 10.0</strong>이며,
+    발견된 모든 취약점의 가중 합산으로 산출되었습니다.
+  </span>
 </p>

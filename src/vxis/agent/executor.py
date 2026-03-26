@@ -65,6 +65,7 @@ class AgentExecutor:
         config: VXISConfig | None = None,
         event_bus: ScanEventBus | None = None,
         max_steps: int = 15,
+        brain: Any | None = None,
     ) -> None:
         self._config = config or VXISConfig()
         self._event_bus = event_bus or ScanEventBus()
@@ -102,14 +103,17 @@ class AgentExecutor:
         except Exception as exc:
             logger.debug("ChainReasoner 초기화 실패 (무시): %s", exc)
 
-        # Brain에 Phase 3 모듈 주입
-        self._brain = AgentBrain(
-            max_steps=max_steps,
-            knowledge_store=self._knowledge_store,
-            compressor=self._compressor,
-            token_router=self._token_router,
-            chain_reasoner=self._chain_reasoner,
-        )
+        # Brain에 Phase 3 모듈 주입 — 외부 brain이 주입되면 그걸 사용
+        if brain is not None:
+            self._brain = brain
+        else:
+            self._brain = AgentBrain(
+                max_steps=max_steps,
+                knowledge_store=self._knowledge_store,
+                compressor=self._compressor,
+                token_router=self._token_router,
+                chain_reasoner=self._chain_reasoner,
+            )
 
         # ── Sandbox 초기화 ──────────────────────────────────────
         self._sandbox_available: bool = DockerSandbox.is_available()

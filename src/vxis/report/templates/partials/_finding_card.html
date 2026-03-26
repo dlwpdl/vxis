@@ -7,7 +7,7 @@
 
   {# Header: title + severity badge #}
   <div class="finding-header">
-    <span class="finding-title">{{ finding.title }}</span>
+    <span class="finding-title">{{ finding.title | bilingual | safe }}</span>
     <span class="severity-badge severity-badge-{{ sev }}">{{ sev | upper }}</span>
   </div>
 
@@ -17,13 +17,13 @@
     <table class="finding-meta-table">
       <thead>
         <tr>
-          <th>Overall Risk</th>
-          <th>Impact</th>
-          <th>Exploitability</th>
-          <th>Finding ID</th>
-          <th>Component</th>
-          <th>Category</th>
-          <th>Status</th>
+          <th><span class="en">Overall Risk</span><span class="ko">위험도</span></th>
+          <th><span class="en">Impact</span><span class="ko">영향</span></th>
+          <th><span class="en">Exploitability</span><span class="ko">공격 용이성</span></th>
+          <th><span class="en">Finding ID</span><span class="ko">식별 번호</span></th>
+          <th><span class="en">Component</span><span class="ko">대상</span></th>
+          <th><span class="en">Category</span><span class="ko">분류</span></th>
+          <th><span class="en">Status</span><span class="ko">상태</span></th>
         </tr>
       </thead>
       <tbody>
@@ -55,7 +55,7 @@
 
     {# CVE / CWE references #}
     {% if finding.cve_ids or finding.cwe_ids %}
-    <div class="finding-section-title">Identifiers</div>
+    <div class="finding-section-title"><span class="en">Identifiers</span><span class="ko">식별자</span></div>
     <p>
       {% if finding.cve_ids %}
         <strong>CVE:</strong>
@@ -74,19 +74,19 @@
     {% endif %}
 
     {# Description #}
-    <div class="finding-section-title">Description</div>
-    <div>{{ finding.description | replace('\n', '<br>') | safe }}</div>
+    <div class="finding-section-title"><span class="en">Description</span><span class="ko">상세 설명</span></div>
+    <div>{{ finding.description | bilingual | safe }}</div>
 
     {# Evidence #}
     {% if finding.evidence %}
-    <div class="finding-section-title">Evidence</div>
+    <div class="finding-section-title"><span class="en">Evidence</span><span class="ko">증거</span></div>
     {% for ev in finding.evidence %}
     <div class="evidence-block">
       <div class="evidence-title">
         {{ ev.title }}
         <span class="evidence-type-badge">{{ ev.evidence_type | upper }}</span>
       </div>
-      <div>{{ ev.content | replace('\n', '<br>') | safe }}</div>
+      <pre class="evidence-content"><code>{{ ev.content }}</code></pre>
       {% if ev.file_path %}
       <div style="margin-top:4pt; font-size:8.5pt; color:#666;">
         File: <code>{{ ev.file_path }}</code>
@@ -98,13 +98,13 @@
 
     {# Recommendation #}
     {% if finding.remediation %}
-    <div class="finding-section-title">Recommendation</div>
-    <div>{{ finding.remediation | replace('\n', '<br>') | safe }}</div>
+    <div class="finding-section-title"><span class="en">Recommendation</span><span class="ko">권고 사항</span></div>
+    <div>{{ finding.remediation | bilingual | safe }}</div>
     {% endif %}
 
     {# References #}
     {% if finding.references %}
-    <div class="finding-section-title">References</div>
+    <div class="finding-section-title"><span class="en">References</span><span class="ko">참고 자료</span></div>
     <ul style="margin:4pt 0; padding-left:18pt; font-size:9pt;">
       {% for ref in finding.references %}
       <li>
@@ -129,7 +129,7 @@
 
     {# Analyst notes #}
     {% if finding.analyst_notes %}
-    <div class="finding-section-title">Analyst Notes</div>
+    <div class="finding-section-title"><span class="en">Analyst Notes</span><span class="ko">분석가 메모</span></div>
     <div style="font-style:italic; color:#555;">{{ finding.analyst_notes | replace('\n', '<br>') | safe }}</div>
     {% endif %}
 

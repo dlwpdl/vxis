@@ -398,6 +398,8 @@ class CSRFTracker:
                 break
 
     def inject_into_data(self, data: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(data, dict):
+            return data
         result = dict(data)
         for fname, fval in self._tokens.items():
             if fname not in result:
@@ -488,7 +490,7 @@ class TargetSession:
         try:
             resp = await self._client.request(
                 method=method.upper(),
-                url=url,
+                url=path,
                 data=data,
                 json=json_data,
                 headers=extra_headers if extra_headers else None,
