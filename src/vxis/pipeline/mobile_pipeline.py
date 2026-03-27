@@ -378,7 +378,8 @@ class MobilePipeline:
     async def _phase2_secrets(self, ctx: MobileScanContext) -> None:
         """바이너리/리소스에서 하드코딩 시크릿, API 키, 비밀번호 스캔."""
         try:
-            for vid in ["MOB-STATIC-001", "MOB-STATIC-002", "MOB-BINARY-004"]:
+            for vid in ["MOB-STATIC-001", "MOB-STATIC-002", "MOB-BINARY-004",
+                        "MOB-PRIV-001"]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
@@ -1463,7 +1464,8 @@ class MobilePipeline:
         """SQLite, Keychain/Keystore, SharedPreferences, 캐시/로그 검사."""
         try:
             for vid in ["MOB-STORE-001", "MOB-STORE-002", "MOB-STORE-003",
-                        "MOB-STORE-004", "MOB-STORE-005", "MOB-STORE-006"]:
+                        "MOB-STORE-004", "MOB-STORE-005", "MOB-STORE-006",
+                        "MOB-PRIV-002", "MOB-PRIV-003"]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
@@ -2764,6 +2766,7 @@ class MobilePipeline:
         """
         try:
             ctx.score_tracker.record_vector_attempt("MOB-SDK-001")
+            ctx.score_tracker.record_vector_attempt("MOB-SDK-002")
         except Exception:
             pass
 
