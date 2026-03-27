@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from vxis.models.finding import Finding
+from vxis.scoring.tracker import ScoreTracker
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +38,14 @@ class ScanContext:
     """
 
     target: str
+    target_type: str = "web"  # "web" | "game" | "mobile"
     app_context_en: str = ""
     app_context_ko: str = ""
     scan_id: str = ""
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # ── Capability Scoring ──
+    score_tracker: ScoreTracker = field(init=False)
 
     # ── 수집된 정보 ──
     tech_stack: list[str] = field(default_factory=list)
@@ -84,9 +89,13 @@ class ScanContext:
     xray_flows: int = 0
     xray_vulns: list[dict[str, Any]] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        """ScoreTracker를 target_type에 맞게 초기화한다."""
+        object.__setattr__(self, "score_tracker", ScoreTracker(target_type=self.target_type))
+
     def add_finding(self, **kwargs: Any) -> Finding:
         """Finding 추가."""
-        from vxis.models.finding import Finding as F, Severity
+        from vxis.models.finding import Finding as F
         self.finding_counter += 1
         kwargs.setdefault("id", f"VXIS-{self.finding_counter:03d}")
         kwargs.setdefault("scan_id", self.scan_id)
