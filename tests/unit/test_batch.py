@@ -11,14 +11,17 @@ import io
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from docx import Document
 
-from vxis.core.batch import BatchResult, BatchScanner, BatchTarget
-from vxis.core.orchestrator import ScanResult
-from vxis.models.finding import Finding, Severity
+pytest.importorskip("docx", reason="python-docx not installed (optional 'export' extra)")
+
+from docx import Document  # noqa: E402
+
+from vxis.core.batch import BatchResult, BatchScanner, BatchTarget  # noqa: E402
+from vxis.core.orchestrator import ScanResult  # noqa: E402
+from vxis.models.finding import Finding, Severity  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
