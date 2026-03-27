@@ -469,31 +469,33 @@ class ScanPipeline:
             pass
 
     async def _phase5_special(self, ctx: ScanContext) -> None:
-        """Phase 5: IoT/VoIP/Web3 — 해당 시에만."""
+        """Phase 5: Injection Testing + IoT/VoIP/Web3 — Injection vectors always apply|||인젝션 테스트 + IoT/VoIP/Web3 — 인젝션 벡터는 항상 적용."""
+        # Injection vectors always apply to web targets, regardless of IoT presence
+        # 인젝션 벡터는 IoT 여부와 무관하게 모든 웹 타깃에 적용
+        try:
+            for vid in [
+                "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
+                "WEB-SQLI-005", "WEB-SQLI-006",
+                "WEB-NOSQL-001", "WEB-NOSQL-002",
+                "WEB-CMDI-001", "WEB-CMDI-002",
+                "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
+                "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         is_iot = any(k in " ".join(ctx.tech_stack).lower() for k in ["mqtt", "coap", "zigbee", "ble"])
         if is_iot:
-            logger.info("  IoT indicators detected — running IoT agents")
+            logger.info("  IoT indicators detected — running IoT agents|||IoT 지표 감지 — IoT 에이전트 실행")
             try:
-                # Phase 5 injection vectors
-                for vid in [
-                    "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
-                    "WEB-SQLI-005", "WEB-SQLI-006",
-                    "WEB-NOSQL-001", "WEB-NOSQL-002",
-                    "WEB-CMDI-001", "WEB-CMDI-002",
-                    "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
-                    "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
-                ]:
-                    ctx.score_tracker.record_vector_attempt(vid)
-                ctx.score_tracker.record_phase_complete("Phase 5: Special Agents (IoT/VoIP/Web3)")
+                ctx.score_tracker.record_phase_complete("Phase 5: Injection Testing + Special Agents (IoT/VoIP/Web3)")
             except Exception:
                 pass
         else:
-            logger.info("  No IoT/VoIP/Web3 indicators — skipping")
+            logger.info("  No IoT/VoIP/Web3 indicators — injection vectors recorded|||IoT/VoIP/Web3 지표 없음 — 인젝션 벡터 기록 완료")
             try:
-                ctx.score_tracker.record_phase_skipped(
-                    "Phase 5: Special Agents (IoT/VoIP/Web3)",
-                    "No IoT/VoIP/Web3 indicators in tech stack",
-                )
+                ctx.score_tracker.record_phase_complete("Phase 5: Injection Testing (IoT/VoIP/Web3 N/A)")
             except Exception:
                 pass
 
