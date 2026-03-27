@@ -1,0 +1,172 @@
+{# Attack Path Graph — 공격 경로 다이어그램 #}
+{% if report.findings %}
+<section class="report-section attack-paths-section">
+  <h2 id="attack-paths">
+    <span class="en">Attack Path Analysis</span>
+    <span class="ko">공격 경로 분석</span>
+  </h2>
+
+  <p class="section-description">
+    <span class="en">
+      The following diagram illustrates how discovered vulnerabilities can be chained
+      together to achieve deeper compromise. Each node represents an attack stage,
+      and edges show the progression from initial access to potential crown jewel access.
+    </span>
+    <span class="ko">
+      아래 다이어그램은 발견된 취약점들이 어떻게 연결되어 더 깊은 침해로 이어질 수 있는지를 보여줍니다.
+      각 노드는 공격 단계를, 간선은 초기 접근부터 Crown Jewel까지의 진행 과정을 나타냅니다.
+    </span>
+  </p>
+
+  <div class="attack-graph-container">
+    <div class="en">{{ report.attack_graph_svg | safe }}</div>
+    <div class="ko">{{ report.attack_graph_svg_ko | safe }}</div>
+  </div>
+
+  {% if report.has_attack_chains %}
+  <div class="chain-summary">
+    <h3>
+      <span class="en">Identified Attack Chains</span>
+      <span class="ko">식별된 공격 체인</span>
+    </h3>
+    <table class="chain-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>
+            <span class="en">Chain</span>
+            <span class="ko">체인</span>
+          </th>
+          <th>
+            <span class="en">Steps</span>
+            <span class="ko">단계</span>
+          </th>
+          <th>
+            <span class="en">Impact</span>
+            <span class="ko">임팩트</span>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for chain in report.attack_chains %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>
+            {% for fid in chain %}
+              <code>{{ fid }}</code>{% if not loop.last %} &rarr; {% endif %}
+            {% endfor %}
+          </td>
+          <td>{{ chain | length }}</td>
+          <td>
+            {% if chain | length >= 5 %}
+              <span class="severity-badge severity-critical">Crown Jewel</span>
+            {% elif chain | length >= 3 %}
+              <span class="severity-badge severity-high">Multi-Hop</span>
+            {% else %}
+              <span class="severity-badge severity-medium">Initial</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <div class="depth-legend">
+    <h3>
+      <span class="en">Attack Depth Levels</span>
+      <span class="ko">공격 깊이 레벨</span>
+    </h3>
+    <table class="depth-table">
+      <tr>
+        <td style="color: #3498DB;">L0</td>
+        <td>
+          <span class="en">Reconnaissance — Port scan, service detection, tech stack</span>
+          <span class="ko">정찰 — 포트 스캔, 서비스 탐지, 기술 스택</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #E67E22;">L1</td>
+        <td>
+          <span class="en">Vulnerability Confirmed — Error disclosure, misconfig, weak crypto</span>
+          <span class="ko">취약점 확인 — 에러 노출, 설정 오류, 약한 암호화</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #C0392B;">L2</td>
+        <td>
+          <span class="en">Exploit Successful — Data extraction, session hijack, file read</span>
+          <span class="ko">익스플로잇 성공 — 데이터 추출, 세션 탈취, 파일 읽기</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #8E44AD;">L3</td>
+        <td>
+          <span class="en">Post-Exploitation — Lateral movement, privilege escalation</span>
+          <span class="ko">포스트 익스플로잇 — 횡이동, 권한 상승</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #FFD700;">L4</td>
+        <td>
+          <span class="en">Crown Jewel — Full DB access, RCE, admin takeover</span>
+          <span class="ko">Crown Jewel — DB 전체 접근, RCE, 관리자 탈취</span>
+        </td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<style>
+.attack-paths-section {
+  page-break-before: always;
+}
+.attack-graph-container {
+  margin: 20px 0;
+  text-align: center;
+}
+.attack-graph-container svg {
+  max-width: 100%;
+  height: auto;
+}
+.chain-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 15px 0;
+}
+.chain-table th,
+.chain-table td {
+  border: 1px solid #ddd;
+  padding: 8px 12px;
+  text-align: left;
+}
+.chain-table th {
+  background: #1a1a2e;
+  color: white;
+}
+.chain-table code {
+  background: #f4f4f4;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+}
+.depth-table {
+  margin: 10px 0;
+}
+.depth-table td {
+  padding: 5px 10px;
+  font-size: 0.9em;
+}
+.depth-table td:first-child {
+  font-weight: bold;
+  font-size: 1.1em;
+  width: 30px;
+}
+@media print {
+  .attack-graph-container svg {
+    max-height: 400px;
+  }
+}
+</style>
+{% endif %}

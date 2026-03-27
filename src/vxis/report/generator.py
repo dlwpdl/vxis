@@ -18,6 +18,11 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from vxis.models.finding import Finding, Severity
 from vxis.report.charts import severity_bar_svg, severity_donut_svg
+from vxis.report.attack_graph import (
+    AttackGraphData,
+    build_attack_graph_from_findings,
+    render_attack_graph_svg,
+)
 
 if TYPE_CHECKING:
     pass
@@ -71,6 +76,30 @@ class ReportData:
     logo_path: str | None = None
     executive_summary: str = ""
     methodology: str = field(default=_DEFAULT_METHODOLOGY)
+    attack_chains: list[list[str]] | None = None  # finding_id 체인 리스트
+
+    @property
+    def attack_graph_svg(self) -> str:
+        """공격 경로 그래프 SVG — 리포트에 인라인 삽입."""
+        graph = build_attack_graph_from_findings(
+            self.findings,
+            chains=self.attack_chains,
+        )
+        return render_attack_graph_svg(graph, width=850, lang="en")
+
+    @property
+    def attack_graph_svg_ko(self) -> str:
+        """공격 경로 그래프 SVG (한국어)."""
+        graph = build_attack_graph_from_findings(
+            self.findings,
+            chains=self.attack_chains,
+        )
+        return render_attack_graph_svg(graph, width=850, lang="ko")
+
+    @property
+    def has_attack_chains(self) -> bool:
+        """공격 체인이 존재하는지."""
+        return bool(self.attack_chains)
 
     @property
     def severity_counts(self) -> dict[str, int]:

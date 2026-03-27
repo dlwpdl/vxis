@@ -949,7 +949,12 @@
       {% endif %}
     {% endfor %}
     <div class="toc-entry">
-      <span class="toc-entry-title"><span class="en">4. Attestation</span><span class="ko">4. 확인서</span></span>
+      <span class="toc-entry-title"><span class="en">4. Attack Path Analysis</span><span class="ko">4. 공격 경로 분석</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">—</span>
+    </div>
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">5. Attestation</span><span class="ko">5. 확인서</span></span>
       <span class="toc-dots"></span>
       <span class="toc-entry-page">—</span>
     </div>
@@ -1004,9 +1009,14 @@
   <div class="page-break"></div>
 
   {# ============================================================
-     SECTION 4: ATTESTATION
+     SECTION 4: ATTACK PATH ANALYSIS
      ============================================================ #}
-  <div class="section-label">Section 4</div>
+  {% include "partials/_attack_paths.html" %}
+
+  {# ============================================================
+     SECTION 5: ATTESTATION
+     ============================================================ #}
+  <div class="section-label">Section 5</div>
   <h1><span class="en">Attestation</span><span class="ko">확인서</span></h1>
 
   {% include "partials/_attestation.html" %}
