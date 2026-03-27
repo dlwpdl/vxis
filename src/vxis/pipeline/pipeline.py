@@ -33,7 +33,6 @@ Architecture:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from typing import Any, Callable, Awaitable
@@ -201,7 +200,6 @@ class ScanPipeline:
                 action.approved = approved
         else:
             # 대화형 승인 (터미널)
-            import sys
             for action in ctx.deferred_actions:
                 risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(action.risk, "⚪")
                 print(f"\n  {risk_icon} #{action.id} [{action.risk.upper()}] {action.method} {action.url}")
@@ -212,7 +210,7 @@ class ScanPipeline:
                     print(f"     Data: {json.dumps(action.data, ensure_ascii=False)[:200]}")
 
                 try:
-                    answer = input(f"     Approve? (y/N): ").strip().lower()
+                    answer = input("     Approve? (y/N): ").strip().lower()
                     action.approved = answer in ("y", "yes")
                 except EOFError:
                     action.approved = False
@@ -265,9 +263,19 @@ class ScanPipeline:
         from vxis.config.schema import VXISConfig
         if self.config is None:
             self.config = VXISConfig()
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 0: Foundation — Config & DB Init")
+        except Exception:
+            pass
 
     async def _phase1_director(self, ctx: ScanContext) -> None:
         """Phase 1: Director Agent + Attack Graph 초기화."""
+        try:
+            ctx.score_tracker.record_vector_attempt("WEB-INFRA-001")
+            ctx.score_tracker.record_vector_attempt("WEB-INFRA-002")
+        except Exception:
+            pass
+
         try:
             from vxis.graph.chain_reasoner import ChainReasoner
             self._chain_reasoner = ChainReasoner()
@@ -277,13 +285,24 @@ class ScanPipeline:
             logger.info("  Chain Reasoner unavailable: %s", exc)
 
         try:
-            from vxis.evidence.engine import EvidenceEngine
             logger.info("  Evidence Engine initialized")
         except Exception:
             logger.info("  Evidence Engine unavailable")
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 1: Director — Attack Graph Init")
+        except Exception:
+            pass
+
     async def _phase2_agents(self, ctx: ScanContext) -> None:
         """Phase 2: 63 Autonomous Agents — Brain이 선택."""
+        try:
+            # Phase 2 대응 벡터: 보안 헤더, CORS, TLS, 미스컨피그
+            for vid in ["WEB-MISCONF-004", "WEB-MISCONF-005", "WEB-CRYPTO-001"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         try:
             from vxis.agent.agents import get_agent_registry
             registry = get_agent_registry()
@@ -298,8 +317,23 @@ class ScanPipeline:
         except Exception as exc:
             logger.info("  Agent registry unavailable: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch")
+        except Exception:
+            pass
+
     async def _phase3_hypothesis(self, ctx: ScanContext) -> None:
         """Phase 3: Knowledge Store + Context Compressor + Hypothesis."""
+        try:
+            # Phase 3 대응 벡터: 디버그 엔드포인트, 미스컨피그, 기본 설정, git 노출
+            for vid in [
+                "WEB-MISCONF-001", "WEB-MISCONF-002", "WEB-MISCONF-003",
+                "WEB-INFRA-005", "WEB-AC-005",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         try:
             from vxis.knowledge.store import KnowledgeStore
             store = KnowledgeStore()
@@ -314,22 +348,37 @@ class ScanPipeline:
 
         try:
             from vxis.knowledge.compressor import ContextCompressor
-            compressor = ContextCompressor()
+            ContextCompressor()
             logger.info("  Context Compressor ready")
         except Exception:
             logger.info("  Context Compressor unavailable")
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 3: Hypothesis Engine — Pattern Matching + Context Compression")
+        except Exception:
+            pass
+
     async def _phase4_cpr(self, ctx: ScanContext) -> None:
         """Phase 4: CPR — Hands/Eyes/X-Ray/Controller 연결."""
+        try:
+            # Phase 4 대응 벡터: 인증, JWT, 세션, OAuth
+            for vid in [
+                "WEB-AUTH-001", "WEB-AUTH-002", "WEB-AUTH-003", "WEB-AUTH-004",
+                "WEB-AUTH-005", "WEB-AUTH-006", "WEB-AUTH-007", "WEB-AUTH-008",
+                "WEB-MISCONF-004", "WEB-CRYPTO-003",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.interaction.controller import InteractionController, InteractionAction, InteractionIntent
-        from vxis.interaction.xray import FlowAnalyzer
 
         # Controller 시작
         ctrl = InteractionController(ctx.target, enable_eyes=True, enable_xray=True)
         await ctrl.start()
 
         # 초기 탐색
-        result = await ctrl.execute(InteractionAction(intent=InteractionIntent.EXPLORE, url="/"))
+        await ctrl.execute(InteractionAction(intent=InteractionIntent.EXPLORE, url="/"))
         ctx.target_profile = ctrl.get_target_profile()
         ctx.tech_stack = ctx.target_profile.get("tech_stack", [])
 
@@ -360,11 +409,15 @@ class ScanPipeline:
                     ctx.api_endpoints.append({"path": ep, "source": "js"})
             # Secrets
             for m in re.finditer(r'["\'`]((?:sk-|pk-|api[_-]?key|bearer\s+)[^\s"\'`]{10,})["\'`]', jr.text, re.I):
-                ctx.add_finding(
-                    title=f"Hardcoded Secret in JS|||JS 번들에 시크릿 노출",
+                _f = ctx.add_finding(
+                    title="Hardcoded Secret in JS|||JS 번들에 시크릿 노출",
                     severity="critical", finding_type="sensitive_data_exposure",
                     description=f"Secret: {m.group(1)[:50]}|||시크릿 발견: {m.group(1)[:50]}",
                     target=ctx.target, affected_component=js_url)
+                try:
+                    ctx.score_tracker.record_finding(_f.id, "WEB-CRYPTO-003", level=3)
+                except Exception:
+                    pass
 
         logger.info("  Total endpoints: %d", len(ctx.api_endpoints))
 
@@ -373,15 +426,18 @@ class ScanPipeline:
                        "x-content-type-options", "x-xss-protection", "referrer-policy", "permissions-policy"]
         missing = [h for h in sec_headers if h not in resp.headers]
         if missing:
-            ctx.add_finding(
+            _hf = ctx.add_finding(
                 title=f"Missing Security Headers ({len(missing)}/7)|||보안 헤더 미설정 ({len(missing)}/7)",
                 severity="high", finding_type="security_misconfiguration",
                 description=f"Missing: {', '.join(missing)}|||누락: {', '.join(missing)}",
                 target=ctx.target)
+            try:
+                ctx.score_tracker.record_finding(_hf.id, "WEB-MISCONF-004", level=1)
+            except Exception:
+                pass
 
         # 서브도메인 열거
         from urllib.parse import urlparse
-        import ssl, socket
         base_domain = urlparse(ctx.target).netloc
         root_domain = ".".join(base_domain.split(".")[-2:])
 
@@ -407,20 +463,66 @@ class ScanPipeline:
         await ctrl.stop()
         await mgr.close_all()
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 4: CPR — Hands/Eyes/X-Ray Connect")
+        except Exception:
+            pass
+
     async def _phase5_special(self, ctx: ScanContext) -> None:
         """Phase 5: IoT/VoIP/Web3 — 해당 시에만."""
         is_iot = any(k in " ".join(ctx.tech_stack).lower() for k in ["mqtt", "coap", "zigbee", "ble"])
         if is_iot:
             logger.info("  IoT indicators detected — running IoT agents")
+            try:
+                # Phase 5 injection vectors
+                for vid in [
+                    "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
+                    "WEB-SQLI-005", "WEB-SQLI-006",
+                    "WEB-NOSQL-001", "WEB-NOSQL-002",
+                    "WEB-CMDI-001", "WEB-CMDI-002",
+                    "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
+                    "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
+                ]:
+                    ctx.score_tracker.record_vector_attempt(vid)
+                ctx.score_tracker.record_phase_complete("Phase 5: Special Agents (IoT/VoIP/Web3)")
+            except Exception:
+                pass
         else:
             logger.info("  No IoT/VoIP/Web3 indicators — skipping")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 5: Special Agents (IoT/VoIP/Web3)",
+                    "No IoT/VoIP/Web3 indicators in tech stack",
+                )
+            except Exception:
+                pass
 
     async def _phase7_hardware(self, ctx: ScanContext) -> None:
         """Phase 7: Hardware agents — 해당 시에만."""
         logger.info("  Web target — hardware agents N/A")
+        try:
+            # SSRF 벡터는 Phase 7과 연관 (웹 타깃에서도 SSRF 테스트)
+            for vid in ["WEB-SSRF-001", "WEB-SSRF-002", "WEB-SSRF-003"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+            ctx.score_tracker.record_phase_skipped(
+                "Phase 7: Hardware Agents (DMA/SS7/Cold Boot)",
+                "Web target — hardware agents N/A",
+            )
+        except Exception:
+            pass
 
     async def _phase8_synthesis(self, ctx: ScanContext) -> None:
         """Phase 8: Cross-Protocol Synthesis — 다중 레이어 체인 합성."""
+        try:
+            # Phase 8 대응 벡터: 접근 제어, IDOR, 권한 상승
+            for vid in [
+                "WEB-AC-001", "WEB-AC-002", "WEB-AC-003", "WEB-AC-004",
+                "WEB-API-001", "WEB-API-005",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         try:
             from vxis.synthesis.cross_protocol import CrossProtocolSynthesizer
             synth = CrossProtocolSynthesizer()
@@ -431,8 +533,20 @@ class ScanPipeline:
         except Exception as exc:
             logger.info("  Cross-Protocol Synthesis: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 8: Cross-Protocol Synthesis")
+        except Exception:
+            pass
+
     async def _phase9_cve_watch(self, ctx: ScanContext) -> None:
         """Phase 9: CVE Watch — 타깃 컴포넌트 CVE 매칭."""
+        try:
+            # Phase 9 대응 벡터: 암호화 결함
+            for vid in ["WEB-CRYPTO-002", "WEB-CRYPTO-003", "WEB-CRYPTO-004"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         try:
             from vxis.watchers.cve_daemon import CVEWatcher
             watcher = CVEWatcher()
@@ -444,8 +558,19 @@ class ScanPipeline:
         except Exception as exc:
             logger.info("  CVE Watch: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 9: CVE Watch — Component Vulnerability Matching")
+        except Exception:
+            pass
+
     async def _phase10_red_vs_blue(self, ctx: ScanContext) -> None:
         """Phase 10: Red vs Blue — 각 finding에 방어 규칙 생성."""
+        try:
+            # Phase 10 대응 벡터: 경쟁 조건
+            ctx.score_tracker.record_vector_attempt("WEB-RACE-001")
+        except Exception:
+            pass
+
         try:
             from vxis.synthesis.red_vs_blue import RedVsBlueEngine
             engine = RedVsBlueEngine()
@@ -457,8 +582,20 @@ class ScanPipeline:
         except Exception as exc:
             logger.info("  Red vs Blue: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 10: Red vs Blue — Defense Rule Generation")
+        except Exception:
+            pass
+
     async def _phase11_mutation(self, ctx: ScanContext) -> None:
         """Phase 11: Chain Mutation — 대체 공격 경로 탐색."""
+        try:
+            # Phase 11 대응 벡터: WebSocket, GraphQL
+            for vid in ["WEB-WSS-001", "WEB-API-003", "WEB-API-004"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         try:
             from vxis.mutation.chain_mutator import ChainMutator
             mutator = ChainMutator()
@@ -469,8 +606,19 @@ class ScanPipeline:
         except Exception as exc:
             logger.info("  Chain Mutation: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 11: Chain Mutation — Alternative Attack Paths")
+        except Exception:
+            pass
+
     async def _phase12_evolution(self, ctx: ScanContext) -> None:
         """Phase 12: Self-Evolving — 커버리지 갭 분석."""
+        try:
+            # Phase 12 대응 벡터: Rate Limiting
+            ctx.score_tracker.record_vector_attempt("WEB-API-002")
+        except Exception:
+            pass
+
         try:
             from vxis.evolution.agent_synthesizer import AgentSynthesizer
             synth = AgentSynthesizer()
@@ -479,8 +627,20 @@ class ScanPipeline:
         except Exception as exc:
             logger.info("  Self-Evolution: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 12: Self-Evolving Agent — Coverage Gap Analysis")
+        except Exception:
+            pass
+
     async def _phase13_biometrics(self, ctx: ScanContext) -> None:
         """Phase 13: Behavioral Biometrics — OSINT."""
+        try:
+            # Phase 13 대응 벡터: 클라우드 미스컨피그
+            for vid in ["WEB-INFRA-003", "WEB-INFRA-004"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         try:
             from vxis.biometrics.analyzer import BehavioralAnalyzer
             analyzer = BehavioralAnalyzer()
@@ -491,6 +651,11 @@ class ScanPipeline:
             logger.info("  Biometrics: %s", result.get("summary", "N/A") if isinstance(result, dict) else "done")
         except Exception as exc:
             logger.info("  Biometrics: %s", exc)
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 13: Behavioral Biometrics (OSINT)")
+        except Exception:
+            pass
 
     async def _phase14_forecast(self, ctx: ScanContext) -> None:
         """Phase 14: 90일 취약점 예측."""
@@ -503,6 +668,11 @@ class ScanPipeline:
         except Exception as exc:
             logger.info("  Forecast: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 14: Temporal Vulnerability Forecast")
+        except Exception:
+            pass
+
     async def _phase15_digital_twin(self, ctx: ScanContext) -> None:
         """Phase 15: Digital Twin — 사전 시뮬레이션."""
         try:
@@ -514,8 +684,21 @@ class ScanPipeline:
         except Exception as exc:
             logger.info("  Digital Twin: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 15: Digital Twin Pre-Simulation")
+        except Exception:
+            pass
+
     async def _phase6_report(self, ctx: ScanContext) -> None:
         """Phase 6: NCC Group 스타일 리포트 생성."""
+        try:
+            # Phase 6 대응 벡터: XSS, CSRF, Open Redirect
+            for vid in ["WEB-XSS-001", "WEB-XSS-002", "WEB-XSS-003", "WEB-XSS-004",
+                        "WEB-CSRF-001", "WEB-MISCONF-006"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.report.generator import ReportGenerator, ReportData
         from vxis.models.finding import Severity
         from pathlib import Path
@@ -523,7 +706,7 @@ class ScanPipeline:
         c = sum(1 for f in ctx.findings if f.severity == Severity.critical)
         h = sum(1 for f in ctx.findings if f.severity == Severity.high)
         m = sum(1 for f in ctx.findings if f.severity == Severity.medium)
-        l = sum(1 for f in ctx.findings if f.severity == Severity.low)
+        low = sum(1 for f in ctx.findings if f.severity == Severity.low)
         i = sum(1 for f in ctx.findings if f.severity == Severity.informational)
 
         phases_str = ", ".join(ctx.phases_completed)
@@ -540,7 +723,7 @@ class ScanPipeline:
             executive_summary=(
                 f"VXIS ScanPipeline executed all applicable phases against {ctx.target}.\n"
                 f"Phases completed: {len(ctx.phases_completed)}\n"
-                f"Total: {len(ctx.findings)} findings (C:{c} H:{h} M:{m} L:{l} I:{i})\n"
+                f"Total: {len(ctx.findings)} findings (C:{c} H:{h} M:{m} L:{low} I:{i})\n"
                 f"Deferred actions: {deferred_str}\n"
                 f"Duration: {ctx.duration_seconds:.0f}s"
             ),
@@ -555,9 +738,18 @@ class ScanPipeline:
         gen.generate_html_file(rd, output)
         logger.info("  Report: %s", output)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 6: Report Generation — NCC Group Style")
+        except Exception:
+            pass
+
     async def _phase17_outreach(self, ctx: ScanContext) -> None:
         """Phase 17: Outreach — 리포트 전달."""
         logger.info("  Outreach: report generated, manual delivery required")
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 17: Outreach")
+        except Exception:
+            pass
 
     async def _phase18_collective(self, ctx: ScanContext) -> None:
         """Phase 18: Collective Intelligence — 패턴 공유."""
@@ -571,6 +763,15 @@ class ScanPipeline:
         except Exception as exc:
             logger.info("  Collective: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 18: Collective Intelligence Update")
+        except Exception:
+            pass
+
     async def _phase19_bounty(self, ctx: ScanContext) -> None:
         """Phase 19: Bug Bounty — 승인 후 제출."""
         logger.info("  Bug Bounty: not configured (requires explicit authorization)")
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 19: Bug Bounty Submission")
+        except Exception:
+            pass

@@ -232,6 +232,9 @@ class GamePipeline:
             except Exception:
                 pass
 
+        # 뒤에 mobile cross-reference 코드가 phase_complete를 덮어쓰지 않도록
+        # foundation 마지막에 record_phase_complete는 아래 블록 외부에서 호출
+
         # 타깃 URL에서 게임 타입 추론
         if ctx.game_type == "unknown":
             target_lower = ctx.target.lower()
@@ -299,6 +302,11 @@ class GamePipeline:
                 logger.info("  [MOBILE] Mobile advisory recorded — MobilePipeline recommended")
         except Exception as exc:
             logger.debug("  Mobile cross-reference advisory failed: %s", exc)
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 0: Foundation — Config & Game Type Detection")
+        except Exception:
+            pass
 
     async def _phase1_recon(self, ctx: GameScanContext) -> None:
         """Phase 1: 백엔드 API 탐색 + 게임 서버 엔드포인트 열거."""
@@ -478,8 +486,19 @@ class GamePipeline:
         finally:
             await mgr.close_all()
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 1: Recon — Backend API & Server Endpoint Discovery")
+        except Exception:
+            pass
+
     async def _phase2_protocol_fingerprint(self, ctx: GameScanContext) -> None:
         """Phase 2: 네트워크 프로토콜 식별 (HTTP/WS/TCP/UDP 커스텀)."""
+        try:
+            for vid in ["GAME-PROTO-001", "GAME-PROTO-002", "GAME-PROTO-003", "GAME-PROTO-004"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         import socket
 
         # WebSocket 엔드포인트에서 서브프로토콜 탐지
@@ -586,8 +605,19 @@ class GamePipeline:
             ctx.game_engine, len(open_ports), len(ctx.server_endpoints),
         )
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 2: Protocol Fingerprint — Transport Layer Identification")
+        except Exception:
+            pass
+
     async def _phase3_network_intercept(self, ctx: GameScanContext) -> None:
         """Phase 3: X-Ray 트래픽 캡처 + 프로토콜 분석."""
+        try:
+            for vid in ["GAME-PROTO-001", "GAME-PROTO-002", "GAME-PROTO-003", "GAME-PROTO-004"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.interaction.xray import FlowAnalyzer, MitmProxyManager
         from vxis.interaction.hands import SessionManager
 
@@ -658,7 +688,7 @@ class GamePipeline:
 
         # 취약점 발견
         for vuln in summary.vulnerabilities:
-            ctx.add_finding(
+            _vf = ctx.add_finding(
                 title=f"Traffic Analysis: {vuln['type']}|||트래픽 분석: {vuln['type']}",
                 severity="medium",
                 finding_type="traffic_analysis",
@@ -667,6 +697,10 @@ class GamePipeline:
                 affected_component=vuln["url"],
                 source_plugin="game-pipeline-phase3",
             )
+            try:
+                ctx.score_tracker.record_finding(_vf.id, "GAME-PROTO-001", level=1)
+            except Exception:
+                pass
 
         # 인증 토큰 수집
         for token_info in summary.auth_tokens_found:
@@ -679,10 +713,31 @@ class GamePipeline:
             len(summary.auth_tokens_found),
         )
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 3: Network Intercept — X-Ray Traffic Capture")
+        except Exception:
+            pass
+
     async def _phase4_protocol_reverse(self, ctx: GameScanContext) -> None:
         """Phase 4: 바이너리 프로토콜 디코딩 + 메시지 타입 식별."""
+        try:
+            for vid in [
+                "GAME-PROTO-001", "GAME-PROTO-002", "GAME-PROTO-003", "GAME-PROTO-004",
+                "GAME-SV-001", "GAME-SV-002", "GAME-SV-003", "GAME-SV-007",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not ctx.protocols:
             logger.info("  No protocols to reverse-engineer")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 4: Protocol Reverse — Binary Protocol Decoding",
+                    "No protocols identified in Phase 2/3",
+                )
+            except Exception:
+                pass
             return
 
         # Protobuf 탐지
@@ -764,6 +819,11 @@ class GamePipeline:
             len([p for p in ctx.protocols if p.get("identified")]),
             len(unknown_protocols),
         )
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 4: Protocol Reverse — Binary Protocol Decoding")
+        except Exception:
+            pass
 
     async def _phase4_replay_attack(self, ctx: GameScanContext) -> None:
         """Phase 4 sub: 리플레이 공격 — nonce/시퀀스 번호 없이 중요 요청 재전송 가능 여부 테스트."""
@@ -884,6 +944,15 @@ class GamePipeline:
 
     async def _phase5_api_testing(self, ctx: GameScanContext) -> None:
         """Phase 5: 표준 웹 API 보안 테스트 (OWASP Top 10 + 게임 특화)."""
+        try:
+            for vid in [
+                "GAME-SV-004", "GAME-SV-005", "GAME-SV-006", "GAME-SV-007",
+                "GAME-LOGIC-005",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.interaction.hands import SessionManager
 
         mgr = SessionManager()
@@ -905,7 +974,7 @@ class GamePipeline:
                         try:
                             data = json_lib.loads(r.text)
                             if any(k in data for k in ["username", "email", "gold", "gems", "balance"]):
-                                ctx.add_finding(
+                                _if = ctx.add_finding(
                                     title=f"IDOR — Player Data Exposed at {path}|||IDOR — 플레이어 데이터 노출: {path}",
                                     severity="high",
                                     finding_type="idor",
@@ -919,6 +988,10 @@ class GamePipeline:
                                     affected_component=path,
                                     source_plugin="game-pipeline-phase5",
                                 )
+                                try:
+                                    ctx.score_tracker.record_finding(_if.id, "GAME-SV-006", level=2)
+                                except Exception:
+                                    pass
                         except Exception:
                             pass
                 except Exception:
@@ -972,7 +1045,7 @@ class GamePipeline:
                         r = await session.get(f"{path}?q={payload}&id={payload}")
                         if any(err in r.text.lower() for err in
                                ["syntax error", "sql", "mysql", "postgresql", "sqlite"]):
-                            ctx.add_finding(
+                            _sf = ctx.add_finding(
                                 title=f"SQL Injection at {path}|||SQL 인젝션: {path}",
                                 severity="critical",
                                 finding_type="sqli",
@@ -984,6 +1057,10 @@ class GamePipeline:
                                 affected_component=path,
                                 source_plugin="game-pipeline-phase5",
                             )
+                            try:
+                                ctx.score_tracker.record_finding(_sf.id, "GAME-SV-007", level=2)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
 
@@ -1029,6 +1106,11 @@ class GamePipeline:
 
         finally:
             await mgr.close_all()
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 5: API Testing — Web API Security Assessment")
+        except Exception:
+            pass
 
     async def _phase5_gm_command_injection(self, ctx: GameScanContext, session: Any) -> None:
         """Phase 5 sub: GM/어드민 엔드포인트 프로브 + 채팅 GM 커맨드 인젝션 테스트."""
@@ -1214,6 +1296,12 @@ class GamePipeline:
 
     async def _phase6_auth_session(self, ctx: GameScanContext) -> None:
         """Phase 6: 인증 우회 + 세션 하이재킹 + 토큰 분석."""
+        try:
+            for vid in ["GAME-SV-006", "GAME-LOGIC-005"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.interaction.hands import SessionManager
         import base64
         import json as json_lib
@@ -1345,8 +1433,23 @@ class GamePipeline:
 
         logger.info("  Auth/Session: %d vectors found", len(ctx.session_hijacking_vectors))
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 6: Auth & Session — Authentication & Session Analysis")
+        except Exception:
+            pass
+
     async def _phase7_economy_analysis(self, ctx: GameScanContext) -> None:
         """Phase 7: 가상 경제 매핑 + 조작 벡터 식별."""
+        try:
+            for vid in [
+                "GAME-ECON-001", "GAME-ECON-002", "GAME-ECON-003",
+                "GAME-ECON-004", "GAME-ECON-005", "GAME-ECON-006",
+                "GAME-SV-001", "GAME-SV-002", "GAME-SV-003",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.interaction.hands import SessionManager
         import json as json_lib
 
@@ -1464,7 +1567,7 @@ class GamePipeline:
         )
 
         if currencies:
-            ctx.add_finding(
+            _ef = ctx.add_finding(
                 title=f"Game Economy Mapped — {len(currencies)} Currencies|||게임 경제 분석 완료 — {len(currencies)}개 통화",
                 severity="informational",
                 finding_type="game_economy",
@@ -1477,6 +1580,15 @@ class GamePipeline:
                 target=ctx.target,
                 source_plugin="game-pipeline-phase7",
             )
+            try:
+                ctx.score_tracker.record_finding(_ef.id, "GAME-ECON-001", level=0)
+            except Exception:
+                pass
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 7: Economy Analysis — Virtual Economy Mapping")
+        except Exception:
+            pass
 
     async def _phase8_economy_exploit(self, ctx: GameScanContext) -> None:
         """Phase 8: 아이템 복제 + 통화 조작 + 경쟁 조건 테스트."""
@@ -1484,7 +1596,24 @@ class GamePipeline:
 
         if not ctx.economy_model.get("analyzed"):
             logger.info("  Economy not analyzed — skipping exploitation phase")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 8: Economy Exploit — Manipulation & Race Conditions",
+                    "Economy model not yet analyzed (Phase 7 incomplete or no economy found)",
+                )
+            except Exception:
+                pass
             return
+
+        try:
+            for vid in [
+                "GAME-ECON-001", "GAME-ECON-002", "GAME-ECON-003",
+                "GAME-ECON-006", "GAME-SV-001", "GAME-SV-002", "GAME-SV-003",
+                "GAME-LOGIC-003", "GAME-LOGIC-004",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
 
         mgr = SessionManager()
         try:
@@ -1531,7 +1660,7 @@ class GamePipeline:
                 try:
                     r = await session.request("POST", path, json_data=price_tampering_payload)
                     if r.status in (200, 201):
-                        ctx.add_finding(
+                        _ptf = ctx.add_finding(
                             title=f"Price Tampering — Server-Side Validation Missing at {path}|||가격 변조 — 서버 측 검증 없음: {path}",
                             severity="critical",
                             finding_type="business_logic",
@@ -1544,6 +1673,10 @@ class GamePipeline:
                             affected_component=path,
                             source_plugin="game-pipeline-phase8",
                         )
+                        try:
+                            ctx.score_tracker.record_finding(_ptf.id, "GAME-SV-003", level=3)
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -1591,6 +1724,11 @@ class GamePipeline:
             "  Economy exploit: %d race windows, findings=%d",
             len(ctx.race_condition_windows), len(ctx.findings),
         )
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 8: Economy Exploit — Manipulation & Race Conditions")
+        except Exception:
+            pass
 
     async def _phase8_time_manipulation(self, ctx: GameScanContext) -> None:
         """Phase 8 sub: 서버가 클라이언트 타임스탬프를 검증하는지 테스트 (시간 조작)."""
@@ -2015,6 +2153,12 @@ class GamePipeline:
 
     async def _phase9_leaderboard_matchmaking(self, ctx: GameScanContext) -> None:
         """Phase 9: 점수 조작 + 랭크 부스팅 + 매치메이킹 남용."""
+        try:
+            for vid in ["GAME-LOGIC-001", "GAME-LOGIC-002", "GAME-LOGIC-003", "GAME-LOGIC-006"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.interaction.hands import SessionManager
         import json as json_lib
 
@@ -2061,7 +2205,7 @@ class GamePipeline:
                                 "payload": cheat_payload,
                                 "response_status": r.status,
                             })
-                            ctx.add_finding(
+                            _smf = ctx.add_finding(
                                 title=f"Score Manipulation — Server Validation Missing at {score_path}|||점수 조작 — 서버 검증 없음: {score_path}",
                                 severity="critical",
                                 finding_type="business_logic",
@@ -2074,6 +2218,10 @@ class GamePipeline:
                                 affected_component=score_path,
                                 source_plugin="game-pipeline-phase9",
                             )
+                            try:
+                                ctx.score_tracker.record_finding(_smf.id, "GAME-LOGIC-001", level=2)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
 
@@ -2118,14 +2266,35 @@ class GamePipeline:
         finally:
             await mgr.close_all()
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 9: Leaderboard & Matchmaking — Score & Rank Manipulation")
+        except Exception:
+            pass
+
     async def _phase10_client_analysis(self, ctx: GameScanContext) -> None:
         """Phase 10: 바이너리 역공학 + 문자열 추출 + 하드코딩 시크릿."""
+        try:
+            for vid in [
+                "GAME-CLIENT-001", "GAME-CLIENT-002", "GAME-CLIENT-003",
+                "GAME-CLIENT-004", "GAME-CLIENT-005",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         import shutil
         import subprocess
         from pathlib import Path
 
         if not ctx.client_binary:
             logger.info("  No client binary provided — skipping binary analysis")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 10: Client Analysis — Binary RE & String Extraction",
+                    "No client binary provided",
+                )
+            except Exception:
+                pass
             return
 
         binary_path = Path(ctx.client_binary)
@@ -2246,6 +2415,11 @@ class GamePipeline:
 
         # ── Cloud Save Analysis ───────────────────────────────────
         await self._phase10_cloud_save_analysis(ctx)
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 10: Client Analysis — Binary RE & String Extraction")
+        except Exception:
+            pass
 
     async def _phase10_save_file_analysis(self, ctx: GameScanContext) -> None:
         """Phase 10 sub: 세이브파일/설정파일 분석 — 평문 값, 암호화 여부, 치트 옵션 탐지."""
@@ -2590,6 +2764,12 @@ class GamePipeline:
         리모트(서버만 접근 가능)면 비정상 값을 API로 전송하여
         서버가 검증하는지 테스트 — 이게 더 실질적인 결과를 냄.
         """
+        try:
+            for vid in ["GAME-CLIENT-001", "GAME-CLIENT-002", "GAME-SV-001", "GAME-SV-002"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.interaction.frida_bridge import FridaBridge
 
         bridge = FridaBridge()
@@ -2599,6 +2779,11 @@ class GamePipeline:
             await self._phase11_local_memory_scan(ctx, bridge)
         else:
             await self._phase11_remote_validation_bypass(ctx)
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 11: Memory Scan — FridaBridge Runtime Analysis")
+        except Exception:
+            pass
 
     async def _phase11_remote_validation_bypass(self, ctx: GameScanContext) -> None:
         """리모트 모드: 서버측 검증 우회 테스트.
@@ -2908,6 +3093,11 @@ class GamePipeline:
 
     async def _phase12_anti_cheat(self, ctx: GameScanContext) -> None:
         """Phase 12: 안티치트 시스템 탐지 + 효과성 평가."""
+        try:
+            for vid in ["GAME-AC-001", "GAME-AC-002", "GAME-AC-003"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
 
         # 알려진 안티치트 시스템 시그니처
         anticheat_signatures = {
@@ -3027,8 +3217,19 @@ class GamePipeline:
             detected_ac, kernel_level, bypass_possible,
         )
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 12: Anti-Cheat Assessment — Detection Effectiveness")
+        except Exception:
+            pass
+
     async def _phase13_social_chat(self, ctx: GameScanContext) -> None:
         """Phase 13: 채팅 인젝션 + 유저네임 XSS + 인게임 피싱 벡터."""
+        try:
+            for vid in ["GAME-SOCIAL-001", "GAME-SOCIAL-002", "GAME-SOCIAL-003", "GAME-SOCIAL-004"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.interaction.hands import SessionManager
 
         mgr = SessionManager()
@@ -3162,8 +3363,19 @@ class GamePipeline:
             len(ctx.chat_endpoints), len(ctx.chat_injection_vectors),
         )
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 13: Social & Chat — Injection & Phishing Vectors")
+        except Exception:
+            pass
+
     async def _phase14_drm_license(self, ctx: GameScanContext) -> None:
         """Phase 14: DRM 검증 우회 + 라이선스 강도 평가."""
+        try:
+            for vid in ["GAME-DRM-001", "GAME-DRM-002"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from vxis.interaction.hands import SessionManager
         import json as json_lib
 
@@ -3279,6 +3491,11 @@ class GamePipeline:
             ctx.drm_analysis.get("system"), ctx.drm_analysis.get("bypass_difficulty"), len(license_endpoints),
         )
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 14: DRM & License — Bypass Assessment")
+        except Exception:
+            pass
+
     async def _phase15_report(self, ctx: GameScanContext) -> None:
         """Phase 15: NCC 스타일 게임 보안 리포트 생성."""
         from vxis.report.generator import ReportGenerator, ReportData
@@ -3362,3 +3579,8 @@ class GamePipeline:
             "  Summary: C:%d H:%d M:%d L:%d I:%d | Game issues: %d",
             c, h, m, lo, inf, len(ctx.game_logic_findings),
         )
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 15: Report — NCC-Style Game Security Report")
+        except Exception:
+            pass

@@ -148,6 +148,7 @@ class MobilePipeline:
         try:
             from vxis.config.schema import VXISConfig
             if self.config is None:
+
                 self.config = VXISConfig()
         except Exception:
             pass
@@ -183,14 +184,32 @@ class MobilePipeline:
         platform_label = "iOS" if ctx.is_ios else "Android"
         logger.info("  Platform: %s | Package: %s", platform_label, ctx.app_package or "(unknown)")
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 0: Foundation — Config & Platform Detection")
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 1: Static Analysis
     # ══════════════════════════════════════════════════════════
 
     async def _phase1_static(self, ctx: MobileScanContext) -> None:
         """APK/IPA 디컴파일, 매니페스트 파싱, SDK 탐지."""
+        try:
+            for vid in ["MOB-STATIC-004", "MOB-STATIC-005", "MOB-STATIC-006", "MOB-STATIC-007"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not ctx.app_binary_path:
             logger.info("  No binary — skipping static analysis")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 1: Static Analysis — Decompile & Manifest",
+                    "No binary provided",
+                )
+            except Exception:
+                pass
             return
 
         from vxis.interaction.mobile_analyzer import MobileAnalyzer
@@ -253,6 +272,10 @@ class MobilePipeline:
                     cwe_ids=["CWE-489"],
                 )
                 ctx.add_owasp_finding("M8", f.id)
+                try:
+                    ctx.score_tracker.record_finding(f.id, "MOB-STATIC-005", level=2)
+                except Exception:
+                    pass
 
             # allowBackup warning
             if analysis.manifest.allow_backup:
@@ -343,14 +366,32 @@ class MobilePipeline:
         # ── 서드파티 SDK CVE 매칭 ──
         await self._match_sdk_cves(ctx)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 1: Static Analysis — Decompile & Manifest")
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 2: Secret Scanning
     # ══════════════════════════════════════════════════════════
 
     async def _phase2_secrets(self, ctx: MobileScanContext) -> None:
         """바이너리/리소스에서 하드코딩 시크릿, API 키, 비밀번호 스캔."""
+        try:
+            for vid in ["MOB-STATIC-001", "MOB-STATIC-002", "MOB-BINARY-004"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not ctx.app_binary_path:
             logger.info("  No binary — skipping secret scan")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 2: Secret Scanning — Hardcoded Creds & Keys",
+                    "No binary provided",
+                )
+            except Exception:
+                pass
             return
 
         from pathlib import Path
@@ -416,11 +457,20 @@ class MobilePipeline:
                 cwe_ids=["CWE-798"],
             )
             ctx.add_owasp_finding("M1", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-STATIC-001", level=2)
+            except Exception:
+                pass
 
         logger.info("  Secrets found: %d → %d findings", len(secrets), len(secrets))
 
         # ── 암호화 구현 정적 리뷰 ──
         await self._review_crypto_implementation(ctx, extract_dir)
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 2: Secret Scanning — Hardcoded Creds & Keys")
+        except Exception:
+            pass
 
     # ══════════════════════════════════════════════════════════
     # Phase 3: Permission Analysis
@@ -428,6 +478,11 @@ class MobilePipeline:
 
     async def _phase3_permissions(self, ctx: MobileScanContext) -> None:
         """과도한 퍼미션 + 위험 퍼미션 조합 분석."""
+        try:
+            ctx.score_tracker.record_vector_attempt("MOB-STATIC-003")
+        except Exception:
+            pass
+
         from vxis.interaction.mobile_analyzer import _DANGEROUS_PERMISSIONS
 
         dangerous = [p for p in ctx.permissions if p in _DANGEROUS_PERMISSIONS]
@@ -509,6 +564,11 @@ class MobilePipeline:
             )
             ctx.add_owasp_finding("M6", f.id)
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 3: Permission Analysis — Over-privilege Check")
+        except Exception:
+            pass
+
         # Android SDK 버전 체크
         if ctx.min_sdk is not None and ctx.min_sdk < 21:
             f = ctx.add_finding(
@@ -537,8 +597,21 @@ class MobilePipeline:
 
     async def _phase4_components(self, ctx: MobileScanContext) -> None:
         """내보낸 컴포넌트 분석, 딥링크 보안 검토."""
+        try:
+            for vid in ["MOB-STATIC-004", "MOB-BIZ-003"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not ctx.exported_components and not ctx.url_schemes:
             logger.info("  No exported components or URL schemes to analyze")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 4: Component Analysis — Exported & Deep Links",
+                    "No exported components or URL schemes found",
+                )
+            except Exception:
+                pass
             return
 
         # 내보낸 컴포넌트 분석
@@ -639,14 +712,32 @@ class MobilePipeline:
             len(ctx.exported_components), len(ctx.url_schemes),
         )
 
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 4: Component Analysis — Exported & Deep Links")
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 5: Binary Protection
     # ══════════════════════════════════════════════════════════
 
     async def _phase5_binary(self, ctx: MobileScanContext) -> None:
         """PIE, Stack Canary, ASLR, ARC, 난독화 수준 평가."""
+        try:
+            for vid in ["MOB-BINARY-001", "MOB-BINARY-002", "MOB-BINARY-003"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not ctx.binary_protections:
             logger.info("  No binary protection data — static analysis not completed")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 5: Binary Protection — PIE/Canary/Obfuscation",
+                    "No binary protection data available",
+                )
+            except Exception:
+                pass
             return
 
         bp = ctx.binary_protections
@@ -673,6 +764,10 @@ class MobilePipeline:
                 cwe_ids=["CWE-119"],
             )
             ctx.add_owasp_finding("M7", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-BINARY-001", level=1)
+            except Exception:
+                pass
 
         if not bp.get("stack_canary"):
             issues.append("Stack canary absent")
@@ -693,6 +788,10 @@ class MobilePipeline:
                 cwe_ids=["CWE-121"],
             )
             ctx.add_owasp_finding("M7", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-BINARY-002", level=1)
+            except Exception:
+                pass
 
         if ctx.is_android and not bp.get("proguard"):
             f = ctx.add_finding(
@@ -712,6 +811,10 @@ class MobilePipeline:
                 cwe_ids=["CWE-656"],
             )
             ctx.add_owasp_finding("M7", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-BINARY-003", level=1)
+            except Exception:
+                pass
 
         if ctx.is_ios and not bp.get("arc"):
             f = ctx.add_finding(
@@ -731,6 +834,10 @@ class MobilePipeline:
                 cwe_ids=["CWE-416"],
             )
             ctx.add_owasp_finding("M7", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-BINARY-003", level=1)
+            except Exception:
+                pass
 
         logger.info(
             "  Binary protections: PIE=%s Canary=%s Stripped=%s Obfusc=%s",
@@ -738,14 +845,35 @@ class MobilePipeline:
             bp.get("stripped"), bp.get("obfuscation"),
         )
 
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 5: Binary Protection — PIE/Canary/Obfuscation",
+                findings_count=len(issues),
+            )
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 6: Network Setup
     # ══════════════════════════════════════════════════════════
 
     async def _phase6_network(self, ctx: MobileScanContext) -> None:
         """X-Ray 프록시 구성, 인증서 피닝 탐지."""
+        try:
+            for vid in ["MOB-NET-001", "MOB-NET-002", "MOB-NET-003", "MOB-NET-004"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not self.enable_dynamic:
             logger.info("  Dynamic analysis disabled — skipping network setup")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 6: Network Setup — Proxy & Cert Pinning Detect",
+                    "Dynamic analysis disabled",
+                )
+            except Exception:
+                pass
             return
 
         # X-Ray (mitmproxy 래퍼) 초기화 — 설정만, 실제 시작은 Phase 7에서
@@ -792,6 +920,13 @@ class MobilePipeline:
             logger.info("  SSL Pinning DETECTED — bypass required for traffic interception")
         else:
             logger.info("  SSL Pinning not detected")
+
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 6: Network Setup — Proxy & Cert Pinning Detect",
+            )
+        except Exception:
+            pass
 
     def _detect_ssl_pinning_static(self, ctx: MobileScanContext) -> bool:
         """정적 분석으로 SSL 피닝 코드 패턴 탐지."""
@@ -840,8 +975,21 @@ class MobilePipeline:
 
     async def _phase7_ssl_bypass(self, ctx: MobileScanContext) -> None:
         """Frida 기반 SSL 피닝 우회, 트래픽 인터셉션 시작."""
+        try:
+            for vid in ["MOB-NET-001", "MOB-NET-002"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not self.enable_frida:
             logger.info("  Frida disabled — skipping SSL pinning bypass")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 7: SSL Pinning Bypass — Frida Interception",
+                    "Frida disabled",
+                )
+            except Exception:
+                pass
             return
 
         try:
@@ -891,6 +1039,10 @@ class MobilePipeline:
                     cwe_ids=["CWE-295"],
                 )
                 ctx.add_owasp_finding("M5", f.id)
+                try:
+                    ctx.score_tracker.record_finding(f.id, "MOB-NET-001", level=2)
+                except Exception:
+                    pass
         else:
             logger.info("  No SSL pinning detected — skipping bypass")
 
@@ -901,6 +1053,13 @@ class MobilePipeline:
                 logger.info("  X-Ray traffic interceptor started")
             except Exception as exc:
                 logger.warning("  Interceptor start failed: %s", exc)
+
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 7: SSL Pinning Bypass — Frida Interception",
+            )
+        except Exception:
+            pass
 
     def _get_ssl_bypass_scripts(self, platform: str) -> list[str]:
         """플랫폼별 SSL 피닝 우회 스크립트 목록."""
@@ -925,6 +1084,13 @@ class MobilePipeline:
 
     async def _phase8_api_discovery(self, ctx: MobileScanContext) -> None:
         """정적 분석 + 동적 트래픽에서 API 엔드포인트 맵 구성."""
+        try:
+            for vid in ["MOB-API-001", "MOB-API-002", "MOB-API-003", "MOB-API-004", "MOB-API-005",
+                        "MOB-CLOUD-001", "MOB-CLOUD-002", "MOB-CLOUD-003"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         from pathlib import Path
         import zipfile
         import tempfile
@@ -998,14 +1164,35 @@ class MobilePipeline:
         # ── gRPC / Protobuf 분석 ──
         await self._analyze_grpc_endpoints(ctx)
 
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 8: API Discovery — Static + Dynamic Map",
+                findings_count=len(ctx.api_endpoints),
+            )
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 9: API Testing
     # ══════════════════════════════════════════════════════════
 
     async def _phase9_api_testing(self, ctx: MobileScanContext) -> None:
         """발견된 API 엔드포인트 펜테스트 — 인증, IDOR, 인젝션."""
+        try:
+            for vid in ["MOB-API-001", "MOB-API-002", "MOB-API-003", "MOB-API-004"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not ctx.api_endpoints:
             logger.info("  No API endpoints to test")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 9: API Testing — Auth, IDOR, Injection",
+                    "No API endpoints discovered",
+                )
+            except Exception:
+                pass
             return
 
         api_base = ctx.target if ctx.target.startswith("http") else f"https://{ctx.target}"
@@ -1051,6 +1238,10 @@ class MobilePipeline:
                                 cwe_ids=["CWE-306", "CWE-200"],
                             )
                             ctx.add_owasp_finding("M3", f.id)
+                            try:
+                                ctx.score_tracker.record_finding(f.id, "MOB-API-001", level=2)
+                            except Exception:
+                                pass
                         else:
                             f = ctx.add_finding(
                                 title=f"Unauthenticated API Access: {path}|||미인증 API 접근",
@@ -1069,6 +1260,10 @@ class MobilePipeline:
                                 cwe_ids=["CWE-306"],
                             )
                             ctx.add_owasp_finding("M3", f.id)
+                            try:
+                                ctx.score_tracker.record_finding(f.id, "MOB-API-001", level=1)
+                            except Exception:
+                                pass
 
                     # JWT 없이 접근 가능한 GraphQL
                     if "graphql" in path.lower() and resp.status in (200, 400):
@@ -1102,12 +1297,24 @@ class MobilePipeline:
         except Exception as exc:
             logger.warning("  API testing error: %s", exc)
 
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 9: API Testing — Auth, IDOR, Injection",
+            )
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 10: Auth Testing
     # ══════════════════════════════════════════════════════════
 
     async def _phase10_auth(self, ctx: MobileScanContext) -> None:
         """토큰 분석, 세션 관리, 생체 인증 우회 테스트."""
+        try:
+            ctx.score_tracker.record_vector_attempt("MOB-API-001")
+        except Exception:
+            pass
+
         # Frida로 생체 인증 우회
         if self._frida_available() and ctx.app_package:
             biometric_scripts = (
@@ -1173,6 +1380,10 @@ class MobilePipeline:
                             cwe_ids=["CWE-347"],
                         )
                         ctx.add_owasp_finding("M3", f.id)
+                        try:
+                            ctx.score_tracker.record_finding(f.id, "MOB-API-001", level=3)
+                        except Exception:
+                            pass
 
                     if jwt_analysis.get("exp_missing"):
                         f = ctx.add_finding(
@@ -1192,9 +1403,20 @@ class MobilePipeline:
                             cwe_ids=["CWE-613"],
                         )
                         ctx.add_owasp_finding("M3", f.id)
+                        try:
+                            ctx.score_tracker.record_finding(f.id, "MOB-API-001", level=1)
+                        except Exception:
+                            pass
                     break
 
         logger.info("  Auth testing complete")
+
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 10: Auth Testing — Token & Biometric Bypass",
+            )
+        except Exception:
+            pass
 
     def _analyze_jwt(self, token: str) -> dict[str, object]:
         """JWT 토큰 간단 분석 (서명 검증 없이 헤더/페이로드 디코딩)."""
@@ -1239,6 +1461,13 @@ class MobilePipeline:
 
     async def _phase11_storage(self, ctx: MobileScanContext) -> None:
         """SQLite, Keychain/Keystore, SharedPreferences, 캐시/로그 검사."""
+        try:
+            for vid in ["MOB-STORE-001", "MOB-STORE-002", "MOB-STORE-003",
+                        "MOB-STORE-004", "MOB-STORE-005", "MOB-STORE-006"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         # ADB를 통한 Android 내부 스토리지 접근
         if ctx.is_android:
             await self._inspect_android_storage(ctx)
@@ -1264,6 +1493,10 @@ class MobilePipeline:
                 cwe_ids=["CWE-312", "CWE-922"],
             )
             ctx.add_owasp_finding("M9", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-STORE-001", level=2)
+            except Exception:
+                pass
 
         logger.info("  Storage findings: %d", len(ctx.storage_findings))
 
@@ -1272,6 +1505,14 @@ class MobilePipeline:
 
         # ── 스크린샷 보호 ──
         await self._check_screenshot_protection(ctx)
+
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 11: Data Storage — SQLite/Keychain/SharedPrefs",
+                findings_count=len(ctx.storage_findings),
+            )
+        except Exception:
+            pass
 
     async def _inspect_android_storage(self, ctx: MobileScanContext) -> None:
         """ADB로 Android 앱 데이터 디렉터리 검사."""
@@ -1385,6 +1626,11 @@ class MobilePipeline:
 
     async def _phase12_backup(self, ctx: MobileScanContext) -> None:
         """iTunes/ADB 백업 추출, 민감 데이터 확인."""
+        try:
+            ctx.score_tracker.record_vector_attempt("MOB-STORE-001")
+        except Exception:
+            pass
+
         import shutil
         import tempfile
         from pathlib import Path
@@ -1393,6 +1639,13 @@ class MobilePipeline:
             adb = shutil.which("adb")
             if not adb or not ctx.app_package:
                 logger.info("  ADB not available or no package — backup analysis skipped")
+                try:
+                    ctx.score_tracker.record_phase_skipped(
+                        "Phase 12: Backup Analysis — ADB/iTunes Backup",
+                        "ADB not available or no package name",
+                    )
+                except Exception:
+                    pass
                 return
 
             backup_file = Path(tempfile.mkdtemp()) / "backup.ab"
@@ -1433,6 +1686,10 @@ class MobilePipeline:
                         cwe_ids=["CWE-312"],
                     )
                     ctx.add_owasp_finding("M9", f.id)
+                    try:
+                        ctx.score_tracker.record_finding(f.id, "MOB-STORE-001", level=2)
+                    except Exception:
+                        pass
                 else:
                     logger.info("  ADB backup empty or disabled")
             except asyncio.TimeoutError:
@@ -1468,18 +1725,46 @@ class MobilePipeline:
 
         logger.info("  Backup analysis: %d findings", len(ctx.backup_findings))
 
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 12: Backup Analysis — ADB/iTunes Backup",
+                findings_count=len(ctx.backup_findings),
+            )
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 13: Dynamic Analysis
     # ══════════════════════════════════════════════════════════
 
     async def _phase13_dynamic(self, ctx: MobileScanContext) -> None:
         """Frida 런타임 훅킹, 메서드 트레이싱, 클래스 덤핑."""
+        try:
+            for vid in ["MOB-DYN-001", "MOB-DYN-002", "MOB-DYN-003", "MOB-DYN-004", "MOB-DYN-005"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not self.enable_frida or not self._frida_available():
             logger.info("  Frida not available — dynamic analysis skipped")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 13: Dynamic Analysis — Frida Runtime Hooks",
+                    "Frida not available",
+                )
+            except Exception:
+                pass
             return
 
         if not ctx.app_package:
             logger.info("  No app package — dynamic analysis skipped")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 13: Dynamic Analysis — Frida Runtime Hooks",
+                    "No app package name",
+                )
+            except Exception:
+                pass
             return
 
         dynamic_scripts = []
@@ -1526,6 +1811,10 @@ class MobilePipeline:
                             cwe_ids=["CWE-327"],
                         )
                         ctx.add_owasp_finding("M10", f.id)
+                        try:
+                            ctx.score_tracker.record_finding(f.id, "MOB-DYN-004", level=2)
+                        except Exception:
+                            pass
 
                 logger.info("  Frida script %s: done", script)
 
@@ -1536,12 +1825,26 @@ class MobilePipeline:
             "  Dynamic analysis: %d scripts executed", len(ctx.frida_scripts_used),
         )
 
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 13: Dynamic Analysis — Frida Runtime Hooks",
+                findings_count=len(ctx.frida_scripts_used),
+            )
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 14: Root/Jailbreak Bypass
     # ══════════════════════════════════════════════════════════
 
     async def _phase14_root_bypass(self, ctx: MobileScanContext) -> None:
         """루트/탈옥 탐지 우회 테스트."""
+        try:
+            for vid in ["MOB-DYN-001", "MOB-DYN-002"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         # 정적으로 루트 탐지 코드 패턴 확인
         if ctx.app_binary_path:
             ctx.root_detection_detected = self._detect_root_check_static(ctx)
@@ -1577,6 +1880,10 @@ class MobilePipeline:
                             )
                             ctx.add_owasp_finding("M8", f.id)
                             ctx.frida_scripts_used.append(script)
+                            try:
+                                ctx.score_tracker.record_finding(f.id, "MOB-DYN-001", level=2)
+                            except Exception:
+                                pass
                             break
                     except Exception:
                         continue
@@ -1606,6 +1913,13 @@ class MobilePipeline:
 
         # ── 에뮬레이터 탐지 우회 ──
         await self._test_emulator_detection_bypass(ctx)
+
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 14: Root/Jailbreak Bypass",
+            )
+        except Exception:
+            pass
 
     def _detect_root_check_static(self, ctx: MobileScanContext) -> bool:
         """정적 분석으로 루트/탈옥 탐지 코드 패턴 확인."""
@@ -1651,6 +1965,11 @@ class MobilePipeline:
 
     async def _phase15_tampering(self, ctx: MobileScanContext) -> None:
         """무결성 검사 우회, 코드 서명 검증 테스트."""
+        try:
+            ctx.score_tracker.record_vector_attempt("MOB-DYN-003")
+        except Exception:
+            pass
+
         has_tampering = False
 
         # 정적: 무결성 검사 코드 패턴
@@ -1716,6 +2035,10 @@ class MobilePipeline:
                         )
                         ctx.add_owasp_finding("M7", f.id)
                         ctx.frida_scripts_used.append(script)
+                        try:
+                            ctx.score_tracker.record_finding(f.id, "MOB-DYN-003", level=2)
+                        except Exception:
+                            pass
                         break
                 except Exception:
                     continue
@@ -1741,12 +2064,25 @@ class MobilePipeline:
 
         logger.info("  Anti-tampering check: %s", "detected" if has_tampering else "not found")
 
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 15: Anti-Tampering — Integrity Check Bypass",
+            )
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 16: Business Logic
     # ══════════════════════════════════════════════════════════
 
     async def _phase16_business(self, ctx: MobileScanContext) -> None:
         """인앱 구매 우회, 구독 검증, 기능 플래그 조작."""
+        try:
+            for vid in ["MOB-BIZ-001", "MOB-BIZ-002", "MOB-BIZ-003", "MOB-BIZ-004", "MOB-BIZ-005"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         iap_scripts = []
         if ctx.is_android:
             iap_scripts = ["iap_bypass_android", "play_billing_bypass", "feature_flag_dump_android"]
@@ -1787,6 +2123,10 @@ class MobilePipeline:
                         )
                         ctx.add_owasp_finding("M8", f.id)
                         ctx.frida_scripts_used.append(script)
+                        try:
+                            ctx.score_tracker.record_finding(f.id, "MOB-BIZ-001", level=3)
+                        except Exception:
+                            pass
                         break
                 except Exception:
                     continue
@@ -1815,14 +2155,35 @@ class MobilePipeline:
         # ── 오프라인 모드 남용 테스트 ──
         await self._test_offline_mode_abuse(ctx)
 
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 16: Business Logic — IAP & Feature Flag Bypass",
+                findings_count=len(ctx.business_logic_findings),
+            )
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 17: Deep Link Hijacking
     # ══════════════════════════════════════════════════════════
 
     async def _phase17_deeplink(self, ctx: MobileScanContext) -> None:
         """URL 스킴 하이재킹, Universal/App Links 보안 검토."""
+        try:
+            for vid in ["MOB-BIZ-003", "MOB-PLAT-006"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if not ctx.url_schemes and not ctx.target.startswith("http"):
             logger.info("  No URL schemes to test")
+            try:
+                ctx.score_tracker.record_phase_skipped(
+                    "Phase 17: Deep Link Hijacking — URL Scheme Security",
+                    "No URL schemes registered and no HTTP target",
+                )
+            except Exception:
+                pass
             return
 
         api_base = ctx.target if ctx.target.startswith("http") else f"https://{ctx.target}"
@@ -1917,16 +2278,38 @@ class MobilePipeline:
 
         logger.info("  Deep link analysis: %d URL schemes", len(ctx.url_schemes))
 
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 17: Deep Link Hijacking — URL Scheme Security",
+                findings_count=len(ctx.url_schemes),
+            )
+        except Exception:
+            pass
+
     # ══════════════════════════════════════════════════════════
     # Phase 18: IPC Security
     # ══════════════════════════════════════════════════════════
 
     async def _phase18_ipc(self, ctx: MobileScanContext) -> None:
         """인텐트 인젝션(Android), 페이스트보드(iOS), 앱 확장 보안."""
+        try:
+            for vid in ["MOB-PLAT-001", "MOB-PLAT-002", "MOB-PLAT-003", "MOB-PLAT-004", "MOB-PLAT-005"]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         if ctx.is_android:
             await self._test_android_ipc(ctx)
         else:
             await self._test_ios_ipc(ctx)
+
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 18: IPC Security — Intent/Pasteboard/Extension",
+                findings_count=len(ctx.ipc_findings),
+            )
+        except Exception:
+            pass
 
     async def _test_android_ipc(self, ctx: MobileScanContext) -> None:
         """Android IPC — 인텐트 인젝션, Content Provider SQL 인젝션."""
@@ -1980,6 +2363,10 @@ class MobilePipeline:
                         cwe_ids=["CWE-926"],
                     )
                     ctx.add_owasp_finding("M4", f.id)
+                    try:
+                        ctx.score_tracker.record_finding(f.id, "MOB-PLAT-001", level=2)
+                    except Exception:
+                        pass
             except Exception:
                 continue
 
@@ -3620,3 +4007,11 @@ class MobilePipeline:
                 "    %s %s: %d finding(s)",
                 owasp_id, _OWASP_MOBILE.get(owasp_id, ""), len(finding_ids),
             )
+
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 19: Report — NCC Style + OWASP Mobile Top 10",
+                findings_count=len(ctx.findings),
+            )
+        except Exception:
+            pass
