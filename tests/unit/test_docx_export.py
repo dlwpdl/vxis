@@ -12,12 +12,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from docx import Document
 
-from vxis.models.finding import Evidence, Finding, Reference, Severity
-from vxis.report.attestation import AttestationGenerator
-from vxis.report.docx_export import DOCXReportGenerator
-from vxis.report.generator import ReportData
+pytest.importorskip("docx", reason="python-docx not installed (optional 'export' extra)")
+
+from docx import Document  # noqa: E402
+
+from vxis.models.finding import Evidence, Finding, Reference, Severity  # noqa: E402
+from vxis.report.attestation import AttestationGenerator  # noqa: E402
+from vxis.report.docx_export import DOCXReportGenerator  # noqa: E402
+from vxis.report.generator import ReportData  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

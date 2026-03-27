@@ -11,12 +11,15 @@ from datetime import datetime, timezone
 from typing import Generator
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncEngine
 
-from vxis.core.db import create_engine, get_session, init_db
-from vxis.dashboard.app import app
-from vxis.models.db_models import FindingRecord, ScanRecord
+pytest.importorskip("fastapi", reason="fastapi not installed (optional 'dashboard' extra)")
+
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncEngine  # noqa: E402
+
+from vxis.core.db import create_engine, get_session, init_db  # noqa: E402
+from vxis.dashboard.app import app  # noqa: E402
+from vxis.models.db_models import FindingRecord, ScanRecord  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
