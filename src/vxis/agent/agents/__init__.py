@@ -57,6 +57,11 @@ from . import (
     third_party_webhook_agent,
     backup_dr_agent,
     game_realtime_agent,
+    # Game Security — Specialized Agents
+    game_recon,
+    game_economy,
+    game_protocol,
+    game_memory,
     # Layer 8+ — Human / Signal / Time
     phishing_intel_agent,
     ss7_cellular_agent,
