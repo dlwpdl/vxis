@@ -1,0 +1,193 @@
+[
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] Show HN: Vanilla JavaScript refinery simulator built to explain job to my kids",
+    "url": "https://fuelingcuriosity.com/game.html",
+    "description": "",
+    "relevance_tags": [],
+    "score": 127.0,
+    "timestamp": "2026-03-11T16:56:51Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 127,
+      "comments": 55
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] Launch HN: Spine Swarm (YC S23) – AI agents that collaborate on a visual canvas",
+    "url": "https://www.getspine.ai/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 109.0,
+    "timestamp": "2026-03-13T13:22:40Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 109,
+      "comments": 69
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-33634 — Aquasecurity Trivy",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-33634",
+    "description": "Aquasecurity Trivy contains an embedded malicious code vulnerability that could allow an attacker to gain access to everything in the CI/CD environment, including all tokens, SSH keys, cloud credentials, database passwords, and any sensitive configuration in memory.",
+    "relevance_tags": [
+      "cve-2026-33634",
+      "aquasecurity",
+      "trivy",
+      "aquasecurity trivy embedded malicious code vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-03-26",
+    "metadata": {
+      "cve_id": "CVE-2026-33634",
+      "vendor": "Aquasecurity",
+      "product": "Trivy",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-09",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-33017 — Langflow Langflow",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-33017",
+    "description": "Langflow contains a code injection vulnerability that could allow building public flows without requiring authentication.",
+    "relevance_tags": [
+      "cve-2026-33017",
+      "langflow",
+      "langflow",
+      "langflow code injection vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-03-25",
+    "metadata": {
+      "cve_id": "CVE-2026-33017",
+      "vendor": "Langflow",
+      "product": "Langflow",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-08",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2025-32432 — Craft CMS Craft CMS",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-32432",
+    "description": "Craft CMS contains a code injection vulnerability that allows a remote attacker to execute arbitrary code.",
+    "relevance_tags": [
+      "cve-2025-32432",
+      "craft cms",
+      "craft cms",
+      "craft cms code injection vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-03-20",
+    "metadata": {
+      "cve_id": "CVE-2025-32432",
+      "vendor": "Craft CMS",
+      "product": "Craft CMS",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2025-54068 — Laravel Livewire",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-54068",
+    "description": "Laravel Livewire contain a code injection vulnerability that could allow unauthenticated attackers to achieve remote command execution in specific scenarios.",
+    "relevance_tags": [
+      "cve-2025-54068",
+      "laravel",
+      "livewire",
+      "laravel livewire code injection vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-03-20",
+    "metadata": {
+      "cve_id": "CVE-2025-54068",
+      "vendor": "Laravel",
+      "product": "Livewire",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2025-43510 — Apple Multiple Products",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-43510",
+    "description": "Apple watchOS, iOS, iPadOS, macOS, visionOS, and tvOS contain an improper locking vulnerability that could allow a malicious application to cause unexpected changes in memory shared between processes.",
+    "relevance_tags": [
+      "cve-2025-43510",
+      "apple",
+      "multiple products",
+      "apple multiple products improper locking vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-03-20",
+    "metadata": {
+      "cve_id": "CVE-2025-43510",
+      "vendor": "Apple",
+      "product": "Multiple Products",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2025-43520 — Apple Multiple Products",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-43520",
+    "description": "Apple watchOS, iOS, iPadOS, macOS, visionOS, and tvOS contain a classic buffer overflow vulnerability which could allow a malicious application to cause unexpected system termination or write kernel memory.",
+    "relevance_tags": [
+      "cve-2025-43520",
+      "apple",
+      "multiple products",
+      "apple multiple products classic buffer overflow vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-03-20",
+    "metadata": {
+      "cve_id": "CVE-2025-43520",
+      "vendor": "Apple",
+      "product": "Multiple Products",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2025-31277 — Apple Multiple Products",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-31277",
+    "description": "Apple Safari, iOS, watchOS, visionOS, iPadOS, macOS, and tvOS contain a buffer overflow vulnerability that could allow the processing of maliciously crafted web content which may lead to memory corruption.",
+    "relevance_tags": [
+      "cve-2025-31277",
+      "apple",
+      "multiple products",
+      "apple multiple products buffer overflow vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-03-20",
+    "metadata": {
+      "cve_id": "CVE-2025-31277",
+      "vendor": "Apple",
+      "product": "Multiple Products",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-03",
+      "known_ransomware": "Unknown"
+    }
+  }
+]
