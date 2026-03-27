@@ -7,15 +7,15 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .notify import send_telegram_report
+from .signals import Signal, collect_all
+from .synthesizer import format_report_markdown, synthesize
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     datefmt="%H:%M:%S",
 )
-
-from .signals import collect_all, Signal
-from .synthesizer import synthesize, format_report_markdown
-
 logger = logging.getLogger(__name__)
 
 _DIGEST_DIR = Path(__file__).parent / "digests"
@@ -128,7 +128,13 @@ def main() -> int:
     digest_path = _save_digest(md, f"domain-intel-{date_str}.md")
     print(f"[REPORT] 주간 리포트 → {digest_path}")
 
-    # ── 4. 요약 출력 ──
+    # ── 4. 텔레그램 전송 ──
+    if send_telegram_report(report):
+        print("[TELEGRAM] Domain Intelligence 리포트 전송 완료")
+    else:
+        print("[TELEGRAM] 전송 실패 또는 미설정 (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)")
+
+    # ── 5. 요약 출력 ──
     print(f"\n{'='*60}")
     print(f"  Domain Intelligence Report — {date_str}")
     print(f"{'='*60}")
@@ -138,7 +144,7 @@ def main() -> int:
     print(f"  트렌드: {len(report.trends)}개")
 
     if report.trends:
-        print(f"\n  주요 트렌드:")
+        print("\n  주요 트렌드:")
         for i, t in enumerate(report.trends, 1):
             icon = {"critical": "🚨", "high": "🔶", "medium": "💡", "low": "📌"}.get(t.priority, "")
             print(f"    {icon} {i}. {t.title}")
@@ -154,11 +160,11 @@ def _print_signal_summary(signals: list[Signal]) -> None:
     for s in signals:
         by_source[s.source] = by_source.get(s.source, 0) + 1
 
-    print(f"\n  소스별 시그널:")
+    print("\n  소스별 시그널:")
     for src, cnt in sorted(by_source.items()):
         print(f"    {src}: {cnt}개")
 
-    print(f"\n  Top 10 시그널 (중요도순):")
+    print("\n  Top 10 시그널 (중요도순):")
     for s in signals[:10]:
         print(f"    [{s.source}] {s.title} (score: {s.score})")
 

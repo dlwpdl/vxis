@@ -23,7 +23,8 @@ try:
     from tools.upstream_watch.llm import chat as llm_chat, is_available as llm_is_available
 except ImportError:
     # 폴백: 직접 경로로 시도
-    import importlib.util, os
+    import importlib.util
+    import os
     _llm_path = os.path.join(os.path.dirname(__file__), "..", "upstream_watch", "llm.py")
     _spec = importlib.util.spec_from_file_location("upstream_watch_llm", _llm_path)
     _mod = importlib.util.module_from_spec(_spec)
@@ -218,7 +219,7 @@ def _parse_trends(raw_text: str) -> list[TrendItem]:
 def format_report_markdown(report: WeeklyReport) -> str:
     """주간 리포트를 마크다운으로 포맷."""
     lines = [
-        f"# VXIS Domain Intelligence — Weekly Report",
+        "# VXIS Domain Intelligence — Weekly Report",
         f"**Generated:** {report.generated_at}",
         f"**Total Signals:** {report.total_signals}",
         "",
@@ -267,6 +268,6 @@ def format_report_markdown(report: WeeklyReport) -> str:
                     f"(소요: {opt.get('effort', '?')}, 위험: {risk_icon})"
                 )
 
-            lines.extend([f"", f"**추천:** {trend.recommendation}", ""])
+            lines.extend(["", f"**추천:** {trend.recommendation}", ""])
 
     return "\n".join(lines)
