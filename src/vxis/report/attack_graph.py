@@ -57,6 +57,10 @@ class AttackNode:
     finding_id: str = ""
     description: str = ""
     depth_level: int = 0  # 0=recon, 1=vuln, 2=exploit, 3=post, 4=crown
+    # 벡터 정보 — 리포트에서 "뭘 막아야 하는지" 바로 인지
+    vector: str = ""          # "SQLi", "XSS", "SSRF", "Weak TLS" 등
+    target_component: str = ""  # "/api/search", "Port 22", "JWT Token" 등
+    remediation: str = ""     # "입력 검증 필수", "WAF 규칙 추가" 등
 
 
 @dataclass
@@ -293,15 +297,23 @@ def _compute_height(positions: dict[str, tuple[float, float]]) -> int:
 
 
 def _render_node(node: AttackNode, x: float, y: float, lang: str) -> str:
-    """단일 노드를 SVG로 렌더링."""
+    """단일 노드를 SVG로 렌더링 — 벡터 중심 표현.
+
+    리포트를 받는 사람이 즉시 인지할 수 있도록:
+    - 상단: 벡터 타입 (SQLi, XSS, SSRF 등)
+    - 중앙: 아이콘 + severity 색상
+    - 하단: 타겟 컴포넌트 (/api/search, Port 22 등)
+    """
     fill = _NODE_COLOURS.get(node.node_type, "#34495e")
     border = _SEVERITY_BORDER.get(node.severity, "#555")
     label = node.label_ko if lang == "ko" and node.label_ko else node.label
-
-    # 아이콘
     icon = _node_icon(node.node_type)
 
-    # Crown Jewel은 특별 처리 (별 모양 + 글로우)
+    # 벡터 정보가 있으면 벡터 중심, 없으면 기존 라벨 사용
+    vector_text = node.vector or ""
+    component_text = node.target_component or ""
+
+    # Crown Jewel 글로우
     glow = ""
     if node.node_type == "crown_jewel":
         glow = (
@@ -312,22 +324,64 @@ def _render_node(node: AttackNode, x: float, y: float, lang: str) -> str:
             f'</circle>'
         )
 
-    # 노드 본체
     r = 30 if node.node_type == "crown_jewel" else 25
-    truncated = label[:18] + "..." if len(label) > 18 else label
 
-    return (
-        f'{glow}'
+    parts = [glow]
+
+    # 노드 원
+    parts.append(
         f'<circle cx="{x}" cy="{y}" r="{r}" fill="{fill}" '
         f'stroke="{border}" stroke-width="2.5"/>'
-        f'<text x="{x}" y="{y - 2}" text-anchor="middle" '
-        f'fill="white" font-size="18">{icon}</text>'
-        f'<text x="{x}" y="{y + r + 15}" text-anchor="middle" '
-        f'fill="#ecf0f1" font-size="10" font-weight="500">'
-        f'{_svg_escape(truncated)}</text>'
-        f'<text x="{x}" y="{y + r + 27}" text-anchor="middle" '
-        f'fill="#6c757d" font-size="8">L{node.depth_level}</text>'
     )
+    # 아이콘
+    parts.append(
+        f'<text x="{x}" y="{y + 5}" text-anchor="middle" '
+        f'fill="white" font-size="18">{icon}</text>'
+    )
+
+    # 벡터 타입 (상단 — 가장 중요한 정보)
+    if vector_text:
+        truncated_vec = vector_text[:22] + "…" if len(vector_text) > 22 else vector_text
+        parts.append(
+            f'<text x="{x}" y="{y - r - 8}" text-anchor="middle" '
+            f'fill="{border}" font-size="11" font-weight="bold">'
+            f'{_svg_escape(truncated_vec)}</text>'
+        )
+        # Severity 뱃지
+        sev_color = _SEVERITY_BORDER.get(node.severity, "#888")
+        sev_text = node.severity.upper()[:4]
+        parts.append(
+            f'<rect x="{x - 18}" y="{y - r - 22}" width="36" height="12" rx="3" '
+            f'fill="{sev_color}" opacity="0.9"/>'
+            f'<text x="{x}" y="{y - r - 13}" text-anchor="middle" '
+            f'fill="white" font-size="7" font-weight="bold">{sev_text}</text>'
+        )
+    else:
+        # 벡터 없으면 기존 라벨
+        truncated = label[:20] + "…" if len(label) > 20 else label
+        parts.append(
+            f'<text x="{x}" y="{y - r - 5}" text-anchor="middle" '
+            f'fill="#ecf0f1" font-size="10" font-weight="500">'
+            f'{_svg_escape(truncated)}</text>'
+        )
+
+    # 타겟 컴포넌트 (하단 — 어디를 막아야 하는지)
+    if component_text:
+        truncated_comp = component_text[:25] + "…" if len(component_text) > 25 else component_text
+        parts.append(
+            f'<text x="{x}" y="{y + r + 14}" text-anchor="middle" '
+            f'fill="#adb5bd" font-size="9" font-family="monospace">'
+            f'{_svg_escape(truncated_comp)}</text>'
+        )
+
+    # Finding ID (최하단)
+    if node.finding_id:
+        parts.append(
+            f'<text x="{x}" y="{y + r + 26}" text-anchor="middle" '
+            f'fill="#6c757d" font-size="7">{_svg_escape(node.finding_id)}</text>'
+        )
+
+    return "\n".join(parts)
 
 
 def _node_icon(node_type: str) -> str:
@@ -425,31 +479,100 @@ def _svg_escape(text: str) -> str:
 # ── Finding → AttackGraph 변환 ───────────────────────────────────
 
 
+def _extract_vector_info(finding: object) -> tuple[str, str, str]:
+    """Finding에서 벡터, 타겟 컴포넌트, 대응 방안 추출.
+
+    Finding 객체의 다양한 속성에서 최대한 정보를 추출:
+    - category/tags → 벡터 타입 (SQLi, XSS 등)
+    - target/component → 타겟 엔드포인트
+    - remediation → 대응 방안
+    """
+    vector = ""
+    component = ""
+    remediation = ""
+
+    # 벡터 타입 추출
+    category = getattr(finding, "category", "")
+    tags = getattr(finding, "tags", [])
+    title = getattr(finding, "title", "")
+
+    # category에서 추출
+    if category:
+        vector = str(category)
+
+    # tags에서 보안 벡터 추출
+    _vector_keywords = {
+        "sqli": "SQL Injection", "xss": "XSS", "ssrf": "SSRF",
+        "csrf": "CSRF", "xxe": "XXE", "rce": "RCE", "lfi": "LFI",
+        "idor": "IDOR", "auth-bypass": "Auth Bypass", "jwt": "JWT",
+        "deserialization": "Deserialization", "upload": "File Upload",
+        "injection": "Injection", "brute-force": "Brute Force",
+        "open-redirect": "Open Redirect", "cors": "CORS",
+        "ssl": "Weak TLS/SSL", "tls": "Weak TLS/SSL",
+        "default-cred": "Default Credentials", "info-disclosure": "Info Disclosure",
+        "directory-listing": "Directory Listing", "prototype-pollution": "Prototype Pollution",
+    }
+    if isinstance(tags, (list, tuple)):
+        for tag in tags:
+            tag_lower = str(tag).lower()
+            for kw, vec_name in _vector_keywords.items():
+                if kw in tag_lower:
+                    vector = vec_name
+                    break
+            if vector:
+                break
+
+    # title에서 벡터 추출 (tags에서 못 찾았을 때)
+    if not vector and title:
+        title_lower = title.lower()
+        for kw, vec_name in _vector_keywords.items():
+            if kw in title_lower:
+                vector = vec_name
+                break
+
+    # 타겟 컴포넌트
+    component = getattr(finding, "target", "") or getattr(finding, "component", "") or ""
+    if not component:
+        # URL에서 추출 시도
+        evidence = getattr(finding, "evidence", "")
+        if isinstance(evidence, str) and "/" in evidence:
+            import re as _re
+            url_match = _re.search(r"(https?://[^\s]+|/[a-zA-Z0-9_/\-\.?=&]+)", evidence)
+            if url_match:
+                component = url_match.group(1)[:50]
+
+    # 대응 방안
+    remediation = getattr(finding, "remediation", "") or ""
+
+    return vector, str(component), str(remediation)
+
+
 def build_attack_graph_from_findings(
     findings: list,
     chains: list[list[str]] | None = None,
 ) -> AttackGraphData:
     """Finding 리스트와 체인 정보로 AttackGraphData를 생성.
 
+    벡터 중심 시각화:
+    - 각 노드에 공격 벡터 (SQLi, XSS 등) + 타겟 컴포넌트 (/api/search 등) 표시
+    - 리포트 받는 사람이 "뭘 막아야 하는지" 즉시 인지 가능
+
     Args:
         findings: Finding 객체 리스트.
         chains: 공격 체인 (finding_id 리스트의 리스트).
-                예: [["VXIS-001", "VXIS-003", "VXIS-007"]]
-
-    Returns:
-        렌더링 가능한 AttackGraphData.
     """
     graph = AttackGraphData()
     finding_map: dict[str, object] = {f.id: f for f in findings if hasattr(f, "id")}
 
     if not chains:
-        # 체인이 없으면 개별 Finding을 독립 노드로
+        # 체인이 없으면 개별 Finding을 독립 노드로 (severity별 깊이)
         path = AttackPath(name="Individual Findings", name_ko="개별 발견")
         for f in findings:
             if not hasattr(f, "id"):
                 continue
             severity = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             depth = _severity_to_depth(severity)
+            vector, component, remediation = _extract_vector_info(f)
             node = AttackNode(
                 id=f.id,
                 label=_split_bilingual(getattr(f, "title", f.id), "en"),
@@ -458,6 +581,9 @@ def build_attack_graph_from_findings(
                 severity=severity,
                 finding_id=f.id,
                 depth_level=depth,
+                vector=vector,
+                target_component=component,
+                remediation=remediation,
             )
             path.nodes.append(node)
             path.max_depth = max(path.max_depth, depth)
@@ -478,6 +604,7 @@ def build_attack_graph_from_findings(
                 continue
 
             severity = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+            vector, component, remediation = _extract_vector_info(f)
 
             # 첫 노드는 entry, 마지막은 depth 기반
             if step_idx == 0:
@@ -498,16 +625,22 @@ def build_attack_graph_from_findings(
                 severity=severity,
                 finding_id=fid,
                 depth_level=depth,
+                vector=vector,
+                target_component=component,
+                remediation=remediation,
             )
             path.nodes.append(node)
             path.max_depth = max(path.max_depth, depth)
 
+            # 엣지 라벨도 벡터 정보로
             if prev_id:
+                edge_label = vector or "chain"
                 edge = AttackEdge(
                     source=prev_id,
                     target=node.id,
-                    label="chain",
+                    label=edge_label,
                     edge_type="success",
+                    technique=vector,
                 )
                 path.edges.append(edge)
 
