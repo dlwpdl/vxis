@@ -259,7 +259,7 @@ class CVEWatchDaemon:
             status_line = f"\U0001f4a5 <b>상태:</b> <b>익스플로잇 성공</b> (방법: {exploit_result.method})"
         else:
             header = "\u26a0\ufe0f <b>[경고] 잠재적 취약점 감지</b>"
-            status_line = f"\U0001f50d <b>상태:</b> 취약 가능성 있음 (미검증)"
+            status_line = "\U0001f50d <b>상태:</b> 취약 가능성 있음 (미검증)"
 
         cvss_display = f"{cve.cvss_score:.1f}" if cve.cvss_score else "N/A"
         severity_upper = cve.severity.upper()
@@ -315,29 +315,39 @@ class CVEWatchDaemon:
     def _send_summary_alert(
         self, run_stats: dict, matched_count: int, exploitable_count: int
     ) -> None:
-        """폴링 주기 완료 후 요약 알림 (새로운 매칭이 있을 때만)."""
+        """폴링 주기 완료 후 요약 알림 (항상 전송 — 시스템 생존 확인용)."""
         if not self._telegram_token or not self._telegram_chat_id:
             return
-        if matched_count == 0:
-            return  # 매칭 없으면 알림 없음
 
         now = datetime.now(timezone.utc)
         kst_hour = (now.hour + 9) % 24
         time_str = f"{now.strftime('%Y-%m-%d')} {kst_hour:02d}:{now.strftime('%M')} KST"
 
-        lines = [
-            "\U0001f4ca <b>CVE 감시 요약</b>",
-            f"\U0001f4c5 {time_str}",
-            "",
-            f"  \u2022 수집된 CVE: {run_stats.get('fetched', 0)}개",
-            f"  \u2022 새로운 매칭: {matched_count}개",
-        ]
-        if exploitable_count > 0:
-            lines.append(
-                f"  \u2022 \U0001f6a8 익스플로잇 성공: {exploitable_count}개"
-            )
+        fetched = run_stats.get("fetched", 0)
+
+        if matched_count == 0:
+            lines = [
+                "\U0001f6e1 <b>CVE Watch \u2014 \uc624\ub298\uc758 \uac10\uc2dc \uacb0\uacfc</b>",
+                f"\U0001f4c5 {time_str}",
+                "",
+                f"\u2705 \uc218\uc9d1\ub41c CVE: {fetched}\uac1c | \ub9e4\uce6d: 0\uac1c | \uc704\ud5d8: 0\uac1c",
+                "",
+                "\ud2b9\uc774\uc0ac\ud56d \uc5c6\uc74c \u2014 \ub2e4\uc74c \uc8fc\uae30\uc5d0 \ub2e4\uc2dc \uac10\uc2dc\ud569\ub2c8\ub2e4.",
+            ]
         else:
-            lines.append("  \u2022 익스플로잇 성공: 0개")
+            lines = [
+                "\U0001f4ca <b>CVE Watch \u2014 \uc624\ub298\uc758 \uac10\uc2dc \uacb0\uacfc</b>",
+                f"\U0001f4c5 {time_str}",
+                "",
+                f"  \u2022 \uc218\uc9d1\ub41c CVE: {fetched}\uac1c",
+                f"  \u2022 \uc0c8\ub85c\uc6b4 \ub9e4\uce6d: {matched_count}\uac1c",
+            ]
+            if exploitable_count > 0:
+                lines.append(
+                    f"  \u2022 \U0001f6a8 \uc775\uc2a4\ud50c\ub85c\uc787 \uc131\uacf5: {exploitable_count}\uac1c"
+                )
+            else:
+                lines.append("  \u2022 \uc775\uc2a4\ud50c\ub85c\uc787 \uc131\uacf5: 0\uac1c")
 
         message = "\n".join(lines)
         _send_telegram_message(self._telegram_token, self._telegram_chat_id, message)
