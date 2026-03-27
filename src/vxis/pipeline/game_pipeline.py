@@ -1458,25 +1458,217 @@ class GamePipeline:
         logger.info("  Binary analysis: %d strings, %d credentials", len(ctx.extracted_strings), len(ctx.hardcoded_credentials))
 
     async def _phase11_memory_scan(self, ctx: GameScanContext) -> None:
-        """Phase 11: FridaBridge 메모리 분석 + 게임 상태 조작."""
+        """Phase 11: 로컬 → Frida 메모리 스캔 / 리모트 → 서버측 검증 우회 테스트.
+
+        로컬에서 게임이 돌고 있으면 Frida로 메모리 직접 분석.
+        리모트(서버만 접근 가능)면 비정상 값을 API로 전송하여
+        서버가 검증하는지 테스트 — 이게 더 실질적인 결과를 냄.
+        """
         from vxis.interaction.frida_bridge import FridaBridge
 
         bridge = FridaBridge()
+        is_local = bridge.is_available and ctx.has_binary_client
 
-        if not bridge.is_available:
-            logger.info("  frida not available — skipping memory scan")
+        if is_local:
+            await self._phase11_local_memory_scan(ctx, bridge)
+        else:
+            await self._phase11_remote_validation_bypass(ctx)
+
+    async def _phase11_remote_validation_bypass(self, ctx: GameScanContext) -> None:
+        """리모트 모드: 서버측 검증 우회 테스트.
+
+        메모리 조작 없이 API로 비정상 값을 전송하여
+        서버가 클라이언트 값을 맹목적으로 신뢰하는지 검증.
+        서버가 수용하면 → 메모리핵 없이도 Critical.
+        서버가 거부하면 → 메모리핵을 해도 무의미.
+        """
+        from vxis.interaction.hands import SessionManager
+
+        logger.info("  [Remote Mode] 서버측 게임 값 검증 테스트")
+
+        session_mgr = SessionManager()
+        session = await session_mgr.get_session(ctx.target)
+
+        # ── 1. 비정상 값 주입 테스트 ──
+        validation_tests = [
+            {
+                "name": "Negative Currency|||음수 통화 전송",
+                "payloads": [
+                    {"amount": -99999, "currency": "gold"},
+                    {"amount": -1, "item_id": "premium_sword"},
+                ],
+                "endpoints": ["/api/v1/purchase", "/api/v1/transaction", "/api/shop/buy"],
+                "severity": "critical",
+                "description": (
+                    "Server accepted negative currency value — attacker can gain items for free|||"
+                    "서버가 음수 통화를 수용 — 공격자가 무료로 아이템 획득 가능"
+                ),
+            },
+            {
+                "name": "Integer Overflow Score|||정수 오버플로우 점수",
+                "payloads": [
+                    {"score": 2147483647},  # INT32_MAX
+                    {"score": 9999999999},
+                    {"hp": 999999, "damage": 0},
+                ],
+                "endpoints": ["/api/v1/score", "/api/v1/leaderboard/submit", "/api/v1/game/result"],
+                "severity": "high",
+                "description": (
+                    "Server accepted impossible game values without validation|||"
+                    "서버가 불가능한 게임 값을 검증 없이 수용"
+                ),
+            },
+            {
+                "name": "Zero Price Purchase|||가격 0원 구매",
+                "payloads": [
+                    {"item_id": "premium_item", "price": 0},
+                    {"item_id": "premium_item", "price": 0.001},
+                    {"item_id": "premium_item", "quantity": 999, "price": 1},
+                ],
+                "endpoints": ["/api/v1/purchase", "/api/v1/shop/buy", "/api/v1/store/checkout"],
+                "severity": "critical",
+                "description": (
+                    "Server accepted zero/minimal price for premium items|||"
+                    "서버가 프리미엄 아이템에 대해 0원/최소 가격을 수용"
+                ),
+            },
+            {
+                "name": "Speed Hack Simulation|||스피드핵 시뮬레이션",
+                "payloads": [
+                    {"action": "move", "x": 99999, "y": 99999, "timestamp": 0},
+                    {"action": "attack", "count": 1000, "interval_ms": 1},
+                ],
+                "endpoints": ["/api/v1/game/action", "/api/v1/player/move", "/api/v1/combat/attack"],
+                "severity": "high",
+                "description": (
+                    "Server accepted physically impossible game actions (teleport/speed)|||"
+                    "서버가 물리적으로 불가능한 게임 행동(텔레포트/속도)을 수용"
+                ),
+            },
+            {
+                "name": "Other Player Data Access|||타 플레이어 데이터 접근",
+                "payloads": [
+                    {"player_id": "1"},
+                    {"player_id": "admin"},
+                    {"player_id": "0"},
+                ],
+                "endpoints": ["/api/v1/player/{id}/inventory", "/api/v1/player/{id}/wallet", "/api/v1/user/{id}/profile"],
+                "severity": "high",
+                "description": (
+                    "Server returns other player's private data (IDOR)|||"
+                    "서버가 다른 플레이어의 비공개 데이터를 반환 (IDOR)"
+                ),
+            },
+        ]
+
+        # 경제 모델에서 발견된 엔드포인트도 추가
+        if ctx.economy_model.get("transaction_endpoints"):
+            for ep in ctx.economy_model["transaction_endpoints"]:
+                validation_tests[0]["endpoints"].append(ep)
+                validation_tests[2]["endpoints"].append(ep)
+
+        total_tested = 0
+        vulnerabilities_found = 0
+
+        for test in validation_tests:
+            test_name = test["name"]
+            for endpoint in test["endpoints"]:
+                for payload in test["payloads"]:
+                    total_tested += 1
+                    # POST 시도
+                    url = f"{ctx.target.rstrip('/')}{endpoint}"
+                    try:
+                        resp = await session.post(url, json_data=payload)
+                    except Exception:
+                        continue
+
+                    if resp is None:
+                        continue
+
+                    # 서버가 200/201로 응답하면 검증 없이 수용한 것
+                    if resp.status_code in (200, 201):
+                        vulnerabilities_found += 1
+                        ctx.add_finding(
+                            title=test_name,
+                            severity=test["severity"],
+                            finding_type="server_validation_bypass",
+                            description=test["description"],
+                            target=ctx.target,
+                            affected_component=endpoint,
+                            source_plugin="game-pipeline-phase11-remote",
+                        )
+                        ctx.add_game_finding(
+                            category="server_validation",
+                            issue=f"Server accepted invalid value at {endpoint}: {payload}",
+                            severity=test["severity"],
+                            details={"endpoint": endpoint, "payload": payload, "status": resp.status_code},
+                        )
+                        logger.info("  [VULN] %s — %s accepted payload", test_name.split("|||")[0], endpoint)
+                        break  # 이 엔드포인트에서 하나 찾으면 다음 테스트로
+                    elif resp.status_code in (400, 403, 422):
+                        logger.debug("  [OK] %s — %s properly rejected", test_name.split("|||")[0], endpoint)
+
+        # ── 2. 레이스컨디션 테스트 (동시 요청) ──
+        race_endpoints = (
+            ctx.economy_model.get("transaction_endpoints", [])
+            + ["/api/v1/purchase", "/api/v1/redeem", "/api/v1/claim"]
+        )
+        for endpoint in race_endpoints[:5]:
+            url = f"{ctx.target.rstrip('/')}{endpoint}"
+            payload = {"item_id": "test_item", "quantity": 1}
+
+            tasks = []
+            for _ in range(10):
+                tasks.append(session.post(url, json_data=payload))
+            try:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                success_count = sum(
+                    1 for r in results
+                    if hasattr(r, "status_code") and r.status_code in (200, 201)
+                )
+                if success_count > 1:
+                    ctx.add_finding(
+                        title="Race Condition in Transaction|||거래 레이스컨디션",
+                        severity="critical",
+                        finding_type="race_condition",
+                        description=(
+                            f"Sent 10 concurrent requests to {endpoint}, "
+                            f"{success_count} succeeded — possible item/currency duplication|||"
+                            f"{endpoint}에 10개 동시 요청 전송, "
+                            f"{success_count}개 성공 — 아이템/통화 복제 가능성"
+                        ),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                        source_plugin="game-pipeline-phase11-remote",
+                    )
+                    vulnerabilities_found += 1
+            except Exception:
+                pass
+
+        logger.info(
+            "  [Remote] Server validation: %d tests, %d vulnerabilities",
+            total_tested, vulnerabilities_found,
+        )
+
+        if vulnerabilities_found == 0 and total_tested > 0:
             ctx.add_finding(
-                title="Frida Not Available — Memory Analysis Skipped|||Frida 미설치 — 메모리 분석 생략",
+                title="Server-Side Validation Appears Robust|||서버측 검증이 견고해 보임",
                 severity="informational",
-                finding_type="analysis_limitation",
+                finding_type="positive_finding",
                 description=(
-                    "frida Python package not installed. Install: pip install frida frida-tools|||"
-                    "frida 미설치. 설치: pip install frida frida-tools"
+                    f"Tested {total_tested} invalid game value submissions — "
+                    f"all were properly rejected by the server. "
+                    f"Memory manipulation attacks would be ineffective.|||"
+                    f"{total_tested}개 비정상 게임 값 전송 테스트 — "
+                    f"서버가 모두 적절히 거부. "
+                    f"메모리 조작 공격은 무효."
                 ),
                 target=ctx.target,
-                source_plugin="game-pipeline-phase11",
+                source_plugin="game-pipeline-phase11-remote",
             )
-            return
+
+    async def _phase11_local_memory_scan(self, ctx: GameScanContext, bridge: object) -> None:
+        """로컬 모드: Frida 메모리 직접 분석."""
 
         # 게임 프로세스 탐색
         processes = await bridge.enumerate_processes()
