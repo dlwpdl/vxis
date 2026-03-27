@@ -1,7 +1,7 @@
 """Domain Intelligence — Telegram 알림.
 
-주간 보안 트렌드 리포트를 Telegram으로 전송한다.
-기존 upstream_watch/notifier.py의 헬퍼를 재활용.
+보안 트렌드 리포트를 Telegram으로 전송한다.
+모드: daily, weekly, monthly, quarterly, yearly
 
 Env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 """
@@ -18,15 +18,31 @@ from .synthesizer import WeeklyReport
 
 logger = logging.getLogger(__name__)
 
+_PERIOD_EMOJI = {
+    "daily": "\U0001f4c6",    # 📆
+    "weekly": "\U0001f4c5",   # 📅
+    "monthly": "\U0001f5d3",  # 🗓
+    "quarterly": "\U0001f4ca",  # 📊
+    "yearly": "\U0001f3c6",   # 🏆
+}
 
-def send_telegram_report(report: WeeklyReport) -> bool:
+_PERIOD_KR = {
+    "daily": "일일",
+    "weekly": "주간",
+    "monthly": "월간",
+    "quarterly": "분기",
+    "yearly": "연간",
+}
+
+
+def send_telegram_report(report: WeeklyReport, period: str = "weekly") -> bool:
     """WeeklyReport를 Telegram HTML 메시지로 전송."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not token or not chat_id:
         return False
 
-    text = _format_telegram_message(report)
+    text = _format_telegram_message(report, period)
     chunks = _split_message(text, 4000)
 
     for chunk in chunks:
@@ -35,18 +51,58 @@ def send_telegram_report(report: WeeklyReport) -> bool:
     return True
 
 
+def send_telegram_rollup(
+    period: str,
+    period_kr: str,
+    date_str: str,
+    digest_count: int,
+    summary: str,
+) -> bool:
+    """롤업 리포트를 Telegram으로 전송 (월간/분기/연간)."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return False
+
+    emoji = _PERIOD_EMOJI.get(period, "\U0001f4ca")
+    now = datetime.now(timezone.utc)
+    kst_hour = (now.hour + 9) % 24
+    time_str = f"{date_str} {kst_hour:02d}:{now.strftime('%M')} KST"
+
+    lines: list[str] = [
+        f"{emoji} <b>VXIS Domain Intelligence \u2014 {_esc(period_kr)} \ub864\uc5c5</b>",
+        f"\U0001f4c5 {time_str}",
+        "",
+    ]
+
+    if digest_count == 0:
+        lines.append("\u2705 \ud574\ub2f9 \uae30\uac04 \uc218\uc9d1\ub41c \ub9ac\ud3ec\ud2b8\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.")
+        lines.append("\ub2e4\uc74c \uc8fc\uae30\uc5d0 \ub370\uc774\ud130\uac00 \uc30d\uc774\uba74 \uc885\ud569 \ubd84\uc11d\uc744 \uc81c\uacf5\ud569\ub2c8\ub2e4.")
+    else:
+        lines.append(f"\U0001f4d1 \ud3ec\ud568 \ub9ac\ud3ec\ud2b8: <b>{digest_count}\uac1c</b>")
+        lines.append("")
+        lines.append("<b>\uc8fc\uc694 \ud2b8\ub80c\ub4dc:</b>")
+        lines.append(_esc(summary))
+
+    text = "\n".join(lines)
+    return _send(token, chat_id, text)
+
+
 # ── 메시지 포맷 ──────────────────────────────────────────────────
 
 
-def _format_telegram_message(report: WeeklyReport) -> str:
+def _format_telegram_message(report: WeeklyReport, period: str = "weekly") -> str:
     now = datetime.now(timezone.utc)
     kst_hour = (now.hour + 9) % 24
     time_str = f"{now.strftime('%Y-%m-%d')} {kst_hour:02d}:{now.strftime('%M')} KST"
 
+    emoji = _PERIOD_EMOJI.get(period, "\U0001f30d")
+    period_kr = _PERIOD_KR.get(period, period)
+
     lines: list[str] = []
 
     # ── Header ──
-    lines.append("\U0001f30d <b>VXIS Domain Intelligence</b>")
+    lines.append(f"{emoji} <b>VXIS Domain Intelligence \u2014 {period_kr} \ub9ac\ud3ec\ud2b8</b>")
     lines.append(f"\U0001f4c5 {time_str}")
     lines.append(
         f"\U0001f4ca \uc2dc\uadf8\ub110 {report.total_signals}\uac1c | "
@@ -121,7 +177,7 @@ def _format_telegram_message(report: WeeklyReport) -> str:
                 lines.append(f"  \u2022 {p}: {by_priority[p]}\uac1c")
 
     else:
-        lines.append("\u2705 \uc774\ubc88 \uc8fc \ud2b9\ubcc4\ud55c \ud2b8\ub80c\ub4dc \uc5c6\uc74c")
+        lines.append(f"\u2705 {period_kr} \ud2b9\ubcc4\ud55c \ud2b8\ub80c\ub4dc \uc5c6\uc74c")
 
     return "\n".join(lines)
 

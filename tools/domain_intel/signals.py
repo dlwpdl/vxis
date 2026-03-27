@@ -19,6 +19,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -58,6 +59,51 @@ def _http_get(url: str, headers: dict | None = None, timeout: int = 30) -> dict 
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
         logger.warning("[DomainIntel] HTTP error %s: %s", url[:80], e)
         return None
+
+
+def _http_get_text(url: str, timeout: int = 30) -> str | None:
+    """HTTP GET — 순수 텍스트(XML/RSS 등) 반환."""
+    req = urllib.request.Request(url, headers={"User-Agent": _UA}, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.read().decode("utf-8")
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as e:
+        logger.warning("[DomainIntel] HTTP error %s: %s", url[:80], e)
+        return None
+
+
+def _parse_rss_signals(rss_text: str, source_name: str, max_items: int = 10) -> list[Signal]:
+    """RSS XML을 Signal 리스트로 파싱."""
+    signals: list[Signal] = []
+    try:
+        root = ET.fromstring(rss_text)
+    except ET.ParseError:
+        logger.warning("[DomainIntel] RSS 파싱 실패: %s", source_name)
+        return signals
+
+    items = root.findall(".//item")[:max_items]
+    for item in items:
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+        desc = (item.findtext("description") or "").strip()[:300]
+        pub_date = (item.findtext("pubDate") or "").strip()
+
+        if not title:
+            continue
+
+        signals.append(Signal(
+            source="community_pulse",
+            category="news",
+            title=f"[{source_name}] {title}",
+            url=link,
+            description=desc,
+            relevance_tags=_extract_tags(title),
+            score=0.0,
+            timestamp=pub_date,
+            metadata={"source": source_name},
+        ))
+
+    return signals
 
 
 def _gh_api(endpoint: str) -> dict | list | None:
@@ -210,10 +256,11 @@ def collect_research_pulse() -> list[Signal]:
 
 
 def collect_community_pulse() -> list[Signal]:
-    """HackerNews + Reddit에서 보안 커뮤니티 화제 수집.
+    """HackerNews + Lobste.rs + Bleeping Computer에서 보안 커뮤니티 화제 수집.
 
     - HN Algolia API: 무료, 무제한, 키 불필요
-    - Reddit: JSON endpoint, 무료
+    - Lobste.rs: 무료 JSON API, 키 불필요
+    - Bleeping Computer: RSS feed, 키 불필요
     """
     signals: list[Signal] = []
 
@@ -251,28 +298,32 @@ def collect_community_pulse() -> list[Signal]:
             ))
         time.sleep(1)
 
-    # ── Reddit r/netsec ──
-    reddit_url = "https://www.reddit.com/r/netsec/top/.json?t=week&limit=10"
-    data = _http_get(reddit_url, headers={"User-Agent": _UA})
-    if data and isinstance(data, dict):
-        for child in data.get("data", {}).get("children", [])[:10]:
-            post = child.get("data", {})
+    # ── Lobste.rs (security 태그) ──
+    lobste_url = "https://lobste.rs/t/security.json"
+    data = _http_get(lobste_url)
+    if data and isinstance(data, list):
+        for post in data[:15]:
             title = post.get("title", "")
-            ups = post.get("ups", 0)
-            if ups < 20:
+            score = post.get("score", 0)
+            if score < 5:
                 continue
-
             signals.append(Signal(
                 source="community_pulse",
                 category="discussion",
-                title=f"[Reddit] {title}",
-                url=f"https://reddit.com{post.get('permalink', '')}",
-                description=post.get("selftext", "")[:300],
+                title=f"[Lobste.rs] {title}",
+                url=post.get("url", post.get("short_id_url", "")),
+                description=post.get("description", "")[:300],
                 relevance_tags=_extract_tags(title),
-                score=float(ups),
-                timestamp=datetime.fromtimestamp(post.get("created_utc", 0), tz=timezone.utc).isoformat(),
-                metadata={"source": "reddit", "subreddit": "netsec", "ups": ups},
+                score=float(score),
+                timestamp=post.get("created_at", ""),
+                metadata={"source": "lobsters", "score": score, "comments": post.get("comment_count", 0)},
             ))
+
+    # ── Bleeping Computer RSS ──
+    bleeping_url = "https://www.bleepingcomputer.com/feed/"
+    rss_text = _http_get_text(bleeping_url)
+    if rss_text:
+        signals.extend(_parse_rss_signals(rss_text, "bleepingcomputer", max_items=10))
 
     logger.info("[Community Pulse] %d signals collected", len(signals))
     return signals

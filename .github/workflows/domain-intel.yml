@@ -1,13 +1,31 @@
 name: Domain Intelligence
 
 on:
-  # 주 1회 — 월요일 00:00 UTC
   schedule:
-    - cron: "0 0 * * 1"
+    # 매일 00:00 UTC (09:00 KST)
+    - cron: "0 0 * * *"
+    # 매주 월요일 01:00 UTC (10:00 KST) — weekly 모드
+    - cron: "0 1 * * 1"
+    # 매월 1일 02:00 UTC (11:00 KST) — monthly 롤업
+    - cron: "0 2 1 * *"
+    # 분기 (1/4/7/10월 1일) 03:00 UTC — quarterly 롤업
+    - cron: "0 3 1 1,4,7,10 *"
+    # 매년 1월 1일 04:00 UTC — yearly 롤업
+    - cron: "0 4 1 1 *"
 
-  # 수동 실행
   workflow_dispatch:
     inputs:
+      mode:
+        description: "실행 모드"
+        required: false
+        default: "daily"
+        type: choice
+        options:
+          - daily
+          - weekly
+          - monthly
+          - quarterly
+          - yearly
       collect_only:
         description: "수집만 (LLM 분석 없이)"
         required: false
@@ -35,6 +53,32 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Determine mode
+        id: mode
+        run: |
+          # 수동 실행이면 입력값 사용
+          if [ -n "${{ github.event.inputs.mode }}" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+          else
+            # cron 스케줄에 따라 모드 결정
+            HOUR=$(date -u +%H)
+            DAY=$(date -u +%d)
+            MONTH=$(date -u +%m)
+
+            if [ "$HOUR" = "04" ] && [ "$DAY" = "01" ] && [ "$MONTH" = "01" ]; then
+              echo "mode=yearly" >> $GITHUB_OUTPUT
+            elif [ "$HOUR" = "03" ] && [ "$DAY" = "01" ]; then
+              echo "mode=quarterly" >> $GITHUB_OUTPUT
+            elif [ "$HOUR" = "02" ] && [ "$DAY" = "01" ]; then
+              echo "mode=monthly" >> $GITHUB_OUTPUT
+            elif [ "$HOUR" = "01" ]; then
+              echo "mode=weekly" >> $GITHUB_OUTPUT
+            else
+              echo "mode=daily" >> $GITHUB_OUTPUT
+            fi
+          fi
+          echo "Determined mode: $(cat $GITHUB_OUTPUT | grep mode)"
+
       - name: Run Domain Intelligence
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,10 +87,14 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          ARGS=""
+          MODE="${{ steps.mode.outputs.mode }}"
+          ARGS="--mode $MODE"
+
           if [ "${{ github.event.inputs.collect_only }}" = "true" ]; then
             ARGS="--collect-only"
           fi
+
+          echo "실행: python -m tools.domain_intel $ARGS"
           python -m tools.domain_intel $ARGS
 
       - name: Commit results
@@ -55,7 +103,8 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add tools/domain_intel/digests/ tools/domain_intel/signals_cache/ 2>/dev/null || true
           if ! git diff --staged --quiet; then
-            git commit -m "chore: domain intelligence report $(date -u +%Y-%m-%d)"
+            MODE="${{ steps.mode.outputs.mode }}"
+            git commit -m "chore: domain intelligence $MODE report $(date -u +%Y-%m-%d)"
             git pull --rebase origin main
             git push
           fi
