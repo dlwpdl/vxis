@@ -1463,7 +1463,8 @@ class MobilePipeline:
         """SQLite, Keychain/Keystore, SharedPreferences, 캐시/로그 검사."""
         try:
             for vid in ["MOB-STORE-001", "MOB-STORE-002", "MOB-STORE-003",
-                        "MOB-STORE-004", "MOB-STORE-005", "MOB-STORE-006"]:
+                        "MOB-STORE-004", "MOB-STORE-005", "MOB-STORE-006",
+                        "MOB-SDK-002"]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
@@ -1505,6 +1506,9 @@ class MobilePipeline:
 
         # ── 스크린샷 보호 ──
         await self._check_screenshot_protection(ctx)
+
+        # ── 애널리틱스 SDK 민감 데이터 유출 ──
+        await self._check_analytics_sdk_leakage(ctx)
 
         try:
             ctx.score_tracker.record_phase_complete(
@@ -1627,7 +1631,8 @@ class MobilePipeline:
     async def _phase12_backup(self, ctx: MobileScanContext) -> None:
         """iTunes/ADB 백업 추출, 민감 데이터 확인."""
         try:
-            ctx.score_tracker.record_vector_attempt("MOB-STORE-001")
+            for vid in ["MOB-STORE-001", "MOB-PRIV-001", "MOB-PRIV-002", "MOB-PRIV-003"]:
+                ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
 
@@ -1688,6 +1693,10 @@ class MobilePipeline:
                     ctx.add_owasp_finding("M9", f.id)
                     try:
                         ctx.score_tracker.record_finding(f.id, "MOB-STORE-001", level=2)
+                        # 백업에서 자격증명/개인정보/저장소 종합 취약점 기록
+                        ctx.score_tracker.record_finding(f.id, "MOB-PRIV-001", level=2)
+                        ctx.score_tracker.record_finding(f.id, "MOB-PRIV-002", level=2)
+                        ctx.score_tracker.record_finding(f.id, "MOB-PRIV-003", level=2)
                     except Exception:
                         pass
                 else:
@@ -3922,6 +3931,107 @@ class MobilePipeline:
 
         logger.info(
             "  Push notification security: %d issues found", len(issues),
+        )
+
+    async def _check_analytics_sdk_leakage(self, ctx: MobileScanContext) -> None:
+        """애널리틱스 SDK를 통한 민감 데이터 유출 탐지.
+
+        벡터: MOB-SDK-002
+        탐지 대상:
+          - Firebase Analytics / Google Analytics — PII 전송 패턴
+          - Mixpanel / Amplitude / Segment — 민감 속성 포함
+          - 사용자 식별자(IMEI, 전화번호, 이메일) 전달 여부
+        """
+        import re
+        from pathlib import Path
+
+        if not ctx.app_binary_path:
+            return
+
+        import zipfile
+        import tempfile
+
+        try:
+            tmp = Path(tempfile.mkdtemp(prefix="vxis_analytics_"))
+            with zipfile.ZipFile(ctx.app_binary_path, "r") as zf:
+                for name in zf.namelist():
+                    if any(name.endswith(ext) for ext in (".java", ".kt", ".swift", ".m", ".js", ".dart")):
+                        try:
+                            zf.extract(name, tmp)
+                        except Exception:
+                            pass
+        except Exception as exc:
+            logger.debug("  Analytics SDK extraction: %s", exc)
+            return
+
+        # 애널리틱스 SDK 호출 패턴
+        analytics_call_pattern = re.compile(
+            r'(?i)(?:logEvent|track|identify|setUserProperty|setUserAttribute|'
+            r'Analytics\.log|mixpanel\.track|amplitude\.logEvent|'
+            r'Analytics\.record|Segment\.track)\s*\(',
+        )
+        # PII 속성 패턴 — 민감 데이터가 analytics에 전달되는 경우
+        pii_in_analytics = re.compile(
+            r'(?i)(?:password|passwd|pwd|ssn|creditCard|credit_card|'
+            r'phoneNumber|phone_number|imei|deviceId|email|dob|dateOfBirth|'
+            r'socialSecurity|bankAccount|cvv)',
+        )
+
+        issues: list[dict[str, str]] = []
+        source_files: list[Path] = list(tmp.rglob("*.java")) + list(tmp.rglob("*.kt")) + \
+            list(tmp.rglob("*.swift")) + list(tmp.rglob("*.m")) + list(tmp.rglob("*.dart"))
+
+        for sf in source_files[:100]:
+            try:
+                content = sf.read_text(errors="replace")
+                if not analytics_call_pattern.search(content):
+                    continue
+                # 분석 호출 주변에서 PII 속성 확인
+                for match in analytics_call_pattern.finditer(content):
+                    # 호출 이후 200자 범위의 컨텍스트 검사
+                    context_slice = content[match.start():match.start() + 200]
+                    if pii_in_analytics.search(context_slice):
+                        issues.append({
+                            "file": sf.name,
+                            "sdk_call": match.group(0).strip(),
+                            "severity": "high",
+                        })
+            except OSError:
+                continue
+
+        for issue in issues:
+            f = ctx.add_finding(
+                title=(
+                    f"Analytics SDK Sensitive Data Leakage — {issue['file']}"
+                    "|||애널리틱스 SDK 민감 데이터 유출"
+                ),
+                severity=issue["severity"],
+                finding_type="data_leakage",
+                description=(
+                    f"Analytics call '{issue['sdk_call']}' in '{issue['file']}' "
+                    "passes PII or sensitive attributes (password, phone, email, IMEI, etc.) "
+                    "to a third-party analytics SDK. This data may be stored on external "
+                    "servers without adequate privacy controls."
+                    "|||"
+                    f"'{issue['file']}'의 애널리틱스 호출 '{issue['sdk_call']}'이 "
+                    "PII 또는 민감 속성(비밀번호, 전화번호, 이메일, IMEI 등)을 "
+                    "서드파티 애널리틱스 SDK에 전달합니다. "
+                    "이 데이터는 충분한 개인정보 보호 없이 외부 서버에 저장될 수 있습니다."
+                ),
+                target=ctx.target,
+                affected_component=issue["file"],
+                source_plugin="vxis-mobile-pipeline",
+                cwe_ids=["CWE-359", "CWE-200"],
+            )
+            ctx.add_owasp_finding("M6", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-SDK-002", level=2)
+            except Exception:
+                pass
+
+        logger.info(
+            "  Analytics SDK leakage: %d issues found across %d source files",
+            len(issues), len(source_files),
         )
 
     # ══════════════════════════════════════════════════════════
