@@ -88,6 +88,29 @@ class MobileScanContext(ScanContext):
     # ── 비즈니스 로직 결과 ──
     business_logic_findings: list[dict[str, Any]] = field(default_factory=list)
 
+    # ── Firebase / Cloud 백엔드 미스컨피그 ──
+    firebase_urls: list[str] = field(default_factory=list)
+    cloud_misconfigs: list[dict[str, Any]] = field(default_factory=list)
+
+    # ── 네이티브 라이브러리 분석 ──
+    native_libs: list[dict[str, Any]] = field(default_factory=list)
+
+    # ── 크로스플랫폼 프레임워크 ──
+    framework_type: str = "native"  # "native" | "react_native" | "flutter" | "xamarin" | "cordova"
+    framework_bundle_findings: list[dict[str, Any]] = field(default_factory=list)
+
+    # ── gRPC / Protobuf ──
+    grpc_endpoints: list[dict[str, Any]] = field(default_factory=list)
+
+    # ── 푸시 알림 ──
+    push_token_findings: list[dict[str, Any]] = field(default_factory=list)
+
+    # ── SDK CVE 매핑 결과 ──
+    sdk_cve_findings: list[dict[str, Any]] = field(default_factory=list)
+
+    # ── 암호화 구현 분석 ──
+    crypto_findings: list[dict[str, Any]] = field(default_factory=list)
+
     def add_owasp_finding(self, owasp_id: str, finding_id: str) -> None:
         """OWASP Mobile Top 10 분류에 Finding ID를 등록."""
         if owasp_id not in self.owasp_mobile_coverage:

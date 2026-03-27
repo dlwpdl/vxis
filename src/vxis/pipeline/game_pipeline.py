@@ -251,6 +251,55 @@ class GamePipeline:
         logger.info("  Target: %s", ctx.target)
         logger.info("  Client binary: %s", ctx.client_binary or "N/A")
 
+        # ── Mobile Cross-Reference Advisory ──────────────────────────
+        try:
+            if ctx.game_type == "mobile":
+                ctx.score_tracker.record_vector_attempt("GAME-MOBILE-XREF-001")
+                ctx.add_game_finding(
+                    category="mobile",
+                    issue=(
+                        "Mobile game detected — mobile-specific pipeline recommended|||"
+                        "모바일 게임 탐지 — 모바일 특화 파이프라인 추가 실행 권장"
+                    ),
+                    severity="informational",
+                    details={
+                        "recommendation_en": (
+                            "Run MobilePipeline in addition to GamePipeline: "
+                            "APK/IPA static analysis, certificate pinning bypass, "
+                            "Frida runtime hooking, obfuscation assessment."
+                        ),
+                        "recommendation_ko": (
+                            "GamePipeline과 함께 MobilePipeline 실행 권장: "
+                            "APK/IPA 정적 분석, 인증서 피닝 우회, "
+                            "Frida 런타임 훅, 난독화 평가."
+                        ),
+                        "platform": ctx.game_platform,
+                        "apk_ipa_check": bool(ctx.client_binary),
+                    },
+                )
+                if not ctx.client_binary:
+                    ctx.add_finding(
+                        title=(
+                            "Mobile Game — APK/IPA Not Provided for Static Analysis|||"
+                            "모바일 게임 — 정적 분석용 APK/IPA 미제공"
+                        ),
+                        severity="medium",
+                        finding_type="missing_test_asset",
+                        description=(
+                            f"Target identified as mobile ({ctx.game_platform}). "
+                            "Provide the APK (Android) or IPA (iOS) binary for full "
+                            "static analysis, certificate pinning, and obfuscation review.|||"
+                            f"모바일 게임({ctx.game_platform}) 탐지. "
+                            "전체 정적 분석(인증서 피닝, 난독화 검토)을 위해 "
+                            "APK(Android) 또는 IPA(iOS) 바이너리 제공 필요."
+                        ),
+                        target=ctx.target,
+                        source_plugin="game-pipeline-phase0",
+                    )
+                logger.info("  [MOBILE] Mobile advisory recorded — MobilePipeline recommended")
+        except Exception as exc:
+            logger.debug("  Mobile cross-reference advisory failed: %s", exc)
+
     async def _phase1_recon(self, ctx: GameScanContext) -> None:
         """Phase 1: 백엔드 API 탐색 + 게임 서버 엔드포인트 열거."""
         from vxis.interaction.hands import SessionManager
@@ -707,10 +756,130 @@ class GamePipeline:
             except Exception as exc:
                 logger.debug("  Brain protocol analysis failed: %s", exc)
 
+        # ── Replay Attack Testing ─────────────────────────────────
+        await self._phase4_replay_attack(ctx)
+
         logger.info(
             "  Protocol reverse: %d identified, %d unknown",
             len([p for p in ctx.protocols if p.get("identified")]),
             len(unknown_protocols),
+        )
+
+    async def _phase4_replay_attack(self, ctx: GameScanContext) -> None:
+        """Phase 4 sub: 리플레이 공격 — nonce/시퀀스 번호 없이 중요 요청 재전송 가능 여부 테스트."""
+        from vxis.interaction.hands import SessionManager
+
+        ctx.score_tracker.record_vector_attempt("GAME-PROTO-REPLAY-001")
+
+        # 리플레이 공격에 취약할 가능성이 높은 엔드포인트
+        replay_candidate_keywords = [
+            "claim", "reward", "daily", "redeem", "collect",
+            "chest", "bonus", "gift", "prize", "spin",
+        ]
+        replay_targets = [
+            p["path"] for p in ctx.api_endpoints
+            if any(k in p.get("path", "").lower() for k in replay_candidate_keywords)
+        ]
+        # 폴백: 경제 트랜잭션 엔드포인트
+        if not replay_targets and ctx.economy_model.get("transaction_endpoints"):
+            replay_targets = ctx.economy_model["transaction_endpoints"][:3]
+
+        if not replay_targets:
+            logger.info("  Replay attack: no candidate endpoints found — skipping")
+            return
+
+        mgr = SessionManager()
+        try:
+            session = await mgr.get_session(ctx.target)
+
+            for path in replay_targets[:4]:
+                try:
+                    # 최초 요청 전송 (reward 수집 시뮬레이션)
+                    first_resp = await session.request("POST", path, json_data={
+                        "action": "claim",
+                        "reward_id": "daily_bonus_001",
+                    })
+                    first_status = first_resp.status
+
+                    # 동일 요청을 3회 더 재전송
+                    replay_statuses: list[int] = []
+                    for _ in range(3):
+                        try:
+                            r = await session.request("POST", path, json_data={
+                                "action": "claim",
+                                "reward_id": "daily_bonus_001",
+                            })
+                            replay_statuses.append(r.status)
+                        except Exception:
+                            pass
+
+                    success_replays = sum(1 for s in replay_statuses if s in (200, 201))
+                    nonce_protected = all(s in (400, 403, 409, 422, 429) for s in replay_statuses)
+
+                    result: dict[str, Any] = {
+                        "endpoint": path,
+                        "first_status": first_status,
+                        "replay_statuses": replay_statuses,
+                        "replayed_n_times": len(replay_statuses),
+                        "successes": success_replays,
+                        "nonce_protected": nonce_protected,
+                    }
+                    ctx.replay_attack_results.append(result)
+
+                    if success_replays > 0:
+                        ctx.score_tracker.record_finding(
+                            "GAME-PROTO-REPLAY-001",
+                            "GAME-PROTO-REPLAY-001",
+                            level=3,
+                        )
+                        ctx.add_finding(
+                            title=(
+                                f"Replay Attack — Reward Claimed Multiple Times at {path}|||"
+                                f"리플레이 공격 — {path}에서 보상 중복 수령 가능"
+                            ),
+                            severity="critical",
+                            finding_type="business_logic",
+                            description=(
+                                f"POST {path} accepted {success_replays} identical replay requests "
+                                f"(out of 3 attempts). No nonce or sequence number protection detected. "
+                                f"Attacker can claim rewards multiple times without re-triggering the "
+                                f"game condition.|||"
+                                f"POST {path}에서 동일 요청 3회 재전송 중 {success_replays}회 성공. "
+                                f"Nonce 또는 시퀀스 번호 보호 없음. "
+                                f"공격자가 조건 재충족 없이 보상 중복 수령 가능."
+                            ),
+                            target=ctx.target,
+                            affected_component=path,
+                            source_plugin="game-pipeline-phase4-replay",
+                        )
+                        ctx.add_game_finding(
+                            category="protocol",
+                            issue=f"Replay attack successful at {path} — {success_replays}/3 replays accepted",
+                            severity="critical",
+                            details=result,
+                        )
+                        logger.info(
+                            "  [REPLAY] VULNERABLE: %s — %d/%d replays succeeded",
+                            path, success_replays, len(replay_statuses),
+                        )
+                    elif nonce_protected:
+                        logger.info("  [REPLAY] PROTECTED (nonce/idempotency): %s", path)
+                    else:
+                        logger.info(
+                            "  [REPLAY] No clear success/protection at %s — statuses: %s",
+                            path, replay_statuses,
+                        )
+
+                except Exception as exc:
+                    logger.debug("  Replay attack probe failed for %s: %s", path, exc)
+
+        finally:
+            await mgr.close_all()
+
+        logger.info(
+            "  Replay attack: %d endpoints tested, %d vulnerable",
+            len(replay_targets[:4]),
+            sum(1 for r in ctx.replay_attack_results if r.get("successes", 0) > 0),
         )
 
     async def _phase5_api_testing(self, ctx: GameScanContext) -> None:
@@ -850,6 +1019,9 @@ class GamePipeline:
                         source_plugin="game-pipeline-phase5",
                     )
 
+            # 5. GM Command Injection
+            await self._phase5_gm_command_injection(ctx, session)
+
             logger.info(
                 "  API testing: %d endpoints tested, findings=%d",
                 len(ctx.api_endpoints), len(ctx.findings),
@@ -857,6 +1029,188 @@ class GamePipeline:
 
         finally:
             await mgr.close_all()
+
+    async def _phase5_gm_command_injection(self, ctx: GameScanContext, session: Any) -> None:
+        """Phase 5 sub: GM/어드민 엔드포인트 프로브 + 채팅 GM 커맨드 인젝션 테스트."""
+        ctx.score_tracker.record_vector_attempt("GAME-LOGIC-GM-001")
+
+        # ── 1. GM/어드민/디버그 엔드포인트 열거 ──
+        gm_probe_paths = [
+            "/admin", "/gm", "/console", "/debug",
+            "/api/admin", "/api/gm", "/api/console", "/api/debug",
+            "/api/v1/admin", "/api/v1/gm", "/api/v1/debug",
+            "/api/v1/internal", "/api/internal",
+            "/api/v1/gamemaster", "/api/gamemaster",
+            "/api/v1/staff", "/api/v1/moderator",
+            "/api/v1/cheat", "/api/cheat",
+            "/api/v1/dev", "/dev",
+        ]
+
+        try:
+            for path in gm_probe_paths:
+                try:
+                    r = await session.get(path)
+                    if r.status not in (404, 410):
+                        entry: dict[str, Any] = {
+                            "path": path,
+                            "status": r.status,
+                            "accessible": r.status in (200, 201, 302),
+                            "content_type": r.headers.get("content-type", ""),
+                        }
+                        ctx.gm_endpoints_found.append(entry)
+                        logger.info("  [GM PROBE] %s -> HTTP %d", path, r.status)
+
+                        # 응답에서 개발자 모드 플래그 탐지
+                        import json as json_lib
+                        try:
+                            data = json_lib.loads(r.text)
+                            debug_flags = [
+                                k for k in (data.keys() if isinstance(data, dict) else [])
+                                if any(k2 in k.lower() for k2 in ["debug", "dev", "test", "internal", "gm"])
+                            ]
+                            if debug_flags:
+                                entry["debug_flags"] = debug_flags
+                        except Exception:
+                            pass
+
+                        if r.status in (200, 201):
+                            ctx.score_tracker.record_finding(
+                                f"GM-ENDPOINT-{path.replace('/', '-')}",
+                                "GAME-LOGIC-GM-001",
+                                level=3,
+                            )
+                            ctx.add_finding(
+                                title=(
+                                    f"Accessible GM/Admin Endpoint: {path}|||"
+                                    f"GM/어드민 엔드포인트 접근 가능: {path}"
+                                ),
+                                severity="critical",
+                                finding_type="broken_access_control",
+                                description=(
+                                    f"GM or admin endpoint {path} returned HTTP {r.status} "
+                                    f"without requiring elevated privileges. "
+                                    f"Game master commands may be executable by any player.|||"
+                                    f"GM/어드민 엔드포인트 {path}가 권한 상승 없이 HTTP {r.status} 반환. "
+                                    f"일반 플레이어가 GM 명령어 실행 가능할 수 있음."
+                                ),
+                                target=ctx.target,
+                                affected_component=path,
+                                source_plugin="game-pipeline-phase5-gm",
+                            )
+
+                except Exception:
+                    pass
+
+        except Exception as exc:
+            logger.debug("  GM endpoint probe failed: %s", exc)
+
+        # ── 2. 채팅 채널에서 GM 커맨드 인젝션 ──
+        gm_chat_commands = [
+            "/give gold 999999",
+            "/give item legendary_sword 99",
+            "/spawn boss dragon",
+            "/teleport 0 0 0",
+            "/godmode on",
+            "/ban target_player",
+            "/setlevel 99",
+            "/addcurrency gems 10000",
+            "!gm give gold 999999",
+            "[GM] give item",
+        ]
+
+        chat_paths = [
+            p["path"] for p in ctx.api_endpoints
+            if any(k in p.get("path", "").lower() for k in ["chat", "message", "msg"])
+        ]
+
+        try:
+            for chat_path in chat_paths[:2]:
+                for cmd in gm_chat_commands[:5]:
+                    try:
+                        r = await session.request("POST", chat_path, json_data={
+                            "message": cmd,
+                            "channel": "global",
+                        })
+                        result: dict[str, Any] = {
+                            "path": chat_path,
+                            "command": cmd,
+                            "status": r.status,
+                            "response_snippet": r.text[:200],
+                        }
+                        ctx.gm_command_responses.append(result)
+
+                        # GM 명령 처리 시그니처 탐지
+                        resp_lower = r.text.lower()
+                        if any(k in resp_lower for k in ["command executed", "gm applied", "granted", "spawned", "teleported"]):
+                            ctx.score_tracker.record_finding(
+                                "GAME-LOGIC-GM-CHAT-001",
+                                "GAME-LOGIC-GM-001",
+                                level=4,
+                            )
+                            ctx.add_finding(
+                                title=(
+                                    f"GM Command Injection via Chat — '{cmd[:30]}'|||"
+                                    f"채팅 GM 커맨드 인젝션 — '{cmd[:30]}'"
+                                ),
+                                severity="critical",
+                                finding_type="business_logic",
+                                description=(
+                                    f"GM command '{cmd}' sent via chat endpoint {chat_path} "
+                                    f"appears to have been executed (response: {r.text[:100]}). "
+                                    f"Any player can issue game master commands.|||"
+                                    f"GM 명령어 '{cmd}'를 채팅 엔드포인트 {chat_path}로 전송 시 "
+                                    f"실행된 것으로 보임 (응답: {r.text[:100]}). "
+                                    f"모든 플레이어가 GM 명령어 실행 가능."
+                                ),
+                                target=ctx.target,
+                                affected_component=chat_path,
+                                source_plugin="game-pipeline-phase5-gm",
+                            )
+                            ctx.add_game_finding(
+                                category="gm_command",
+                                issue=f"GM chat command executed: '{cmd}' via {chat_path}",
+                                severity="critical",
+                                details=result,
+                            )
+                    except Exception:
+                        pass
+
+        except Exception as exc:
+            logger.debug("  GM chat command injection failed: %s", exc)
+
+        # ── 3. API 응답에서 개발자 모드 플래그 탐지 ──
+        try:
+            for endpoint_info in ctx.api_endpoints[:20]:
+                path = endpoint_info.get("path", "")
+                content_type = endpoint_info.get("content_type", "")
+                if "json" in content_type:
+                    try:
+                        r = await session.get(path)
+                        import json as json_lib
+                        data = json_lib.loads(r.text)
+                        if isinstance(data, dict):
+                            dev_flags = {
+                                k: v for k, v in data.items()
+                                if any(k2 in str(k).lower() for k2 in
+                                       ["debug", "dev_mode", "test_mode", "internal", "admin_mode"])
+                            }
+                            if dev_flags:
+                                ctx.add_game_finding(
+                                    category="gm_command",
+                                    issue=f"Developer/debug flags exposed in API response at {path}",
+                                    severity="medium",
+                                    details={"path": path, "flags": dev_flags},
+                                )
+                    except Exception:
+                        pass
+        except Exception as exc:
+            logger.debug("  API debug flag check failed: %s", exc)
+
+        logger.info(
+            "  GM injection: %d admin endpoints found, %d chat commands tested",
+            len(ctx.gm_endpoints_found),
+            len(ctx.gm_command_responses),
+        )
 
     async def _phase6_auth_session(self, ctx: GameScanContext) -> None:
         """Phase 6: 인증 우회 + 세션 하이재킹 + 토큰 분석."""
@@ -1224,9 +1578,439 @@ class GamePipeline:
         finally:
             await mgr.close_all()
 
+        # ── 4. Time Manipulation ──────────────────────────────────
+        await self._phase8_time_manipulation(ctx)
+
+        # ── 5. Gacha/RNG Manipulation ─────────────────────────────
+        await self._phase8_gacha_rng(ctx)
+
+        # ── 6. Gift/Trade Abuse ───────────────────────────────────
+        await self._phase8_gift_trade_abuse(ctx)
+
         logger.info(
             "  Economy exploit: %d race windows, findings=%d",
             len(ctx.race_condition_windows), len(ctx.findings),
+        )
+
+    async def _phase8_time_manipulation(self, ctx: GameScanContext) -> None:
+        """Phase 8 sub: 서버가 클라이언트 타임스탬프를 검증하는지 테스트 (시간 조작)."""
+        from vxis.interaction.hands import SessionManager
+        import json as json_lib
+
+        ctx.score_tracker.record_vector_attempt("GAME-LOGIC-TIME-001")
+
+        # 시간 기반 콘텐츠 엔드포인트 식별
+        time_sensitive_keywords = [
+            "daily", "reward", "bonus", "energy", "stamina",
+            "cooldown", "timer", "schedule", "event", "limited",
+            "refresh", "reset", "midnight",
+        ]
+        time_endpoints = [
+            p["path"] for p in ctx.api_endpoints
+            if any(k in p.get("path", "").lower() for k in time_sensitive_keywords)
+        ]
+        if not time_endpoints:
+            # 트랜잭션 엔드포인트를 폴백으로 사용
+            time_endpoints = ctx.economy_model.get("transaction_endpoints", [])[:3]
+
+        if not time_endpoints:
+            logger.info("  Time manipulation: no time-sensitive endpoints found")
+            return
+
+        mgr = SessionManager()
+        try:
+            session = await mgr.get_session(ctx.target)
+
+            # 미래 타임스탬프 (에너지 충전, 데일리 보상 우회 시도)
+            future_ts = int(time.time()) + 86400 * 30  # 30일 미래
+            # 과거 타임스탬프 (쿨다운 무효화 시도)
+            past_ts = int(time.time()) - 86400 * 30   # 30일 과거
+
+            timestamp_payloads: list[dict[str, Any]] = [
+                {
+                    "label": "future_timestamp",
+                    "data": {"timestamp": future_ts, "client_time": future_ts, "action": "collect"},
+                },
+                {
+                    "label": "past_timestamp",
+                    "data": {"timestamp": past_ts, "client_time": past_ts, "last_collected": past_ts},
+                },
+                {
+                    "label": "zero_timestamp",
+                    "data": {"timestamp": 0, "client_time": 0, "action": "collect"},
+                },
+                {
+                    "label": "epoch_max",
+                    "data": {"timestamp": 2147483647, "client_time": 2147483647, "action": "collect"},
+                },
+            ]
+
+            for path in time_endpoints[:4]:
+                for ts_payload in timestamp_payloads:
+                    try:
+                        r = await session.request("POST", path, json_data=ts_payload["data"])
+
+                        result: dict[str, Any] = {
+                            "endpoint": path,
+                            "vector": ts_payload["label"],
+                            "status": r.status,
+                            "bypassed": False,
+                        }
+
+                        # 성공 응답 = 서버가 클라이언트 타임스탬프를 신뢰
+                        if r.status in (200, 201):
+                            try:
+                                resp_data = json_lib.loads(r.text)
+                                # 실제 보상/에너지가 지급되었는지 확인
+                                reward_granted = any(
+                                    k in resp_data for k in
+                                    ["reward", "items", "gold", "energy", "stamina", "granted"]
+                                ) if isinstance(resp_data, dict) else False
+                            except Exception:
+                                reward_granted = False
+
+                            result["bypassed"] = True
+                            result["reward_granted"] = reward_granted
+                            ctx.time_manipulation_results.append(result)
+
+                            ctx.score_tracker.record_finding(
+                                f"GAME-TIME-{ts_payload['label'].upper()}",
+                                "GAME-LOGIC-TIME-001",
+                                level=3 if reward_granted else 2,
+                            )
+                            severity = "critical" if reward_granted else "high"
+                            ctx.add_finding(
+                                title=(
+                                    f"Time Manipulation — {ts_payload['label']} accepted at {path}|||"
+                                    f"시간 조작 — {path}에서 {ts_payload['label']} 수락됨"
+                                ),
+                                severity=severity,
+                                finding_type="business_logic",
+                                description=(
+                                    f"Server accepted client-controlled {ts_payload['label']} at {path}. "
+                                    f"Reward granted: {reward_granted}. "
+                                    f"Attacker can bypass time-gated content by sending arbitrary timestamps.|||"
+                                    f"{path}에서 클라이언트 제어 타임스탬프({ts_payload['label']}) 수락. "
+                                    f"보상 지급 여부: {reward_granted}. "
+                                    f"공격자가 임의 타임스탬프 전송으로 시간 제한 콘텐츠 우회 가능."
+                                ),
+                                target=ctx.target,
+                                affected_component=path,
+                                source_plugin="game-pipeline-phase8-time",
+                            )
+                            ctx.add_game_finding(
+                                category="time_manipulation",
+                                issue=f"Time-gated bypass via {ts_payload['label']} at {path}",
+                                severity=severity,
+                                details=result,
+                            )
+                            logger.info(
+                                "  [TIME] VULNERABLE: %s — %s (reward=%s)",
+                                path, ts_payload["label"], reward_granted,
+                            )
+                        else:
+                            result["bypassed"] = False
+                            ctx.time_manipulation_results.append(result)
+                            logger.debug(
+                                "  [TIME] Protected: %s — %s -> HTTP %d",
+                                path, ts_payload["label"], r.status,
+                            )
+
+                    except Exception as exc:
+                        logger.debug("  Time manipulation probe failed for %s: %s", path, exc)
+
+        finally:
+            await mgr.close_all()
+
+        bypassed = sum(1 for r in ctx.time_manipulation_results if r.get("bypassed"))
+        logger.info(
+            "  Time manipulation: %d endpoints tested, %d bypassed",
+            len(time_endpoints[:4]), bypassed,
+        )
+
+    async def _phase8_gacha_rng(self, ctx: GameScanContext) -> None:
+        """Phase 8 sub: 가챠/RNG 조작 — 클라이언트 사이드 RNG 여부 + 씨드 예측 가능성 테스트."""
+        from vxis.interaction.hands import SessionManager
+        import json as json_lib
+
+        ctx.score_tracker.record_vector_attempt("GAME-LOGIC-GACHA-001")
+
+        # 가챠 관련 엔드포인트 식별
+        gacha_keywords = [
+            "gacha", "pull", "draw", "spin", "loot", "crate",
+            "box", "pack", "summon", "roll", "lottery", "chest",
+        ]
+        gacha_paths = [
+            p["path"] for p in ctx.api_endpoints
+            if any(k in p.get("path", "").lower() for k in gacha_keywords)
+        ]
+        ctx.gacha_endpoints = gacha_paths
+
+        if not gacha_paths:
+            logger.info("  Gacha/RNG: no gacha endpoints found — skipping")
+            return
+
+        mgr = SessionManager()
+        try:
+            session = await mgr.get_session(ctx.target)
+
+            for path in gacha_paths[:3]:
+                pull_results: list[Any] = []
+
+                # 동일 요청 5회 전송 — 완전히 동일한 결과가 나오면 클라이언트 RNG
+                identical_payload = {"gacha_id": "standard_pool", "count": 1}
+                for attempt in range(5):
+                    try:
+                        r = await session.request("POST", path, json_data=identical_payload)
+                        entry: dict[str, Any] = {
+                            "endpoint": path,
+                            "attempt": attempt + 1,
+                            "status": r.status,
+                            "result": None,
+                            "seed_predictable": False,
+                        }
+                        if r.status in (200, 201):
+                            try:
+                                result_data = json_lib.loads(r.text)
+                                entry["result"] = result_data
+                                pull_results.append(result_data)
+                            except Exception:
+                                pass
+                        ctx.gacha_results.append(entry)
+                    except Exception:
+                        pass
+
+                # 씨드 예측 가능성 분석 — 동일 결과 반복 여부
+                if len(pull_results) >= 3:
+                    # 결과를 문자열로 직렬화 후 비교
+                    result_strs = [json_lib.dumps(r, sort_keys=True) for r in pull_results if r]
+                    unique_results = len(set(result_strs))
+
+                    if unique_results == 1 and len(result_strs) >= 3:
+                        # 완전히 동일한 결과 — 클라이언트 사이드 또는 고정 씨드 RNG
+                        ctx.score_tracker.record_finding(
+                            "GAME-GACHA-SEED-001",
+                            "GAME-LOGIC-GACHA-001",
+                            level=3,
+                        )
+                        ctx.add_finding(
+                            title=(
+                                f"Gacha RNG — Identical Results Suggest Predictable Seed at {path}|||"
+                                f"가챠 RNG — {path}에서 동일 결과 반복 (씨드 예측 가능)"
+                            ),
+                            severity="high",
+                            finding_type="business_logic",
+                            description=(
+                                f"5 consecutive pulls to {path} produced identical results ({unique_results} unique). "
+                                f"Suggests client-side RNG or fixed server seed. "
+                                f"Attacker can predict outcomes and exploit favorable seeds.|||"
+                                f"{path}에서 연속 5회 가챠 동일 결과 ({unique_results}개 고유). "
+                                f"클라이언트 사이드 RNG 또는 고정 서버 씨드 의심. "
+                                f"공격자가 결과 예측 후 유리한 씨드 악용 가능."
+                            ),
+                            target=ctx.target,
+                            affected_component=path,
+                            source_plugin="game-pipeline-phase8-gacha",
+                        )
+                        ctx.add_game_finding(
+                            category="gacha",
+                            issue=f"Predictable RNG seed at {path} — {unique_results} unique results from 5 pulls",
+                            severity="high",
+                            details={"path": path, "unique_results": unique_results, "samples": result_strs[:2]},
+                        )
+                        logger.info(
+                            "  [GACHA] PREDICTABLE SEED: %s — %d unique from 5 pulls",
+                            path, unique_results,
+                        )
+
+                # 가챠 확률 정보 노출 여부 확인
+                try:
+                    odds_paths = [f"{path}/odds", f"{path}/rates", f"{path}/probability"]
+                    for odds_path in odds_paths:
+                        r = await session.get(odds_path)
+                        if r.status == 200:
+                            try:
+                                odds_data = json_lib.loads(r.text)
+                                ctx.add_game_finding(
+                                    category="gacha",
+                                    issue=f"Gacha odds/rates endpoint accessible: {odds_path}",
+                                    severity="informational",
+                                    details={
+                                        "path": odds_path,
+                                        "odds_data": str(odds_data)[:300],
+                                        "note": "Cross-reference with published rates to verify accuracy",
+                                    },
+                                )
+                                logger.info("  [GACHA] Odds endpoint found: %s", odds_path)
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+        finally:
+            await mgr.close_all()
+
+        logger.info(
+            "  Gacha/RNG: %d endpoints tested, %d pulls captured",
+            len(gacha_paths[:3]), len(ctx.gacha_results),
+        )
+
+    async def _phase8_gift_trade_abuse(self, ctx: GameScanContext) -> None:
+        """Phase 8 sub: 선물/거래 남용 — 음수 수량, 자기 자신에게 선물, 타이밍 공격."""
+        from vxis.interaction.hands import SessionManager
+        import json as json_lib
+
+        ctx.score_tracker.record_vector_attempt("GAME-ECON-TRADE-001")
+
+        # 선물/거래 관련 엔드포인트
+        gift_keywords = ["gift", "send", "transfer", "trade", "give"]
+        gift_paths = [
+            p["path"] for p in ctx.api_endpoints
+            if any(k in p.get("path", "").lower() for k in gift_keywords)
+        ]
+        if not gift_paths and ctx.economy_model.get("transaction_endpoints"):
+            gift_paths = [
+                p for p in ctx.economy_model["transaction_endpoints"]
+                if any(k in p.lower() for k in gift_keywords)
+            ]
+
+        if not gift_paths:
+            logger.info("  Gift/Trade abuse: no gift endpoints found — skipping")
+            return
+
+        mgr = SessionManager()
+        try:
+            session = await mgr.get_session(ctx.target)
+
+            test_vectors: list[dict[str, Any]] = [
+                {
+                    "label": "negative_quantity",
+                    "payload": {"item_id": "gold_coin", "quantity": -999, "recipient": "test_user"},
+                    "description_en": "Negative quantity gift — may grant items to sender",
+                    "description_ko": "음수 수량 선물 — 발신자에게 아이템 지급될 수 있음",
+                    "severity": "critical",
+                },
+                {
+                    "label": "gift_to_nonexistent_user",
+                    "payload": {"item_id": "gold_coin", "quantity": 1, "recipient": "NONEXISTENT_USER_XYZ_12345"},
+                    "description_en": "Gift to non-existent user — check error handling and item loss",
+                    "description_ko": "존재하지 않는 유저에게 선물 — 오류 처리 및 아이템 소실 확인",
+                    "severity": "medium",
+                },
+                {
+                    "label": "self_gift",
+                    "payload": {"item_id": "gold_coin", "quantity": 1, "recipient": "self", "sender": "self"},
+                    "description_en": "Self-gift — circular trade that may duplicate items",
+                    "description_ko": "자기 자신에게 선물 — 아이템 복제 가능한 순환 거래",
+                    "severity": "high",
+                },
+                {
+                    "label": "zero_quantity",
+                    "payload": {"item_id": "legendary_sword", "quantity": 0, "recipient": "test_user"},
+                    "description_en": "Zero quantity gift — server validation edge case",
+                    "description_ko": "0 수량 선물 — 서버 검증 경계 케이스",
+                    "severity": "low",
+                },
+                {
+                    "label": "max_int_quantity",
+                    "payload": {"item_id": "gold_coin", "quantity": 2147483647, "recipient": "test_user"},
+                    "description_en": "INT_MAX quantity — integer overflow in gift system",
+                    "description_ko": "INT_MAX 수량 — 선물 시스템 정수 오버플로우",
+                    "severity": "high",
+                },
+            ]
+
+            for path in gift_paths[:3]:
+                for vector in test_vectors:
+                    try:
+                        r = await session.request("POST", path, json_data=vector["payload"])
+                        result: dict[str, Any] = {
+                            "vector": vector["label"],
+                            "endpoint": path,
+                            "status": r.status,
+                            "vulnerable": False,
+                            "response_snippet": r.text[:200],
+                        }
+
+                        # 성공 응답 → 취약
+                        if r.status in (200, 201):
+                            result["vulnerable"] = True
+                            ctx.trade_abuse_results.append(result)
+
+                            ctx.score_tracker.record_finding(
+                                f"GAME-TRADE-{vector['label'].upper()}",
+                                "GAME-ECON-TRADE-001",
+                                level={"critical": 4, "high": 3, "medium": 2, "low": 1}.get(
+                                    vector["severity"], 2
+                                ),
+                            )
+                            ctx.add_finding(
+                                title=(
+                                    f"Gift/Trade Abuse — {vector['label']} at {path}|||"
+                                    f"선물/거래 남용 — {path}에서 {vector['label']}"
+                                ),
+                                severity=vector["severity"],
+                                finding_type="business_logic",
+                                description=(
+                                    f"{vector['description_en']} (HTTP {r.status} at {path}).|||"
+                                    f"{vector['description_ko']} ({path}에서 HTTP {r.status})."
+                                ),
+                                target=ctx.target,
+                                affected_component=path,
+                                source_plugin="game-pipeline-phase8-trade",
+                            )
+                            ctx.add_game_finding(
+                                category="economy",
+                                issue=f"Gift/trade abuse: {vector['label']} accepted at {path}",
+                                severity=vector["severity"],
+                                details=result,
+                            )
+                            logger.info(
+                                "  [TRADE] VULNERABLE: %s — %s",
+                                path, vector["label"],
+                            )
+                        else:
+                            result["vulnerable"] = False
+                            ctx.trade_abuse_results.append(result)
+
+                        # 존재하지 않는 사용자 오류 처리 탐지 — 정보 노출 확인
+                        if vector["label"] == "gift_to_nonexistent_user" and r.status in (400, 404, 422):
+                            try:
+                                err_data = json_lib.loads(r.text)
+                                err_str = str(err_data)
+                                # 내부 스택 트레이스 or DB 오류 노출 탐지
+                                if any(k in err_str.lower() for k in
+                                       ["traceback", "stack", "sql", "exception", "internal"]):
+                                    ctx.add_finding(
+                                        title=(
+                                            f"Error Response Leaks Internal Details at {path}|||"
+                                            f"{path} 오류 응답에서 내부 정보 노출"
+                                        ),
+                                        severity="medium",
+                                        finding_type="information_disclosure",
+                                        description=(
+                                            f"Gift to non-existent user at {path} returned internal error details: "
+                                            f"{err_str[:150]}|||"
+                                            f"{path}에서 존재하지 않는 사용자 선물 시 내부 오류 정보 노출: "
+                                            f"{err_str[:150]}"
+                                        ),
+                                        target=ctx.target,
+                                        affected_component=path,
+                                        source_plugin="game-pipeline-phase8-trade",
+                                    )
+                            except Exception:
+                                pass
+
+                    except Exception as exc:
+                        logger.debug("  Gift/trade test failed for %s [%s]: %s", path, vector["label"], exc)
+
+        finally:
+            await mgr.close_all()
+
+        vulnerable_count = sum(1 for r in ctx.trade_abuse_results if r.get("vulnerable"))
+        logger.info(
+            "  Gift/Trade abuse: %d endpoints, %d vectors tested, %d vulnerable",
+            len(gift_paths[:3]), len(test_vectors), vulnerable_count,
         )
 
     async def _phase9_leaderboard_matchmaking(self, ctx: GameScanContext) -> None:
@@ -1456,6 +2240,348 @@ class GamePipeline:
                 pass
 
         logger.info("  Binary analysis: %d strings, %d credentials", len(ctx.extracted_strings), len(ctx.hardcoded_credentials))
+
+        # ── Save File / Config File Analysis ─────────────────────
+        await self._phase10_save_file_analysis(ctx)
+
+        # ── Cloud Save Analysis ───────────────────────────────────
+        await self._phase10_cloud_save_analysis(ctx)
+
+    async def _phase10_save_file_analysis(self, ctx: GameScanContext) -> None:
+        """Phase 10 sub: 세이브파일/설정파일 분석 — 평문 값, 암호화 여부, 치트 옵션 탐지."""
+        import json as json_lib
+        import configparser
+        from pathlib import Path
+
+        ctx.score_tracker.record_vector_attempt("GAME-CLIENT-SAVE-001")
+
+        if not ctx.client_binary:
+            logger.info("  Save file analysis: no client binary path — skipping")
+            return
+
+        binary_path = Path(ctx.client_binary)
+        if not binary_path.exists():
+            logger.info("  Save file analysis: binary path does not exist — skipping")
+            return
+
+        # 세이브파일이 존재할 가능성이 있는 경로 목록
+        search_dirs: list[Path] = [
+            binary_path.parent,
+            binary_path.parent / "Saves",
+            binary_path.parent / "saves",
+            binary_path.parent / "SaveData",
+            binary_path.parent / "UserData",
+            binary_path.parent / "Data",
+        ]
+
+        save_extensions = {".sav", ".save", ".dat", ".json", ".xml", ".db"}
+        config_extensions = {".ini", ".cfg", ".config", ".conf", ".json", ".xml", ".yaml", ".yml"}
+        config_names = {
+            "settings", "config", "game_config", "options", "preferences",
+            "app_config", "game_settings", "user_settings",
+        }
+
+        # 평문에서 탐지할 가치 있는 필드명
+        valuable_field_patterns = [
+            "gold", "gems", "level", "exp", "experience", "item",
+            "currency", "money", "score", "rank", "unlocked",
+            "purchased", "premium", "vip", "admin", "cheat",
+            "god_mode", "infinite", "max_level",
+        ]
+
+        for search_dir in search_dirs:
+            if not search_dir.is_dir():
+                continue
+
+            try:
+                for file_path in search_dir.iterdir():
+                    if not file_path.is_file():
+                        continue
+
+                    suffix = file_path.suffix.lower()
+                    stem = file_path.stem.lower()
+
+                    # ── 세이브 파일 분석 ──
+                    if suffix in save_extensions:
+                        try:
+                            raw = file_path.read_bytes()
+                            is_encrypted = False
+                            plaintext_values: dict[str, Any] = {}
+
+                            # JSON 세이브 파일
+                            if suffix == ".json" or raw[:1] in (b"{", b"["):
+                                try:
+                                    save_data = json_lib.loads(raw.decode("utf-8", errors="replace"))
+                                    plaintext_values = {
+                                        k: v for k, v in (
+                                            save_data.items() if isinstance(save_data, dict) else {}
+                                        )
+                                        if any(p in str(k).lower() for p in valuable_field_patterns)
+                                    }
+                                except Exception:
+                                    is_encrypted = True
+
+                            # 바이너리 파일에서 평문 필드 탐지
+                            else:
+                                text_portion = raw[:4096].decode("utf-8", errors="replace")
+                                for field in valuable_field_patterns:
+                                    if field in text_portion.lower():
+                                        plaintext_values[field] = "(found in binary save)"
+
+                                # 높은 엔트로피 = 암호화 가능성
+                                if len(raw) > 16:
+                                    byte_set = len(set(raw[:256]))
+                                    is_encrypted = byte_set > 200
+
+                            save_entry: dict[str, Any] = {
+                                "path": str(file_path),
+                                "format": suffix,
+                                "size": file_path.stat().st_size,
+                                "encrypted": is_encrypted,
+                                "plaintext_values": plaintext_values,
+                                "fields_found": list(plaintext_values.keys()),
+                            }
+                            ctx.save_files.append(save_entry)
+
+                            if plaintext_values and not is_encrypted:
+                                ctx.score_tracker.record_finding(
+                                    "GAME-CLIENT-SAVE-001",
+                                    "GAME-CLIENT-SAVE-001",
+                                    level=3,
+                                )
+                                ctx.add_finding(
+                                    title=(
+                                        f"Plaintext Save File — Game Values Unprotected: {file_path.name}|||"
+                                        f"평문 세이브파일 — 게임 값 보호 없음: {file_path.name}"
+                                    ),
+                                    severity="high",
+                                    finding_type="insecure_data_storage",
+                                    description=(
+                                        f"Save file '{file_path.name}' stores game values in plaintext "
+                                        f"with no encryption or signing. "
+                                        f"Fields: {list(plaintext_values.keys())}. "
+                                        f"Player can directly edit gold, level, items.|||"
+                                        f"세이브파일 '{file_path.name}'이 암호화 또는 서명 없이 "
+                                        f"게임 값을 평문으로 저장. "
+                                        f"필드: {list(plaintext_values.keys())}. "
+                                        f"플레이어가 gold, 레벨, 아이템 직접 수정 가능."
+                                    ),
+                                    target=ctx.client_binary,
+                                    affected_component=str(file_path),
+                                    source_plugin="game-pipeline-phase10-save",
+                                )
+                                ctx.add_game_finding(
+                                    category="client_save",
+                                    issue=f"Plaintext save file: {file_path.name}",
+                                    severity="high",
+                                    details=save_entry,
+                                )
+                                logger.info(
+                                    "  [SAVE] Plaintext save: %s — fields: %s",
+                                    file_path.name, list(plaintext_values.keys()),
+                                )
+                            elif is_encrypted:
+                                logger.info("  [SAVE] Encrypted save: %s", file_path.name)
+
+                        except Exception as exc:
+                            logger.debug("  Save file parse failed for %s: %s", file_path, exc)
+
+                    # ── 설정 파일 분석 ──
+                    if suffix in config_extensions and stem in config_names:
+                        try:
+                            raw_text = file_path.read_text(encoding="utf-8", errors="replace")
+                            cheat_options: list[str] = []
+
+                            # INI 파싱
+                            if suffix in (".ini", ".cfg", ".config"):
+                                parser = configparser.ConfigParser()
+                                try:
+                                    parser.read_string(raw_text)
+                                    for section in parser.sections():
+                                        for key, value in parser.items(section):
+                                            if any(p in key.lower() for p in
+                                                   ["cheat", "debug", "god", "noclip", "infinite",
+                                                    "no_clip", "fly", "invisible", "admin"]):
+                                                cheat_options.append(f"[{section}] {key}={value}")
+                                except Exception:
+                                    # 평문 스캔으로 폴백
+                                    for line in raw_text.splitlines():
+                                        if any(p in line.lower() for p in
+                                               ["cheat", "god_mode", "debug_mode", "admin"]):
+                                            cheat_options.append(line.strip()[:100])
+
+                            # JSON 파싱
+                            elif suffix == ".json":
+                                try:
+                                    cfg_data = json_lib.loads(raw_text)
+                                    if isinstance(cfg_data, dict):
+                                        for k, v in cfg_data.items():
+                                            if any(p in str(k).lower() for p in
+                                                   ["cheat", "debug", "god", "admin", "dev_mode"]):
+                                                cheat_options.append(f"{k}={v}")
+                                except Exception:
+                                    pass
+
+                            config_entry: dict[str, Any] = {
+                                "path": str(file_path),
+                                "cheat_options": cheat_options,
+                                "size": file_path.stat().st_size,
+                            }
+                            ctx.config_files.append(config_entry)
+
+                            if cheat_options:
+                                ctx.add_finding(
+                                    title=(
+                                        f"Config File Contains Cheat-Enabling Options: {file_path.name}|||"
+                                        f"설정파일에 치트 활성화 옵션 포함: {file_path.name}"
+                                    ),
+                                    severity="medium",
+                                    finding_type="insecure_configuration",
+                                    description=(
+                                        f"Config file '{file_path.name}' contains potentially "
+                                        f"cheat-enabling options: {cheat_options[:3]}. "
+                                        f"Players may enable debug/god mode by editing this file.|||"
+                                        f"설정파일 '{file_path.name}'에 치트 활성화 가능 옵션 포함: "
+                                        f"{cheat_options[:3]}. "
+                                        f"플레이어가 파일 수정으로 디버그/갓모드 활성화 가능."
+                                    ),
+                                    target=ctx.client_binary,
+                                    affected_component=str(file_path),
+                                    source_plugin="game-pipeline-phase10-config",
+                                )
+                                logger.info(
+                                    "  [CONFIG] Cheat options in %s: %d found",
+                                    file_path.name, len(cheat_options),
+                                )
+
+                        except Exception as exc:
+                            logger.debug("  Config file parse failed for %s: %s", file_path, exc)
+
+            except Exception as exc:
+                logger.debug("  Save file search in %s failed: %s", search_dir, exc)
+
+        logger.info(
+            "  Save file analysis: %d save files, %d config files found",
+            len(ctx.save_files), len(ctx.config_files),
+        )
+
+    async def _phase10_cloud_save_analysis(self, ctx: GameScanContext) -> None:
+        """Phase 10 sub: 클라우드 세이브 엔드포인트 탐지 + 무결성 검증 여부 테스트."""
+        from vxis.interaction.hands import SessionManager
+
+        ctx.score_tracker.record_vector_attempt("GAME-CLIENT-CLOUD-001")
+
+        # 클라우드 세이브 관련 엔드포인트 패턴
+        cloud_save_paths = [
+            # 일반 게임 백엔드
+            "/api/v1/cloud-save", "/api/v1/cloudsave", "/api/v1/save",
+            "/api/v1/progress", "/api/v1/player/save", "/api/v1/sync",
+            "/api/save", "/api/sync", "/api/backup",
+            # Steam Cloud
+            "/api/steam/save", "/api/steam/cloudsave",
+            # Google Play Games
+            "/api/google/save", "/api/googleplay/save",
+            # Apple iCloud / Game Center
+            "/api/apple/save", "/api/icloud/save",
+            # Epic Games
+            "/api/epic/save", "/api/epicgames/save",
+        ]
+
+        # 기존 발견된 엔드포인트에서도 클라우드 세이브 관련 경로 추출
+        cloud_keywords = ["save", "sync", "backup", "cloud", "progress"]
+        extra_paths = [
+            p["path"] for p in ctx.api_endpoints
+            if any(k in p.get("path", "").lower() for k in cloud_keywords)
+            and p["path"] not in cloud_save_paths
+        ]
+        all_cloud_paths = cloud_save_paths + extra_paths[:5]
+
+        mgr = SessionManager()
+        try:
+            session = await mgr.get_session(ctx.target)
+
+            for path in all_cloud_paths:
+                try:
+                    r = await session.get(path)
+                    if r.status < 404:
+                        ctx.cloud_save_endpoints.append(path)
+                        logger.info("  [CLOUD SAVE] Endpoint found: %s -> HTTP %d", path, r.status)
+
+                        # 무결성 검증 없이 수정 가능한지 테스트
+                        tampered_save: dict[str, Any] = {
+                            "gold": 9999999,
+                            "gems": 9999999,
+                            "level": 999,
+                            "items": ["legendary_sword", "god_armor"],
+                            "achievements": ["all_unlocked"],
+                            "version": 1,
+                        }
+
+                        try:
+                            put_r = await session.request("PUT", path, json_data=tampered_save)
+                            post_r = await session.request("POST", path, json_data=tampered_save)
+
+                            for method_name, resp in [("PUT", put_r), ("POST", post_r)]:
+                                if resp.status in (200, 201):
+                                    cloud_result: dict[str, Any] = {
+                                        "endpoint": path,
+                                        "method": method_name,
+                                        "integrity_check": False,
+                                        "manipulable": True,
+                                        "response_status": resp.status,
+                                    }
+                                    ctx.cloud_save_results.append(cloud_result)
+
+                                    ctx.score_tracker.record_finding(
+                                        f"GAME-CLOUD-SAVE-{path.replace('/', '-')}",
+                                        "GAME-CLIENT-CLOUD-001",
+                                        level=4,
+                                    )
+                                    ctx.add_finding(
+                                        title=(
+                                            f"Cloud Save Manipulation — No Integrity Check at {path}|||"
+                                            f"클라우드 세이브 조작 — {path}에서 무결성 검증 없음"
+                                        ),
+                                        severity="critical",
+                                        finding_type="business_logic",
+                                        description=(
+                                            f"{method_name} {path} accepted tampered save data "
+                                            f"(gold=9999999, level=999) without integrity validation. "
+                                            f"Attacker can permanently override game progress, "
+                                            f"grant unlimited currency, and unlock all items.|||"
+                                            f"{method_name} {path}에서 변조된 세이브 데이터 "
+                                            f"(gold=9999999, level=999) 무결성 검증 없이 수락. "
+                                            f"공격자가 게임 진행 상황 영구 변조, 무제한 통화 획득, "
+                                            f"모든 아이템 잠금 해제 가능."
+                                        ),
+                                        target=ctx.target,
+                                        affected_component=path,
+                                        source_plugin="game-pipeline-phase10-cloud",
+                                    )
+                                    ctx.add_game_finding(
+                                        category="cloud_save",
+                                        issue=f"Cloud save manipulation via {method_name} {path}",
+                                        severity="critical",
+                                        details=cloud_result,
+                                    )
+                                    logger.info(
+                                        "  [CLOUD SAVE] VULNERABLE: %s %s -> HTTP %d",
+                                        method_name, path, resp.status,
+                                    )
+                        except Exception:
+                            pass
+
+                except Exception:
+                    pass
+
+        finally:
+            await mgr.close_all()
+
+        logger.info(
+            "  Cloud save: %d endpoints found, %d manipulable",
+            len(ctx.cloud_save_endpoints),
+            sum(1 for r in ctx.cloud_save_results if r.get("manipulable")),
+        )
 
     async def _phase11_memory_scan(self, ctx: GameScanContext) -> None:
         """Phase 11: 로컬 → Frida 메모리 스캔 / 리모트 → 서버측 검증 우회 테스트.

@@ -164,6 +164,52 @@ class GameScanContext(ScanContext):
     game_auth_tokens: list[dict[str, Any]] = field(default_factory=list)
     session_hijacking_vectors: list[dict[str, Any]] = field(default_factory=list)
 
+    # ── 시간 조작 (Time Manipulation) ─────────────────────────────
+    time_manipulation_results: list[dict[str, Any]] = field(default_factory=list)
+    # [{"endpoint": "/api/v1/daily-reward", "vector": "future_timestamp",
+    #   "bypassed": True, "response_status": 200}]
+
+    # ── 세이브파일 / 설정파일 분석 ────────────────────────────────
+    save_files: list[dict[str, Any]] = field(default_factory=list)
+    # [{"path": "/saves/slot1.sav", "format": "json", "plaintext_values": True,
+    #   "encrypted": False, "fields": {"gold": 1000}}]
+
+    config_files: list[dict[str, Any]] = field(default_factory=list)
+    # [{"path": "settings.ini", "cheat_options": ["god_mode=false"]}]
+
+    # ── 가챠 / RNG 조작 ───────────────────────────────────────────
+    gacha_results: list[dict[str, Any]] = field(default_factory=list)
+    # [{"endpoint": "/api/v1/gacha/pull", "attempt": 1, "result": {...},
+    #   "seed_predictable": False}]
+
+    gacha_endpoints: list[str] = field(default_factory=list)
+    # 식별된 가챠 관련 엔드포인트
+
+    # ── GM 커맨드 / 어드민 엔드포인트 ────────────────────────────
+    gm_endpoints_found: list[dict[str, Any]] = field(default_factory=list)
+    # [{"path": "/admin/gm", "status": 200, "accessible": True}]
+
+    gm_command_responses: list[dict[str, Any]] = field(default_factory=list)
+    # 채팅에서 GM 명령어 주입 시도 결과
+
+    # ── 선물 / 거래 남용 ──────────────────────────────────────────
+    trade_abuse_results: list[dict[str, Any]] = field(default_factory=list)
+    # [{"vector": "negative_quantity", "endpoint": "/api/v1/gift",
+    #   "vulnerable": True, "response": "..."}]
+
+    # ── 리플레이 공격 ────────────────────────────────────────────
+    replay_attack_results: list[dict[str, Any]] = field(default_factory=list)
+    # [{"endpoint": "/api/v1/claim", "replayed_n_times": 5,
+    #   "successes": 3, "nonce_protected": False}]
+
+    # ── 클라우드 세이브 ───────────────────────────────────────────
+    cloud_save_endpoints: list[str] = field(default_factory=list)
+    # 식별된 클라우드 세이브 관련 엔드포인트
+
+    cloud_save_results: list[dict[str, Any]] = field(default_factory=list)
+    # [{"endpoint": "/api/v1/cloud-save", "integrity_check": False,
+    #   "manipulable": True}]
+
     def add_game_finding(
         self,
         category: str,
