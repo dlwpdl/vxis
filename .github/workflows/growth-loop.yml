@@ -1,9 +1,9 @@
 name: VXIS Growth Loop
 
 on:
-  # 매일 23:00 UTC (08:00 KST 다음날) — 하루 마무리 성장 측정
+  # 매일 15:00 UTC (00:00 KST 자정) — 하루 마무리 성장 측정
   schedule:
-    - cron: "0 23 * * *"
+    - cron: "0 15 * * *"
 
   workflow_dispatch:
     inputs:
