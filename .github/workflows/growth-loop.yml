@@ -1,0 +1,341 @@
+name: VXIS Growth Loop
+
+on:
+  # 매주 일요일 06:00 UTC — 주간 성장 측정
+  schedule:
+    - cron: "0 6 * * 0"
+
+  workflow_dispatch:
+    inputs:
+      target_type:
+        description: "벤치마크 대상 (web/game/mobile/all)"
+        required: false
+        default: "web"
+        type: choice
+        options:
+          - web
+          - game
+          - mobile
+          - all
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  growth-benchmark:
+    name: Weekly Growth Measurement
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        target_type: [web]
+      fail-fast: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install VXIS
+        run: pip install -e ".[dev]" 2>/dev/null || echo "PYTHONPATH=src" >> $GITHUB_ENV
+
+      - name: Restore score history
+        uses: actions/cache@v4
+        with:
+          path: tools/benchmark/
+          key: growth-loop-${{ github.run_id }}
+          restore-keys: growth-loop-
+
+      - name: Run benchmark
+        id: benchmark
+        env:
+          PYTHONPATH: src
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          VXIS_BENCHMARK_TARGET_WEB: ${{ vars.BENCHMARK_TARGET_WEB || 'http://testphp.vulnweb.com' }}
+        run: |
+          python - <<'PYEOF'
+          import asyncio, json, os, sys
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          sys.path.insert(0, "src")
+
+          HISTORY_FILE = Path("tools/benchmark/score_history.json")
+          BASELINE_FILE = Path("tools/benchmark/baseline.json")
+          HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+          # 히스토리 로드
+          history = []
+          if HISTORY_FILE.exists():
+              history = json.loads(HISTORY_FILE.read_text())
+
+          target_type = "${{ matrix.target_type }}"
+          target_url = os.environ.get("VXIS_BENCHMARK_TARGET_WEB", "")
+
+          if not target_url:
+              print(f"No target configured for {target_type}")
+              sys.exit(0)
+
+          try:
+              from vxis.scoring.benchmark import BenchmarkRunner
+              runner = BenchmarkRunner(baseline_path=str(BASELINE_FILE))
+
+              async def main():
+                  score = await runner.run_benchmark(target_type, target_url)
+                  comparison = runner.compare_with_baseline(score)
+
+                  # 히스토리에 추가
+                  entry = {
+                      "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                      "target_type": target_type,
+                      "total": score.total,
+                      "grade": score.grade,
+                      "dimensions": {
+                          "vector_coverage": score.vector_coverage.score,
+                          "exploitation_reach": score.exploitation_reach.score,
+                          "chain_intelligence": score.chain_intelligence.score,
+                          "finding_precision": score.finding_precision.score,
+                          "completeness": score.completeness.score,
+                      },
+                      "delta": comparison.total_delta if comparison else 0,
+                  }
+                  history.append(entry)
+
+                  # 최대 52주 유지
+                  if len(history) > 52:
+                      history[:] = history[-52:]
+
+                  HISTORY_FILE.write_text(json.dumps(history, indent=2))
+
+                  # 점수 개선 시 베이스라인 업데이트
+                  if comparison and comparison.total_delta > 0:
+                      runner.save_baseline(score)
+                      print(f"Baseline updated: {score.total:.1f} [{score.grade}] (+{comparison.total_delta:+.1f})")
+
+                  print(score.summary_text())
+                  return score, comparison
+
+              score, comparison = asyncio.run(main())
+
+          except Exception as exc:
+              print(f"Benchmark failed: {exc}")
+              # 실패해도 히스토리 기록 (0점으로)
+              entry = {
+                  "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                  "target_type": target_type,
+                  "total": 0,
+                  "grade": "D",
+                  "error": str(exc),
+              }
+              history.append(entry)
+              HISTORY_FILE.write_text(json.dumps(history, indent=2))
+          PYEOF
+
+      - name: Generate growth report
+        id: report
+        env:
+          PYTHONPATH: src
+        run: |
+          python - <<'PYEOF'
+          import json
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          HISTORY_FILE = Path("tools/benchmark/score_history.json")
+          REPORT_FILE = Path("tools/benchmark/growth_report.md")
+
+          if not HISTORY_FILE.exists():
+              print("No history yet")
+              exit(0)
+
+          history = json.loads(HISTORY_FILE.read_text())
+          if not history:
+              exit(0)
+
+          now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+          latest = history[-1]
+
+          # 성장 추이 계산
+          lines = [
+              "# VXIS Growth Report",
+              f"**Date:** {now}",
+              f"**Latest Score:** {latest.get('total', 0):.1f} / 1000 [{latest.get('grade', '?')}]",
+              "",
+              "## Score History",
+              "",
+              "| Date | Score | Grade | Delta | Trend |",
+              "|------|-------|-------|-------|-------|",
+          ]
+
+          for i, entry in enumerate(history[-12:]):  # 최근 12주
+              delta = entry.get("delta", 0)
+              trend = "📈" if delta > 0 else ("📉" if delta < 0 else "➡️")
+              error = f" ⚠️ {entry['error'][:30]}" if entry.get("error") else ""
+              lines.append(
+                  f"| {entry['date']} | {entry.get('total', 0):.1f} | "
+                  f"{entry.get('grade', '?')} | {delta:+.1f} | {trend}{error} |"
+              )
+
+          # 약점 분석
+          if "dimensions" in latest:
+              dims = latest["dimensions"]
+              lines.extend([
+                  "",
+                  "## Dimension Breakdown (Latest)",
+                  "",
+                  "| Dimension | Score | Max | % | Status |",
+                  "|-----------|-------|-----|---|--------|",
+              ])
+              dim_config = [
+                  ("Vector Coverage", "vector_coverage", 250),
+                  ("Exploitation Reach", "exploitation_reach", 300),
+                  ("Chain Intelligence", "chain_intelligence", 150),
+                  ("Finding Precision", "finding_precision", 200),
+                  ("Completeness", "completeness", 100),
+              ]
+              weakest = None
+              weakest_pct = 1.0
+              for name, key, max_score in dim_config:
+                  score = dims.get(key, 0)
+                  pct = score / max_score if max_score else 0
+                  status = "🟢" if pct >= 0.7 else ("🟡" if pct >= 0.4 else "🔴")
+                  lines.append(f"| {name} | {score:.1f} | {max_score} | {pct:.0%} | {status} |")
+                  if pct < weakest_pct:
+                      weakest_pct = pct
+                      weakest = (name, key, pct)
+
+              if weakest:
+                  lines.extend([
+                      "",
+                      f"## Weakest Dimension: {weakest[0]} ({weakest[2]:.0%})",
+                      "",
+                      "**다음 주 개선 포인트:**",
+                  ])
+                  improvement_tips = {
+                      "vector_coverage": "- 더 많은 공격 벡터를 시도하도록 에이전트 확장\n- 누락된 벡터 카테고리 확인 (injection, auth, crypto 등)",
+                      "exploitation_reach": "- L2+ 도달률을 높이기 위해 익스플로잇 로직 강화\n- Chain Reasoner로 더 깊은 공격 경로 탐색",
+                      "chain_intelligence": "- 체인 깊이를 늘리기 위해 피벗/횡이동 로직 추가\n- 발견된 취약점 간 연결점 탐색 강화",
+                      "finding_precision": "- FP 필터링 파이프라인 개선\n- 증거 수집 로직 강화 (evidence 2개 이상)",
+                      "completeness": "- 실패/스킵되는 Phase 원인 분석\n- 도구 설치/환경 문제 해결",
+                  }
+                  lines.append(improvement_tips.get(weakest[1], "- 해당 차원 코드 리뷰 필요"))
+
+          # 성장률 계산
+          if len(history) >= 2:
+              first = history[0].get("total", 0)
+              last = latest.get("total", 0)
+              growth = last - first
+              weeks = len(history)
+              lines.extend([
+                  "",
+                  f"## Growth Summary",
+                  f"- **총 성장:** {growth:+.1f}점 ({weeks}주간)",
+                  f"- **주간 평균 성장:** {growth / max(weeks, 1):+.1f}점/주",
+              ])
+
+          REPORT_FILE.write_text("\n".join(lines), encoding="utf-8")
+          print(f"Growth report saved: {REPORT_FILE}")
+
+          # GitHub Actions output
+          with open(os.environ.get("GITHUB_OUTPUT", "/dev/null"), "a") as f:
+              f.write(f"score={latest.get('total', 0):.1f}\n")
+              f.write(f"grade={latest.get('grade', '?')}\n")
+          PYEOF
+
+      - name: Commit score history
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tools/benchmark/ 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: growth loop — score update $(date -u +%Y-%m-%d)"
+            git pull --rebase origin main
+            git push
+          fi
+
+      - name: Send Telegram report
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PYEOF'
+          import json, os, urllib.request, urllib.error
+          from pathlib import Path
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+          if not token or not chat_id:
+              print("Telegram not configured")
+              exit(0)
+
+          history_file = Path("tools/benchmark/score_history.json")
+          if not history_file.exists():
+              exit(0)
+
+          history = json.loads(history_file.read_text())
+          if not history:
+              exit(0)
+
+          latest = history[-1]
+          total = latest.get("total", 0)
+          grade = latest.get("grade", "?")
+          delta = latest.get("delta", 0)
+          trend = "📈" if delta > 0 else ("📉" if delta < 0 else "➡️")
+
+          # 약점 분석
+          weakest_msg = ""
+          if "dimensions" in latest:
+              dims = latest["dimensions"]
+              dim_names = {
+                  "vector_coverage": ("벡터 커버리지", 250),
+                  "exploitation_reach": ("공격 깊이", 300),
+                  "chain_intelligence": ("체인 지능", 150),
+                  "finding_precision": ("발견 정확도", 200),
+                  "completeness": ("완전성", 100),
+              }
+              weakest_key = min(dims, key=lambda k: dims[k] / dim_names[k][1] if k in dim_names else 1)
+              wname, wmax = dim_names.get(weakest_key, (weakest_key, 100))
+              wpct = dims[weakest_key] / wmax
+              weakest_msg = f"\n🎯 <b>약점:</b> {wname} ({wpct:.0%})"
+
+          msg = (
+              f"📊 <b>VXIS Growth Loop — 주간 리포트</b>\n"
+              f"\n"
+              f"🏆 <b>점수:</b> {total:.1f} / 1000 [{grade}]\n"
+              f"{trend} <b>변화:</b> {delta:+.1f}점"
+              f"{weakest_msg}\n"
+              f"\n"
+              f"📈 <b>히스토리:</b> {len(history)}주 추적 중"
+          )
+
+          payload = json.dumps({
+              "chat_id": chat_id,
+              "text": msg,
+              "parse_mode": "HTML",
+          }).encode("utf-8")
+
+          req = urllib.request.Request(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data=payload,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          try:
+              urllib.request.urlopen(req, timeout=15)
+              print("Telegram report sent")
+          except Exception as e:
+              print(f"Telegram failed: {e}")
+          PYEOF
