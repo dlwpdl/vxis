@@ -77,7 +77,7 @@ class MobilePipeline:
 
         platform_label = "iOS" if ctx.is_ios else "Android"
         logger.info("=" * 70)
-        logger.info("  VXIS MobilePipeline — 20 Phase Mobile Pentesting")
+        logger.info("  VXIS MobilePipeline — 21 Phase Mobile Pentesting")
         logger.info("  Target: %s  Platform: %s", target, platform_label)
         logger.info("  Binary: %s", app_binary_path or "(none)")
         logger.info("  Scan ID: %s", ctx.scan_id)
@@ -103,7 +103,8 @@ class MobilePipeline:
             ("Phase 16: Business Logic — IAP & Feature Flag Bypass", self._phase16_business),
             ("Phase 17: Deep Link Hijacking — URL Scheme Security", self._phase17_deeplink),
             ("Phase 18: IPC Security — Intent/Pasteboard/Extension", self._phase18_ipc),
-            ("Phase 19: Report — NCC Style + OWASP Mobile Top 10", self._phase19_report),
+            ("Phase 19: Privacy Controls — OWASP M1/M6/M9", self._phase_privacy_controls),
+            ("Phase 20: Report — NCC Style + OWASP Mobile Top 10", self._phase19_report),
         ]
 
         for name, func in phases:
@@ -365,6 +366,9 @@ class MobilePipeline:
 
         # ── 서드파티 SDK CVE 매칭 ──
         await self._match_sdk_cves(ctx)
+
+        # ── 애널리틱스 SDK 민감 데이터 유출 검사 ──
+        await self._test_analytics_sdk_leakage(ctx)
 
         try:
             ctx.score_tracker.record_phase_complete("Phase 1: Static Analysis — Decompile & Manifest")
@@ -2919,6 +2923,135 @@ class MobilePipeline:
             len(ctx.third_party_sdks), len(found_cves),
         )
 
+    async def _test_analytics_sdk_leakage(self, ctx: MobileScanContext) -> None:
+        """애널리틱스 SDK 민감 데이터 유출 검사.
+
+        벡터: MOB-SDK-002 (Analytics SDK — Sensitive Data Leakage)
+        탐지 대상:
+          - Firebase Analytics / Amplitude / Mixpanel / Flurry / AppsFlyer 등 SDK 사용 여부
+          - 이벤트 파라미터에 PII(이메일, 전화번호, 카드번호 등) 포함 여부
+          - 광고 ID(IDFA/GAID)와 개인정보 연계 여부
+          - 민감 데이터를 사용자 속성으로 설정하는 패턴
+        """
+        import re
+        import zipfile
+        import tempfile
+        from pathlib import Path
+
+        try:
+            ctx.score_tracker.record_vector_attempt("MOB-SDK-002")
+        except Exception:
+            pass
+
+        if not ctx.app_binary_path:
+            logger.info("  Analytics SDK leakage: no binary — skipping")
+            return
+
+        try:
+            tmp = Path(tempfile.mkdtemp(prefix="vxis_sdk2_"))
+            with zipfile.ZipFile(ctx.app_binary_path, "r") as zf:
+                zf.extractall(tmp)
+        except Exception as exc:
+            logger.debug("  Analytics SDK leakage extraction: %s", exc)
+            return
+
+        # PII가 이벤트 파라미터에 포함되는 패턴
+        pii_in_event = re.compile(
+            r"(?i)(?:logEvent|track|setUserProperty|setUserAttribute|identify)\s*\([^)]*"
+            r"(?:email|phone|ssn|password|creditCard|address|dateOfBirth|lastName|firstName)",
+        )
+        # 광고 ID와 개인정보 연계 패턴
+        adid_with_pii = re.compile(
+            r"(?i)(?:advertisingId|IDFA|GAID|getAdvertisingId)\s*.*"
+            r"(?:email|phone|userId|username)",
+        )
+        # 민감 데이터를 사용자 속성으로 설정하는 패턴
+        sensitive_user_prop = re.compile(
+            r"(?i)(?:setUserProperty|setUserAttribute|setUserId)\s*\([^)]*"
+            r"(?:password|ssn|creditCard|bankAccount)",
+        )
+
+        # 알려진 애널리틱스 SDK 식별자
+        analytics_sdk_names = [
+            "firebase", "firebaseanalytics", "googleanalytics",
+            "amplitude", "mixpanel", "flurry", "appsflyer",
+            "adjust", "braze", "segment", "heap", "intercom",
+        ]
+
+        issues: list[dict[str, str]] = []
+
+        source_files: list[Path] = []
+        for ext in (".java", ".kt", ".swift", ".m", ".js", ".dart"):
+            source_files.extend(list(tmp.rglob(f"*{ext}"))[:80])
+
+        for sf in source_files:
+            try:
+                content = sf.read_text(errors="replace")
+                content_lower = content.lower()
+
+                has_analytics_sdk = any(name in content_lower for name in analytics_sdk_names)
+                if not has_analytics_sdk:
+                    continue
+
+                if pii_in_event.search(content):
+                    issues.append({
+                        "file": sf.name,
+                        "issue": "PII passed as analytics event parameter",
+                        "severity": "high",
+                    })
+
+                if adid_with_pii.search(content):
+                    issues.append({
+                        "file": sf.name,
+                        "issue": "Advertising ID (IDFA/GAID) linked to PII",
+                        "severity": "high",
+                    })
+
+                if sensitive_user_prop.search(content):
+                    issues.append({
+                        "file": sf.name,
+                        "issue": "Sensitive data set as analytics user property",
+                        "severity": "high",
+                    })
+
+            except OSError:
+                continue
+
+        for issue in issues:
+            f = ctx.add_finding(
+                title=(
+                    f"Analytics SDK Sensitive Data Leakage: {issue['issue']}"
+                    f"|||애널리틱스 SDK 민감 데이터 유출: {issue['issue']}"
+                ),
+                severity=issue["severity"],
+                finding_type="analytics_data_leakage",
+                description=(
+                    f"{issue['issue']} detected in '{issue['file']}'. "
+                    "Analytics SDKs must not receive Personally Identifiable Information (PII). "
+                    "This can result in GDPR/CCPA violations and privacy breaches. "
+                    "Anonymize or hash user identifiers before passing to analytics."
+                    "|||"
+                    f"'{issue['file']}'에서 {issue['issue']} 탐지. "
+                    "애널리틱스 SDK에 개인식별정보(PII)를 전달해서는 안 됩니다. "
+                    "이는 GDPR/CCPA 위반 및 개인정보 침해로 이어질 수 있습니다. "
+                    "분석 도구에 전달하기 전에 사용자 식별자를 익명화하거나 해시하세요."
+                ),
+                target=ctx.target,
+                affected_component=issue["file"],
+                source_plugin="vxis-mobile-pipeline",
+                cwe_ids=["CWE-200", "CWE-359"],
+            )
+            ctx.add_owasp_finding("M10", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-SDK-002", 2)
+            except Exception:
+                pass
+
+        logger.info(
+            "  Analytics SDK leakage: %d source files scanned, %d issues found",
+            len(source_files), len(issues),
+        )
+
     async def _review_crypto_implementation(
         self, ctx: MobileScanContext, extract_dir: object,
     ) -> None:
@@ -3925,7 +4058,207 @@ class MobilePipeline:
         )
 
     # ══════════════════════════════════════════════════════════
-    # Phase 19: Report
+    # Phase 19: Privacy Controls
+    # ══════════════════════════════════════════════════════════
+
+    async def _phase_privacy_controls(self, ctx: MobileScanContext) -> None:
+        """OWASP M1/M6/M9 프라이버시 제어 종합 검증.
+
+        벡터:
+          MOB-PRIV-001 — OWASP M1: 부적절한 자격증명 사용 (Improper Credential Usage)
+          MOB-PRIV-002 — OWASP M6: 불충분한 개인정보 보호 (Inadequate Privacy Controls)
+          MOB-PRIV-003 — OWASP M9: 안전하지 않은 데이터 저장 종합 (Insecure Data Storage)
+        """
+        import re
+        import zipfile
+        import tempfile
+        from pathlib import Path
+
+        for vid in ["MOB-PRIV-001", "MOB-PRIV-002", "MOB-PRIV-003"]:
+            try:
+                ctx.score_tracker.record_vector_attempt(vid)
+            except Exception:
+                pass
+
+        if not ctx.app_binary_path:
+            logger.info("  Privacy controls: no binary — skipping")
+            try:
+                ctx.score_tracker.record_phase_complete(
+                    "Phase 19: Privacy Controls — OWASP M1/M6/M9",
+                    findings_count=0,
+                )
+            except Exception:
+                pass
+            return
+
+        try:
+            tmp = Path(tempfile.mkdtemp(prefix="vxis_priv_"))
+            with zipfile.ZipFile(ctx.app_binary_path, "r") as zf:
+                zf.extractall(tmp)
+        except Exception as exc:
+            logger.debug("  Privacy controls extraction: %s", exc)
+            return
+
+        # MOB-PRIV-001: Improper Credential Usage — 하드코딩된 자격증명 패턴
+        cred_patterns: list[tuple[re.Pattern[str], str]] = [
+            (re.compile(r'(?i)(?:password|passwd|pwd)\s*=\s*["\'][^"\']{4,}["\']'), "Hardcoded password"),
+            (re.compile(r'(?i)(?:apikey|api_key|secret_key)\s*=\s*["\'][A-Za-z0-9+/]{16,}["\']'), "Hardcoded API key"),
+            (re.compile(r'(?i)(?:access_token|accesstoken)\s*=\s*["\'][A-Za-z0-9._\-]{20,}["\']'), "Hardcoded access token"),
+            (re.compile(r'(?i)Bearer\s+[A-Za-z0-9._\-]{30,}'), "Hardcoded Bearer token"),
+        ]
+
+        # MOB-PRIV-002: Inadequate Privacy Controls — PII 로그 출력 및 과수집 패턴
+        pii_log_patterns: list[tuple[re.Pattern[str], str]] = [
+            (re.compile(r'(?i)(?:Log\.|print|NSLog|System\.out)\s*.*(?:email|phone|ssn|password|creditCard|cardNumber)'), "PII exposed in log output"),
+            (re.compile(r'(?i)(?:analytics|tracking|telemetry).*(?:email|phone|userId|deviceId)'), "PII included in analytics call"),
+            (re.compile(r'(?i)(?:location|gps|latitude|longitude).*(?:share|send|upload|post)'), "Location data shared without explicit consent"),
+        ]
+
+        # MOB-PRIV-003: Insecure Data Storage (Comprehensive) — 안전하지 않은 저장소 패턴
+        insecure_storage_patterns: list[tuple[re.Pattern[str], str]] = [
+            (re.compile(r'(?i)(?:getSharedPreferences|NSUserDefaults).*(?:password|secret|token|key)'), "Credentials stored in SharedPreferences/UserDefaults"),
+            (re.compile(r'(?i)openFileOutput\s*\(.*MODE_WORLD_READABLE'), "World-readable file creation"),
+            (re.compile(r'(?i)MODE_WORLD_WRITABLE'), "World-writable file creation"),
+            (re.compile(r'(?i)(?:sqlite|SQLiteDatabase).*(?:password|secret|ssn|creditCard)'), "Sensitive data in SQLite plaintext"),
+            (re.compile(r'(?i)(?:getExternalStorageDirectory|getExternalFilesDir).*(?:write|create|open)'), "Sensitive data on external storage"),
+        ]
+
+        priv001_issues: list[dict[str, str]] = []
+        priv002_issues: list[dict[str, str]] = []
+        priv003_issues: list[dict[str, str]] = []
+
+        source_files: list[Path] = []
+        for ext in (".java", ".kt", ".swift", ".m", ".js", ".dart"):
+            source_files.extend(list(tmp.rglob(f"*{ext}"))[:80])
+
+        for sf in source_files:
+            try:
+                content = sf.read_text(errors="replace")
+
+                for pattern, label in cred_patterns:
+                    if pattern.search(content):
+                        priv001_issues.append({"file": sf.name, "issue": label})
+
+                for pattern, label in pii_log_patterns:
+                    if pattern.search(content):
+                        priv002_issues.append({"file": sf.name, "issue": label})
+
+                for pattern, label in insecure_storage_patterns:
+                    if pattern.search(content):
+                        priv003_issues.append({"file": sf.name, "issue": label})
+
+            except OSError:
+                continue
+
+        # MOB-PRIV-001 findings 기록
+        for issue in priv001_issues:
+            f = ctx.add_finding(
+                title=(
+                    f"Improper Credential Usage: {issue['issue']}"
+                    f"|||부적절한 자격증명 사용: {issue['issue']}"
+                ),
+                severity="high",
+                finding_type="improper_credential_usage",
+                description=(
+                    f"{issue['issue']} detected in '{issue['file']}'. "
+                    "Hardcoded credentials can be extracted from the app binary and used "
+                    "to gain unauthorized access to backend systems. "
+                    "Store credentials in secure system keystores, not in source code."
+                    "|||"
+                    f"'{issue['file']}'에서 {issue['issue']} 탐지. "
+                    "하드코딩된 자격증명은 앱 바이너리에서 추출되어 "
+                    "백엔드 시스템에 무단 접근하는 데 사용될 수 있습니다. "
+                    "자격증명은 소스 코드가 아닌 안전한 시스템 키스토어에 저장하세요."
+                ),
+                target=ctx.target,
+                affected_component=issue["file"],
+                source_plugin="vxis-mobile-pipeline",
+                cwe_ids=["CWE-798", "CWE-259"],
+            )
+            ctx.add_owasp_finding("M1", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-PRIV-001", 2)
+            except Exception:
+                pass
+
+        # MOB-PRIV-002 findings 기록
+        for issue in priv002_issues:
+            f = ctx.add_finding(
+                title=(
+                    f"Inadequate Privacy Control: {issue['issue']}"
+                    f"|||불충분한 개인정보 보호: {issue['issue']}"
+                ),
+                severity="medium",
+                finding_type="inadequate_privacy_controls",
+                description=(
+                    f"{issue['issue']} detected in '{issue['file']}'. "
+                    "Personally Identifiable Information (PII) must not appear in log output "
+                    "or be forwarded to third-party services without explicit user consent. "
+                    "Implement data minimization, anonymization, and log scrubbing."
+                    "|||"
+                    f"'{issue['file']}'에서 {issue['issue']} 탐지. "
+                    "개인식별정보(PII)는 로그 출력에 포함되거나 명시적 사용자 동의 없이 "
+                    "서드파티 서비스로 전달되어서는 안 됩니다. "
+                    "데이터 최소화, 익명화, 로그 스크러빙을 구현하세요."
+                ),
+                target=ctx.target,
+                affected_component=issue["file"],
+                source_plugin="vxis-mobile-pipeline",
+                cwe_ids=["CWE-200", "CWE-359"],
+            )
+            ctx.add_owasp_finding("M6", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-PRIV-002", 1)
+            except Exception:
+                pass
+
+        # MOB-PRIV-003 findings 기록
+        for issue in priv003_issues:
+            f = ctx.add_finding(
+                title=(
+                    f"Insecure Data Storage: {issue['issue']}"
+                    f"|||안전하지 않은 데이터 저장: {issue['issue']}"
+                ),
+                severity="high",
+                finding_type="insecure_data_storage",
+                description=(
+                    f"{issue['issue']} detected in '{issue['file']}'. "
+                    "Sensitive data stored in insecure locations can be accessed by other "
+                    "apps on rooted/jailbroken devices, or extracted via ADB/iTunes backups. "
+                    "Use Android Keystore or iOS Keychain for all sensitive data."
+                    "|||"
+                    f"'{issue['file']}'에서 {issue['issue']} 탐지. "
+                    "안전하지 않은 위치에 저장된 민감한 데이터는 루팅/탈옥 기기에서 "
+                    "다른 앱이 접근하거나 ADB/iTunes 백업으로 추출될 수 있습니다. "
+                    "모든 민감 데이터에 Android Keystore 또는 iOS Keychain을 사용하세요."
+                ),
+                target=ctx.target,
+                affected_component=issue["file"],
+                source_plugin="vxis-mobile-pipeline",
+                cwe_ids=["CWE-312", "CWE-311"],
+            )
+            ctx.add_owasp_finding("M9", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-PRIV-003", 2)
+            except Exception:
+                pass
+
+        total = len(priv001_issues) + len(priv002_issues) + len(priv003_issues)
+        logger.info(
+            "  Privacy controls: M1=%d M6=%d M9=%d issues found",
+            len(priv001_issues), len(priv002_issues), len(priv003_issues),
+        )
+
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 19: Privacy Controls — OWASP M1/M6/M9",
+                findings_count=total,
+            )
+        except Exception:
+            pass
+
+    # ══════════════════════════════════════════════════════════
+    # Phase 20: Report
     # ══════════════════════════════════════════════════════════
 
     async def _phase19_report(self, ctx: MobileScanContext) -> None:
@@ -3960,7 +4293,7 @@ class MobilePipeline:
             company_name="VXIS Security",
             author="VXIS MobilePipeline",
             executive_summary=(
-                f"VXIS MobilePipeline executed all 20 phases against {platform_label} app "
+                f"VXIS MobilePipeline executed all 21 phases against {platform_label} app "
                 f"'{ctx.app_package or ctx.target}'.\n\n"
                 f"Platform: {platform_label} | Version: {ctx.app_version or 'unknown'}\n"
                 f"Package: {ctx.app_package or 'unknown'}\n"
@@ -3980,7 +4313,7 @@ class MobilePipeline:
                 f"Duration: {ctx.duration_seconds:.0f}s"
             ),
             methodology=(
-                "20-Phase VXIS Mobile Pentesting Pipeline. "
+                "21-Phase VXIS Mobile Pentesting Pipeline. "
                 "Static analysis (jadx/apktool/plistlib), "
                 "dynamic analysis (Frida instrumentation), "
                 "network interception (mitmproxy/X-Ray), "
