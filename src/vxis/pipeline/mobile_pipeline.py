@@ -1463,7 +1463,8 @@ class MobilePipeline:
         """SQLite, Keychain/Keystore, SharedPreferences, 캐시/로그 검사."""
         try:
             for vid in ["MOB-STORE-001", "MOB-STORE-002", "MOB-STORE-003",
-                        "MOB-STORE-004", "MOB-STORE-005", "MOB-STORE-006"]:
+                        "MOB-STORE-004", "MOB-STORE-005", "MOB-STORE-006",
+                        "MOB-SDK-002"]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
@@ -1627,7 +1628,8 @@ class MobilePipeline:
     async def _phase12_backup(self, ctx: MobileScanContext) -> None:
         """iTunes/ADB 백업 추출, 민감 데이터 확인."""
         try:
-            ctx.score_tracker.record_vector_attempt("MOB-STORE-001")
+            for vid in ["MOB-STORE-001", "MOB-PRIV-001", "MOB-PRIV-002", "MOB-PRIV-003"]:
+                ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
 
