@@ -1,9 +1,9 @@
 name: VXIS Growth Loop
 
 on:
-  # 매주 일요일 06:00 UTC — 주간 성장 측정
+  # 매일 23:00 UTC (08:00 KST 다음날) — 하루 마무리 성장 측정
   schedule:
-    - cron: "0 6 * * 0"
+    - cron: "0 23 * * *"
 
   workflow_dispatch:
     inputs:
@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   growth-benchmark:
-    name: Weekly Growth Measurement
+    name: Daily Growth Measurement
     runs-on: ubuntu-latest
 
     strategy:
@@ -113,9 +113,9 @@ jobs:
                   }
                   history.append(entry)
 
-                  # 최대 52주 유지
-                  if len(history) > 52:
-                      history[:] = history[-52:]
+                  # 최대 365일 유지
+                  if len(history) > 365:
+                      history[:] = history[-365:]
 
                   HISTORY_FILE.write_text(json.dumps(history, indent=2))
 
