@@ -1,16 +1,26 @@
-"""Trivy K8s plugin — Kubernetes cluster vulnerability and misconfiguration scanning."""
+"""Trivy K8s plugin — Kubernetes cluster vulnerability and misconfiguration scanning.
+
+SECURITY NOTE: CVE-2026-33634 대응 — trivy_plugin.py의 버전 차단 로직 공유.
+"""
 
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
 from vxis.plugins.base import BasePlugin, PluginMeta
+from vxis.plugins.supply_chain.trivy_plugin import _is_version_blocked, _TRIVY_SAFE_MIN_VERSION
+
+logger = logging.getLogger(__name__)
 
 
 class TrivyK8sPlugin(BasePlugin):
-    """Scan a running Kubernetes cluster with trivy for CRITICAL/HIGH vulnerabilities."""
+    """Scan a running Kubernetes cluster with trivy for CRITICAL/HIGH vulnerabilities.
+
+    WARNING: CVE-2026-33634 대응으로 0.62.x 버전은 자동 차단됩니다.
+    """
 
     _meta = PluginMeta(
         name="trivy-k8s",
@@ -22,6 +32,18 @@ class TrivyK8sPlugin(BasePlugin):
         produces=("k8s_vulns",),
         timeout_seconds=900,
     )
+
+    def validate_environment(self) -> bool:
+        if not super().validate_environment():
+            return False
+        version = self.get_tool_version()
+        if _is_version_blocked(version):
+            logger.critical(
+                "BLOCKED: Trivy %s is compromised (CVE-2026-33634). "
+                "Upgrade to >= %s.", version, _TRIVY_SAFE_MIN_VERSION,
+            )
+            return False
+        return True
 
     @property
     def meta(self) -> PluginMeta:
