@@ -1,9 +1,11 @@
 name: VXIS Growth Loop
 
 on:
-  # 매주 일요일 06:00 UTC — 주간 성장 측정
+  # 매일 밤 15:00 UTC (자정 KST) — Docker 취약 앱 벤치마크
+  # 매주 일요일 06:00 UTC — 온라인 타겟 + 주간 종합
   schedule:
-    - cron: "0 6 * * 0"
+    - cron: "0 15 * * *"   # 매일 자정 KST
+    - cron: "0 6 * * 0"    # 매주 일요일
 
   workflow_dispatch:
     inputs:
@@ -27,8 +29,19 @@ permissions:
 
 jobs:
   growth-benchmark:
-    name: Weekly Growth Measurement
+    name: Growth Measurement
     runs-on: ubuntu-latest
+
+    # Docker 취약 앱 — 매일 밤 자동 기동
+    services:
+      dvwa:
+        image: vulnerables/web-dvwa
+        ports:
+          - 8081:80
+      juice-shop:
+        image: bkimminich/juice-shop
+        ports:
+          - 3000:3000
 
     strategy:
       matrix:
@@ -63,10 +76,9 @@ jobs:
           PYTHONPATH: src
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
-          VXIS_BENCHMARK_TARGET_WEB: ${{ vars.BENCHMARK_TARGET_WEB || 'http://testphp.vulnweb.com' }}
         run: |
           python - <<'PYEOF'
-          import asyncio, json, os, sys
+          import asyncio, json, os, sys, time
           from pathlib import Path
           from datetime import datetime, timezone
 
@@ -76,30 +88,62 @@ jobs:
           BASELINE_FILE = Path("tools/benchmark/baseline.json")
           HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-          # 히스토리 로드
           history = []
           if HISTORY_FILE.exists():
               history = json.loads(HISTORY_FILE.read_text())
 
           target_type = "${{ matrix.target_type }}"
-          target_url = os.environ.get("VXIS_BENCHMARK_TARGET_WEB", "")
+          now = datetime.now(timezone.utc)
+          is_sunday = now.weekday() == 6  # 일요일 = 주간 종합
 
-          if not target_url:
-              print(f"No target configured for {target_type}")
-              sys.exit(0)
+          # 멀티 타겟 — Docker 취약 앱 (매일) + 온라인 (주간)
+          targets = [
+              # (이름, URL, 매일/주간)
+              ("dvwa", "http://localhost:8081", "daily"),
+              ("juice-shop", "http://localhost:3000", "daily"),
+          ]
 
-          try:
-              from vxis.scoring.benchmark import BenchmarkRunner
-              runner = BenchmarkRunner(baseline_path=str(BASELINE_FILE))
+          if is_sunday:
+              # 일요일엔 온라인 타겟도 추가
+              targets.append(("vulnweb", "http://testphp.vulnweb.com", "weekly"))
 
-              async def main():
-                  score = await runner.run_benchmark(target_type, target_url)
-                  comparison = runner.compare_with_baseline(score)
+          best_score = None
+          best_comparison = None
 
-                  # 히스토리에 추가
+          for target_name, target_url, schedule in targets:
+              print(f"\n{'='*50}")
+              print(f"  Benchmark: {target_name} ({target_url})")
+              print(f"{'='*50}")
+
+              # Docker 서비스 준비 대기 (최대 30초)
+              if "localhost" in target_url:
+                  import urllib.request, urllib.error
+                  for attempt in range(15):
+                      try:
+                          urllib.request.urlopen(target_url, timeout=2)
+                          print(f"  {target_name} ready")
+                          break
+                      except Exception:
+                          time.sleep(2)
+                  else:
+                      print(f"  {target_name} not ready — skipping")
+                      continue
+
+              try:
+                  from vxis.scoring.benchmark import BenchmarkRunner
+                  runner = BenchmarkRunner(baseline_path=str(BASELINE_FILE))
+
+                  async def run_one(tt, url):
+                      score = await runner.run_benchmark(tt, url)
+                      comparison = runner.compare_with_baseline(score)
+                      return score, comparison
+
+                  score, comparison = asyncio.run(run_one(target_type, target_url))
+
                   entry = {
-                      "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                      "date": now.strftime("%Y-%m-%d"),
                       "target_type": target_type,
+                      "target_name": target_name,
                       "total": score.total,
                       "grade": score.grade,
                       "dimensions": {
@@ -110,37 +154,37 @@ jobs:
                           "completeness": score.completeness.score,
                       },
                       "delta": comparison.total_delta if comparison else 0,
+                      "schedule": schedule,
                   }
                   history.append(entry)
 
-                  # 최대 52주 유지
-                  if len(history) > 52:
-                      history[:] = history[-52:]
-
-                  HISTORY_FILE.write_text(json.dumps(history, indent=2))
-
-                  # 점수 개선 시 베이스라인 업데이트
                   if comparison and comparison.total_delta > 0:
                       runner.save_baseline(score)
-                      print(f"Baseline updated: {score.total:.1f} [{score.grade}] (+{comparison.total_delta:+.1f})")
+                      print(f"  Baseline updated: {score.total:.1f} [{score.grade}] (+{comparison.total_delta:+.1f})")
 
                   print(score.summary_text())
-                  return score, comparison
 
-              score, comparison = asyncio.run(main())
+                  if best_score is None or score.total > best_score.total:
+                      best_score = score
+                      best_comparison = comparison
 
-          except Exception as exc:
-              print(f"Benchmark failed: {exc}")
-              # 실패해도 히스토리 기록 (0점으로)
-              entry = {
-                  "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                  "target_type": target_type,
-                  "total": 0,
-                  "grade": "D",
-                  "error": str(exc),
-              }
-              history.append(entry)
-              HISTORY_FILE.write_text(json.dumps(history, indent=2))
+              except Exception as exc:
+                  print(f"  Benchmark failed: {exc}")
+                  history.append({
+                      "date": now.strftime("%Y-%m-%d"),
+                      "target_type": target_type,
+                      "target_name": target_name,
+                      "total": 0, "grade": "D",
+                      "error": str(exc)[:200],
+                      "schedule": schedule,
+                  })
+
+          # 히스토리 저장 (최대 365일)
+          if len(history) > 365:
+              history[:] = history[-365:]
+          HISTORY_FILE.write_text(json.dumps(history, indent=2))
+
+          print(f"\n총 {len(targets)} 타겟 벤치마크 완료")
           PYEOF
 
       - name: Generate growth report
