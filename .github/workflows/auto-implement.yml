@@ -277,6 +277,55 @@ Implement the changes described in the issue. Return JSON with the implementatio
           logger.info("Implementation complete: %d files", len(files_changed))
           PYEOF
 
+      - name: Security scan (supply chain check)
+        run: |
+          echo "[SECURITY] 생성된 코드에 악성 패턴 검사..."
+          python - <<'PYEOF'
+          import re, sys
+          from pathlib import Path
+
+          # 공급망 공격에 사용되는 위험 패턴
+          DANGEROUS_PATTERNS = [
+              (r"base64\.b64decode\s*\(", "base64 디코딩 — 숨겨진 페이로드 가능"),
+              (r"exec\s*\(", "exec() — 동적 코드 실행"),
+              (r"eval\s*\(", "eval() — 동적 코드 실행"),
+              (r"subprocess\.(?:call|run|Popen)\s*\(.*(curl|wget|nc\s)", "외부 다운로드/연결 시도"),
+              (r"os\.system\s*\(", "os.system() — 셸 명령 실행"),
+              (r"socket\.connect\s*\(", "소켓 연결 — C2 서버 통신 가능"),
+              (r"requests\.(?:get|post)\s*\(\s*['\"]https?://(?!api\.github|api\.together|api\.anthropic)", "알 수 없는 외부 서버 통신"),
+              (r"__import__\s*\(", "동적 모듈 임포트"),
+              (r"compile\s*\(.*exec", "컴파일 + 실행 체인"),
+              (r"marshal\.loads|pickle\.loads|yaml\.(?:load|unsafe_load)", "역직렬화 — RCE 가능"),
+              (r"ctypes\.|cffi\.", "네이티브 코드 실행"),
+              (r"\\x[0-9a-f]{2}.*\\x[0-9a-f]{2}.*\\x[0-9a-f]{2}", "16진수 인코딩 페이로드"),
+          ]
+
+          alerts = []
+          changed_files = list(Path(".").rglob("*.py"))
+
+          for fpath in changed_files:
+              try:
+                  content = fpath.read_text(encoding="utf-8", errors="ignore")
+              except Exception:
+                  continue
+
+              for pattern, desc in DANGEROUS_PATTERNS:
+                  matches = list(re.finditer(pattern, content))
+                  for m in matches:
+                      line_num = content[:m.start()].count("\n") + 1
+                      alerts.append(f"  ⚠️ {fpath}:{line_num} — {desc}")
+                      alerts.append(f"     매칭: {m.group()[:80]}")
+
+          if alerts:
+              print("🚨 [SECURITY] 위험 패턴 감지!")
+              for a in alerts:
+                  print(a)
+              print(f"\n총 {len(alerts)//2}건 — PR에 경고 포함됨")
+              Path("security_alerts.txt").write_text("\n".join(alerts))
+          else:
+              print("✅ [SECURITY] 위험 패턴 없음")
+          PYEOF
+
       - name: Commit and create PR
         if: always()
         env:

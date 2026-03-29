@@ -155,11 +155,11 @@ TARGETS: list[WatchTarget] = [
         relevance_tags=("ai-agent", "llm", "interactive-pentest", "gpt"),
     ),
     WatchTarget(
-        owner="Hacker-GPT",
-        repo="HackerGPT-2.0",
-        reason="AI security chatbot — RAG patterns for security knowledge, prompt engineering",
-        include_paths=("app/", "lib/", "components/"),
-        relevance_tags=("ai-agent", "llm", "security-chatbot", "rag"),
+        owner="browser-use",
+        repo="browser-use",
+        reason="AI browser automation — Playwright + LLM agent patterns, CPR Eyes 개선 참고",
+        include_paths=("browser_use/", "examples/"),
+        relevance_tags=("ai-agent", "browser", "playwright", "automation", "cpr"),
     ),
     # ── Recon & OSINT Frameworks ──
     WatchTarget(

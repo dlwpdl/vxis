@@ -72,10 +72,10 @@ relevance_tags = [
 ]
 added_at = "2026-03-23T04:44:53.692707+00:00"
 
-[targets."Hacker-GPT--HackerGPT-2.0"]
-owner = "Hacker-GPT"
-repo = "HackerGPT-2.0"
-reason = "AI security chatbot — RAG patterns for security knowledge, prompt engineering"
+[targets."browser-use--browser-use"]
+owner = "browser-use"
+repo = "browser-use"
+reason = "AI browser automation — Playwright + LLM agent, CPR Eyes 개선 참고"
 enabled = true
 watch_releases = true
 watch_commits = true
