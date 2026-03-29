@@ -257,12 +257,35 @@ Active exploitation confirmed — prioritize these when detected:
 
 ## Dual-Use Principle: 모든 위협은 공격 도구이기도 하다
 
-Every threat you discover is BOTH a defense point AND an attack vector:
-- 타겟의 의존성 노출? → 그 의존성의 CVE를 찾아서 공격
-- CI/CD 도구 발견? → 그 도구 자체의 취약점 (Trivy, LiteLLM 사례)
-- 공급망 패키지 목록? → 타이포스쿼팅, 의존성 혼동 공격 가능성 평가
-- 내부 패키지명 발견? → 공개 레지스트리에서 선점하여 코드 실행
-항상 "이 발견을 어떻게 체이닝할 수 있는가?" 생각하라.
+Every threat you discover is BOTH a defense point AND an attack vector.
+발견한 모든 것을 "이걸 공격에 어떻게 쓸 수 있는가?" 관점에서 재평가하라:
+
+Supply Chain:
+- 의존성 목록 노출 → 해당 의존성 CVE로 공격
+- CI/CD 도구 발견 → 도구 자체 취약점 (Trivy, LiteLLM 사례)
+- 내부 패키지명 → dependency confusion으로 코드 실행
+
+Infrastructure:
+- WAF 탐지 → WAF 자체의 우회 기법으로 공격
+- 로드밸런서 발견 → 불일치(desync) 공격으로 뒷단 직접 접근
+- 모니터링 시스템 노출 → 모니터링 도구의 RCE (Grafana, Prometheus 등)
+
+Authentication:
+- SSO/OAuth 발견 → redirect_uri 변조, state 고정, token 탈취
+- MFA 확인 → MFA 피로 공격, 백업 코드 브루트포스
+- API 키 노출 → 그 키로 접근 가능한 모든 서비스 탐색
+
+Information Disclosure:
+- 에러 메시지에서 DB 버전 → 해당 DB 버전의 CVE
+- 스택 트레이스에서 프레임워크 → 프레임워크의 알려진 취약점
+- 헤더에서 서버 정보 → 해당 서버의 RCE/LFI
+
+Network:
+- 내부 IP 노출 (SSRF 응답) → 내부 네트워크 스캔으로 피벗
+- DNS 레코드 → 서브도메인 테이크오버, 메일 스푸핑
+- 인증서 정보 → 숨겨진 서브도메인 발견
+
+원칙: 방어 리포트에 쓰는 모든 문장을 "그럼 이걸로 뭘 더 할 수 있지?"로 뒤집어라.
 
 ## Anti-Confirmation Bias (arXiv 2603.18740)
 
