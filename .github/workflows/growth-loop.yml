@@ -78,9 +78,9 @@ jobs:
           PYTHONPATH: src
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
-        timeout-minutes: 300  # 최대 5시간
+        timeout-minutes: 370  # 자정~06:00 KST (6시간 + 여유)
         run: |
-          MAX_ITER=${{ github.event.inputs.max_iterations || '5' }}
+          MAX_ITER=${{ github.event.inputs.max_iterations || '0' }}
           python - "$MAX_ITER" <<'PYEOF'
           import asyncio, json, os, sys, time, urllib.request, urllib.error
           from pathlib import Path
@@ -88,7 +88,10 @@ jobs:
 
           sys.path.insert(0, "src")
 
-          MAX_ITERATIONS = int(sys.argv[1]) if len(sys.argv) > 1 else 5
+          # 0 = 시간 기반 (06:00 KST = 21:00 UTC까지), 양수 = 횟수 제한
+          _max_iter_arg = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+          MAX_ITERATIONS = _max_iter_arg if _max_iter_arg > 0 else None  # None = 시간까지 무한
+          STOP_HOUR_UTC = 21  # 21:00 UTC = 06:00 KST
           HISTORY_FILE = Path("tools/benchmark/score_history.json")
           BASELINE_FILE = Path("tools/benchmark/baseline.json")
           ITERATION_LOG = Path("tools/benchmark/iteration_log.json")
@@ -208,17 +211,32 @@ jobs:
           # ═══════════════════════════════════════════════════════════
 
           now = datetime.now(timezone.utc)
+          stop_label = f"06:00 KST (21:00 UTC)" if MAX_ITERATIONS is None else f"최대 {MAX_ITERATIONS}회"
           print(f"\n{'#'*60}")
           print(f"  VXIS Growth Loop — {now.strftime('%Y-%m-%d %H:%M')} UTC")
-          print(f"  Max iterations: {MAX_ITERATIONS}")
+          print(f"  종료 조건: {stop_label}")
           print(f"{'#'*60}\n")
 
           prev_best = 0
-          no_improvement_count = 0
+          iteration = 0
 
-          for iteration in range(1, MAX_ITERATIONS + 1):
+          def _should_continue():
+              """계속 돌릴지 판단."""
+              if MAX_ITERATIONS is not None:
+                  return iteration < MAX_ITERATIONS
+              utc_now = datetime.now(timezone.utc)
+              return utc_now.hour < STOP_HOUR_UTC or (utc_now.hour == STOP_HOUR_UTC and utc_now.minute == 0)
+
+          while _should_continue():
+              iteration += 1
+              iter_label = f"{iteration}" if MAX_ITERATIONS is None else f"{iteration}/{MAX_ITERATIONS}"
+              time_left = ""
+              if MAX_ITERATIONS is None:
+                  utc_now = datetime.now(timezone.utc)
+                  mins_left = (STOP_HOUR_UTC - utc_now.hour) * 60 - utc_now.minute
+                  time_left = f" | 남은시간 ~{mins_left}분"
               print(f"\n{'='*60}")
-              print(f"  ITERATION {iteration}/{MAX_ITERATIONS}")
+              print(f"  ITERATION {iter_label}{time_left}")
               print(f"{'='*60}")
 
               iter_results = []
@@ -296,21 +314,12 @@ jobs:
               iter_log["improvement"] = round(improvement, 1)
 
               if improvement <= 0 and iteration > 1:
-                  no_improvement_count += 1
-                  print(f"  [PLATEAU] 개선 없음 ({no_improvement_count}회 연속)")
+                  print(f"  [PLATEAU] 개선 없음 — 계속 시도")
+              elif iteration > 1:
+                  print(f"  [GROWTH] +{improvement:.1f}점 성장!")
 
-                  if no_improvement_count >= 2:
-                      print(f"  [STOP] 2회 연속 개선 없음 — 현재 수준에서 안정화됨")
-                      iter_log["action"] = "stopped_plateau"
-                      iterations.append(iter_log)
-                      break
-              else:
-                  no_improvement_count = 0
-                  if iteration > 1:
-                      print(f"  [GROWTH] +{improvement:.1f}점 성장!")
-
-              # 마지막 반복이면 종료
-              if iteration >= MAX_ITERATIONS:
+              # 횟수 제한 모드에서만 마지막 반복 체크
+              if MAX_ITERATIONS is not None and iteration >= MAX_ITERATIONS:
                   iter_log["action"] = "max_iterations_reached"
                   iterations.append(iter_log)
                   break
