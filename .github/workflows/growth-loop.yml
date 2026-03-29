@@ -271,14 +271,24 @@ jobs:
 
               print(f"\n  Best: {current_best:.1f} | Weakest: {dim_names_ko.get(weakest_dim, '?')} ({weakest_pct:.0%})")
 
-              # iteration 기록
+              # iteration 기록 — 상세 스텝 로그
               iter_log = {
                   "iteration": iteration,
                   "timestamp": datetime.now(timezone.utc).isoformat(),
                   "best_score": current_best,
                   "weakest_dimension": weakest_dim,
                   "weakest_pct": round(weakest_pct, 2),
-                  "results": [{k: v for k, v in r.items() if k not in ("score_obj", "comparison", "runner")} for r in iter_results],
+                  "all_dimensions": best_result.get("dimensions", {}),
+                  "results_per_target": [
+                      {
+                          "target": r.get("target", "?"),
+                          "score": r.get("total", 0),
+                          "grade": r.get("grade", "?"),
+                          "dimensions": r.get("dimensions", {}),
+                          "error": r.get("error", ""),
+                      }
+                      for r in iter_results
+                  ],
               }
 
               # 개선 여부 판단
@@ -335,6 +345,77 @@ jobs:
               "iterations": iterations,
           }, indent=2, ensure_ascii=False))
 
+          # ═══ 상세 마크다운 리포트 (전체 스텝 볼 수 있게) ═══
+          STEP_REPORT = Path("tools/benchmark/nightly_steps.md")
+          dim_names_ko = {
+              "vector_coverage": "벡터 커버리지",
+              "exploitation_reach": "공격 깊이",
+              "chain_intelligence": "체인 지능",
+              "finding_precision": "발견 정확도",
+              "completeness": "완전성",
+          }
+          dim_max = {
+              "vector_coverage": 250, "exploitation_reach": 300,
+              "chain_intelligence": 150, "finding_precision": 200,
+              "completeness": 100,
+          }
+
+          md = [
+              f"# Nightly Growth Steps — {now.strftime('%Y-%m-%d')}",
+              "",
+              f"**반복 횟수:** {len(iterations)}",
+          ]
+          if iterations:
+              start_s = iterations[0]["best_score"]
+              final_s = iterations[-1]["best_score"]
+              md.append(f"**시작:** {start_s:.1f}점 → **최종:** {final_s:.1f}점 (**{final_s - start_s:+.1f}점**)")
+          md.append("")
+
+          # 반복별 상세 테이블
+          md.append("## Step-by-Step")
+          md.append("")
+          md.append("| # | 점수 | 등급 | 변화 | 약점 | 약점% | 전략 |")
+          md.append("|---|------|------|------|------|-------|------|")
+
+          for it in iterations:
+              weak_ko = dim_names_ko.get(it.get("weakest_dimension", ""), "?")
+              wpct = it.get("weakest_pct", 0)
+              imp = it.get("improvement", 0)
+              imp_icon = "📈" if imp > 0 else ("📉" if imp < 0 else "➡️")
+              action = it.get("action", "")[:30]
+              md.append(
+                  f"| {it['iteration']} | {it['best_score']:.1f} | "
+                  f"— | {imp_icon} {imp:+.1f} | {weak_ko} | {wpct:.0%} | {action} |"
+              )
+
+          md.append("")
+
+          # 각 반복의 차원별 상세
+          md.append("## Dimension Breakdown per Iteration")
+          md.append("")
+          for it in iterations:
+              md.append(f"### Iteration {it['iteration']} — {it['best_score']:.1f}점")
+              dims = it.get("all_dimensions", {})
+              if dims:
+                  md.append("| 차원 | 점수 | 최대 | % | |")
+                  md.append("|------|------|------|---|---|")
+                  for dk, dv in dims.items():
+                      dmax = dim_max.get(dk, 100)
+                      pct = dv / dmax if dmax else 0
+                      bar = "🟢" if pct >= 0.7 else ("🟡" if pct >= 0.4 else "🔴")
+                      md.append(f"| {dim_names_ko.get(dk, dk)} | {dv:.1f} | {dmax} | {pct:.0%} | {bar} |")
+                  md.append("")
+
+              # 타겟별 결과
+              for tr in it.get("results_per_target", []):
+                  if tr.get("error"):
+                      md.append(f"- **{tr['target']}**: ❌ {tr['error'][:50]}")
+                  else:
+                      md.append(f"- **{tr['target']}**: {tr.get('score', 0):.1f}점 [{tr.get('grade', '?')}]")
+              md.append("")
+
+          STEP_REPORT.write_text("\n".join(md), encoding="utf-8")
+
           print(f"\n{'#'*60}")
           print(f"  Growth Loop 완료")
           print(f"  반복: {len(iterations)}회")
@@ -343,6 +424,7 @@ jobs:
               print(f"  최종: {iterations[-1]['best_score']:.1f}")
               growth = iterations[-1]['best_score'] - iterations[0]['best_score']
               print(f"  성장: {growth:+.1f}점")
+              print(f"  상세 리포트: {STEP_REPORT}")
           print(f"{'#'*60}")
           PYEOF
 
