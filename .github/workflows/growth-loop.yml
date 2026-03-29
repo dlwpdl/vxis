@@ -187,18 +187,177 @@ jobs:
           print(f"\n총 {len(targets)} 타겟 벤치마크 완료")
           PYEOF
 
+      - name: Compare and judge
+        id: judge
+        env:
+          PYTHONPATH: src
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PYEOF'
+          import json, os, subprocess
+          from pathlib import Path
+          from datetime import datetime, timedelta, timezone
+
+          HISTORY_FILE = Path("tools/benchmark/score_history.json")
+          VERDICT_FILE = Path("tools/benchmark/verdict.json")
+
+          if not HISTORY_FILE.exists():
+              print("No history — skip comparison")
+              exit(0)
+
+          history = json.loads(HISTORY_FILE.read_text())
+          if len(history) < 2:
+              print("Not enough data for comparison")
+              exit(0)
+
+          now = datetime.now(timezone.utc)
+          today = now.strftime("%Y-%m-%d")
+          yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+          # 오늘 vs 어제 비교 (같은 타겟)
+          today_entries = [e for e in history if e.get("date") == today and not e.get("error")]
+          yesterday_entries = [e for e in history if e.get("date") == yesterday and not e.get("error")]
+
+          if not today_entries:
+              print("No today entries — skip")
+              exit(0)
+
+          # 최근 머지된 커밋 조회 (오늘 반영된 변경사항)
+          recent_commits = []
+          try:
+              result = subprocess.run(
+                  ["git", "log", "--oneline", "--since=24 hours ago", "--format=%h %s"],
+                  capture_output=True, text=True, timeout=10,
+              )
+              recent_commits = result.stdout.strip().split("\n") if result.stdout.strip() else []
+          except Exception:
+              pass
+
+          # 타겟별 비교
+          verdicts = []
+          for today_e in today_entries:
+              target_name = today_e.get("target_name", "unknown")
+              today_score = today_e.get("total", 0)
+
+              # 어제 같은 타겟 찾기
+              prev = [e for e in yesterday_entries if e.get("target_name") == target_name]
+              if not prev:
+                  # 어제 데이터 없으면 전체 이전 데이터에서 같은 타겟 최근값
+                  prev = [e for e in history[:-len(today_entries)]
+                          if e.get("target_name") == target_name and not e.get("error")]
+              if not prev:
+                  verdicts.append({
+                      "target": target_name,
+                      "today": today_score,
+                      "previous": 0,
+                      "delta": 0,
+                      "verdict": "first_run",
+                  })
+                  continue
+
+              prev_score = prev[-1].get("total", 0)
+              delta = today_score - prev_score
+
+              if delta > 5:
+                  verdict = "improved"
+              elif delta < -5:
+                  verdict = "regressed"
+              else:
+                  verdict = "stable"
+
+              verdicts.append({
+                  "target": target_name,
+                  "today": today_score,
+                  "previous": prev_score,
+                  "delta": round(delta, 1),
+                  "verdict": verdict,
+              })
+
+          # 최종 판정
+          regressions = [v for v in verdicts if v["verdict"] == "regressed"]
+          improvements = [v for v in verdicts if v["verdict"] == "improved"]
+
+          verdict_summary = {
+              "date": today,
+              "verdicts": verdicts,
+              "recent_commits": recent_commits[:10],
+              "overall": "regressed" if regressions else ("improved" if improvements else "stable"),
+          }
+          VERDICT_FILE.write_text(json.dumps(verdict_summary, indent=2, ensure_ascii=False))
+
+          print(f"\n{'='*50}")
+          print(f"  VERDICT — {today}")
+          print(f"{'='*50}")
+          for v in verdicts:
+              icon = {"improved": "📈", "regressed": "📉", "stable": "➡️", "first_run": "🆕"}[v["verdict"]]
+              print(f"  {icon} {v['target']}: {v['today']:.1f} (delta: {v['delta']:+.1f}) → {v['verdict'].upper()}")
+
+          if recent_commits:
+              print(f"\n  최근 커밋 ({len(recent_commits)}건):")
+              for c in recent_commits[:5]:
+                  print(f"    {c}")
+
+          # Regression 발견 시 GitHub Issue 생성
+          if regressions:
+              print(f"\n  ⚠️ REGRESSION in {len(regressions)} target(s)")
+              reg_details = "\n".join(
+                  f"- **{r['target']}**: {r['previous']:.1f} → {r['today']:.1f} ({r['delta']:+.1f})"
+                  for r in regressions
+              )
+              commits_str = "\n".join(f"- `{c}`" for c in recent_commits[:10]) if recent_commits else "- 커밋 정보 없음"
+
+              issue_body = f"""## Growth Loop — Regression 감지
+
+### 점수 하락
+
+{reg_details}
+
+### 최근 커밋 (원인 후보)
+
+{commits_str}
+
+### 판정
+
+코드 변경 후 벤치마크 점수가 하락했습니다.
+다음 중 하나를 결정해야 합니다:
+
+- [ ] **Revert**: 원인 커밋을 되돌림
+- [ ] **Fix**: 하락 원인을 분석하고 수정
+- [ ] **Accept**: 의도된 변경 (예: 오탐 필터 강화로 일시적 하락)
+
+---
+*VXIS Growth Loop 자동 생성*"""
+
+              try:
+                  subprocess.run(
+                      ["gh", "issue", "create",
+                       "--title", f"[Growth] Regression detected — {', '.join(r['target'] for r in regressions)}",
+                       "--body", issue_body,
+                       "--label", "regression,growth-loop,automated"],
+                      capture_output=True, text=True, timeout=30,
+                  )
+                  print("  → Regression Issue 생성됨")
+              except Exception as e:
+                  print(f"  → Issue 생성 실패: {e}")
+
+          elif improvements:
+              print(f"\n  ✅ IMPROVED in {len(improvements)} target(s) — 코드 변경 효과 확인")
+
+          PYEOF
+
       - name: Generate growth report
         id: report
         env:
           PYTHONPATH: src
         run: |
           python - <<'PYEOF'
-          import json
+          import json, os
           from pathlib import Path
           from datetime import datetime, timezone
 
           HISTORY_FILE = Path("tools/benchmark/score_history.json")
           REPORT_FILE = Path("tools/benchmark/growth_report.md")
+          VERDICT_FILE = Path("tools/benchmark/verdict.json")
 
           if not HISTORY_FILE.exists():
               print("No history yet")
@@ -211,10 +370,16 @@ jobs:
           now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
           latest = history[-1]
 
+          # Verdict 로드
+          verdict = {}
+          if VERDICT_FILE.exists():
+              verdict = json.loads(VERDICT_FILE.read_text())
+
           # 성장 추이 계산
           lines = [
               "# VXIS Growth Report",
               f"**Date:** {now}",
+              f"**Overall Verdict:** {verdict.get('overall', 'unknown').upper()}",
               f"**Latest Score:** {latest.get('total', 0):.1f} / 1000 [{latest.get('grade', '?')}]",
               "",
               "## Score History",
@@ -355,14 +520,28 @@ jobs:
               wpct = dims[weakest_key] / wmax
               weakest_msg = f"\n🎯 <b>약점:</b> {wname} ({wpct:.0%})"
 
+          # Verdict 로드
+          verdict_file = Path("tools/benchmark/verdict.json")
+          verdict_msg = ""
+          if verdict_file.exists():
+              v = json.loads(verdict_file.read_text())
+              overall = v.get("overall", "unknown")
+              verdict_icon = {"improved": "✅ 반영 확정", "regressed": "⚠️ REGRESSION", "stable": "➡️ 변화 없음"}.get(overall, "❓")
+              verdict_msg = f"\n📋 <b>판정:</b> {verdict_icon}"
+              # 타겟별 상세
+              for vd in v.get("verdicts", [])[:3]:
+                  vi = {"improved": "📈", "regressed": "📉", "stable": "➡️", "first_run": "🆕"}.get(vd.get("verdict",""), "")
+                  verdict_msg += f"\n  {vi} {vd.get('target','')}: {vd.get('delta',0):+.1f}"
+
           msg = (
-              f"📊 <b>VXIS Growth Loop — 주간 리포트</b>\n"
+              f"📊 <b>VXIS Growth Loop</b>\n"
               f"\n"
               f"🏆 <b>점수:</b> {total:.1f} / 1000 [{grade}]\n"
               f"{trend} <b>변화:</b> {delta:+.1f}점"
-              f"{weakest_msg}\n"
+              f"{weakest_msg}"
+              f"{verdict_msg}\n"
               f"\n"
-              f"📈 <b>히스토리:</b> {len(history)}주 추적 중"
+              f"📈 <b>히스토리:</b> {len(history)}일 추적 중"
           )
 
           payload = json.dumps({
