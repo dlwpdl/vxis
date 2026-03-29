@@ -97,7 +97,33 @@ class SupplyChainAgent(BaseAgent):
                     suggested_agent="supply_chain",
                 ))
 
-        # Phase 5: Package manifest exposure
+        # Phase 5: Offensive supply chain — 공급망을 공격 벡터로 활용
+        # 방어만이 아니라, 타겟의 공급망이 공격에 활용 가능한지 평가
+        # (CVE-2026-33634 Trivy, LiteLLM 사례 — 정상 패키지에 백도어)
+        offensive_findings = await self._assess_offensive_supply_chain(target)
+        for of in offensive_findings:
+            findings.append(Evidence(
+                agent_id=self.agent_id,
+                title=of["title"],
+                severity=of["severity"],
+                evidence_type=EvidenceType.ATTACK_SURFACE,
+                description=of["description"],
+                response=of.get("detail", ""),
+                tags=["supply-chain", "offensive", "attack-vector"],
+            ))
+            if of["severity"] in (Severity.CRITICAL, Severity.HIGH):
+                hypotheses.append(Hypothesis(
+                    title=f"Supply chain as attack vector: {of['title']}",
+                    rationale=(
+                        "타겟이 사용하는 패키지/도구의 공급망이 취약 — "
+                        "악성 업데이트, 타이포스쿼팅, 또는 의존성 혼동을 통해 "
+                        "코드 실행이 가능할 수 있음 (Trivy/LiteLLM 사례 참고)"
+                    ),
+                    probability=0.4, impact=0.95,
+                    suggested_agent="supply_chain",
+                ))
+
+        # Phase 6: Package manifest exposure
         manifest_results = await self._check_manifest_exposure(target)
         for mr in manifest_results:
             findings.append(Evidence(
@@ -286,4 +312,79 @@ class SupplyChainAgent(BaseAgent):
                     })
             except asyncio.TimeoutError:
                 continue
+        return results
+
+    async def _assess_offensive_supply_chain(self, target: str) -> list[dict[str, Any]]:
+        """공급망을 공격 벡터로 활용 가능성 평가.
+
+        핵심 관점: 모든 위협은 방어 대상이자 공격 도구.
+        - 타겟의 의존성 목록 노출 → 정확한 CVE 타겟팅
+        - 내부 패키지명 → 의존성 혼동(dependency confusion) 공격
+        - CI/CD 도구 식별 → 도구 자체 취약점 (Trivy/LiteLLM 사례)
+        - 타이포스쿼팅 → 악성 코드 주입
+
+        실제 공격은 하지 않음 — 가능성만 평가하고 리포트.
+        """
+        results: list[dict[str, Any]] = []
+        if not shutil.which("curl"):
+            return results
+
+        for manifest in ["/package.json", "/composer.json", "/requirements.txt"]:
+            proc = await asyncio.create_subprocess_exec(
+                "curl", "-sS", f"{target}{manifest}", "--max-time", "5",
+                "-w", "\n%{{http_code}}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=8)
+                output = stdout.decode(errors="replace")
+                lines = output.rsplit("\n", 1)
+                body = lines[0] if len(lines) > 1 else ""
+                status = lines[-1].strip()
+
+                if status != "200" or not body.strip():
+                    continue
+
+                results.append({
+                    "title": (
+                        f"Offensive supply chain: {manifest} exposed|||"
+                        f"공격적 공급망: {manifest} 의존성 목록 노출"
+                    ),
+                    "severity": Severity.MEDIUM,
+                    "description": (
+                        f"타겟의 {manifest}가 공개 접근 가능.\n"
+                        "공격자가 활용 가능한 벡터:\n"
+                        "1. 정확한 버전 → 알려진 CVE 타겟팅\n"
+                        "2. 내부 패키지명 → 의존성 혼동 공격\n"
+                        "3. CI/CD 도구 식별 → 도구 취약점 (Trivy/LiteLLM 사례)\n"
+                        "4. 타이포스쿼팅 → 악성 패키지 주입"
+                    ),
+                    "detail": body[:2000],
+                })
+
+                # 내부 스코프 패키지 탐지 (npm @scope/package)
+                if manifest == "/package.json":
+                    try:
+                        pkg = json.loads(body)
+                        all_deps = {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}
+                        scoped = [d for d in all_deps if d.startswith("@")]
+                        if scoped:
+                            results.append({
+                                "title": (
+                                    f"Dependency confusion target: {len(scoped)} scoped packages|||"
+                                    f"의존성 혼동 공격 대상: 스코프 패키지 {len(scoped)}개"
+                                ),
+                                "severity": Severity.HIGH,
+                                "description": (
+                                    f"스코프 패키지 {len(scoped)}개: {', '.join(scoped[:5])}\n"
+                                    "공개 레지스트리에 미등록 시 의존성 혼동 공격 가능"
+                                ),
+                            })
+                    except json.JSONDecodeError:
+                        pass
+
+            except asyncio.TimeoutError:
+                continue
+
         return results

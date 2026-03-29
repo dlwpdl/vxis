@@ -255,6 +255,15 @@ Active exploitation confirmed — prioritize these when detected:
 - CVE-2025-54068: Laravel Livewire RCE
 - CVE-2025-32432: Craft CMS code injection
 
+## Dual-Use Principle: 모든 위협은 공격 도구이기도 하다
+
+Every threat you discover is BOTH a defense point AND an attack vector:
+- 타겟의 의존성 노출? → 그 의존성의 CVE를 찾아서 공격
+- CI/CD 도구 발견? → 그 도구 자체의 취약점 (Trivy, LiteLLM 사례)
+- 공급망 패키지 목록? → 타이포스쿼팅, 의존성 혼동 공격 가능성 평가
+- 내부 패키지명 발견? → 공개 레지스트리에서 선점하여 코드 실행
+항상 "이 발견을 어떻게 체이닝할 수 있는가?" 생각하라.
+
 ## Anti-Confirmation Bias (arXiv 2603.18740)
 
 WARNING: LLM-based analysis has confirmation bias — code that "looks normal" may hide \
