@@ -1,0 +1,89 @@
+name: Action Bridge
+
+on:
+  # domain-intel daily 완료 후 실행
+  schedule:
+    - cron: "30 0 * * *"  # 매일 00:30 UTC (domain-intel 00:00 후)
+
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  bridge:
+    name: Intel → Action
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run Action Bridge
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PYEOF'
+          import logging, json, os, sys, urllib.request
+          logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+          sys.path.insert(0, ".")
+
+          from tools.action_bridge import run_all_actions
+
+          results = run_all_actions()
+
+          success = [r for r in results if r.success]
+          failed = [r for r in results if not r.success]
+
+          print(f"\n{'='*50}")
+          print(f"Action Bridge: {len(success)} success, {len(failed)} failed")
+
+          if success:
+              print("\nCreated:")
+              for r in success:
+                  print(f"  ✓ {r.action.title[:60]} → {r.result_url}")
+
+          # Telegram 요약
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+          if token and chat_id and success:
+              items = "\n".join(f"  • {r.action.title[:50]}" for r in success[:5])
+              msg = (
+                  f"🔗 <b>Action Bridge</b>\n\n"
+                  f"인텔 → 액션 변환 {len(success)}건:\n{items}"
+              )
+              payload = json.dumps({"chat_id": chat_id, "text": msg, "parse_mode": "HTML"}).encode()
+              req = urllib.request.Request(
+                  f"https://api.telegram.org/bot{token}/sendMessage",
+                  data=payload, headers={"Content-Type": "application/json"}, method="POST"
+              )
+              try:
+                  urllib.request.urlopen(req, timeout=15)
+              except Exception:
+                  pass
+          PYEOF
+
+      - name: Commit watch_targets changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tools/upstream_watch/watch_targets.toml tools/upstream_watch/decisions.json 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore: action bridge — watch targets updated $(date -u +%Y-%m-%d)"
+            git pull --rebase origin main
+            git push
+          fi
