@@ -1,9 +1,9 @@
 name: VXIS Growth Loop
 
 on:
-  # 매일 밤 15:00 UTC (자정 KST) — 밤새 반복 성장
+  # 매주 일요일 15:00 UTC (일요일 자정 KST) — 밤새 반복 성장
   schedule:
-    - cron: "0 15 * * *"
+    - cron: "0 15 * * 0"
 
   workflow_dispatch:
     inputs:
