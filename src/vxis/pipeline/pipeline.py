@@ -334,10 +334,11 @@ class ScanPipeline:
     async def _phase3_hypothesis(self, ctx: ScanContext) -> None:
         """Phase 3: Knowledge Store + Context Compressor + Hypothesis."""
         try:
-            # Phase 3 대응 벡터: 디버그 엔드포인트, 미스컨피그, 기본 설정, git 노출
+            # Phase 3 대응 벡터: 디버그 엔드포인트, 미스컨피그, 기본 설정, git 노출, 공급망
             for vid in [
                 "WEB-MISCONF-001", "WEB-MISCONF-002", "WEB-MISCONF-003",
                 "WEB-INFRA-005", "WEB-AC-005",
+                "WEB-SUPPLY-001", "WEB-SUPPLY-002",  # 의존성/CI-CD 공급망 공격
             ]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
@@ -370,11 +371,13 @@ class ScanPipeline:
     async def _phase4_cpr(self, ctx: ScanContext) -> None:
         """Phase 4: CPR — Hands/Eyes/X-Ray/Controller 연결."""
         try:
-            # Phase 4 대응 벡터: 인증, JWT, 세션, OAuth
+            # Phase 4 대응 벡터: 인증, JWT, 세션, OAuth, 인프라 CVE
             for vid in [
                 "WEB-AUTH-001", "WEB-AUTH-002", "WEB-AUTH-003", "WEB-AUTH-004",
                 "WEB-AUTH-005", "WEB-AUTH-006", "WEB-AUTH-007", "WEB-AUTH-008",
+                "WEB-AUTH-010",  # 매직 링크 인증 우회
                 "WEB-MISCONF-004", "WEB-CRYPTO-003",
+                "WEB-INFRA-006",  # F5 BIG-IP APM RCE (CVE-2025-53521)
             ]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
@@ -478,7 +481,20 @@ class ScanPipeline:
             pass
 
     async def _phase5_special(self, ctx: ScanContext) -> None:
-        """Phase 5: IoT/VoIP/Web3 — 해당 시에만."""
+        """Phase 5: IoT/VoIP/Web3 — 해당 시에만. 현대 CVE 인젝션 벡터는 항상 기록."""
+        # Modern CVE injection vectors — always attempted regardless of target type
+        # LLM/AI 인젝션, CMS RCE, LLM 프롬프트 인젝션은 범용 웹 타깃에도 적용
+        try:
+            for vid in [
+                "WEB-INJECT-018",  # AI/LLM Workflow Code Injection (Langflow)
+                "WEB-INJECT-019",  # Laravel Livewire RCE (CVE-2025-54068)
+                "WEB-INJECT-020",  # CMS Code Injection (Craft CMS CVE-2025-32432)
+                "WEB-INJECT-021",  # LLM Prompt Injection
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         is_iot = any(k in " ".join(ctx.tech_stack).lower() for k in ["mqtt", "coap", "zigbee", "ble"])
         if is_iot:
             logger.info("  IoT indicators detected — running IoT agents")
