@@ -201,7 +201,7 @@ def convert_proposals_to_issues() -> list[ActionResult]:
 
 ---
 *이 이슈는 Upstream Watch Action Bridge가 자동 생성했습니다.*""",
-            labels=["upstream-watch", category, "automated"],
+            labels=["upstream-watch", category, "automated", "claude-implement"],
             source=f"upstream_watch/{proposal_id}",
             priority="high",
         )

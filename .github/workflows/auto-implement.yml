@@ -1,0 +1,358 @@
+name: Auto Implement (Claude)
+
+on:
+  # "claude-implement" 라벨이 붙은 이슈가 생기면 자동 트리거
+  issues:
+    types: [labeled]
+
+  # 수동 실행
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "구현할 Issue 번호"
+        required: true
+        type: string
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  implement:
+    name: Claude Auto-Implement
+    # claude-implement 라벨일 때만 실행
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'claude-implement')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Get Issue Details
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ github.event.inputs.issue_number }}" ]; then
+            ISSUE_NUM="${{ github.event.inputs.issue_number }}"
+          else
+            ISSUE_NUM="${{ github.event.issue.number }}"
+          fi
+
+          echo "number=$ISSUE_NUM" >> $GITHUB_OUTPUT
+
+          # Issue 내용 가져오기
+          gh issue view "$ISSUE_NUM" --json title,body,labels > issue.json
+          TITLE=$(jq -r '.title' issue.json)
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "Issue #$ISSUE_NUM: $TITLE"
+
+      - name: Create implementation branch
+        id: branch
+        run: |
+          ISSUE_NUM="${{ steps.issue.outputs.number }}"
+          BRANCH="auto-implement/issue-${ISSUE_NUM}"
+          git checkout -b "$BRANCH"
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Claude implements the change
+        env:
+          PYTHONPATH: src
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+        run: |
+          python - <<'PYEOF'
+          import json, os, sys, urllib.request, urllib.error, logging
+          from pathlib import Path
+
+          logging.basicConfig(level=logging.INFO)
+          logger = logging.getLogger("auto-implement")
+
+          issue = json.loads(Path("issue.json").read_text())
+          title = issue["title"]
+          body = issue["body"]
+          labels = [l["name"] for l in issue.get("labels", [])]
+
+          logger.info("Implementing: %s", title)
+
+          # LLM에게 구현 계획 요청
+          api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("TOGETHER_API_KEY", "")
+          if not api_key:
+              logger.error("No API key — cannot implement")
+              # 구현 계획만 코멘트로 남기기
+              Path("implementation_plan.md").write_text(
+                  f"## Auto-Implementation Failed\n\nNo API key configured.\n\n"
+                  f"### Issue\n{title}\n\n### Body\n{body[:500]}"
+              )
+              sys.exit(0)
+
+          # VXIS 코드베이스 구조 수집
+          src_files = []
+          for p in Path("src/vxis").rglob("*.py"):
+              rel = str(p.relative_to("."))
+              try:
+                  content = p.read_text()[:200]
+                  first_line = content.split("\n")[0] if content else ""
+              except Exception:
+                  first_line = ""
+              src_files.append(f"{rel}: {first_line}")
+
+          codebase_summary = "\n".join(src_files[:100])
+
+          # Claude/Together API 호출
+          use_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
+
+          system_prompt = """You are a senior security engineer implementing a code change for VXIS,
+an AI-powered autonomous pentesting platform.
+
+You will receive:
+1. A GitHub Issue describing what needs to be implemented
+2. A summary of the VXIS codebase structure
+
+Your job:
+1. Analyze the issue and determine which files need to change
+2. Write the actual code changes (full file content or patches)
+3. Output a JSON with your implementation plan and code
+
+Output valid JSON:
+{
+  "plan": "한국어로 구현 계획 설명 (3-5문장)",
+  "files": [
+    {
+      "path": "src/vxis/path/to/file.py",
+      "action": "modify|create",
+      "description": "이 파일에서 무엇을 바꾸는지",
+      "content": "... full file content or diff ..."
+    }
+  ],
+  "test_files": [
+    {
+      "path": "tests/unit/test_xxx.py",
+      "content": "... test code ..."
+    }
+  ],
+  "commit_message": "feat: 한 줄 커밋 메시지"
+}
+
+Rules:
+- ALL text in Korean
+- Follow existing code patterns (dataclass, type hints, docstrings)
+- All text bilingual: "English|||한국어"
+- No external dependencies (stdlib + existing deps only)
+- AGPL code must NOT be copied
+- Write actual working code, not pseudocode"""
+
+          user_prompt = f"""## GitHub Issue
+
+**Title:** {title}
+
+**Body:**
+{body[:3000]}
+
+**Labels:** {', '.join(labels)}
+
+## VXIS Codebase Structure
+
+{codebase_summary}
+
+---
+
+Implement the changes described in the issue. Return JSON with the implementation plan and actual code."""
+
+          if use_anthropic:
+              url = "https://api.anthropic.com/v1/messages"
+              payload = json.dumps({
+                  "model": "claude-sonnet-4-20250514",
+                  "max_tokens": 4000,
+                  "system": system_prompt,
+                  "messages": [{"role": "user", "content": user_prompt}],
+              }).encode()
+              headers = {
+                  "Content-Type": "application/json",
+                  "x-api-key": api_key,
+                  "anthropic-version": "2023-06-01",
+              }
+          else:
+              url = "https://api.together.xyz/v1/chat/completions"
+              payload = json.dumps({
+                  "model": "moonshotai/Kimi-K2.5",
+                  "max_tokens": 4000,
+                  "messages": [
+                      {"role": "system", "content": system_prompt},
+                      {"role": "user", "content": user_prompt},
+                  ],
+              }).encode()
+              headers = {
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {api_key}",
+              }
+
+          req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+          try:
+              with urllib.request.urlopen(req, timeout=180) as resp:
+                  data = json.loads(resp.read().decode())
+          except Exception as exc:
+              logger.error("LLM call failed: %s", exc)
+              Path("implementation_plan.md").write_text(
+                  f"## LLM Call Failed\n\n{exc}\n\n### Issue\n{title}"
+              )
+              sys.exit(0)
+
+          # 응답 파싱
+          if use_anthropic:
+              raw_text = data.get("content", [{}])[0].get("text", "")
+          else:
+              raw_text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+          # JSON 추출
+          json_str = raw_text
+          if "```json" in json_str:
+              json_str = json_str.split("```json")[1].split("```")[0]
+          elif "```" in json_str:
+              json_str = json_str.split("```")[1].split("```")[0]
+
+          try:
+              impl = json.loads(json_str.strip())
+          except json.JSONDecodeError:
+              logger.error("Failed to parse implementation JSON")
+              Path("implementation_plan.md").write_text(
+                  f"## Parse Failed\n\n```\n{raw_text[:2000]}\n```"
+              )
+              sys.exit(0)
+
+          # 파일 생성/수정
+          files_changed = []
+          for file_info in impl.get("files", []):
+              file_path = Path(file_info["path"])
+              content = file_info.get("content", "")
+              if not content:
+                  continue
+
+              file_path.parent.mkdir(parents=True, exist_ok=True)
+              file_path.write_text(content, encoding="utf-8")
+              files_changed.append(str(file_path))
+              logger.info("Written: %s", file_path)
+
+          # 테스트 파일
+          for test_info in impl.get("test_files", []):
+              test_path = Path(test_info["path"])
+              content = test_info.get("content", "")
+              if not content:
+                  continue
+              test_path.parent.mkdir(parents=True, exist_ok=True)
+              test_path.write_text(content, encoding="utf-8")
+              files_changed.append(str(test_path))
+              logger.info("Written test: %s", test_path)
+
+          # 구현 계획 저장
+          plan = impl.get("plan", "")
+          commit_msg = impl.get("commit_message", f"feat: auto-implement issue")
+
+          Path("implementation_plan.md").write_text(
+              f"## Implementation Plan\n\n{plan}\n\n"
+              f"### Files Changed\n" + "\n".join(f"- `{f}`" for f in files_changed) +
+              f"\n\n### Commit Message\n`{commit_msg}`",
+              encoding="utf-8",
+          )
+
+          # 환경변수로 커밋 메시지 전달
+          with open(os.environ.get("GITHUB_OUTPUT", "/dev/null"), "a") as f:
+              f.write(f"commit_msg={commit_msg}\n")
+              f.write(f"files_changed={len(files_changed)}\n")
+
+          logger.info("Implementation complete: %d files", len(files_changed))
+          PYEOF
+
+      - name: Commit and create PR
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE_NUM="${{ steps.issue.outputs.number }}"
+          BRANCH="${{ steps.branch.outputs.branch }}"
+          TITLE="${{ steps.issue.outputs.title }}"
+
+          # 변경사항이 있는지 확인
+          git add -A
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+            # Issue에 코멘트 남기기
+            if [ -f "implementation_plan.md" ]; then
+              gh issue comment "$ISSUE_NUM" --body-file implementation_plan.md
+            fi
+            exit 0
+          fi
+
+          # 커밋
+          git config user.name "vxis-bot[bot]"
+          git config user.email "vxis-bot@users.noreply.github.com"
+          git commit -m "feat: auto-implement #${ISSUE_NUM} — ${TITLE}"
+
+          # 푸시
+          git push -u origin "$BRANCH"
+
+          # PR 생성
+          PR_BODY="## Auto-Implementation
+
+Closes #${ISSUE_NUM}
+
+### Implementation Plan
+$(cat implementation_plan.md 2>/dev/null || echo 'See commits for details')
+
+---
+*이 PR은 VXIS Auto-Implement가 자동 생성했습니다.*
+*반드시 코드 리뷰 후 머지하세요.*"
+
+          gh pr create \
+            --title "Auto-implement: ${TITLE}" \
+            --body "$PR_BODY" \
+            --base main \
+            --head "$BRANCH" \
+            --label "auto-implement,review-needed"
+
+          echo "PR created for issue #${ISSUE_NUM}"
+
+      - name: Notify Telegram
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          ISSUE_NUM="${{ steps.issue.outputs.number }}"
+          TITLE="${{ steps.issue.outputs.title }}"
+
+          python - <<PYEOF
+          import json, os, urllib.request
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+          if not token or not chat_id:
+              exit(0)
+          msg = (
+              f"🤖 <b>Auto-Implement 완료</b>\n\n"
+              f"Issue #${ISSUE_NUM}: ${TITLE}\n"
+              f"→ PR 생성됨. 코드 리뷰 필요."
+          )
+          payload = json.dumps({"chat_id": chat_id, "text": msg, "parse_mode": "HTML"}).encode()
+          req = urllib.request.Request(
+              f"https://api.telegram.org/bot{token}/sendMessage",
+              data=payload, headers={"Content-Type": "application/json"}, method="POST"
+          )
+          try:
+              urllib.request.urlopen(req, timeout=15)
+          except Exception:
+              pass
+          PYEOF
