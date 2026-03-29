@@ -1628,6 +1628,9 @@ class MobilePipeline:
         """iTunes/ADB 백업 추출, 민감 데이터 확인."""
         try:
             ctx.score_tracker.record_vector_attempt("MOB-STORE-001")
+            ctx.score_tracker.record_vector_attempt("MOB-PRIV-001")
+            ctx.score_tracker.record_vector_attempt("MOB-PRIV-002")
+            ctx.score_tracker.record_vector_attempt("MOB-PRIV-003")
         except Exception:
             pass
 
@@ -1720,6 +1723,7 @@ class MobilePipeline:
                         "path": str(backup_dir),
                         "file_count": len(files),
                     })
+                    await self._scan_backup_for_privacy_issues(ctx, backup_dir)
             except Exception as exc:
                 logger.info("  iOS backup: %s", exc)
 
@@ -1732,6 +1736,161 @@ class MobilePipeline:
             )
         except Exception:
             pass
+
+    async def _scan_backup_for_privacy_issues(
+        self, ctx: MobileScanContext, backup_dir: Any,
+    ) -> None:
+        """백업 디렉토리에서 자격증명·PII·민감 파일 노출 여부를 스캔한다.
+
+        벡터: MOB-PRIV-001 (M1 — 자격증명), MOB-PRIV-002 (M6 — 개인정보),
+              MOB-PRIV-003 (M9 — 안전하지 않은 데이터 저장 종합)
+        """
+        import re
+        from pathlib import Path
+
+        backup_path = Path(str(backup_dir))
+        if not backup_path.exists():
+            return
+
+        credential_patterns = [
+            re.compile(
+                r'(?i)(password|passwd|secret|api_key|apikey|token|private_key)'
+                r'\s*[=:]\s*["\']?([^\s"\']{6,})',
+                re.MULTILINE,
+            ),
+            re.compile(
+                r'(?i)aws_(access_key|secret_key)\s*[=:]\s*["\']?([A-Za-z0-9/+]{16,})',
+                re.MULTILINE,
+            ),
+        ]
+        pii_patterns = [
+            re.compile(r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b'),
+            re.compile(
+                r'\b(?:\d{3}[-.\s]?\d{3}[-.\s]?\d{4}|\(\d{3}\)\s*\d{3}[-.\s]?\d{4})\b'
+            ),
+            re.compile(
+                r'\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b'
+            ),
+        ]
+        _SENSITIVE_SUFFIXES = (
+            ".db", ".sqlite", ".sqlite3", ".realm",
+            ".key", ".pem", ".p12", ".pfx",
+        )
+
+        cred_hits: list[str] = []
+        pii_hits: list[str] = []
+        sensitive_files: list[str] = []
+
+        all_files = list(backup_path.rglob("*"))[:200]
+        for fp in all_files:
+            if not fp.is_file():
+                continue
+            name_lower = fp.name.lower()
+            if any(name_lower.endswith(s) for s in _SENSITIVE_SUFFIXES):
+                sensitive_files.append(fp.name)
+            try:
+                content = fp.read_text(errors="replace")[:4096]
+            except Exception:
+                continue
+            for pat in credential_patterns:
+                if pat.search(content):
+                    cred_hits.append(fp.name)
+                    break
+            for pat in pii_patterns:
+                if pat.search(content):
+                    pii_hits.append(fp.name)
+                    break
+
+        if cred_hits:
+            f = ctx.add_finding(
+                title=(
+                    "Credentials Exposed in App Backup"
+                    "|||"
+                    "앱 백업에 자격증명 노출"
+                ),
+                severity="critical",
+                finding_type="insecure_credential_storage",
+                description=(
+                    f"Backup contains credential patterns in: {', '.join(cred_hits[:5])}. "
+                    "OWASP M1 — Improper Credential Usage: credentials must be stored in "
+                    "the platform secure enclave (Keychain/Keystore), not in backup-accessible storage."
+                    "|||"
+                    f"백업 파일에서 자격증명 패턴 탐지: {', '.join(cred_hits[:5])}. "
+                    "OWASP M1 — 자격증명은 Keychain/Keystore에 저장해야 하며 "
+                    "백업 접근 가능한 스토리지에 저장하면 안 됩니다."
+                ),
+                target=ctx.target,
+                affected_component="App Backup",
+                source_plugin="vxis-mobile-pipeline",
+                cwe_ids=["CWE-312", "CWE-522"],
+            )
+            ctx.add_owasp_finding("M1", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-PRIV-001", level=3)
+            except Exception:
+                pass
+
+        if pii_hits:
+            f = ctx.add_finding(
+                title=(
+                    "PII Exposed in App Backup"
+                    "|||"
+                    "앱 백업에 개인정보(PII) 노출"
+                ),
+                severity="high",
+                finding_type="privacy_violation",
+                description=(
+                    f"Backup contains PII patterns (email/phone/card) in: {', '.join(pii_hits[:5])}. "
+                    "OWASP M6 — Inadequate Privacy Controls: PII must not be stored in "
+                    "backup-accessible plaintext storage."
+                    "|||"
+                    f"백업 파일에서 PII 패턴(이메일/전화/카드번호) 탐지: {', '.join(pii_hits[:5])}. "
+                    "OWASP M6 — 개인정보는 평문 백업 접근 가능 스토리지에 저장하면 안 됩니다."
+                ),
+                target=ctx.target,
+                affected_component="App Backup",
+                source_plugin="vxis-mobile-pipeline",
+                cwe_ids=["CWE-359"],
+            )
+            ctx.add_owasp_finding("M6", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-PRIV-002", level=2)
+            except Exception:
+                pass
+
+        if sensitive_files:
+            f = ctx.add_finding(
+                title=(
+                    "Sensitive Database / Key Files in Unencrypted Backup"
+                    "|||"
+                    "암호화되지 않은 백업에 민감 DB·키 파일 노출"
+                ),
+                severity="high",
+                finding_type="insecure_data_storage",
+                description=(
+                    f"Unencrypted backup contains sensitive files: {', '.join(sensitive_files[:5])}. "
+                    "OWASP M9 — Insecure Data Storage (Comprehensive): SQLite databases, Realm files, "
+                    "and cryptographic key files must be encrypted at rest or excluded from backups."
+                    "|||"
+                    f"암호화되지 않은 백업에 민감 파일 포함: {', '.join(sensitive_files[:5])}. "
+                    "OWASP M9 — SQLite DB, Realm 파일, 암호화 키 파일은 "
+                    "암호화하거나 백업에서 제외해야 합니다."
+                ),
+                target=ctx.target,
+                affected_component="App Backup",
+                source_plugin="vxis-mobile-pipeline",
+                cwe_ids=["CWE-312", "CWE-200"],
+            )
+            ctx.add_owasp_finding("M9", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-PRIV-003", level=2)
+            except Exception:
+                pass
+
+        logger.info(
+            "  Backup privacy scan: %d cred hits, %d PII hits, %d sensitive files",
+            len(cred_hits), len(pii_hits), len(sensitive_files),
+        )
 
     # ══════════════════════════════════════════════════════════
     # Phase 13: Dynamic Analysis
@@ -2759,11 +2918,13 @@ class MobilePipeline:
 
     async def _match_sdk_cves(self, ctx: MobileScanContext) -> None:
         """서드파티 SDK 버전을 알려진 CVE 데이터베이스와 매핑.
+        애널리틱스 SDK의 민감 데이터 유출 여부도 검사한다.
 
-        벡터: MOB-SDK-001
+        벡터: MOB-SDK-001 (CVE 매핑), MOB-SDK-002 (애널리틱스 SDK 데이터 유출)
         """
         try:
             ctx.score_tracker.record_vector_attempt("MOB-SDK-001")
+            ctx.score_tracker.record_vector_attempt("MOB-SDK-002")
         except Exception:
             pass
 
@@ -2917,6 +3078,104 @@ class MobilePipeline:
         logger.info(
             "  SDK CVE matching: %d SDKs checked, %d CVEs found",
             len(ctx.third_party_sdks), len(found_cves),
+        )
+
+        # ── MOB-SDK-002: 애널리틱스 SDK 민감 데이터 유출 탐지 ──
+        _ANALYTICS_SDKS = {
+            "firebase": "Firebase Analytics",
+            "amplitude": "Amplitude",
+            "mixpanel": "Mixpanel",
+            "segment": "Segment",
+            "appsflyer": "AppsFlyer",
+            "adjust": "Adjust",
+            "flurry": "Flurry",
+            "branch": "Branch",
+        }
+        _SENSITIVE_ANALYTICS_PROPS = [
+            "password", "passwd", "credit_card", "card_number",
+            "ssn", "social_security", "dob", "date_of_birth",
+            "passport", "pin", "cvv", "secret",
+        ]
+        analytics_sdks_detected: list[str] = [
+            _ANALYTICS_SDKS[k]
+            for sdk in ctx.third_party_sdks
+            for k in _ANALYTICS_SDKS
+            if k in sdk.get("name", "").lower()
+        ]
+        analytics_leaks: list[str] = []
+        if analytics_sdks_detected and ctx.app_binary_path:
+            import re as _re
+            import zipfile
+            import tempfile
+            from pathlib import Path as _Path
+
+            sensitive_prop_pat = _re.compile(
+                r'(?i)(?:' + '|'.join(_SENSITIVE_ANALYTICS_PROPS) + r')',
+                _re.IGNORECASE,
+            )
+            try:
+                tmp_analytics = _Path(tempfile.mkdtemp(prefix="vxis_analytics_"))
+                with zipfile.ZipFile(ctx.app_binary_path, "r") as zf:
+                    for name in zf.namelist():
+                        if any(name.endswith(ext) for ext in (".java", ".kt", ".swift", ".m", ".js", ".dart")):
+                            try:
+                                zf.extract(name, tmp_analytics)
+                            except Exception:
+                                pass
+                for src_file in list(tmp_analytics.rglob("*"))[:150]:
+                    if not src_file.is_file():
+                        continue
+                    try:
+                        content = src_file.read_text(errors="replace")
+                    except Exception:
+                        continue
+                    # 애널리틱스 이벤트 전송 + 민감 속성 패턴
+                    if (
+                        any(k in content.lower() for k in _ANALYTICS_SDKS)
+                        and sensitive_prop_pat.search(content)
+                    ):
+                        analytics_leaks.append(src_file.name)
+            except Exception as exc:
+                logger.debug("  Analytics SDK data leakage scan: %s", exc)
+
+        if analytics_leaks:
+            f = ctx.add_finding(
+                title=(
+                    f"Analytics SDK Sensitive Data Leakage: {', '.join(analytics_sdks_detected[:3])}"
+                    "|||"
+                    f"애널리틱스 SDK 민감 데이터 유출: {', '.join(analytics_sdks_detected[:3])}"
+                ),
+                severity="high",
+                finding_type="data_leakage",
+                description=(
+                    f"Files {', '.join(analytics_leaks[:5])} reference analytics SDK calls "
+                    f"({', '.join(analytics_sdks_detected[:3])}) alongside sensitive property names "
+                    f"({', '.join(_SENSITIVE_ANALYTICS_PROPS[:5])}). "
+                    "Analytics SDKs must not receive PII or credentials in event properties."
+                    "|||"
+                    f"파일 {', '.join(analytics_leaks[:5])}에서 애널리틱스 SDK 호출 "
+                    f"({', '.join(analytics_sdks_detected[:3])})과 민감 속성명이 함께 탐지됨. "
+                    "애널리틱스 SDK 이벤트 속성에 개인정보나 자격증명을 포함하면 안 됩니다."
+                ),
+                target=ctx.target,
+                affected_component=", ".join(analytics_sdks_detected[:3]),
+                source_plugin="vxis-mobile-pipeline",
+                cwe_ids=["CWE-359", "CWE-200"],
+            )
+            ctx.add_owasp_finding("M6", f.id)
+            try:
+                ctx.score_tracker.record_finding(f.id, "MOB-SDK-002", level=2)
+            except Exception:
+                pass
+        elif analytics_sdks_detected:
+            logger.info(
+                "  Analytics SDKs detected (%s) — no obvious sensitive property leakage found",
+                ", ".join(analytics_sdks_detected),
+            )
+
+        logger.info(
+            "  Analytics SDK leakage scan: %d SDK(s) found, %d leakage files",
+            len(analytics_sdks_detected), len(analytics_leaks),
         )
 
     async def _review_crypto_implementation(
