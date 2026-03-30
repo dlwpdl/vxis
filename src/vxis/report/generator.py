@@ -183,13 +183,16 @@ def _filter_bilingual(text: str) -> str:
 
     If no separator, returns the text as-is (shown in both languages).
     Line breaks within each part are preserved as <br>.
+    Content is HTML-escaped to prevent XSS from payload strings in findings.
     """
+    from markupsafe import escape
+
     if "|||" in text:
         en, ko = text.split("|||", 1)
-        en_html = en.strip().replace("\n", "<br>")
-        ko_html = ko.strip().replace("\n", "<br>")
+        en_html = str(escape(en.strip())).replace("\n", "<br>")
+        ko_html = str(escape(ko.strip())).replace("\n", "<br>")
         return f'<span class="en">{en_html}</span><span class="ko">{ko_html}</span>'
-    return text.replace("\n", "<br>")
+    return str(escape(text)).replace("\n", "<br>")
 
 
 def _filter_severity_badge(severity: str) -> str:
