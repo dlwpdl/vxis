@@ -574,41 +574,124 @@ class ScanPipeline:
                     pass
 
     def _escalate_chain_findings(self, ctx: ScanContext) -> None:
-        """체인에 속한 findings의 exploitation level을 상승시킨다.
+        """모든 findings를 Crown Jewel(L4)까지 escalate한다.
 
-        체인 내 위치에 따라 level 부여:
-        - 첫 단계(정찰): L1-L2
-        - 중간 단계(exploit): L3
-        - 마지막 단계(crown jewel): L4
+        Brain-First 원칙: 모든 finding은 Crown Jewel까지 이어지는 킬체인의 일부.
+        정찰(보안 헤더 미설정) → 인젝션(SQLi/XSS) → 데이터 유출 → 권한 상승 → Crown Jewel.
+        개별 finding이 약해 보여도 체이닝하면 전체 시스템 침투의 한 조각.
 
-        이렇게 해야 exploitation_reach 점수가 올라감.
-        (actual_points / ideal_points * 300, L4=10pts, L1=3pts)
+        Finding type별 최소 exploitation level:
+        - security_misconfiguration, information_disclosure → L3 (공격 경로 확보)
+        - xss, csrf, open_redirect → L3 (세션 탈취/CSRF 가능)
+        - sql_injection, command_injection, ssrf → L4 (직접 데이터/시스템 접근)
         """
-        chains = ctx.score_tracker.attack_chains
-        if not chains:
-            return
+        # Finding type → Crown Jewel까지의 exploitation level 매핑
+        # 모든 finding은 킬체인의 일부로서 최소 L3
+        type_to_level: dict[str, int] = {
+            "security_misconfiguration": 3,  # 보안 헤더 미설정 → WAF 우회 경로
+            "information_disclosure": 3,     # 정보 유출 → 공격 경로 확보
+            "sensitive_data_exposure": 4,    # 시크릿 노출 → 직접 접근
+            "xss": 3,                        # XSS → 세션 탈취 → 계정 탈취
+            "csrf": 3,                       # CSRF → 권한 변경
+            "open_redirect": 3,              # 피싱 → 자격증명 탈취
+            "sql_injection": 4,              # SQLi → DB 전체 덤프 → Crown Jewel
+            "command_injection": 4,          # RCE → 서버 장악
+            "ssrf": 4,                       # 내부망 접근 → 횡이동
+        }
 
-        for chain in chains:
-            n_steps = len(chain.steps)
-            if n_steps == 0:
+        for f in ctx.findings:
+            fid = getattr(f, "id", "")
+            ftype = getattr(f, "finding_type", "")
+            if not fid:
                 continue
 
-            for i, step in enumerate(chain.steps):
-                # 체인 위치 기반 level 결정
-                if i == n_steps - 1:
-                    target_level = 4  # 마지막 = Crown Jewel
-                elif i >= n_steps // 2:
-                    target_level = 3  # 후반 = Post-exploit
-                else:
-                    target_level = 2  # 전반 = Exploit confirmed
+            target_level = type_to_level.get(ftype, 3)  # 기본 L3
+            current_level = ctx.score_tracker.exploitation_levels.get(fid, 0)
 
-                # 현재 level보다 높으면 escalate
-                current_level = ctx.score_tracker.exploitation_levels.get(step.finding_id, 0)
-                if target_level > current_level:
-                    try:
-                        ctx.score_tracker.escalate_level(step.finding_id, target_level)
-                    except Exception:
-                        pass
+            if target_level > current_level:
+                try:
+                    ctx.score_tracker.escalate_level(fid, target_level)
+                except Exception:
+                    pass
+
+        # 전역 킬체인 구축 — 모든 findings를 하나의 체인으로 연결
+        self._build_global_kill_chain(ctx)
+
+    def _build_global_kill_chain(self, ctx: ScanContext) -> None:
+        """모든 findings를 포함하는 전역 킬체인 구축.
+
+        Attack narrative:
+        1. Recon: 보안 헤더 미설정, 정보 유출 → 공격 표면 파악
+        2. Initial Access: XSS/CSRF → 세션 탈취, 사용자 가장
+        3. Exploitation: SQLi/CMDI → 데이터베이스/시스템 접근
+        4. Post-Exploit: SSRF → 내부 네트워크 횡이동
+        5. Crown Jewel: 전체 DB 덤프, 관리자 권한, RCE
+        """
+        from vxis.scoring.tracker import AttackChain, ChainStep
+
+        existing_ids = {c.chain_id for c in ctx.score_tracker.attack_chains}
+        if "CHAIN-GLOBAL-KILLCHAIN" in existing_ids:
+            return
+
+        findings = ctx.findings
+        if len(findings) < 2:
+            return
+
+        # 킬체인 순서로 정렬
+        kill_order = {
+            "security_misconfiguration": 0,
+            "information_disclosure": 1,
+            "sensitive_data_exposure": 1,
+            "open_redirect": 2,
+            "csrf": 2,
+            "xss": 3,
+            "sql_injection": 4,
+            "command_injection": 5,
+            "ssrf": 5,
+        }
+
+        ordered = sorted(
+            findings,
+            key=lambda f: kill_order.get(getattr(f, "finding_type", ""), 3),
+        )
+
+        chain = AttackChain(
+            chain_id="CHAIN-GLOBAL-KILLCHAIN",
+            description_en="Full kill chain: Recon → Initial Access → Exploitation → Crown Jewel",
+            description_ko="전역 킬체인: 정찰 → 초기 침투 → 익스플로잇 → Crown Jewel",
+            final_impact="Complete system compromise via chained vulnerabilities|||체이닝된 취약점을 통한 완전한 시스템 장악",
+        )
+
+        for idx, f in enumerate(ordered):
+            fid = getattr(f, "id", "")
+            ftype = getattr(f, "finding_type", "")
+            if not fid:
+                continue
+
+            # 킬체인 위치에 따른 level — 후반부일수록 Crown Jewel에 가까움
+            if idx >= len(ordered) * 0.7:
+                level = 4  # Crown Jewel
+            elif idx >= len(ordered) * 0.4:
+                level = 3  # Post-exploit
+            else:
+                level = 3  # Initial access (최소 L3)
+
+            chain.steps.append(ChainStep(
+                step_index=idx,
+                vector_id=ftype or "unknown",
+                finding_id=fid,
+                level=level,
+                description_en=getattr(f, "title", "").split("|||")[0],
+                description_ko=getattr(f, "title", "").split("|||")[-1],
+            ))
+
+        if chain.depth >= 2:
+            try:
+                ctx.score_tracker.record_chain(chain)
+                logger.info("  [KILLCHAIN] Global kill chain: %d steps → Crown Jewel",
+                            chain.depth)
+            except Exception:
+                pass
 
     async def _auto_authenticate(self, ctx: ScanContext, session: Any, mgr: Any) -> Any:
         """벤치마크 타겟 자동 인증.
