@@ -16,3 +16,4 @@ reports/
 tools/upstream_watch/.state.json
 .worktrees/
 .worktrees/
+tools/benchmark/.brain/
