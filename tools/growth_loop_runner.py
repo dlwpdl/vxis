@@ -473,6 +473,11 @@ def main() -> None:
         help="LLM provider: together, claude-cli, anthropic, auto (default: auto)",
     )
     parser.add_argument(
+        "--brain", default="api",
+        choices=["api", "claude-code"],
+        help="Brain mode: api (LLM API call) or claude-code (file protocol for Claude Code). Default: api",
+    )
+    parser.add_argument(
         "--targets", default="dvwa,juice-shop",
         help="Comma-separated target names (default: dvwa,juice-shop)",
     )
@@ -501,6 +506,12 @@ def main() -> None:
         elif args.provider == "anthropic":
             os.environ.setdefault("UPSTREAM_LLM_PROVIDER", "anthropic")
 
+    # Brain 모드 설정
+    if args.brain == "claude-code":
+        os.environ["VXIS_BRAIN_MODE"] = "claude-code"
+    else:
+        os.environ["VXIS_BRAIN_MODE"] = "api"
+
     # 종료 조건 결정
     max_iterations: int | None = args.iterations
     until_hour_kst: int | None = None
@@ -518,6 +529,7 @@ def main() -> None:
     print(f"  Time: {datetime.now(KST).strftime('%Y-%m-%d %H:%M')} KST")
     print(f"  Targets: {', '.join(target_names)}")
     print(f"  Provider: {args.provider or 'auto'}")
+    print(f"  Brain: {args.brain}")
     if until_hour_kst is not None:
         print(f"  Until: {until_hour_kst:02d}:00 KST")
     else:
