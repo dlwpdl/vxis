@@ -198,8 +198,14 @@ class ScanPipeline:
         except Exception as exc:
             logger.warning("  %s failed: %s (continuing)", name, exc)
 
-        # Brain decisions → 실제 Hands 공격 실행
+        # Brain decisions → 실제 Hands 공격 실행 (FileBasedBrain 전용)
         await self._execute_brain_decisions(name, ctx)
+
+        # 체인 구축 + TP 마킹 + evidence — 모든 Brain 타입에서 실행
+        self._build_chains_and_mark_tp(ctx, name)
+
+        # Exploitation level escalation — 체인에 속한 findings 레벨 상승
+        self._escalate_chain_findings(ctx)
 
         elapsed = (time.monotonic() - t0) * 1000
         new_findings = len(ctx.findings) - pre_count
@@ -443,9 +449,6 @@ class ScanPipeline:
 
         # 세션은 닫지 않음 — 다음 Phase에서 재사용
 
-        # ── 체인 구축 + 정밀도 개선 ──
-        self._build_chains_and_mark_tp(ctx, phase_name)
-
     def _build_chains_and_mark_tp(self, ctx: ScanContext, phase_name: str) -> None:
         """Brain-exec에서 발견한 findings를 체인으로 연결하고 TP 마킹한다.
 
@@ -531,6 +534,43 @@ class ScanPipeline:
                     logger.info("  [CHAIN] %s: %d steps recorded", chain_id, chain.depth)
                 except Exception:
                     pass
+
+    def _escalate_chain_findings(self, ctx: ScanContext) -> None:
+        """체인에 속한 findings의 exploitation level을 상승시킨다.
+
+        체인 내 위치에 따라 level 부여:
+        - 첫 단계(정찰): L1-L2
+        - 중간 단계(exploit): L3
+        - 마지막 단계(crown jewel): L4
+
+        이렇게 해야 exploitation_reach 점수가 올라감.
+        (actual_points / ideal_points * 300, L4=10pts, L1=3pts)
+        """
+        chains = ctx.score_tracker.attack_chains
+        if not chains:
+            return
+
+        for chain in chains:
+            n_steps = len(chain.steps)
+            if n_steps == 0:
+                continue
+
+            for i, step in enumerate(chain.steps):
+                # 체인 위치 기반 level 결정
+                if i == n_steps - 1:
+                    target_level = 4  # 마지막 = Crown Jewel
+                elif i >= n_steps // 2:
+                    target_level = 3  # 후반 = Post-exploit
+                else:
+                    target_level = 2  # 전반 = Exploit confirmed
+
+                # 현재 level보다 높으면 escalate
+                current_level = ctx.score_tracker.exploitation_levels.get(step.finding_id, 0)
+                if target_level > current_level:
+                    try:
+                        ctx.score_tracker.escalate_level(step.finding_id, target_level)
+                    except Exception:
+                        pass
 
     async def _auto_authenticate(self, ctx: ScanContext, session: Any, mgr: Any) -> Any:
         """벤치마크 타겟 자동 인증.
@@ -1076,24 +1116,35 @@ class ScanPipeline:
             except Exception:
                 pass
 
-        # 서브도메인 열거
+        # 서브도메인 열거 (localhost/IP 타겟은 스킵 — 의미 없는 SSL 에러 방지)
         from urllib.parse import urlparse
         base_domain = urlparse(ctx.target).netloc
         root_domain = ".".join(base_domain.split(".")[-2:])
 
-        for sub in ["api", "admin", "staging", "dev", "internal", "dashboard",
-                     "cdn", "static", "auth", "mail", "monitor"]:
-            fqdn = f"{sub}.{root_domain}"
-            try:
-                sub_s = await mgr.get_session(f"https://{fqdn}")
-                sr = await sub_s.get("/")
-                ctx.subdomains.append({
-                    "fqdn": fqdn, "status": sr.status, "live": True,
-                    "headers": dict(sr.headers), "body_preview": sr.text[:200],
-                })
-                logger.info("  [LIVE] %s → %d", fqdn, sr.status)
-            except Exception:
-                pass
+        skip_subdomain = (
+            "localhost" in base_domain
+            or base_domain.startswith("127.")
+            or base_domain.startswith("192.168.")
+            or base_domain.startswith("10.")
+            or ":" in base_domain.split(".")[-1]  # port-only like localhost:8081
+        )
+
+        if skip_subdomain:
+            logger.info("  Subdomain enum skipped (local/IP target)")
+        else:
+            for sub in ["api", "admin", "staging", "dev", "internal", "dashboard",
+                         "cdn", "static", "auth", "mail", "monitor"]:
+                fqdn = f"{sub}.{root_domain}"
+                try:
+                    sub_s = await mgr.get_session(f"https://{fqdn}")
+                    sr = await sub_s.get("/")
+                    ctx.subdomains.append({
+                        "fqdn": fqdn, "status": sr.status, "live": True,
+                        "headers": dict(sr.headers), "body_preview": sr.text[:200],
+                    })
+                    logger.info("  [LIVE] %s → %d", fqdn, sr.status)
+                except Exception:
+                    pass
 
         # OWASP 전체 순회 (Phase 2 에이전트가 해야 하지만, 아직 에이전트가 Pipeline에 통합 안 된 상태에서
         # Phase 4 CPR이 직접 수행)
