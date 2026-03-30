@@ -197,6 +197,10 @@ class ScanPipeline:
             await func(ctx)
         except Exception as exc:
             logger.warning("  %s failed: %s (continuing)", name, exc)
+
+        # Brain decisions → 실제 Hands 공격 실행
+        await self._execute_brain_decisions(name, ctx)
+
         elapsed = (time.monotonic() - t0) * 1000
         new_findings = len(ctx.findings) - pre_count
         ctx.log_phase(name, duration_ms=elapsed, findings_count=new_findings)
@@ -313,6 +317,294 @@ class ScanPipeline:
             "targets": [a.args for a in actions],
             "actions": actions,
         }
+
+    # ── Brain decision execution ────────────────────────────
+
+    async def _execute_brain_decisions(
+        self,
+        phase_name: str,
+        ctx: ScanContext,
+    ) -> None:
+        """Brain이 결정한 공격을 Hands로 실제 실행한다.
+
+        ctx._brain_decisions에 저장된 decision 중 attempt=True인 것들의
+        targets/payloads를 실제 HTTP 요청으로 보내고 결과를 해석한다.
+        """
+        import re as _re
+        from vxis.agent.brain_filebased import FileBasedBrain
+
+        if not isinstance(self.brain, FileBasedBrain):
+            return
+
+        decisions = getattr(ctx, "_brain_decisions", {})
+        if not decisions:
+            return
+
+        # 이 Phase에서 attempt=True인 결정만 필터
+        phase_match = _re.match(r"(Phase \d+)", phase_name)
+        if not phase_match:
+            return
+        phase_key = phase_match.group(1)
+
+        try:
+            from vxis.scoring.vectors import WEB_VECTORS
+            phase_vector_ids = {v.id for v in WEB_VECTORS if v.phase == phase_key}
+        except ImportError:
+            return
+
+        active_decisions = {
+            vid: d for vid, d in decisions.items()
+            if vid in phase_vector_ids and d.get("attempt", False)
+        }
+
+        if not active_decisions:
+            return
+
+        logger.info("  [BRAIN-EXEC] Executing %d brain decisions with Hands",
+                     len(active_decisions))
+
+        # Hands(SessionManager) 획득
+        try:
+            from vxis.interaction.hands import SessionManager
+            mgr = SessionManager()
+            session = await mgr.get_session(ctx.target)
+        except Exception as exc:
+            logger.warning("  [BRAIN-EXEC] Hands unavailable: %s", exc)
+            return
+
+        # 각 decision의 targets/payloads 실행
+        for vector_id, decision in active_decisions.items():
+            targets = decision.get("targets", [])
+            reasoning = decision.get("reasoning", "")
+
+            for target_spec in targets:
+                endpoint = target_spec.get("endpoint", "/")
+                method = target_spec.get("method", "GET").upper()
+                param = target_spec.get("param", "")
+                payloads = target_spec.get("payloads", [])
+                note = target_spec.get("note", "")
+
+                if not payloads:
+                    payloads = [""]  # 빈 페이로드라도 엔드포인트 접근 시도
+
+                for payload in payloads[:10]:  # 페이로드당 최대 10개
+                    try:
+                        if method == "GET" and param:
+                            resp = await session.get(endpoint, params={param: payload})
+                        elif method == "POST" and param:
+                            resp = await session.post(endpoint, data={param: payload})
+                        elif method == "GET":
+                            resp = await session.get(endpoint)
+                        else:
+                            resp = await session.post(endpoint, data={"input": payload})
+
+                        # 응답 해석 — 취약점 시그니처 탐지
+                        body = resp.text[:5000] if hasattr(resp, "text") else ""
+                        status = resp.status if hasattr(resp, "status") else 0
+
+                        finding_created = self._analyze_probe_response(
+                            ctx, vector_id, endpoint, param, payload, body, status,
+                        )
+
+                        if finding_created:
+                            logger.info("    [HIT] %s on %s param=%s",
+                                        vector_id, endpoint, param)
+
+                            # FileBasedBrain에 결과 기록
+                            from vxis.agent.brain import AgentAction
+                            self.brain.record_result(
+                                AgentAction(tool="PROBE", args=target_spec, reasoning=reasoning),
+                                {
+                                    "success": True,
+                                    "findings": [{
+                                        "vector_id": vector_id,
+                                        "endpoint": endpoint,
+                                        "param": param,
+                                        "payload": payload[:100],
+                                        "status": status,
+                                    }],
+                                },
+                            )
+
+                    except Exception as exc:
+                        logger.debug("    [FAIL] %s %s: %s", vector_id, endpoint, exc)
+
+        try:
+            await mgr.close_all()
+        except Exception:
+            pass
+
+    def _analyze_probe_response(
+        self,
+        ctx: ScanContext,
+        vector_id: str,
+        endpoint: str,
+        param: str,
+        payload: str,
+        body: str,
+        status: int,
+    ) -> bool:
+        """응답에서 취약점 시그니처를 탐지하고 Finding을 생성한다."""
+        import re as _re
+
+        body_lower = body.lower()
+
+        # ── SQL Injection 시그니처 ──
+        if vector_id.startswith("WEB-SQLI"):
+            sqli_sigs = [
+                r"you have an error in your sql",
+                r"mysql_fetch", r"ORA-\d+", r"syntax error.*sql",
+                r"unclosed quotation mark", r"SQLITE_ERROR",
+                r"pg_query", r"Warning.*mysql",
+            ]
+            for sig in sqli_sigs:
+                if _re.search(sig, body, _re.IGNORECASE):
+                    f = ctx.add_finding(
+                        title=f"SQL Injection — {endpoint}|||SQL 인젝션 — {endpoint}",
+                        severity="critical",
+                        finding_type="sql_injection",
+                        description=(
+                            f"SQL error signature detected on {endpoint} param={param} "
+                            f"with payload: {payload[:80]}. Error: {_re.search(sig, body, _re.IGNORECASE).group()[:100]}"
+                            f"|||{endpoint}에서 SQL 에러 시그니처 탐지. 파라미터: {param}, 페이로드: {payload[:80]}"
+                        ),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=3)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── XSS 시그니처 ──
+        if vector_id.startswith("WEB-XSS"):
+            if payload and payload in body and "<" in payload:
+                f = ctx.add_finding(
+                    title=f"Cross-Site Scripting — {endpoint}|||크로스사이트 스크립팅 — {endpoint}",
+                    severity="high",
+                    finding_type="xss",
+                    description=(
+                        f"Reflected payload on {endpoint} param={param}: {payload[:80]}"
+                        f"|||{endpoint}에서 반사형 페이로드 탐지. 파라미터: {param}: {payload[:80]}"
+                    ),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=2)
+                except Exception:
+                    pass
+                return True
+
+        # ── Command Injection 시그니처 ──
+        if vector_id.startswith("WEB-CMDI"):
+            cmdi_sigs = [r"root:.*:0:0:", r"uid=\d+", r"Windows IP Configuration",
+                         r"Directory of [A-Z]:\\"]
+            for sig in cmdi_sigs:
+                if _re.search(sig, body):
+                    f = ctx.add_finding(
+                        title=f"Command Injection — {endpoint}|||커맨드 인젝션 — {endpoint}",
+                        severity="critical",
+                        finding_type="command_injection",
+                        description=(
+                            f"OS command output in response from {endpoint} param={param}"
+                            f"|||{endpoint}에서 OS 명령 실행 결과 탐지. 파라미터: {param}"
+                        ),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=4)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── SSRF 시그니처 ──
+        if vector_id.startswith("WEB-SSRF"):
+            ssrf_sigs = [r"169\.254\.169\.254", r"metadata\.google", r"localhost",
+                         r"127\.0\.0\.1", r"internal server"]
+            for sig in ssrf_sigs:
+                if _re.search(sig, body_lower):
+                    f = ctx.add_finding(
+                        title=f"Server-Side Request Forgery — {endpoint}|||SSRF — {endpoint}",
+                        severity="high",
+                        finding_type="ssrf",
+                        description=(
+                            f"Internal resource access detected from {endpoint} param={param}"
+                            f"|||{endpoint}에서 내부 리소스 접근 탐지. 파라미터: {param}"
+                        ),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=3)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── Open Redirect ──
+        if vector_id == "WEB-MISCONF-006":
+            if status in (301, 302, 303, 307, 308):
+                f = ctx.add_finding(
+                    title=f"Open Redirect — {endpoint}|||오픈 리다이렉트 — {endpoint}",
+                    severity="medium",
+                    finding_type="open_redirect",
+                    description=(
+                        f"Redirect with status {status} on {endpoint} param={param}"
+                        f"|||{endpoint}에서 리다이렉트 탐지 (상태코드: {status}). 파라미터: {param}"
+                    ),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=1)
+                except Exception:
+                    pass
+                return True
+
+        # ── CSRF (토큰 부재) ──
+        if vector_id == "WEB-CSRF-001":
+            if "<form" in body_lower and "csrf" not in body_lower and "_token" not in body_lower:
+                f = ctx.add_finding(
+                    title=f"Missing CSRF Token — {endpoint}|||CSRF 토큰 누락 — {endpoint}",
+                    severity="medium",
+                    finding_type="csrf",
+                    description=(
+                        f"Form on {endpoint} lacks CSRF token"
+                        f"|||{endpoint}의 폼에 CSRF 토큰이 없습니다"
+                    ),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=1)
+                except Exception:
+                    pass
+                return True
+
+        # ── 일반 에러 기반 정보 유출 ──
+        error_sigs = [r"stack trace", r"traceback", r"exception", r"debug"]
+        for sig in error_sigs:
+            if _re.search(sig, body_lower) and status >= 400:
+                f = ctx.add_finding(
+                    title=f"Information Disclosure via Error — {endpoint}|||에러 기반 정보 유출 — {endpoint}",
+                    severity="low",
+                    finding_type="information_disclosure",
+                    description=(
+                        f"Error page with debug info on {endpoint} (status {status})"
+                        f"|||{endpoint}에서 디버그 정보 포함 에러 페이지 (상태코드: {status})"
+                    ),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=1)
+                except Exception:
+                    pass
+                return True
+
+        return False
 
     # ── Deferred Action Approval ──────────────────────────────
 
