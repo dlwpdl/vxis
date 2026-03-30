@@ -250,9 +250,15 @@ class BenchmarkRunner:
         scan_id: str,
     ):
         """타겟 타입에 맞는 파이프라인을 실행하고 ScanContext를 반환한다."""
-        from vxis.agent.brain import AgentBrain
-
-        brain = AgentBrain()
+        brain_mode = os.environ.get("VXIS_BRAIN_MODE", "api")
+        if brain_mode == "claude-code":
+            from vxis.agent.brain_filebased import FileBasedBrain
+            brain = FileBasedBrain()
+            logger.info("[BENCHMARK] Brain mode: claude-code (FileBasedBrain)")
+        else:
+            from vxis.agent.brain import AgentBrain
+            brain = AgentBrain()
+            logger.info("[BENCHMARK] Brain mode: api (AgentBrain)")
 
         if target_type == "web":
             from vxis.pipeline.pipeline import ScanPipeline
@@ -269,6 +275,9 @@ class BenchmarkRunner:
             ctx = await pipeline.run(target=target_url)
         else:
             raise ValueError(f"Unknown target_type: {target_type!r}")
+
+        if brain_mode == "claude-code" and hasattr(brain, "mark_done"):
+            brain.mark_done()
 
         return ctx
 
