@@ -880,6 +880,19 @@
     @media print {
       .lang-toggle { display: none; }
     }
+
+    /* Attack Paths Section */
+    .attack-paths-section { page-break-before: always; }
+    .attack-graph-container { margin: 20px 0; text-align: center; }
+    .attack-graph-container svg { max-width: 100%; height: auto; }
+    .chain-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+    .chain-table th, .chain-table td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+    .chain-table th { background: #1a1a2e; color: white; }
+    .chain-table code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; }
+    .depth-table { margin: 10px 0; }
+    .depth-table td { padding: 5px 10px; font-size: 0.9em; }
+    .depth-table td:first-child { font-weight: bold; font-size: 1.1em; width: 30px; }
+    @media print { .attack-graph-container svg { max-height: 400px; } }
   </style>
   <script>
   document.addEventListener('DOMContentLoaded', function() {
