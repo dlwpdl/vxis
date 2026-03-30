@@ -206,6 +206,83 @@
     }
   },
   {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] The System Prompt Is the Attack Surface: How LLM Agent Configuration Shapes Security and Creates Exploitable Vulnerabilities",
+    "url": "http://arxiv.org/abs/2603.25056v1",
+    "description": "System prompt configuration can make the difference between near-total phishing blindness and near-perfect detection in LLM email agents. We present PhishNChips, a study of 11 models under 10 prompt strategies, showing that prompt-model interaction is a first-order security variable: a single model's phishing bypass rate ranges from under 1% to 97% depending on how it is configured, while the false-positive cost of the same prompt varies sharply across models. We then show that optimizing prompt",
+    "relevance_tags": [
+      "agent",
+      "bypass",
+      "llm",
+      "phishing"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-03-26T05:48:37Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Bridging Code Property Graphs and Language Models for Program Analysis",
+    "url": "http://arxiv.org/abs/2603.24837v1",
+    "description": "Large Language Models (LLMs) face critical challenges when analyzing security vulnerabilities in real world codebases: token limits prevent loading entire repositories, code embeddings fail to capture inter procedural data flows, and LLMs struggle to generate complex static analysis queries. These limitations force existing approaches to operate on isolated code snippets, missing vulnerabilities that span multiple functions and files. We introduce codebadger, an open source Model Context Protoco",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-03-25T22:08:04Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Leveraging Large Language Models for Trustworthiness Assessment of Web Applications",
+    "url": "http://arxiv.org/abs/2603.23781v1",
+    "description": "The widespread adoption of web applications has made their security a critical concern and has increased the need for systematic ways to assess whether they can be considered trustworthy. However, \"trust\" assessment remains an open problem as existing techniques primarily focus on detecting known vulnerabilities or depend on manual evaluation, which limits their scalability; therefore, evaluating adherence to secure coding practices offers a complementary, pragmatic perspective by focusing on ob",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-03-24T23:33:54Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Robust Safety Monitoring of Language Models via Activation Watermarking",
+    "url": "http://arxiv.org/abs/2603.23171v1",
+    "description": "Large language models (LLMs) can be misused to reveal sensitive information, such as weapon-making instructions or writing malware. LLM providers rely on $\\emph{monitoring}$ to detect and flag unsafe behavior during inference. An open security challenge is $\\emph{adaptive}$ adversaries who craft attacks that simultaneously (i) evade detection while (ii) eliciting unsafe behavior. Adaptive attackers are a major concern as LLM providers cannot patch their security mechanisms, since they are unawar",
+    "relevance_tags": [
+      "llm",
+      "malware"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-03-24T13:13:23Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Agent Audit: A Security Analysis System for LLM Agent Applications",
+    "url": "http://arxiv.org/abs/2603.22853v1",
+    "description": "What should a developer inspect before deploying an LLM agent: the model, the tool code, the deployment configuration, or all three? In practice, many security failures in agent systems arise not from model weights alone, but from the surrounding software stack: tool functions that pass untrusted inputs to dangerous operations, exposed credentials in deployment artifacts, and over-privileged Model Context Protocol (MCP) configurations.   We present Agent Audit, a security analysis system for LLM",
+    "relevance_tags": [
+      "agent",
+      "llm",
+      "mcp"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-03-24T06:44:51Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
     "source": "community_pulse",
     "category": "news",
     "title": "[bleepingcomputer] FBI confirms hack of Director Patel's personal email inbox",
