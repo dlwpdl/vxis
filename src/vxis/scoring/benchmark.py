@@ -250,19 +250,26 @@ class BenchmarkRunner:
         scan_id: str,
     ):
         """타겟 타입에 맞는 파이프라인을 실행하고 ScanContext를 반환한다."""
+        from vxis.agent.brain import AgentBrain
+
+        brain = AgentBrain()
+
         if target_type == "web":
             from vxis.pipeline.pipeline import ScanPipeline
-            pipeline = ScanPipeline(target=target_url, scan_id=scan_id)
+            pipeline = ScanPipeline(brain=brain)
+            ctx = await pipeline.run(target=target_url)
         elif target_type == "game":
-            from vxis.pipeline.game_pipeline import GameScanPipeline
-            pipeline = GameScanPipeline(target=target_url, scan_id=scan_id)
+            # game_pipeline은 아직 미구현 — web 파이프라인으로 fallback
+            from vxis.pipeline.pipeline import ScanPipeline
+            pipeline = ScanPipeline(brain=brain)
+            ctx = await pipeline.run(target=target_url)
         elif target_type == "mobile":
-            from vxis.pipeline.mobile_pipeline import MobileScanPipeline
-            pipeline = MobileScanPipeline(target=target_url, scan_id=scan_id)
+            from vxis.pipeline.mobile_pipeline import MobilePipeline
+            pipeline = MobilePipeline()
+            ctx = await pipeline.run(target=target_url)
         else:
             raise ValueError(f"Unknown target_type: {target_type!r}")
 
-        ctx = await pipeline.run()
         return ctx
 
 
