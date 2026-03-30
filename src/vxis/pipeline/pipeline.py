@@ -407,14 +407,52 @@ class ScanPipeline:
 
                 for payload in payloads[:10]:  # 페이로드당 최대 10개
                     try:
+                        # 폼 필드 자동 탐지: 먼저 페이지를 GET해서 폼 구조 파악
+                        extra_fields = target_spec.get("extra_fields", {})
+                        if not extra_fields and param:
+                            # 폼의 submit 버튼 이름 자동 탐지
+                            try:
+                                import re as _re2
+                                probe_resp = await session.get(endpoint)
+                                probe_body = probe_resp.text if hasattr(probe_resp, "text") else ""
+                                # Submit 버튼 탐지
+                                submit_match = _re2.search(
+                                    r'<input[^>]+type=["\']submit["\'][^>]+name=["\']([^"\']+)["\']',
+                                    probe_body, _re2.IGNORECASE,
+                                )
+                                if not submit_match:
+                                    submit_match = _re2.search(
+                                        r'name=["\']([^"\']+)["\'][^>]+type=["\']submit["\']',
+                                        probe_body, _re2.IGNORECASE,
+                                    )
+                                if submit_match:
+                                    extra_fields[submit_match.group(1)] = "Submit"
+                                # CSRF 토큰 탐지
+                                token_match = _re2.search(
+                                    r'name=["\']user_token["\'][^>]+value=["\']([^"\']+)["\']',
+                                    probe_body,
+                                )
+                                if token_match:
+                                    extra_fields["user_token"] = token_match.group(1)
+                            except Exception:
+                                pass
+                            # 캐시: 같은 endpoint에 대해 반복 탐지 방지
+                            target_spec["extra_fields"] = extra_fields
+
                         if method == "GET" and param:
-                            resp = await session.get(endpoint, params={param: payload})
+                            params = {param: payload}
+                            params.update(extra_fields)
+                            resp = await session.get(endpoint, params=params)
                         elif method == "POST" and param:
-                            resp = await session.post(endpoint, data={param: payload})
+                            data = {param: payload}
+                            data.update(extra_fields)
+                            resp = await session.post(endpoint, data=data)
                         elif method == "GET":
                             resp = await session.get(endpoint)
                         else:
-                            resp = await session.post(endpoint, data={"input": payload})
+                            data = {"input": payload}
+                            data.update(extra_fields)
+                            resp = await session.post(endpoint, data=data)
 
                         # 응답 해석 — 취약점 시그니처 탐지
                         body = resp.text[:5000] if hasattr(resp, "text") else ""
