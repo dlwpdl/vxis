@@ -549,6 +549,21 @@ class ScanPipeline:
             pass
 
         try:
+            # Phase 8 대응 벡터: 클라이언트 사이드 인젝션 — XSS/CSRF/Open Redirect
+            # Client-side injection vectors — XSS/CSRF/Open Redirect
+            for vid in [
+                "WEB-XSS-001",   # Reflected XSS | 반사형 XSS
+                "WEB-XSS-002",   # Stored XSS | 저장형 XSS
+                "WEB-XSS-003",   # DOM-Based XSS | DOM 기반 XSS
+                "WEB-XSS-004",   # Mutation XSS (mXSS) | Mutation XSS
+                "WEB-CSRF-001",  # Cross-Site Request Forgery | 사이트 간 요청 위조
+                "WEB-MISCONF-006",  # Open Redirect | 오픈 리다이렉트
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
+        try:
             from vxis.synthesis.cross_protocol import CrossProtocolSynthesizer
             synth = CrossProtocolSynthesizer()
             # 발견된 취약점들을 크로스 레이어로 합성
