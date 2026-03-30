@@ -1,0 +1,49 @@
+{
+  "date": "2026-03-30T05:18:20.695054+00:00",
+  "total_iterations": 1,
+  "start_score": 663.0769230769231,
+  "final_score": 663.0769230769231,
+  "total_growth": 0,
+  "verdicts": [
+    {
+      "target": "dvwa",
+      "today": 663.0769230769231,
+      "previous": 580.0,
+      "delta": 83.1,
+      "verdict": "improved"
+    }
+  ],
+  "iterations": [
+    {
+      "iteration": 1,
+      "timestamp": "2026-03-30T05:18:20.694519+00:00",
+      "best_score": 663.0769230769231,
+      "weakest_dimension": "chain_intelligence",
+      "weakest_pct": 0.0,
+      "all_dimensions": {
+        "vector_coverage": 250.0,
+        "exploitation_reach": 173.07692307692307,
+        "chain_intelligence": 0.0,
+        "finding_precision": 140.0,
+        "completeness": 100.0
+      },
+      "improvement": 0.0,
+      "results_per_target": [
+        {
+          "target": "dvwa",
+          "score": 663.0769230769231,
+          "grade": "B",
+          "dimensions": {
+            "vector_coverage": 250.0,
+            "exploitation_reach": 173.07692307692307,
+            "chain_intelligence": 0.0,
+            "finding_precision": 140.0,
+            "completeness": 100.0
+          },
+          "error": null
+        }
+      ],
+      "action": "발견 간 연결점 탐색 강화, 피벗 로직 활성화"
+    }
+  ]
+}

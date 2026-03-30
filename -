@@ -37,3 +37,38 @@
               "severity"     : "FATAL",
               "finding"      : "non-empty '-' exists. Either use '--append' or (re)move it"
           }
+         {
+              "id"           : "scanProblem",
+              "ip"           : "/",
+              "port"         : "443",
+              "severity"     : "FATAL",
+              "finding"      : "non-empty '-' exists. Either use '--append' or (re)move it"
+          }
+         {
+              "id"           : "scanProblem",
+              "ip"           : "/",
+              "port"         : "443",
+              "severity"     : "FATAL",
+              "finding"      : "non-empty '-' exists. Either use '--append' or (re)move it"
+          }
+         {
+              "id"           : "scanProblem",
+              "ip"           : "/",
+              "port"         : "443",
+              "severity"     : "FATAL",
+              "finding"      : "non-empty '-' exists. Either use '--append' or (re)move it"
+          }
+         {
+              "id"           : "scanProblem",
+              "ip"           : "/",
+              "port"         : "443",
+              "severity"     : "FATAL",
+              "finding"      : "non-empty '-' exists. Either use '--append' or (re)move it"
+          }
+         {
+              "id"           : "scanProblem",
+              "ip"           : "/",
+              "port"         : "443",
+              "severity"     : "FATAL",
+              "finding"      : "non-empty '-' exists. Either use '--append' or (re)move it"
+          }

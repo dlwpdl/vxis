@@ -420,10 +420,21 @@ class ScanPipeline:
                             if not best_form:
                                 best_form = probe_resp.forms[0]  # fallback: 첫 번째 폼
 
+                            # action 정규화: "#", 빈 값, 풀 URL → endpoint 사용
+                            raw_action = best_form.action or ""
+                            if not raw_action or raw_action.endswith("#") or raw_action == endpoint:
+                                normalized_action = endpoint
+                            elif raw_action.startswith("http"):
+                                # 풀 URL에서 path만 추출
+                                from urllib.parse import urlparse as _urlparse
+                                normalized_action = _urlparse(raw_action).path or endpoint
+                            else:
+                                normalized_action = raw_action
+
                             form_cache = {
                                 "fields": dict(best_form.fields),
                                 "method": best_form.method.upper(),
-                                "action": best_form.action or endpoint,
+                                "action": normalized_action,
                                 "enctype": best_form.enctype,
                             }
                         else:

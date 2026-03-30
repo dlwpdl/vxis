@@ -1,0 +1,3 @@
+# VXIS 산업 스캔 테스트 대상
+tms.jnf-logistics.com
+cloud.protopie.io
