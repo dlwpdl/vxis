@@ -341,7 +341,7 @@ def _render_node(node: AttackNode, x: float, y: float, lang: str) -> str:
 
     # 벡터 타입 (상단 — 가장 중요한 정보)
     if vector_text:
-        truncated_vec = vector_text[:30] + "…" if len(vector_text) > 30 else vector_text
+        truncated_vec = vector_text[:45] + "…" if len(vector_text) > 45 else vector_text
         parts.append(
             f'<text x="{x}" y="{y - r - 10}" text-anchor="middle" '
             f'fill="{border}" font-size="13" font-weight="bold">'
@@ -367,7 +367,7 @@ def _render_node(node: AttackNode, x: float, y: float, lang: str) -> str:
 
     # 타겟 컴포넌트 (하단 — 어디를 막아야 하는지)
     if component_text:
-        truncated_comp = component_text[:35] + "…" if len(component_text) > 35 else component_text
+        truncated_comp = component_text[:50] + "…" if len(component_text) > 50 else component_text
         parts.append(
             f'<text x="{x}" y="{y + r + 16}" text-anchor="middle" '
             f'fill="#adb5bd" font-size="11" font-family="monospace">'

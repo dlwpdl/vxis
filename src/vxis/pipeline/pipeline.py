@@ -783,7 +783,41 @@ class ScanPipeline:
                     logger.warning("  [AUTH] DVWA login failed")
 
         except Exception as exc:
-            logger.debug("  [AUTH] Auto-auth attempt failed: %s", exc)
+            logger.debug("  [AUTH] DVWA auth attempt failed: %s", exc)
+
+        # ── WebGoat 인증 ──
+        try:
+            resp = await session.get("/WebGoat/login")
+            body = resp.text if hasattr(resp, "text") else ""
+
+            if "WebGoat" in body or "webgoat" in str(getattr(resp, "url", "")).lower():
+                logger.info("  [AUTH] WebGoat detected — registering + logging in...")
+
+                # Register
+                try:
+                    await session.post("/WebGoat/register.mvc", data={
+                        "username": "vxisbrain",
+                        "password": "VxisBrain123!",
+                        "matchingPassword": "VxisBrain123!",
+                        "agree": "agree",
+                    })
+                except Exception:
+                    pass  # Already registered
+
+                # Login
+                login_resp = await session.post("/WebGoat/login", data={
+                    "username": "vxisbrain",
+                    "password": "VxisBrain123!",
+                })
+                login_url = str(getattr(login_resp, "url", ""))
+                if "welcome" in login_url or "attack" in login_url:
+                    logger.info("  [AUTH] WebGoat login OK (vxisbrain)")
+                    return session
+                else:
+                    logger.warning("  [AUTH] WebGoat login unclear → %s", login_url)
+
+        except Exception as exc:
+            logger.debug("  [AUTH] WebGoat auth attempt failed: %s", exc)
 
         return session
 
@@ -810,6 +844,10 @@ class ScanPipeline:
                 r"mysql_fetch", r"ORA-\d+", r"syntax error.*sql",
                 r"unclosed quotation mark", r"SQLITE_ERROR",
                 r"pg_query", r"Warning.*mysql",
+                # HSQLDB / H2 (WebGoat)
+                r"org\.hsqldb", r"unexpected token", r"JDBCException",
+                r"data exception.*string data", r"H2 Console",
+                r"HSQL Database Engine",
             ]
             for sig in sqli_error_sigs:
                 if _re.search(sig, body, _re.IGNORECASE):
@@ -852,6 +890,40 @@ class ScanPipeline:
                 except Exception:
                     pass
                 return True
+
+            # JSON 응답에서 SQL 쿼리 노출 (WebGoat 스타일)
+            import json as _json
+            try:
+                json_resp = _json.loads(body)
+                output = json_resp.get("output", "") or ""
+                feedback = json_resp.get("feedback", "") or ""
+                combined = output + " " + feedback
+
+                # SQL 쿼리가 output에 노출됨
+                if _re.search(r"SELECT.*FROM|INSERT INTO|UPDATE.*SET|DELETE FROM", combined, _re.IGNORECASE):
+                    # lessonCompleted = True면 exploit 성공
+                    completed = json_resp.get("lessonCompleted", False)
+                    if completed or "user_data" in combined.lower() or payload.upper() in combined.upper():
+                        f = ctx.add_finding(
+                            title=f"SQL Injection (JSON API) — {endpoint}|||SQL 인젝션 (JSON API) — {endpoint}",
+                            severity="critical",
+                            finding_type="sql_injection",
+                            description=(
+                                f"SQL query exposed in JSON response from {endpoint}. "
+                                f"Output: {output[:200]}. Payload: {payload[:80]}"
+                                f"|||{endpoint}의 JSON 응답에서 SQL 쿼리 노출. "
+                                f"출력: {output[:200]}. 페이로드: {payload[:80]}"
+                            ),
+                            target=ctx.target,
+                            affected_component=endpoint,
+                        )
+                        try:
+                            ctx.score_tracker.record_finding(f.id, vector_id, level=3 if not completed else 4)
+                        except Exception:
+                            pass
+                        return True
+            except (_json.JSONDecodeError, AttributeError):
+                pass
 
         # ── XSS 시그니처 ──
         if vector_id.startswith("WEB-XSS"):
