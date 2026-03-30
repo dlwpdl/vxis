@@ -357,17 +357,29 @@ class ScanPipeline:
             if vid in phase_vector_ids and d.get("attempt", False)
         }
 
+        print(f"  [BRAIN-EXEC] {phase_key}: {len(decisions)} decisions total, "
+              f"{len(phase_vector_ids)} in this phase, {len(active_decisions)} active",
+              flush=True)
+
         if not active_decisions:
             return
 
         logger.info("  [BRAIN-EXEC] Executing %d brain decisions with Hands",
                      len(active_decisions))
 
-        # Hands(SessionManager) 획득
+        # Hands(SessionManager) 획득 — ctx에 이미 인증된 세션이 있으면 재사용
         try:
             from vxis.interaction.hands import SessionManager
-            mgr = SessionManager()
-            session = await mgr.get_session(ctx.target)
+            if hasattr(ctx, "_brain_session_mgr") and ctx._brain_session_mgr is not None:
+                mgr = ctx._brain_session_mgr
+                session = ctx._brain_session
+            else:
+                mgr = SessionManager()
+                session = await mgr.get_session(ctx.target)
+                # 타겟 자동 인증 시도 (DVWA 등 벤치마크 앱)
+                session = await self._auto_authenticate(ctx, session, mgr)
+                ctx._brain_session_mgr = mgr
+                ctx._brain_session = session
         except Exception as exc:
             logger.warning("  [BRAIN-EXEC] Hands unavailable: %s", exc)
             return
@@ -429,10 +441,102 @@ class ScanPipeline:
                     except Exception as exc:
                         logger.debug("    [FAIL] %s %s: %s", vector_id, endpoint, exc)
 
+        # 세션은 닫지 않음 — 다음 Phase에서 재사용
+        # mgr.close_all()은 파이프라인 종료 시 호출
+
+    async def _auto_authenticate(self, ctx: ScanContext, session: Any, mgr: Any) -> Any:
+        """벤치마크 타겟 자동 인증.
+
+        DVWA: admin/password 로그인 + security=low 설정
+        Juice Shop: 자동 등록 또는 기본 계정
+        """
+        import re as _re
+
+        target = ctx.target
+
+        # ── DVWA 인증 ──
         try:
-            await mgr.close_all()
-        except Exception:
-            pass
+            resp = await session.get("/login.php")
+            body = resp.text if hasattr(resp, "text") else ""
+
+            if "login.php" in str(getattr(resp, "url", "")) or "DVWA" in body:
+                logger.info("  [AUTH] DVWA detected — logging in...")
+
+                # CSRF 토큰 추출
+                token_match = _re.search(
+                    r"name=['\"]user_token['\"]\s+value=['\"]([^'\"]+)['\"]", body
+                )
+                user_token = token_match.group(1) if token_match else ""
+
+                # 로그인 시도
+                login_data = {
+                    "username": "admin",
+                    "password": "password",
+                    "Login": "Login",
+                }
+                if user_token:
+                    login_data["user_token"] = user_token
+
+                login_resp = await session.post("/login.php", data=login_data)
+                login_body = login_resp.text if hasattr(login_resp, "text") else ""
+
+                # DVWA 로그인 성공 = login.php가 아닌 다른 페이지로 이동
+                login_url = str(getattr(login_resp, "url", ""))
+                login_ok = (
+                    "login.php" not in login_url
+                    or "Login failed" not in login_body
+                )
+                if login_ok:
+                    logger.info("  [AUTH] DVWA login OK (admin/password) → %s", login_url)
+
+                    # security=low 설정
+                    try:
+                        sec_resp = await session.get("/security.php")
+                        sec_body = sec_resp.text if hasattr(sec_resp, "text") else ""
+                        sec_token = ""
+                        tm = _re.search(
+                            r"name=['\"]user_token['\"]\s+value=['\"]([^'\"]+)['\"]",
+                            sec_body,
+                        )
+                        if tm:
+                            sec_token = tm.group(1)
+
+                        sec_data = {"security": "low", "seclev_submit": "Submit"}
+                        if sec_token:
+                            sec_data["user_token"] = sec_token
+
+                        await session.post("/security.php", data=sec_data)
+                        logger.info("  [AUTH] DVWA security=low set")
+                    except Exception as exc:
+                        logger.debug("  [AUTH] DVWA security set failed: %s", exc)
+
+                    # DVWA 데이터베이스 초기화 시도
+                    try:
+                        setup_resp = await session.get("/setup.php")
+                        setup_body = setup_resp.text if hasattr(setup_resp, "text") else ""
+                        setup_token = ""
+                        stm = _re.search(
+                            r"name=['\"]user_token['\"]\s+value=['\"]([^'\"]+)['\"]",
+                            setup_body,
+                        )
+                        if stm:
+                            setup_token = stm.group(1)
+                        setup_data = {"create_db": "Create / Reset Database"}
+                        if setup_token:
+                            setup_data["user_token"] = setup_token
+                        await session.post("/setup.php", data=setup_data)
+                        logger.info("  [AUTH] DVWA database initialized")
+                    except Exception:
+                        pass
+
+                    return session
+                else:
+                    logger.warning("  [AUTH] DVWA login failed")
+
+        except Exception as exc:
+            logger.debug("  [AUTH] Auto-auth attempt failed: %s", exc)
+
+        return session
 
     def _analyze_probe_response(
         self,
@@ -451,22 +555,23 @@ class ScanPipeline:
 
         # ── SQL Injection 시그니처 ──
         if vector_id.startswith("WEB-SQLI"):
-            sqli_sigs = [
+            # 에러 기반 시그니처
+            sqli_error_sigs = [
                 r"you have an error in your sql",
                 r"mysql_fetch", r"ORA-\d+", r"syntax error.*sql",
                 r"unclosed quotation mark", r"SQLITE_ERROR",
                 r"pg_query", r"Warning.*mysql",
             ]
-            for sig in sqli_sigs:
+            for sig in sqli_error_sigs:
                 if _re.search(sig, body, _re.IGNORECASE):
                     f = ctx.add_finding(
-                        title=f"SQL Injection — {endpoint}|||SQL 인젝션 — {endpoint}",
+                        title=f"SQL Injection (Error-Based) — {endpoint}|||SQL 인젝션 (에러 기반) — {endpoint}",
                         severity="critical",
                         finding_type="sql_injection",
                         description=(
-                            f"SQL error signature detected on {endpoint} param={param} "
-                            f"with payload: {payload[:80]}. Error: {_re.search(sig, body, _re.IGNORECASE).group()[:100]}"
-                            f"|||{endpoint}에서 SQL 에러 시그니처 탐지. 파라미터: {param}, 페이로드: {payload[:80]}"
+                            f"SQL error detected on {endpoint} param={param} "
+                            f"with payload: {payload[:80]}"
+                            f"|||{endpoint}에서 SQL 에러 탐지. 파라미터: {param}, 페이로드: {payload[:80]}"
                         ),
                         target=ctx.target,
                         affected_component=endpoint,
@@ -476,6 +581,28 @@ class ScanPipeline:
                     except Exception:
                         pass
                     return True
+
+            # 데이터 유출 기반 시그니처 (UNION/OR 인젝션 성공 시 추가 행 반환)
+            data_leak_count = body.count("First name") + body.count("first_name")
+            if data_leak_count > 1 and payload and ("OR" in payload.upper() or "UNION" in payload.upper()):
+                f = ctx.add_finding(
+                    title=f"SQL Injection (Data Leak) — {endpoint}|||SQL 인젝션 (데이터 유출) — {endpoint}",
+                    severity="critical",
+                    finding_type="sql_injection",
+                    description=(
+                        f"Multiple data rows returned ({data_leak_count}) on {endpoint} param={param} "
+                        f"with payload: {payload[:80]} — indicates successful UNION/OR injection"
+                        f"|||{endpoint}에서 다수 데이터 행 반환 ({data_leak_count}). 파라미터: {param}, "
+                        f"페이로드: {payload[:80]} — UNION/OR 인젝션 성공"
+                    ),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=4)
+                except Exception:
+                    pass
+                return True
 
         # ── XSS 시그니처 ──
         if vector_id.startswith("WEB-XSS"):
