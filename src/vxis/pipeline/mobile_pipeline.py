@@ -4267,6 +4267,9 @@ class MobilePipeline:
                 owasp_id, _OWASP_MOBILE.get(owasp_id, ""), len(finding_ids),
             )
 
+        # Build mobile kill chain for Chain Intelligence scoring
+        self._build_mobile_kill_chain(ctx)
+
         try:
             ctx.score_tracker.record_phase_complete(
                 "Phase 19: Report — NCC Style + OWASP Mobile Top 10",
@@ -4274,3 +4277,126 @@ class MobilePipeline:
             )
         except Exception:
             pass
+
+    def _build_mobile_kill_chain(self, ctx: MobileScanContext) -> None:
+        """모바일 공격 킬체인 구축 + Chain Intelligence 점수 기록.
+
+        Mobile attack kill chain stages:
+        0. Recon          — Static analysis (hardcoded secrets, manifest)
+        1. Initial Access — Network/SSL bypass
+        2. Auth Bypass    — Token & biometric bypass
+        3. Data Theft     — Storage & privacy leakage
+        4. Persistence    — Root/jailbreak & anti-tamper bypass
+        5. Platform Abuse — IPC injection, deep link hijacking
+        """
+        from vxis.scoring.tracker import AttackChain, ChainStep
+
+        existing_ids = {c.chain_id for c in ctx.score_tracker.attack_chains}
+        if "CHAIN-MOB-KILLCHAIN" in existing_ids:
+            return
+
+        if len(ctx.findings) < 2:
+            return
+
+        # Kill chain stage ordering by mobile finding type
+        kill_order: dict[str, int] = {
+            "hardcoded_secret": 0,
+            "insecure_static": 0,
+            "information_disclosure": 0,
+            "ssl_misconfiguration": 1,
+            "network_security": 1,
+            "cleartext_traffic": 1,
+            "authentication_bypass": 2,
+            "insecure_authentication": 2,
+            "weak_authentication": 2,
+            "insecure_storage": 3,
+            "privacy_violation": 3,
+            "sensitive_data_exposure": 3,
+            "root_bypass": 4,
+            "anti_tamper_bypass": 4,
+            "dynamic_bypass": 4,
+            "ipc_vulnerability": 5,
+            "deep_link_hijacking": 5,
+            "intent_injection": 5,
+        }
+
+        ordered = sorted(
+            ctx.findings,
+            key=lambda f: kill_order.get(getattr(f, "finding_type", ""), 3),
+        )
+
+        chain = AttackChain(
+            chain_id="CHAIN-MOB-KILLCHAIN",
+            description_en=(
+                "Mobile kill chain: Static Recon → Network Bypass → "
+                "Auth Bypass → Data Exfiltration → Persistence → Platform Abuse"
+            ),
+            description_ko=(
+                "모바일 킬체인: 정적 정찰 → 네트워크 우회 → "
+                "인증 우회 → 데이터 유출 → 지속 → 플랫폼 악용"
+            ),
+            final_impact=(
+                "Full mobile app compromise via chained vulnerabilities"
+                "|||체이닝된 취약점을 통한 모바일 앱 완전 침투"
+            ),
+        )
+
+        total = len(ordered)
+        for idx, f in enumerate(ordered):
+            fid = getattr(f, "id", "")
+            ftype = getattr(f, "finding_type", "")
+            if not fid:
+                continue
+
+            # Exploitation level by kill chain position
+            if total > 0 and idx >= total * 0.7:
+                level = 4  # Crown Jewel
+            elif total > 0 and idx >= total * 0.4:
+                level = 3  # Post-exploit
+            else:
+                level = 2  # Initial access
+
+            chain.steps.append(ChainStep(
+                step_index=idx,
+                vector_id=ftype or "unknown",
+                finding_id=fid,
+                level=level,
+                description_en=getattr(f, "title", "").split("|||")[0],
+                description_ko=getattr(f, "title", "").split("|||")[-1],
+            ))
+
+        if chain.depth >= 2:
+            try:
+                ctx.score_tracker.record_chain(chain)
+                logger.info(
+                    "  [KILLCHAIN] Mobile kill chain: %d steps → Crown Jewel",
+                    chain.depth,
+                )
+            except Exception:
+                pass
+
+        # Escalate exploitation levels for high-impact mobile finding types
+        type_to_level: dict[str, int] = {
+            "hardcoded_secret": 3,
+            "sensitive_data_exposure": 4,
+            "authentication_bypass": 4,
+            "insecure_storage": 3,
+            "ssl_misconfiguration": 2,
+            "root_bypass": 3,
+            "ipc_vulnerability": 3,
+            "privacy_violation": 3,
+            "deep_link_hijacking": 3,
+        }
+
+        for f in ctx.findings:
+            fid = getattr(f, "id", "")
+            ftype = getattr(f, "finding_type", "")
+            if not fid:
+                continue
+            target_level = type_to_level.get(ftype, 2)
+            current_level = ctx.score_tracker.exploitation_levels.get(fid, 0)
+            if target_level > current_level:
+                try:
+                    ctx.score_tracker.escalate_level(fid, target_level)
+                except Exception:
+                    pass
