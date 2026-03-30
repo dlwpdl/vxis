@@ -799,75 +799,38 @@ class ScanPipeline:
         except Exception as exc:
             logger.debug("  [AUTH] DVWA auth attempt failed: %s", exc)
 
-        # ── WebGoat 인증 (Spring Security — CSRF 필수) ──
+        # ── WebGoat 인증 (등록하면 자동 로그인) ──
         try:
             resp = await session.get("/WebGoat/login")
             body = resp.text if hasattr(resp, "text") else ""
 
             if "WebGoat" in body or "webgoat" in str(getattr(resp, "url", "")).lower():
-                logger.info("  [AUTH] WebGoat detected — registering + logging in...")
+                logger.info("  [AUTH] WebGoat detected — registering (auto-login on register)...")
 
-                # Step 1: GET register page to obtain CSRF token
+                # WebGoat은 register.mvc POST 성공 시 자동 로그인 + 세션 발급
+                # 고유 사용자명 생성 (시간 기반)
+                import time as _time
+                username = f"vxis{int(_time.time()) % 100000}"
+
                 try:
-                    reg_page = await session.get("/WebGoat/registration")
-                    reg_body = reg_page.text if hasattr(reg_page, "text") else ""
-                    csrf_token = ""
-                    csrf_match = _re.search(
-                        r'name=["\']_csrf["\'][^>]*value=["\']([^"\']+)["\']', reg_body
-                    )
-                    if not csrf_match:
-                        csrf_match = _re.search(
-                            r'value=["\']([^"\']+)["\'][^>]*name=["\']_csrf["\']', reg_body
-                        )
-                    if csrf_match:
-                        csrf_token = csrf_match.group(1)
-
-                    # Step 2: Register with CSRF
-                    reg_data = {
-                        "username": "vxisbrain",
-                        "password": "VxisBrain123!",
-                        "matchingPassword": "VxisBrain123!",
+                    await session.get("/WebGoat/registration")  # 세션 쿠키 획득
+                    reg_resp = await session.post("/WebGoat/register.mvc", data={
+                        "username": username,
+                        "password": username,
+                        "matchingPassword": username,
                         "agree": "agree",
-                    }
-                    if csrf_token:
-                        reg_data["_csrf"] = csrf_token
-                    await session.post("/WebGoat/register.mvc", data=reg_data)
-                    logger.info("  [AUTH] WebGoat registration attempted")
-                except Exception as exc:
-                    logger.debug("  [AUTH] WebGoat register: %s", exc)
+                    })
 
-                # Step 3: GET login page for fresh CSRF
-                try:
-                    login_page = await session.get("/WebGoat/login")
-                    login_body = login_page.text if hasattr(login_page, "text") else ""
-                    csrf_token = ""
-                    csrf_match = _re.search(
-                        r'name=["\']_csrf["\'][^>]*value=["\']([^"\']+)["\']', login_body
-                    )
-                    if not csrf_match:
-                        csrf_match = _re.search(
-                            r'value=["\']([^"\']+)["\'][^>]*name=["\']_csrf["\']', login_body
-                        )
-                    if csrf_match:
-                        csrf_token = csrf_match.group(1)
-
-                    # Step 4: Login with CSRF
-                    login_data = {
-                        "username": "vxisbrain",
-                        "password": "VxisBrain123!",
-                    }
-                    if csrf_token:
-                        login_data["_csrf"] = csrf_token
-
-                    login_resp = await session.post("/WebGoat/login", data=login_data)
-                    login_url = str(getattr(login_resp, "url", ""))
-                    if "welcome" in login_url or "attack" in login_url or "error" not in login_url:
-                        logger.info("  [AUTH] WebGoat login OK → %s", login_url)
+                    # 등록 성공 시 자동 로그인됨 — start.mvc 접근 가능한지 확인
+                    check = await session.get("/WebGoat/start.mvc")
+                    check_body = check.text if hasattr(check, "text") else ""
+                    if "lesson" in check_body.lower() and check.status == 200:
+                        logger.info("  [AUTH] WebGoat register+auto-login OK (%s)", username)
                         return session
                     else:
-                        logger.warning("  [AUTH] WebGoat login failed → %s", login_url)
+                        logger.warning("  [AUTH] WebGoat register OK but session not authenticated")
                 except Exception as exc:
-                    logger.debug("  [AUTH] WebGoat login: %s", exc)
+                    logger.debug("  [AUTH] WebGoat register: %s", exc)
 
         except Exception as exc:
             logger.debug("  [AUTH] WebGoat auth attempt failed: %s", exc)
