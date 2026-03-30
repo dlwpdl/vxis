@@ -181,10 +181,18 @@ class ScanPipeline:
         func: Callable[[ScanContext], Awaitable[None]],
         ctx: ScanContext,
     ) -> None:
-        """Phase를 실행하고 로깅/타이밍을 자동 처리."""
+        """Phase를 실행하고 로깅/타이밍을 자동 처리.
+
+        FileBasedBrain일 때: Phase 실행 전에 해당 Phase의 벡터들을
+        하나씩 Brain에게 물어보고 결정을 ctx._brain_decisions에 저장.
+        """
         logger.info("\n[%s]", name)
         t0 = time.monotonic()
         pre_count = len(ctx.findings)
+
+        # FileBasedBrain일 때: Phase에 속한 벡터별 Brain 호출
+        await self._consult_brain_for_phase_vectors(name, ctx)
+
         try:
             await func(ctx)
         except Exception as exc:
@@ -192,6 +200,54 @@ class ScanPipeline:
         elapsed = (time.monotonic() - t0) * 1000
         new_findings = len(ctx.findings) - pre_count
         ctx.log_phase(name, duration_ms=elapsed, findings_count=new_findings)
+
+    async def _consult_brain_for_phase_vectors(
+        self,
+        phase_name: str,
+        ctx: ScanContext,
+    ) -> None:
+        """FileBasedBrain일 때 해당 Phase의 벡터들을 Brain에게 물어본다."""
+        import re
+        from vxis.agent.brain_filebased import FileBasedBrain
+
+        if not isinstance(self.brain, FileBasedBrain):
+            return
+
+        # Phase 이름에서 번호 추출: "Phase 5: Special Agents" → "Phase 5"
+        match = re.match(r"(Phase \d+)", phase_name)
+        if not match:
+            return
+        phase_key = match.group(1)
+
+        # 해당 Phase에 속하는 벡터 목록 조회
+        try:
+            from vxis.scoring.vectors import WEB_VECTORS
+            phase_vectors = [v for v in WEB_VECTORS if v.phase == phase_key]
+        except ImportError:
+            return
+
+        if not phase_vectors:
+            return
+
+        logger.info("  [BRAIN] Consulting Brain for %d vectors in %s",
+                     len(phase_vectors), phase_key)
+
+        # ctx에 brain decisions 저장소 초기화
+        if not hasattr(ctx, "_brain_decisions"):
+            ctx._brain_decisions = {}
+
+        for vec in phase_vectors:
+            decision = self._consult_brain_for_vector(
+                ctx,
+                vector_id=vec.id,
+                vector_name=f"{vec.name_en}|||{vec.name_ko}",
+                phase_name=phase_name,
+            )
+            if decision is not None:
+                ctx._brain_decisions[vec.id] = decision
+                attempt_str = "ATTEMPT" if decision.get("attempt") else "SKIP"
+                logger.info("    %s %s: %s",
+                            attempt_str, vec.id, decision.get("reasoning", "")[:80])
 
     # ── Brain consultation per vector ─────────────────────────
 
