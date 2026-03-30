@@ -193,6 +193,71 @@ class ScanPipeline:
         new_findings = len(ctx.findings) - pre_count
         ctx.log_phase(name, duration_ms=elapsed, findings_count=new_findings)
 
+    # ── Brain consultation per vector ─────────────────────────
+
+    def _consult_brain_for_vector(
+        self,
+        ctx: ScanContext,
+        vector_id: str,
+        vector_name: str,
+        phase_name: str,
+    ) -> dict[str, Any] | None:
+        """Brain에게 벡터 실행 여부를 물어본다.
+
+        FileBasedBrain일 때: observation.json 쓰고 decision.json 대기
+        AgentBrain일 때: None 반환 (기존 로직 유지)
+
+        Returns:
+            None — Brain 없음 또는 FileBasedBrain이 아님, 기존 로직으로 실행
+            dict — Brain의 decision (attempt, reasoning, targets, chain_hint)
+        """
+        from vxis.agent.brain_filebased import FileBasedBrain
+
+        if not isinstance(self.brain, FileBasedBrain):
+            return None
+
+        from vxis.agent.brain import AgentObservation
+
+        obs = AgentObservation(
+            target=ctx.target,
+            tech_stack=getattr(ctx, "tech_stack", []),
+            findings=[
+                {
+                    "id": getattr(f, "id", ""),
+                    "title": getattr(f, "title", ""),
+                    "severity": getattr(f, "severity", ""),
+                    "finding_type": getattr(f, "finding_type", ""),
+                    "affected_component": getattr(f, "affected_component", ""),
+                }
+                for f in ctx.findings[-50:]
+            ],
+            executed_tools=[
+                {"tool": p, "status": "done"}
+                for p in ctx.phases_completed[-20:]
+            ],
+        )
+
+        # FileBasedBrain에 현재 벡터 정보 설정
+        self.brain._current_vector_id = vector_id
+        self.brain._current_vector_name = vector_name
+        self.brain._current_phase = phase_name
+
+        actions = self.brain.think(obs)
+
+        if not actions:
+            return {"attempt": False, "reasoning": "brain returned no actions"}
+
+        first = actions[0]
+        if first.tool == "SKIP":
+            return {"attempt": False, "reasoning": first.reasoning}
+
+        return {
+            "attempt": True,
+            "reasoning": first.reasoning,
+            "targets": [a.args for a in actions],
+            "actions": actions,
+        }
+
     # ── Deferred Action Approval ──────────────────────────────
 
     async def _execute_deferred_actions(self, ctx: ScanContext) -> None:
