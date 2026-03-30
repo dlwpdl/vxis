@@ -78,6 +78,7 @@ jobs:
           PYTHONPATH: src
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          VXIS_BRAIN_MODE: api
         timeout-minutes: 370  # 자정~06:00 KST (6시간 + 여유)
         run: |
           MAX_ITER=${{ github.event.inputs.max_iterations || '0' }}
