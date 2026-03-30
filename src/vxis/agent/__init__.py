@@ -1,5 +1,6 @@
 """VXIS Agent — autonomous pentesting engine with Docker sandbox isolation."""
 
+from vxis.agent.brain_filebased import FileBasedBrain
 from vxis.agent.brain_interactive import InteractiveBrain
 from vxis.agent.evidence import (
     EvidenceBundle,
@@ -13,6 +14,7 @@ from vxis.agent.sandbox import DockerSandbox, SandboxManager, get_sandbox_manage
 __all__ = [
     "AgentExecutor",
     "AgentScanResult",
+    "FileBasedBrain",
     "InteractiveBrain",
     "AgentMemory",
     "ScanMemory",

@@ -10,9 +10,10 @@ from vxis.agent.brain import AgentAction, AgentObservation
 class BrainProtocol(Protocol):
     """AgentExecutor가 사용하는 Brain 인터페이스.
 
-    두 가지 구현:
+    세 가지 구현:
         1. AgentBrain     — 외부 LLM API 호출 (자율 모드)
         2. InteractiveBrain — stdin/stdout JSON (Claude Code 모드)
+        3. FileBasedBrain   — 파일 프로토콜 (Claude Code 모드)
     """
 
     is_done: bool
