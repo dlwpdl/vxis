@@ -127,7 +127,7 @@ class AttackGraphData:
 
 def render_attack_graph_svg(
     graph: AttackGraphData,
-    width: int = 1200,
+    width: int = 1600,
     lang: str = "en",
 ) -> str:
     """공격 그래프를 SVG 문자열로 렌더링.
@@ -181,8 +181,8 @@ def render_attack_graph_svg(
     # 타이틀
     title = "Attack Path Graph" if lang == "en" else "공격 경로 그래프"
     parts.append(
-        f'<text x="{width // 2}" y="35" text-anchor="middle" '
-        f'fill="#ecf0f1" font-size="22" font-weight="bold">{title}</text>'
+        f'<text x="{width // 2}" y="45" text-anchor="middle" '
+        f'fill="#ecf0f1" font-size="28" font-weight="bold">{title}</text>'
     )
 
     # 깊이 레벨 라벨
@@ -197,9 +197,9 @@ def render_attack_graph_svg(
     for depth in depths_used:
         label_en, label_ko = depth_labels.get(depth, (f"L{depth}", f"L{depth}"))
         label = label_ko if lang == "ko" else label_en
-        y_pos = 80 + depth * 160
+        y_pos = 100 + depth * 220
         parts.append(
-            f'<text x="15" y="{y_pos}" fill="#8e99a4" font-size="14" '
+            f'<text x="20" y="{y_pos}" fill="#8e99a4" font-size="16" '
             f'font-style="italic">{label}</text>'
         )
         parts.append(
@@ -272,14 +272,16 @@ def _compute_layout(
     for node in graph.all_nodes:
         by_depth.setdefault(node.depth_level, []).append(node)
 
-    y_start = 100
-    y_gap = 160
+    y_start = 120
+    y_gap = 220  # 수직 간격 넉넉하게
+    min_x_gap = 250  # 노드 간 최소 수평 간격
 
     for depth, nodes in sorted(by_depth.items()):
         y = y_start + depth * y_gap
-        x_gap = (width - 100) / (len(nodes) + 1)
+        # 노드 수에 따라 width 확장 필요 시 간격 보장
+        x_gap = max(min_x_gap, (width - 200) / (len(nodes) + 1))
         for i, node in enumerate(nodes):
-            x = 80 + (i + 1) * x_gap
+            x = 100 + (i + 1) * x_gap
             positions[node.id] = (x, y)
 
     return positions
@@ -290,7 +292,7 @@ def _compute_height(positions: dict[str, tuple[float, float]]) -> int:
     if not positions:
         return 200
     max_y = max(y for _, y in positions.values())
-    return int(max_y + 120)
+    return int(max_y + 200)
 
 
 # ── 노드 렌더링 ──────────────────────────────────────────────────
@@ -324,61 +326,62 @@ def _render_node(node: AttackNode, x: float, y: float, lang: str) -> str:
             f'</circle>'
         )
 
-    r = 35 if node.node_type == "crown_jewel" else 30
+    r = 40 if node.node_type == "crown_jewel" else 35
 
     parts = [glow]
 
-    # 노드 원
+    # 노드 원 — 더 크게
     parts.append(
         f'<circle cx="{x}" cy="{y}" r="{r}" fill="{fill}" '
-        f'stroke="{border}" stroke-width="2.5"/>'
+        f'stroke="{border}" stroke-width="3"/>'
     )
-    # 아이콘
+    # 아이콘 — 더 크게
     parts.append(
-        f'<text x="{x}" y="{y + 5}" text-anchor="middle" '
-        f'fill="white" font-size="18">{icon}</text>'
+        f'<text x="{x}" y="{y + 7}" text-anchor="middle" '
+        f'fill="white" font-size="22">{icon}</text>'
     )
 
-    # 벡터 타입 (상단 — 가장 중요한 정보)
+    # 벡터 타입 (상단 — 전체 텍스트, 잘림 없음)
     if vector_text:
-        truncated_vec = vector_text[:45] + "…" if len(vector_text) > 45 else vector_text
+        escaped_vec = _svg_escape(vector_text)
         parts.append(
-            f'<text x="{x}" y="{y - r - 10}" text-anchor="middle" '
-            f'fill="{border}" font-size="13" font-weight="bold">'
-            f'{_svg_escape(truncated_vec)}</text>'
+            f'<text x="{x}" y="{y - r - 12}" text-anchor="middle" '
+            f'fill="{border}" font-size="15" font-weight="bold">'
+            f'{escaped_vec}</text>'
         )
-        # Severity 뱃지
+        # Severity 뱃지 — 더 크게
         sev_color = _SEVERITY_BORDER.get(node.severity, "#888")
-        sev_text = node.severity.upper()[:4]
+        sev_text = node.severity.upper()
+        badge_w = len(sev_text) * 9 + 12
         parts.append(
-            f'<rect x="{x - 22}" y="{y - r - 26}" width="44" height="14" rx="3" '
+            f'<rect x="{x - badge_w // 2}" y="{y - r - 30}" width="{badge_w}" height="16" rx="4" '
             f'fill="{sev_color}" opacity="0.9"/>'
-            f'<text x="{x}" y="{y - r - 16}" text-anchor="middle" '
-            f'fill="white" font-size="9" font-weight="bold">{sev_text}</text>'
+            f'<text x="{x}" y="{y - r - 18}" text-anchor="middle" '
+            f'fill="white" font-size="10" font-weight="bold">{sev_text}</text>'
         )
     else:
-        # 벡터 없으면 기존 라벨
-        truncated = label[:20] + "…" if len(label) > 20 else label
+        # 벡터 없으면 기존 라벨 — 전체 표시
+        escaped_label = _svg_escape(label)
         parts.append(
-            f'<text x="{x}" y="{y - r - 5}" text-anchor="middle" '
-            f'fill="#ecf0f1" font-size="10" font-weight="500">'
-            f'{_svg_escape(truncated)}</text>'
+            f'<text x="{x}" y="{y - r - 8}" text-anchor="middle" '
+            f'fill="#ecf0f1" font-size="13" font-weight="500">'
+            f'{escaped_label}</text>'
         )
 
-    # 타겟 컴포넌트 (하단 — 어디를 막아야 하는지)
+    # 타겟 컴포넌트 (하단 — 전체 표시, 잘림 없음)
     if component_text:
-        truncated_comp = component_text[:50] + "…" if len(component_text) > 50 else component_text
+        escaped_comp = _svg_escape(component_text)
         parts.append(
-            f'<text x="{x}" y="{y + r + 16}" text-anchor="middle" '
-            f'fill="#adb5bd" font-size="11" font-family="monospace">'
-            f'{_svg_escape(truncated_comp)}</text>'
+            f'<text x="{x}" y="{y + r + 20}" text-anchor="middle" '
+            f'fill="#adb5bd" font-size="12" font-family="monospace">'
+            f'{escaped_comp}</text>'
         )
 
     # Finding ID (최하단)
     if node.finding_id:
         parts.append(
-            f'<text x="{x}" y="{y + r + 30}" text-anchor="middle" '
-            f'fill="#6c757d" font-size="9">{_svg_escape(node.finding_id)}</text>'
+            f'<text x="{x}" y="{y + r + 36}" text-anchor="middle" '
+            f'fill="#6c757d" font-size="10">{_svg_escape(node.finding_id)}</text>'
         )
 
     return "\n".join(parts)
