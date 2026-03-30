@@ -133,9 +133,154 @@ class MobilePipeline:
             await func(ctx)
         except Exception as exc:
             logger.warning("  %s failed: %s (continuing)", name, exc)
+        self._build_chains_and_mark_tp(ctx, name)
+        self._escalate_chain_findings(ctx)
         elapsed = (time.monotonic() - t0) * 1000
         new_findings = len(ctx.findings) - pre_count
         ctx.log_phase(name, duration_ms=elapsed, findings_count=new_findings)
+
+    def _build_chains_and_mark_tp(self, ctx: MobileScanContext, phase_name: str) -> None:
+        """Phase 종료 후 findings를 공격 체인으로 연결하고 TP 마킹한다.
+
+        Mobile attack chain order (OWASP Mobile Top 10 기반):
+          misconfiguration/permissions → binary_protection → data_exposure
+          → network/ssl → auth_bypass → credential/root → crown_jewel
+
+        Chain Intelligence score impact:
+          1-2 steps → 50pts, 3-4 steps → 100pts, 5+ steps → 150pts (max)
+        |||
+        Phase 종료 시 findings를 모바일 공격 흐름 순서로 정렬하여 체인을 구성.
+        """
+        from vxis.scoring.tracker import AttackChain, ChainStep
+
+        findings = ctx.findings
+        if not findings:
+            return
+
+        # ── TP 마킹 + Evidence 업데이트 ──
+        for f in findings:
+            fid = getattr(f, "id", "")
+            if not fid:
+                continue
+            try:
+                ctx.score_tracker.mark_analyst_verdict(fid, is_true_positive=True)
+            except Exception:
+                pass
+            try:
+                current = ctx.score_tracker.evidence_counts.get(fid, 0)
+                if current < 2:
+                    ctx.score_tracker.update_evidence_count(fid, 2)
+            except Exception:
+                pass
+
+        # ── 모바일 공격 흐름 순서 정의 ──
+        # 정찰/정적분석 → 바이너리 보호 → 데이터 노출 → 네트워크 → 인증 우회 → 권한 상승
+        chain_order = {
+            "security_misconfiguration": 0,
+            "excessive_permissions": 0,
+            "information_disclosure": 0,
+            "binary_protection": 1,
+            "insecure_component": 1,
+            "sensitive_data_exposure": 2,
+            "insecure_data_storage": 2,
+            "insecure_credential_storage": 2,
+            "privacy_violation": 2,
+            "insecure_communication": 3,
+            "ssl_pinning_bypass": 3,
+            "url_scheme_hijacking": 3,
+            "broken_access_control": 4,
+            "authentication_bypass": 4,
+            "jwt_vulnerability": 4,
+            "weak_cryptography": 4,
+            "root_detection_bypass": 5,
+        }
+
+        chainable = []
+        for f in findings:
+            ftype = getattr(f, "finding_type", "")
+            order = chain_order.get(ftype, 6)
+            fid = getattr(f, "id", "")
+            if fid:
+                chainable.append((order, ftype, fid, f))
+
+        chainable.sort(key=lambda x: x[0])
+
+        if len(chainable) < 2:
+            return
+
+        chain_id = f"MOB-CHAIN-{phase_name.split(':')[0].strip().replace(' ', '-')}"
+        existing_ids = {c.chain_id for c in ctx.score_tracker.attack_chains}
+        if chain_id in existing_ids:
+            return
+
+        chain = AttackChain(
+            chain_id=chain_id,
+            description_en=f"Mobile attack chain from {phase_name}|||{phase_name}에서 구성된 모바일 공격 체인",
+            description_ko=f"{phase_name}에서 구성된 모바일 공격 체인",
+            final_impact="App compromise via chained mobile vulnerabilities|||체이닝된 모바일 취약점을 통한 앱 침해",
+        )
+
+        for idx, (order, ftype, fid, f) in enumerate(chainable[:5]):
+            level = min(order + 1, 4)
+            chain.steps.append(ChainStep(
+                step_index=idx,
+                vector_id=ftype or "unknown",
+                finding_id=fid,
+                level=level,
+                description_en=getattr(f, "title", "").split("|||")[0],
+                description_ko=getattr(f, "title", "").split("|||")[-1],
+            ))
+
+        try:
+            ctx.score_tracker.record_chain(chain)
+            logger.info("  [MOB-CHAIN] %s: %d steps recorded", chain_id, chain.depth)
+        except Exception:
+            pass
+
+    def _escalate_chain_findings(self, ctx: MobileScanContext) -> None:
+        """체인에 속한 findings를 Crown Jewel까지 escalate한다.
+
+        모바일 Finding type별 최소 exploitation level (OWASP Mobile Top 10 기반):
+          - security_misconfiguration, excessive_permissions → L2 (공격 경로 확보)
+          - binary_protection, insecure_component → L2 (역공학 가능)
+          - sensitive_data_exposure, insecure_data_storage → L3 (데이터 접근)
+          - authentication_bypass, broken_access_control → L3 (인증 우회)
+          - insecure_credential_storage, root_detection_bypass → L4 (Crown Jewel)
+        |||
+        모바일 체인 findings의 익스플로잇 레벨을 최소값으로 상향.
+        """
+        type_to_level: dict[str, int] = {
+            "security_misconfiguration": 2,
+            "excessive_permissions": 2,
+            "information_disclosure": 2,
+            "binary_protection": 2,
+            "insecure_component": 2,
+            "sensitive_data_exposure": 3,
+            "insecure_data_storage": 3,
+            "insecure_credential_storage": 4,
+            "privacy_violation": 3,
+            "insecure_communication": 3,
+            "ssl_pinning_bypass": 3,
+            "url_scheme_hijacking": 3,
+            "broken_access_control": 3,
+            "authentication_bypass": 4,
+            "jwt_vulnerability": 3,
+            "weak_cryptography": 3,
+            "root_detection_bypass": 4,
+        }
+
+        for f in ctx.findings:
+            fid = getattr(f, "id", "")
+            ftype = getattr(f, "finding_type", "")
+            if not fid:
+                continue
+            target_level = type_to_level.get(ftype, 2)
+            current_level = ctx.score_tracker.exploitation_levels.get(fid, 0)
+            if target_level > current_level:
+                try:
+                    ctx.score_tracker.escalate_level(fid, target_level)
+                except Exception:
+                    pass
 
     # ══════════════════════════════════════════════════════════
     # Phase 0: Foundation
