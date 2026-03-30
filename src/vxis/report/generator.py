@@ -85,7 +85,7 @@ class ReportData:
             self.findings,
             chains=self.attack_chains,
         )
-        return render_attack_graph_svg(graph, width=850, lang="en")
+        return render_attack_graph_svg(graph, width=1200, lang="en")
 
     @property
     def attack_graph_svg_ko(self) -> str:
@@ -94,7 +94,7 @@ class ReportData:
             self.findings,
             chains=self.attack_chains,
         )
-        return render_attack_graph_svg(graph, width=850, lang="ko")
+        return render_attack_graph_svg(graph, width=1200, lang="ko")
 
     @property
     def has_attack_chains(self) -> bool:

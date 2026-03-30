@@ -127,7 +127,7 @@ class AttackGraphData:
 
 def render_attack_graph_svg(
     graph: AttackGraphData,
-    width: int = 900,
+    width: int = 1200,
     lang: str = "en",
 ) -> str:
     """공격 그래프를 SVG 문자열로 렌더링.
@@ -181,8 +181,8 @@ def render_attack_graph_svg(
     # 타이틀
     title = "Attack Path Graph" if lang == "en" else "공격 경로 그래프"
     parts.append(
-        f'<text x="{width // 2}" y="30" text-anchor="middle" '
-        f'fill="#ecf0f1" font-size="16" font-weight="bold">{title}</text>'
+        f'<text x="{width // 2}" y="35" text-anchor="middle" '
+        f'fill="#ecf0f1" font-size="22" font-weight="bold">{title}</text>'
     )
 
     # 깊이 레벨 라벨
@@ -197,9 +197,9 @@ def render_attack_graph_svg(
     for depth in depths_used:
         label_en, label_ko = depth_labels.get(depth, (f"L{depth}", f"L{depth}"))
         label = label_ko if lang == "ko" else label_en
-        y_pos = 60 + depth * 120
+        y_pos = 80 + depth * 160
         parts.append(
-            f'<text x="15" y="{y_pos}" fill="#6c757d" font-size="11" '
+            f'<text x="15" y="{y_pos}" fill="#8e99a4" font-size="14" '
             f'font-style="italic">{label}</text>'
         )
         parts.append(
@@ -272,8 +272,8 @@ def _compute_layout(
     for node in graph.all_nodes:
         by_depth.setdefault(node.depth_level, []).append(node)
 
-    y_start = 80
-    y_gap = 120
+    y_start = 100
+    y_gap = 160
 
     for depth, nodes in sorted(by_depth.items()):
         y = y_start + depth * y_gap
@@ -324,7 +324,7 @@ def _render_node(node: AttackNode, x: float, y: float, lang: str) -> str:
             f'</circle>'
         )
 
-    r = 30 if node.node_type == "crown_jewel" else 25
+    r = 35 if node.node_type == "crown_jewel" else 30
 
     parts = [glow]
 
@@ -341,20 +341,20 @@ def _render_node(node: AttackNode, x: float, y: float, lang: str) -> str:
 
     # 벡터 타입 (상단 — 가장 중요한 정보)
     if vector_text:
-        truncated_vec = vector_text[:22] + "…" if len(vector_text) > 22 else vector_text
+        truncated_vec = vector_text[:30] + "…" if len(vector_text) > 30 else vector_text
         parts.append(
-            f'<text x="{x}" y="{y - r - 8}" text-anchor="middle" '
-            f'fill="{border}" font-size="11" font-weight="bold">'
+            f'<text x="{x}" y="{y - r - 10}" text-anchor="middle" '
+            f'fill="{border}" font-size="13" font-weight="bold">'
             f'{_svg_escape(truncated_vec)}</text>'
         )
         # Severity 뱃지
         sev_color = _SEVERITY_BORDER.get(node.severity, "#888")
         sev_text = node.severity.upper()[:4]
         parts.append(
-            f'<rect x="{x - 18}" y="{y - r - 22}" width="36" height="12" rx="3" '
+            f'<rect x="{x - 22}" y="{y - r - 26}" width="44" height="14" rx="3" '
             f'fill="{sev_color}" opacity="0.9"/>'
-            f'<text x="{x}" y="{y - r - 13}" text-anchor="middle" '
-            f'fill="white" font-size="7" font-weight="bold">{sev_text}</text>'
+            f'<text x="{x}" y="{y - r - 16}" text-anchor="middle" '
+            f'fill="white" font-size="9" font-weight="bold">{sev_text}</text>'
         )
     else:
         # 벡터 없으면 기존 라벨
@@ -367,18 +367,18 @@ def _render_node(node: AttackNode, x: float, y: float, lang: str) -> str:
 
     # 타겟 컴포넌트 (하단 — 어디를 막아야 하는지)
     if component_text:
-        truncated_comp = component_text[:25] + "…" if len(component_text) > 25 else component_text
+        truncated_comp = component_text[:35] + "…" if len(component_text) > 35 else component_text
         parts.append(
-            f'<text x="{x}" y="{y + r + 14}" text-anchor="middle" '
-            f'fill="#adb5bd" font-size="9" font-family="monospace">'
+            f'<text x="{x}" y="{y + r + 16}" text-anchor="middle" '
+            f'fill="#adb5bd" font-size="11" font-family="monospace">'
             f'{_svg_escape(truncated_comp)}</text>'
         )
 
     # Finding ID (최하단)
     if node.finding_id:
         parts.append(
-            f'<text x="{x}" y="{y + r + 26}" text-anchor="middle" '
-            f'fill="#6c757d" font-size="7">{_svg_escape(node.finding_id)}</text>'
+            f'<text x="{x}" y="{y + r + 30}" text-anchor="middle" '
+            f'fill="#6c757d" font-size="9">{_svg_escape(node.finding_id)}</text>'
         )
 
     return "\n".join(parts)
