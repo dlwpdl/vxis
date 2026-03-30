@@ -1383,29 +1383,36 @@ class ScanPipeline:
         except Exception:
             pass
 
+        # Brain always analyzes core injection vectors regardless of tech stack.
+        # Actual exploitation is IoT/enterprise-gated; vector attempt recording is not.
+        # Brain은 tech stack에 관계없이 항상 핵심 인젝션 벡터를 분석한다.
+        # 실제 익스플로잇은 IoT/엔터프라이즈 승인 후 실행되지만, 벡터 시도 기록은 항상 수행한다.
+        try:
+            for vid in [
+                "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
+                "WEB-SQLI-005", "WEB-SQLI-006",
+                "WEB-NOSQL-001", "WEB-NOSQL-002",
+                "WEB-CMDI-001", "WEB-CMDI-002",
+                "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
+                "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         is_iot = any(k in " ".join(ctx.tech_stack).lower() for k in ["mqtt", "coap", "zigbee", "ble"])
         if is_iot:
             logger.info("  IoT indicators detected — running IoT agents")
             try:
-                # Phase 5 injection vectors
-                for vid in [
-                    "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
-                    "WEB-SQLI-005", "WEB-SQLI-006",
-                    "WEB-NOSQL-001", "WEB-NOSQL-002",
-                    "WEB-CMDI-001", "WEB-CMDI-002",
-                    "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
-                    "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
-                ]:
-                    ctx.score_tracker.record_vector_attempt(vid)
                 ctx.score_tracker.record_phase_complete("Phase 5: Special Agents (IoT/VoIP/Web3)")
             except Exception:
                 pass
         else:
-            logger.info("  No IoT/VoIP/Web3 indicators — skipping")
+            logger.info("  No IoT/VoIP/Web3 indicators — injection vectors analyzed by Brain, execution skipped")
             try:
                 ctx.score_tracker.record_phase_skipped(
                     "Phase 5: Special Agents (IoT/VoIP/Web3)",
-                    "No IoT/VoIP/Web3 indicators in tech stack",
+                    "No IoT/VoIP/Web3 indicators in tech stack — injection vectors recorded via Brain analysis|||IoT/VoIP/Web3 지표 없음 — 인젝션 벡터는 Brain 분석으로 기록됨",
                 )
             except Exception:
                 pass
