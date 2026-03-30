@@ -405,54 +405,57 @@ class ScanPipeline:
                 if not payloads:
                     payloads = [""]  # 빈 페이로드라도 엔드포인트 접근 시도
 
+                # Smart Probe: 폼 리플레이 — 페이지 GET → 폼 파싱 → 타겟만 교체
+                form_cache = target_spec.get("_form_cache")
+                if form_cache is None and param:
+                    try:
+                        probe_resp = await session.get(endpoint)
+                        if probe_resp.forms:
+                            # 타겟 파라미터를 포함하는 폼 찾기
+                            best_form = None
+                            for form in probe_resp.forms:
+                                if param in form.fields:
+                                    best_form = form
+                                    break
+                            if not best_form:
+                                best_form = probe_resp.forms[0]  # fallback: 첫 번째 폼
+
+                            form_cache = {
+                                "fields": dict(best_form.fields),
+                                "method": best_form.method.upper(),
+                                "action": best_form.action or endpoint,
+                                "enctype": best_form.enctype,
+                            }
+                        else:
+                            form_cache = {"fields": {}, "method": method, "action": endpoint}
+                    except Exception:
+                        form_cache = {"fields": {}, "method": method, "action": endpoint}
+                    target_spec["_form_cache"] = form_cache
+
                 for payload in payloads[:10]:  # 페이로드당 최대 10개
                     try:
-                        # 폼 필드 자동 탐지: 먼저 페이지를 GET해서 폼 구조 파악
-                        extra_fields = target_spec.get("extra_fields", {})
-                        if not extra_fields and param:
-                            # 폼의 submit 버튼 이름 자동 탐지
-                            try:
-                                import re as _re2
-                                probe_resp = await session.get(endpoint)
-                                probe_body = probe_resp.text if hasattr(probe_resp, "text") else ""
-                                # Submit 버튼 탐지
-                                submit_match = _re2.search(
-                                    r'<input[^>]+type=["\']submit["\'][^>]+name=["\']([^"\']+)["\']',
-                                    probe_body, _re2.IGNORECASE,
-                                )
-                                if not submit_match:
-                                    submit_match = _re2.search(
-                                        r'name=["\']([^"\']+)["\'][^>]+type=["\']submit["\']',
-                                        probe_body, _re2.IGNORECASE,
-                                    )
-                                if submit_match:
-                                    extra_fields[submit_match.group(1)] = "Submit"
-                                # CSRF 토큰 탐지
-                                token_match = _re2.search(
-                                    r'name=["\']user_token["\'][^>]+value=["\']([^"\']+)["\']',
-                                    probe_body,
-                                )
-                                if token_match:
-                                    extra_fields["user_token"] = token_match.group(1)
-                            except Exception:
-                                pass
-                            # 캐시: 같은 endpoint에 대해 반복 탐지 방지
-                            target_spec["extra_fields"] = extra_fields
+                        if form_cache and form_cache.get("fields") and param:
+                            # 폼 리플레이: 원본 필드 유지, 타겟만 교체
+                            form_data = dict(form_cache["fields"])
+                            form_data[param] = payload
+                            form_method = form_cache.get("method", method)
+                            form_action = form_cache.get("action", endpoint)
 
-                        if method == "GET" and param:
-                            params = {param: payload}
-                            params.update(extra_fields)
-                            resp = await session.get(endpoint, params=params)
+                            if form_method == "GET":
+                                resp = await session.get(form_action, params=form_data)
+                            else:
+                                if form_cache.get("enctype", "").startswith("application/json"):
+                                    resp = await session.post(form_action, json_data=form_data)
+                                else:
+                                    resp = await session.post(form_action, data=form_data)
+                        elif method == "GET" and param:
+                            resp = await session.get(endpoint, params={param: payload})
                         elif method == "POST" and param:
-                            data = {param: payload}
-                            data.update(extra_fields)
-                            resp = await session.post(endpoint, data=data)
+                            resp = await session.post(endpoint, data={param: payload})
                         elif method == "GET":
                             resp = await session.get(endpoint)
                         else:
-                            data = {"input": payload}
-                            data.update(extra_fields)
-                            resp = await session.post(endpoint, data=data)
+                            resp = await session.post(endpoint, data={"input": payload})
 
                         # 응답 해석 — 취약점 시그니처 탐지
                         body = resp.text[:5000] if hasattr(resp, "text") else ""
@@ -785,7 +788,7 @@ class ScanPipeline:
         except Exception as exc:
             logger.debug("  [AUTH] DVWA auth attempt failed: %s", exc)
 
-        # ── WebGoat 인증 ──
+        # ── WebGoat 인증 (Spring Security — CSRF 필수) ──
         try:
             resp = await session.get("/WebGoat/login")
             body = resp.text if hasattr(resp, "text") else ""
@@ -793,28 +796,67 @@ class ScanPipeline:
             if "WebGoat" in body or "webgoat" in str(getattr(resp, "url", "")).lower():
                 logger.info("  [AUTH] WebGoat detected — registering + logging in...")
 
-                # Register
+                # Step 1: GET register page to obtain CSRF token
                 try:
-                    await session.post("/WebGoat/register.mvc", data={
+                    reg_page = await session.get("/WebGoat/registration")
+                    reg_body = reg_page.text if hasattr(reg_page, "text") else ""
+                    csrf_token = ""
+                    csrf_match = _re.search(
+                        r'name=["\']_csrf["\'][^>]*value=["\']([^"\']+)["\']', reg_body
+                    )
+                    if not csrf_match:
+                        csrf_match = _re.search(
+                            r'value=["\']([^"\']+)["\'][^>]*name=["\']_csrf["\']', reg_body
+                        )
+                    if csrf_match:
+                        csrf_token = csrf_match.group(1)
+
+                    # Step 2: Register with CSRF
+                    reg_data = {
                         "username": "vxisbrain",
                         "password": "VxisBrain123!",
                         "matchingPassword": "VxisBrain123!",
                         "agree": "agree",
-                    })
-                except Exception:
-                    pass  # Already registered
+                    }
+                    if csrf_token:
+                        reg_data["_csrf"] = csrf_token
+                    await session.post("/WebGoat/register.mvc", data=reg_data)
+                    logger.info("  [AUTH] WebGoat registration attempted")
+                except Exception as exc:
+                    logger.debug("  [AUTH] WebGoat register: %s", exc)
 
-                # Login
-                login_resp = await session.post("/WebGoat/login", data={
-                    "username": "vxisbrain",
-                    "password": "VxisBrain123!",
-                })
-                login_url = str(getattr(login_resp, "url", ""))
-                if "welcome" in login_url or "attack" in login_url:
-                    logger.info("  [AUTH] WebGoat login OK (vxisbrain)")
-                    return session
-                else:
-                    logger.warning("  [AUTH] WebGoat login unclear → %s", login_url)
+                # Step 3: GET login page for fresh CSRF
+                try:
+                    login_page = await session.get("/WebGoat/login")
+                    login_body = login_page.text if hasattr(login_page, "text") else ""
+                    csrf_token = ""
+                    csrf_match = _re.search(
+                        r'name=["\']_csrf["\'][^>]*value=["\']([^"\']+)["\']', login_body
+                    )
+                    if not csrf_match:
+                        csrf_match = _re.search(
+                            r'value=["\']([^"\']+)["\'][^>]*name=["\']_csrf["\']', login_body
+                        )
+                    if csrf_match:
+                        csrf_token = csrf_match.group(1)
+
+                    # Step 4: Login with CSRF
+                    login_data = {
+                        "username": "vxisbrain",
+                        "password": "VxisBrain123!",
+                    }
+                    if csrf_token:
+                        login_data["_csrf"] = csrf_token
+
+                    login_resp = await session.post("/WebGoat/login", data=login_data)
+                    login_url = str(getattr(login_resp, "url", ""))
+                    if "welcome" in login_url or "attack" in login_url or "error" not in login_url:
+                        logger.info("  [AUTH] WebGoat login OK → %s", login_url)
+                        return session
+                    else:
+                        logger.warning("  [AUTH] WebGoat login failed → %s", login_url)
+                except Exception as exc:
+                    logger.debug("  [AUTH] WebGoat login: %s", exc)
 
         except Exception as exc:
             logger.debug("  [AUTH] WebGoat auth attempt failed: %s", exc)
