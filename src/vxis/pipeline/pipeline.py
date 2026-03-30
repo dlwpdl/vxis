@@ -708,7 +708,7 @@ class ScanPipeline:
             resp = await session.get("/login.php")
             body = resp.text if hasattr(resp, "text") else ""
 
-            if "login.php" in str(getattr(resp, "url", "")) or "DVWA" in body:
+            if "DVWA" in body and resp.status == 200:
                 logger.info("  [AUTH] DVWA detected — logging in...")
 
                 # CSRF 토큰 추출
