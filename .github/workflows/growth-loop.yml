@@ -34,20 +34,40 @@ jobs:
     name: Growth Measurement
     runs-on: ubuntu-latest
 
-    # Docker 취약 앱 — 매일 밤 자동 기동
+    # Docker 취약 앱 — 매일 밤 자동 기동 (모두 법적으로 허용된 테스트 전용 앱)
     services:
       dvwa:
-        image: vulnerables/web-dvwa
+        image: vulnerables/web-dvwa          # OWASP DVWA — PHP/MySQL 기반
         ports:
           - 8081:80
       juice-shop:
-        image: bkimminich/juice-shop
+        image: bkimminich/juice-shop         # OWASP Juice Shop — Node.js SPA
         ports:
           - 3000:3000
       webgoat:
-        image: webgoat/webgoat
+        image: webgoat/webgoat               # OWASP WebGoat — Spring Boot
         ports:
           - 8888:8080
+      mutillidae:
+        image: citizenstig/nowasp            # OWASP Mutillidae II — PHP/MySQL, 100+ 취약점
+        ports:
+          - 8082:80
+      bwapp:
+        image: raesene/bwapp                 # bWAPP — PHP 버그 많은 웹앱, 100+ CWE
+        ports:
+          - 8083:80
+      nodegoat:
+        image: owasp/nodegoat                # OWASP NodeGoat — Node.js OWASP Top 10
+        ports:
+          - 4000:4000
+      vampi:
+        image: erev0s/vampi:latest           # VAmPI — Flask REST API 취약점 (OWASP API Top 10)
+        ports:
+          - 5001:5000
+      bodgeit:
+        image: psiinon/bodgeit               # BodgeIt Store — Java/Tomcat, 간단한 레거시 앱
+        ports:
+          - 8084:8080
 
     strategy:
       matrix:
@@ -106,9 +126,14 @@ jobs:
           iterations: list[dict] = []
 
           targets = [
-              ("dvwa", "http://localhost:8081"),
+              ("dvwa",       "http://localhost:8081"),
               ("juice-shop", "http://localhost:3000"),
-              ("webgoat", "http://localhost:8888/WebGoat"),
+              ("webgoat",    "http://localhost:8888/WebGoat"),
+              ("mutillidae", "http://localhost:8082/mutillidae"),
+              ("bwapp",      "http://localhost:8083/bWAPP"),
+              ("nodegoat",   "http://localhost:4000"),
+              ("vampi",      "http://localhost:5001"),
+              ("bodgeit",    "http://localhost:8084/bodgeit"),
           ]
 
           # Docker 서비스 준비 대기
