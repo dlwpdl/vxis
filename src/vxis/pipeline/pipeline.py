@@ -1400,14 +1400,34 @@ class ScanPipeline:
 
     async def _phase5_special(self, ctx: ScanContext) -> None:
         """Phase 5: IoT/VoIP/Web3 — 해당 시에만. 현대 CVE 인젝션 벡터는 항상 기록."""
-        # Modern CVE injection vectors — always attempted regardless of target type
-        # LLM/AI 인젝션, CMS RCE, LLM 프롬프트 인젝션은 범용 웹 타깃에도 적용
+        # Core injection vectors — always attempted for every web target
+        # 핵심 인젝션 벡터 — 모든 웹 타깃에 항상 시도
         try:
             for vid in [
                 "WEB-INJECT-018",  # AI/LLM Workflow Code Injection (Langflow)
                 "WEB-INJECT-019",  # Laravel Livewire RCE (CVE-2025-54068)
                 "WEB-INJECT-020",  # CMS Code Injection (Craft CMS CVE-2025-32432)
-                "WEB-INJECT-021",  # LLM Prompt Injection
+                "WEB-INJECT-021",  # LLM Prompt Injection | LLM 프롬프트 인젝션
+                # SQL Injection — fundamental web vector | SQL 인젝션 — 기본 웹 벡터
+                "WEB-SQLI-001",    # Union Based | Union 기반
+                "WEB-SQLI-002",    # Boolean Blind | Boolean Blind
+                "WEB-SQLI-003",    # Time Based Blind | 시간 기반 Blind
+                "WEB-SQLI-004",    # Error Based | 에러 기반
+                "WEB-SQLI-005",    # Out-of-Band | Out-of-Band
+                "WEB-SQLI-006",    # Second Order | 이차 주입
+                # NoSQL Injection | NoSQL 인젝션
+                "WEB-NOSQL-001",   # MongoDB Operator | MongoDB 연산자
+                "WEB-NOSQL-002",   # JavaScript Injection | JavaScript 주입
+                # OS Command Injection | OS 명령 주입
+                "WEB-CMDI-001",    # Direct | 직접
+                "WEB-CMDI-002",    # Blind OOB | Blind OOB
+                # Other Injection | 기타 인젝션
+                "WEB-LDAP-001",    # LDAP Injection | LDAP 인젝션
+                "WEB-XPATH-001",   # XPath Injection | XPath 인젝션
+                "WEB-SSTI-001",    # Server-Side Template Injection | 서버사이드 템플릿 인젝션
+                "WEB-XXE-001",     # XML External Entity | XML 외부 엔티티
+                "WEB-DESER-001",   # Insecure Deserialization RCE | 안전하지 않은 역직렬화 RCE
+                "WEB-UPLOAD-001",  # Unrestricted File Upload | 무제한 파일 업로드
             ]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
@@ -1417,25 +1437,15 @@ class ScanPipeline:
         if is_iot:
             logger.info("  IoT indicators detected — running IoT agents")
             try:
-                # Phase 5 injection vectors
-                for vid in [
-                    "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
-                    "WEB-SQLI-005", "WEB-SQLI-006",
-                    "WEB-NOSQL-001", "WEB-NOSQL-002",
-                    "WEB-CMDI-001", "WEB-CMDI-002",
-                    "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
-                    "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
-                ]:
-                    ctx.score_tracker.record_vector_attempt(vid)
                 ctx.score_tracker.record_phase_complete("Phase 5: Special Agents (IoT/VoIP/Web3)")
             except Exception:
                 pass
         else:
-            logger.info("  No IoT/VoIP/Web3 indicators — skipping")
+            logger.info("  No IoT/VoIP/Web3 indicators — core injection vectors recorded")
             try:
                 ctx.score_tracker.record_phase_skipped(
                     "Phase 5: Special Agents (IoT/VoIP/Web3)",
-                    "No IoT/VoIP/Web3 indicators in tech stack",
+                    "No IoT/VoIP/Web3 indicators in tech stack|||기술 스택에 IoT/VoIP/Web3 지표 없음",
                 )
             except Exception:
                 pass
