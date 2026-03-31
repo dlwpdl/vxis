@@ -44,6 +44,10 @@ jobs:
         image: bkimminich/juice-shop
         ports:
           - 3000:3000
+      webgoat:
+        image: webgoat/webgoat
+        ports:
+          - 8888:8080
 
     strategy:
       matrix:
@@ -104,6 +108,7 @@ jobs:
           targets = [
               ("dvwa", "http://localhost:8081"),
               ("juice-shop", "http://localhost:3000"),
+              ("webgoat", "http://localhost:8888/WebGoat"),
           ]
 
           # Docker 서비스 준비 대기

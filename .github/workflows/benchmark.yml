@@ -61,8 +61,12 @@ jobs:
       - name: Run benchmark scan
         id: run_benchmark
         env:
+          PYTHONPATH: src
+          VXIS_BRAIN_MODE: api
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           VXIS_BENCHMARK_TARGET_TYPE: ${{ matrix.target_type }}
-          VXIS_BENCHMARK_TARGET_WEB: ${{ vars.BENCHMARK_TARGET_WEB || 'http://testphp.vulnweb.com' }}
+          VXIS_BENCHMARK_TARGET_WEB: ${{ vars.BENCHMARK_TARGET_WEB || '' }}
           VXIS_BENCHMARK_TARGET_GAME: ${{ vars.BENCHMARK_TARGET_GAME || '' }}
           VXIS_BENCHMARK_TARGET_MOBILE: ${{ vars.BENCHMARK_TARGET_MOBILE || '' }}
         run: |

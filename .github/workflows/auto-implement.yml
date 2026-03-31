@@ -176,8 +176,8 @@ Implement the changes described in the issue. Return JSON with the implementatio
           if use_anthropic:
               url = "https://api.anthropic.com/v1/messages"
               payload = json.dumps({
-                  "model": "claude-sonnet-4-20250514",
-                  "max_tokens": 4000,
+                  "model": "claude-sonnet-4-6",
+                  "max_tokens": 8096,
                   "system": system_prompt,
                   "messages": [{"role": "user", "content": user_prompt}],
               }).encode()
@@ -189,8 +189,8 @@ Implement the changes described in the issue. Return JSON with the implementatio
           else:
               url = "https://api.together.xyz/v1/chat/completions"
               payload = json.dumps({
-                  "model": "moonshotai/Kimi-K2.5",
-                  "max_tokens": 4000,
+                  "model": "moonshotai/Kimi-K2-5",
+                  "max_tokens": 8096,
                   "messages": [
                       {"role": "system", "content": system_prompt},
                       {"role": "user", "content": user_prompt},
@@ -301,7 +301,11 @@ Implement the changes described in the issue. Return JSON with the implementatio
           ]
 
           alerts = []
-          changed_files = list(Path(".").rglob("*.py"))
+          # 새로 생성된 파일만 스캔 (기존 코드 FP 방지)
+          import subprocess
+          result = subprocess.run(["git", "diff", "--name-only", "--cached"], capture_output=True, text=True)
+          staged = {p.strip() for p in result.stdout.splitlines() if p.strip().endswith(".py")}
+          changed_files = [Path(p) for p in staged if Path(p).exists()] if staged else []
 
           for fpath in changed_files:
               try:

@@ -64,8 +64,8 @@ jobs:
 
       - name: Run daily watch
         env:
-          UPSTREAM_LLM_PROVIDER: ${{ vars.UPSTREAM_LLM_PROVIDER || 'together' }}
-          UPSTREAM_LLM_MODEL: ${{ vars.UPSTREAM_LLM_MODEL || '' }}
+          UPSTREAM_LLM_PROVIDER: ${{ vars.UPSTREAM_LLM_PROVIDER || 'anthropic' }}
+          UPSTREAM_LLM_MODEL: ${{ vars.UPSTREAM_LLM_MODEL || 'claude-haiku-4-5-20251001' }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
@@ -131,6 +131,12 @@ jobs:
           python-version: "3.12"
 
       - name: Run weekly digest
+        env:
+          UPSTREAM_LLM_PROVIDER: ${{ vars.UPSTREAM_LLM_PROVIDER || 'anthropic' }}
+          UPSTREAM_LLM_MODEL: ${{ vars.UPSTREAM_LLM_MODEL || 'claude-haiku-4-5-20251001' }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python -m tools.upstream_watch --mode weekly
 
       - name: Commit weekly digest
@@ -171,6 +177,12 @@ jobs:
 
       - name: Run weekly digest
         if: steps.check-day.outputs.is_sunday == 'true'
+        env:
+          UPSTREAM_LLM_PROVIDER: ${{ vars.UPSTREAM_LLM_PROVIDER || 'anthropic' }}
+          UPSTREAM_LLM_MODEL: ${{ vars.UPSTREAM_LLM_MODEL || 'claude-haiku-4-5-20251001' }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python -m tools.upstream_watch --mode weekly
 
       - name: Commit weekly digest
