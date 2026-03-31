@@ -1060,25 +1060,48 @@ class ScanPipeline:
                 return True
 
         # ── 일반 에러 기반 정보 유출 ──
-        error_sigs = [r"stack trace", r"traceback", r"exception", r"debug"]
-        for sig in error_sigs:
-            if _re.search(sig, body_lower) and status >= 400:
-                f = ctx.add_finding(
-                    title=f"Information Disclosure via Error — {endpoint}|||에러 기반 정보 유출 — {endpoint}",
-                    severity="low",
-                    finding_type="information_disclosure",
-                    description=(
-                        f"Error page with debug info on {endpoint} (status {status})"
-                        f"|||{endpoint}에서 디버그 정보 포함 에러 페이지 (상태코드: {status})"
-                    ),
-                    target=ctx.target,
-                    affected_component=endpoint,
-                )
-                try:
-                    ctx.score_tracker.record_finding(f.id, vector_id, level=1)
-                except Exception:
-                    pass
-                return True
+        # JSON API 응답은 에러가 정상 동작 (WebGoat, REST API 등) — 스킵
+        # 진짜 정보 유출은 HTML 에러 페이지에서 발생 (PHP, Node.js, Python, Java 웹앱)
+        is_json_response = body_lower.strip().startswith("{") or body_lower.strip().startswith("[")
+
+        if not is_json_response and status >= 400:
+            # HTML 에러 페이지에서만 탐지
+            # "exception" 단독은 너무 광범위 — 구체적 패턴 사용
+            error_sigs = [
+                r"stack\s+trace",              # Java/Node "stack trace"
+                r"stacktrace",                 # Java/Express "#stacktrace"
+                r"traceback\s+\(most\s+recent", # Python Traceback
+                r"at\s+[\w\.$]+\([\w]+\.java:\d+\)",  # Java stack frame
+                r"Warning:\s+\w+\(\)",         # PHP Warning
+                r"Fatal\s+error:",             # PHP Fatal error
+                r"Unhandled\s+exception",      # .NET
+                r"debug\s*=\s*true",           # debug mode enabled
+            ]
+            # 동일 endpoint에 대해 이미 같은 finding이 있으면 dedup
+            existing_titles = {f.title.split("|||")[0] for f in ctx.findings}
+            dedup_key = f"Information Disclosure via Error — {endpoint}"
+            if dedup_key not in existing_titles:
+                for sig in error_sigs:
+                    if _re.search(sig, body, _re.IGNORECASE):
+                        matched_sig = sig
+                        f = ctx.add_finding(
+                            title=f"Information Disclosure via Error — {endpoint}|||에러 기반 정보 유출 — {endpoint}",
+                            severity="low",
+                            finding_type="information_disclosure",
+                            description=(
+                                f"Error page exposes debug info on {endpoint} (status {status}). "
+                                f"Pattern matched: {matched_sig}"
+                                f"|||{endpoint}에서 디버그 정보 포함 에러 페이지 탐지 (상태코드: {status}). "
+                                f"패턴: {matched_sig}"
+                            ),
+                            target=ctx.target,
+                            affected_component=endpoint,
+                        )
+                        try:
+                            ctx.score_tracker.record_finding(f.id, vector_id, level=1)
+                        except Exception:
+                            pass
+                        return True
 
         return False
 
