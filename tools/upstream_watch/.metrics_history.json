@@ -39,6 +39,14 @@
       "open_issues": 134,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "projectdiscovery/nuclei",
+      "stars": 27699,
+      "forks": 3330,
+      "open_issues": 138,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "usestrix/strix": [
@@ -81,6 +89,14 @@
       "open_issues": 83,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "usestrix/strix",
+      "stars": 22888,
+      "forks": 2470,
+      "open_issues": 86,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "0x4m4/hexstrike-ai": [
@@ -115,6 +131,14 @@
       "open_issues": 72,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "0x4m4/hexstrike-ai",
+      "stars": 7792,
+      "forks": 1705,
+      "open_issues": 72,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "GH05TCREW/pentestagent": [
@@ -149,6 +173,14 @@
       "open_issues": 10,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "GH05TCREW/pentestagent",
+      "stars": 1833,
+      "forks": 380,
+      "open_issues": 10,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "GreyDGL/PentestGPT": [
@@ -183,6 +215,14 @@
       "open_issues": 50,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "GreyDGL/PentestGPT",
+      "stars": 12330,
+      "forks": 2100,
+      "open_issues": 50,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "Hacker-GPT/HackerGPT-2.0": [
@@ -243,6 +283,14 @@
       "open_issues": 241,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "aquasecurity/trivy",
+      "stars": 34250,
+      "forks": 220,
+      "open_issues": 242,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "blacklanternsecurity/bbot": [
@@ -277,6 +325,14 @@
       "open_issues": 78,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "blacklanternsecurity/bbot",
+      "stars": 9555,
+      "forks": 788,
+      "open_issues": 80,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "caido/caido": [
@@ -311,6 +367,14 @@
       "open_issues": 721,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "caido/caido",
+      "stars": 2235,
+      "forks": 115,
+      "open_issues": 721,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "j3ssie/osmedeus": [
@@ -345,6 +409,14 @@
       "open_issues": 2,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "j3ssie/osmedeus",
+      "stars": 6168,
+      "forks": 973,
+      "open_issues": 3,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "mitre/caldera": [
@@ -379,6 +451,14 @@
       "open_issues": 70,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "mitre/caldera",
+      "stars": 6853,
+      "forks": 1303,
+      "open_issues": 71,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "projectdiscovery/httpx": [
@@ -413,6 +493,14 @@
       "open_issues": 6,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "projectdiscovery/httpx",
+      "stars": 9752,
+      "forks": 1048,
+      "open_issues": 8,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "projectdiscovery/nuclei-templates": [
@@ -447,6 +535,14 @@
       "open_issues": 142,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "projectdiscovery/nuclei-templates",
+      "stars": 12105,
+      "forks": 3410,
+      "open_issues": 123,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "projectdiscovery/subfinder": [
@@ -481,6 +577,14 @@
       "open_issues": 9,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "projectdiscovery/subfinder",
+      "stars": 13334,
+      "forks": 1521,
+      "open_issues": 9,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "prowler-cloud/prowler": [
@@ -515,6 +619,14 @@
       "open_issues": 188,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "prowler-cloud/prowler",
+      "stars": 13449,
+      "forks": 2065,
+      "open_issues": 182,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "redcanaryco/atomic-red-team": [
@@ -549,6 +661,14 @@
       "open_issues": 11,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "redcanaryco/atomic-red-team",
+      "stars": 11753,
+      "forks": 3083,
+      "open_issues": 13,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "six2dez/reconftw": [
@@ -583,6 +703,14 @@
       "open_issues": 2,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "six2dez/reconftw",
+      "stars": 7383,
+      "forks": 1145,
+      "open_issues": 2,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "trufflesecurity/trufflehog": [
@@ -617,6 +745,14 @@
       "open_issues": 407,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "trufflesecurity/trufflehog",
+      "stars": 25279,
+      "forks": 2276,
+      "open_issues": 413,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "vxcontrol/pentagi": [
@@ -651,6 +787,14 @@
       "open_issues": 16,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "vxcontrol/pentagi",
+      "stars": 13964,
+      "forks": 1743,
+      "open_issues": 15,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ],
   "browser-use/browser-use": [
@@ -661,6 +805,14 @@
       "open_issues": 206,
       "commit_count_today": 0,
       "fetched_at": "2026-03-29"
+    },
+    {
+      "repo": "browser-use/browser-use",
+      "stars": 85248,
+      "forks": 9880,
+      "open_issues": 217,
+      "commit_count_today": 0,
+      "fetched_at": "2026-03-31"
     }
   ]
 }
