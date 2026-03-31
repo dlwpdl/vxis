@@ -799,38 +799,50 @@ class ScanPipeline:
         except Exception as exc:
             logger.debug("  [AUTH] DVWA auth attempt failed: %s", exc)
 
-        # ── WebGoat 인증 (등록하면 자동 로그인) ──
+        # ── WebGoat 인증 (등록 → 로그인 2단계) ──
+        # httpx base_url 규칙: base_url=".../WebGoat" + "/login" = ".../WebGoat/login" (올바름)
+        # "/WebGoat/login"은 ".../WebGoat/WebGoat/login"이 되므로 사용 금지
         try:
-            resp = await session.get("/WebGoat/login")
-            body = resp.text if hasattr(resp, "text") else ""
+            is_webgoat = "/WebGoat" in target or "webgoat" in target.lower()
+            if not is_webgoat:
+                resp = await session.get("/login")
+                body = resp.text if hasattr(resp, "text") else ""
+                is_webgoat = "WebGoat" in body or "webgoat" in str(getattr(resp, "url", "")).lower()
 
-            if "WebGoat" in body or "webgoat" in str(getattr(resp, "url", "")).lower():
-                logger.info("  [AUTH] WebGoat detected — registering (auto-login on register)...")
+            if is_webgoat:
+                logger.info("  [AUTH] WebGoat detected — registering + logging in...")
 
-                # WebGoat은 register.mvc POST 성공 시 자동 로그인 + 세션 발급
-                # 고유 사용자명 생성 (시간 기반)
                 import time as _time
-                username = f"vxis{int(_time.time()) % 100000}"
+                # 6-8자 사용자명 (WebGoat 유효성 검사: 6-10자)
+                username = f"vx{int(_time.time()) % 1000000:06d}"
 
                 try:
-                    await session.get("/WebGoat/registration")  # 세션 쿠키 획득
-                    reg_resp = await session.post("/WebGoat/register.mvc", data={
+                    # Step 1: 세션 쿠키 획득
+                    await session.get("/registration")
+                    # Step 2: 계정 등록
+                    await session.post("/register.mvc", data={
                         "username": username,
                         "password": username,
                         "matchingPassword": username,
                         "agree": "agree",
                     })
-
-                    # 등록 성공 시 자동 로그인됨 — start.mvc 접근 가능한지 확인
-                    check = await session.get("/WebGoat/start.mvc")
-                    check_body = check.text if hasattr(check, "text") else ""
-                    if "lesson" in check_body.lower() and check.status == 200:
-                        logger.info("  [AUTH] WebGoat register+auto-login OK (%s)", username)
+                    # Step 3: 명시적 로그인 (Spring Security — 등록 후 자동 로그인 없음)
+                    await session.post("/login", data={
+                        "username": username,
+                        "password": username,
+                    })
+                    # Step 4: 인증 확인 — start.mvc가 200이고 login으로 redirect 안 됨
+                    check = await session.get("/start.mvc")
+                    check_url = str(getattr(check, "url", ""))
+                    authed = check.status == 200 and "login" not in check_url
+                    if authed:
+                        logger.info("  [AUTH] WebGoat register+login OK (%s)", username)
                         return session
                     else:
-                        logger.warning("  [AUTH] WebGoat register OK but session not authenticated")
+                        logger.warning("  [AUTH] WebGoat auth failed (status=%d url=%s)",
+                                       check.status, check_url)
                 except Exception as exc:
-                    logger.debug("  [AUTH] WebGoat register: %s", exc)
+                    logger.debug("  [AUTH] WebGoat register/login: %s", exc)
 
         except Exception as exc:
             logger.debug("  [AUTH] WebGoat auth attempt failed: %s", exc)
