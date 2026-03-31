@@ -262,7 +262,7 @@ class TestReportGeneratorRenderHtml:
     def test_html_document_structure(self):
         html = make_generator().render_html(make_report_data())
         assert "<head>" in html
-        assert "<body>" in html
+        assert "<body" in html   # template uses <body class="lang-en">
         assert "</body>" in html
 
     def test_scan_id_included(self):
@@ -270,9 +270,10 @@ class TestReportGeneratorRenderHtml:
         html = make_generator().render_html(rd)
         assert "scan-UNIQUE-99" in html
 
-    def test_stylesheet_link_present(self):
+    def test_stylesheet_inline(self):
+        # Template uses inline <style> block (no external main.css)
         html = make_generator().render_html(make_report_data())
-        assert "main.css" in html
+        assert "<style>" in html
 
 
 # ---------------------------------------------------------------------------
@@ -546,7 +547,8 @@ class TestFindingCardEvidence:
         rd = make_report_data(findings=[finding])
         html = make_generator().render_html(rd)
         assert "Login form bypass" in html
-        assert "' OR '1'='1" in html
+        # Evidence content is HTML-escaped for XSS safety; check escaped form
+        assert "&#39; OR &#39;1&#39;=&#39;1" in html
 
     def test_multiple_evidence_items_all_rendered(self):
         evidences = [
