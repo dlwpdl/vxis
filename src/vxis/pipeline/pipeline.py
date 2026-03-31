@@ -83,14 +83,9 @@ class ScanPipeline:
         logger.info("  Target: %s", target)
         logger.info("  Scan ID: %s", ctx.scan_id)
 
-        # ── 전체 벡터 자동 등록 — 모든 벡터를 시도하도록 보장 ──
-        try:
-            from vxis.scoring.vectors import WEB_VECTORS
-            for vec in WEB_VECTORS:
-                ctx.score_tracker.record_vector_attempt(vec.id)
-            logger.info("  Registered %d attack vectors for scoring", len(WEB_VECTORS))
-        except Exception as exc:
-            logger.debug("  Vector registration failed (non-fatal): %s", exc)
+        # ── 벡터 사전 등록 제거 ──
+        # Brain이 attempt=true로 결정한 벡터만 record_vector_attempt 되어야 정확한 scoring
+        # 사전 등록하면 Brain이 skip해도 attempted=true가 되어 vector_coverage가 항상 만점
         logger.info("  Brain: %s", type(self.brain).__name__)
         logger.info("=" * 70)
 

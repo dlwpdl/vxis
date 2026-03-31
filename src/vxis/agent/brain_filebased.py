@@ -76,8 +76,11 @@ class FileBasedBrain:
         brain_dir: str = "tools/benchmark/.brain",
         timeout_per_vector: int = 120,
         poll_interval: float = 1.0,
+        scan_id: str = "",
     ) -> None:
-        self.brain_dir = Path(brain_dir)
+        # scan_id가 있으면 scan별 서브디렉토리 사용 — 동시 파이프라인 충돌 방지
+        base = Path(brain_dir)
+        self.brain_dir = (base / scan_id) if scan_id else base
         self.brain_dir.mkdir(parents=True, exist_ok=True)
         self.timeout_per_vector = timeout_per_vector
         self.poll_interval = poll_interval
@@ -91,16 +94,20 @@ class FileBasedBrain:
         self._decision_path = str(self.brain_dir / "decision.json")
         self._result_path = str(self.brain_dir / "result.json")
         self._context_path = str(self.brain_dir / "scan_context.json")
+        self._lock_path = str(self.brain_dir / ".write.lock")   # 동시 쓰기 방지 락
         # Cumulative context
         self._cumulative_findings: list[dict[str, Any]] = []
         self._previous_decisions: list[dict[str, Any]] = []
         self._endpoints_discovered: list[dict[str, Any]] = []
         # Init status
         self._write_status(STATE_INITIALIZING, {})
-        # Clean up stale decision
+        # Clean up stale decision and lock
         decision_p = Path(self._decision_path)
         if decision_p.exists():
             decision_p.unlink()
+        lock_p = Path(self._lock_path)
+        if lock_p.exists() and (time.time() - lock_p.stat().st_mtime) > 60:
+            lock_p.unlink()  # 60초 이상 된 stale lock 제거
 
     def think(self, observation: AgentObservation) -> list[AgentAction]:
         """Observation을 파일에 쓰고 외부 decision을 기다린다."""
@@ -108,11 +115,16 @@ class FileBasedBrain:
             return []
         self._step_count += 1
         obs_data = self._serialize_observation(observation)
-        atomic_write(self._observation_path, obs_data)
-        self._write_status(STATE_WAITING_FOR_BRAIN, {
-            "vector_index": self._step_count,
-            "findings_so_far": len(self._cumulative_findings),
-        })
+        # 락 획득 — 동시 파이프라인 인스턴스가 같은 파일을 덮어쓰지 않도록
+        self._acquire_lock()
+        try:
+            atomic_write(self._observation_path, obs_data)
+            self._write_status(STATE_WAITING_FOR_BRAIN, {
+                "vector_index": self._step_count,
+                "findings_so_far": len(self._cumulative_findings),
+            })
+        finally:
+            self._release_lock()
         decision = self._wait_for_decision()
         self._write_status(STATE_EXECUTING, {"vector_index": self._step_count})
         actions = self._parse_decision(decision)
@@ -179,7 +191,40 @@ class FileBasedBrain:
         data.update(extra)
         atomic_write(self._status_path, data)
 
+    def _acquire_lock(self, timeout: float = 30.0) -> None:
+        """파일 락 획득 — 동시 파이프라인 인스턴스 간 observation 충돌 방지."""
+        lock_p = Path(self._lock_path)
+        start = time.monotonic()
+        while time.monotonic() - start < timeout:
+            try:
+                # O_CREAT|O_EXCL — 원자적 생성, 이미 존재하면 FileExistsError
+                fd = os.open(str(lock_p), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode())
+                os.close(fd)
+                return
+            except FileExistsError:
+                # stale lock 확인 (30초 초과)
+                try:
+                    if time.time() - lock_p.stat().st_mtime > 30:
+                        lock_p.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                time.sleep(0.2)
+        # 타임아웃 — 락 없이 진행 (데이터 경합보다 deadlock이 더 나쁨)
+        logger.warning("  [BRAIN] Lock acquisition timeout — proceeding without lock")
+
+    def _release_lock(self) -> None:
+        """파일 락 해제."""
+        try:
+            Path(self._lock_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def _serialize_observation(self, obs: AgentObservation) -> dict[str, Any]:
+        # 전체 이력에서 compact summary 생성 — 30개 절삭 보완
+        all_attempted = [p["vector_id"] for p in self._previous_decisions if p.get("attempted") and p.get("vector_id")]
+        all_found     = [p["vector_id"] for p in self._previous_decisions if p.get("found")     and p.get("vector_id")]
+        all_skipped   = [p["vector_id"] for p in self._previous_decisions if not p.get("attempted") and p.get("vector_id")]
         data: dict[str, Any] = {
             "target": obs.target,
             "tech_stack": obs.tech_stack,
@@ -188,7 +233,13 @@ class FileBasedBrain:
             "subdomains": obs.subdomains[:20],
             "endpoints_discovered": self._endpoints_discovered[:100],
             "cumulative_findings": self._cumulative_findings[-50:],
-            "previous_decisions": self._previous_decisions[-30:],
+            "previous_decisions": self._previous_decisions[-50:],   # 30→50
+            "all_vectors_summary": {                                 # 전체 이력 compact
+                "attempted": list(dict.fromkeys(all_attempted)),    # 중복 제거
+                "found":     list(dict.fromkeys(all_found)),
+                "skipped":   list(dict.fromkeys(all_skipped)),
+                "total_steps": self._step_count,
+            },
             "executed_tools": obs.executed_tools,
             "step": self._step_count,
         }
