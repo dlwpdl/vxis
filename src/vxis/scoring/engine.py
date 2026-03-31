@@ -220,41 +220,54 @@ class ScoringEngine:
     def _calc_vector_coverage(self, tracker: ScoreTracker) -> DimensionScore:
         """Dimension 1: Vector Coverage (max 250pts).
 
-        Score = (vectors_attempted / total_vectors) × 250
+        Score = attempt_score + found_score
+          attempt_score = (vectors_attempted / total_vectors) × 120  (도구 능력)
+          found_score   = (vectors_found    / total_vectors) × 130  (실제 발견)
+
+        취약점을 하나도 못 찾으면 최대 120pts, 찾을수록 추가 점수.
         """
         max_score = self.MAX_SCORES["vector_coverage"]
+        ATTEMPT_MAX = 120.0
+        FOUND_MAX = 130.0
 
-        attempted = len(tracker.vectors_attempted)
         total = self._total_vectors
-
-        # 알려진 벡터에 대해서만 카운트 (미정의 벡터 ID는 무시)
         valid_ids = {v.id for v in self._vectors}
-        valid_attempted = len(tracker.vectors_attempted & valid_ids)
 
-        ratio = valid_attempted / total if total > 0 else 0.0
-        score = ratio * max_score
+        valid_attempted = len(tracker.vectors_attempted & valid_ids)
+        valid_found = len(tracker.vectors_found & valid_ids)
+
+        attempt_ratio = valid_attempted / total if total > 0 else 0.0
+        found_ratio = valid_found / total if total > 0 else 0.0
+
+        attempt_score = attempt_ratio * ATTEMPT_MAX
+        found_score = found_ratio * FOUND_MAX
+        score = attempt_score + found_score
 
         # 카테고리별 커버리지 세부 정보
         category_coverage: dict[str, dict] = {}
         for v in self._vectors:
             cat = v.category
             if cat not in category_coverage:
-                category_coverage[cat] = {"total": 0, "attempted": 0}
+                category_coverage[cat] = {"total": 0, "attempted": 0, "found": 0}
             category_coverage[cat]["total"] += 1
             if v.id in tracker.vectors_attempted:
                 category_coverage[cat]["attempted"] += 1
+            if v.id in tracker.vectors_found:
+                category_coverage[cat]["found"] += 1
 
         return DimensionScore(
             name="Vector Coverage",
             name_ko="벡터 커버리지",
             score=score,
             max_score=max_score,
-            percentage=ratio,
+            percentage=score / max_score,
             details={
                 "vectors_attempted": valid_attempted,
+                "vectors_found": valid_found,
                 "total_vectors": total,
-                "vectors_found": len(tracker.vectors_found & valid_ids),
-                "unknown_vectors_ignored": attempted - valid_attempted,
+                "attempt_score": round(attempt_score, 2),
+                "found_score": round(found_score, 2),
+                "unknown_vectors_ignored": len(tracker.vectors_attempted) - valid_attempted,
                 "category_coverage": category_coverage,
             },
         )
@@ -372,9 +385,14 @@ class ScoringEngine:
         tp = tracker.true_positive_count
         fp = tracker.false_positive_count
         total_judged = tp + fp
+        total_findings = len(tracker.exploitation_levels)  # 실제 기록된 findings 수
 
-        # 애널리스트 판정이 전혀 없으면 기본 정밀도 1.0으로 가정 (낙관적)
-        if total_judged == 0:
+        # findings가 하나도 없으면 정밀도 0 — 찾지 못한 스캔은 정밀도 점수 없음
+        if total_findings == 0:
+            precision_ratio = 0.0
+            base_score = 0.0
+        elif total_judged == 0:
+            # findings는 있지만 애널리스트 판정이 없으면 70% 기본
             precision_ratio = 1.0
             base_score = max_score * 0.7  # 판정 없이는 최대 70% (140pts)
         else:
