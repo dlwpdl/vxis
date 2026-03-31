@@ -395,7 +395,7 @@ class ScanPipeline:
                 method = target_spec.get("method", "GET").upper()
                 param = target_spec.get("param", "")
                 payloads = target_spec.get("payloads", [])
-                note = target_spec.get("note", "")
+
 
                 if not payloads:
                     payloads = [""]  # 빈 페이로드라도 엔드포인트 접근 시도
@@ -1413,20 +1413,25 @@ class ScanPipeline:
         except Exception:
             pass
 
+        # Core injection vectors — always attempted on all web targets regardless of IoT/VoIP/Web3
+        # 핵심 인젝션 벡터 — IoT/VoIP/Web3 여부와 관계없이 모든 웹 타겟에 항상 시도
+        try:
+            for vid in [
+                "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
+                "WEB-SQLI-005", "WEB-SQLI-006",
+                "WEB-NOSQL-001", "WEB-NOSQL-002",
+                "WEB-CMDI-001", "WEB-CMDI-002",
+                "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
+                "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         is_iot = any(k in " ".join(ctx.tech_stack).lower() for k in ["mqtt", "coap", "zigbee", "ble"])
         if is_iot:
             logger.info("  IoT indicators detected — running IoT agents")
             try:
-                # Phase 5 injection vectors
-                for vid in [
-                    "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
-                    "WEB-SQLI-005", "WEB-SQLI-006",
-                    "WEB-NOSQL-001", "WEB-NOSQL-002",
-                    "WEB-CMDI-001", "WEB-CMDI-002",
-                    "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
-                    "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
-                ]:
-                    ctx.score_tracker.record_vector_attempt(vid)
                 ctx.score_tracker.record_phase_complete("Phase 5: Special Agents (IoT/VoIP/Web3)")
             except Exception:
                 pass
