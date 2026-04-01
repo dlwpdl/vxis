@@ -842,6 +842,41 @@ class ScanPipeline:
         except Exception as exc:
             logger.debug("  [AUTH] WebGoat auth attempt failed: %s", exc)
 
+        # ── NodeGoat 인증 (user1/User1_123 기본 계정) ──
+        try:
+            resp = await session.get("/login")
+            body = resp.text if hasattr(resp, "text") else ""
+            is_nodegoat = (
+                "NodeGoat" in body
+                or "nodegoat" in target.lower()
+                or ("userName" in body and "Node" in body)
+            )
+            if is_nodegoat:
+                logger.info("  [AUTH] NodeGoat detected — logging in as user1...")
+                try:
+                    # CSRF 토큰 추출 (비어있는 경우 많음 — NodeGoat CSRF 취약)
+                    import re as _re
+                    csrf_match = _re.search(r'name="_csrf"\s+value="([^"]*)"', body)
+                    csrf = csrf_match.group(1) if csrf_match else ""
+                    await session.post("/login", data={
+                        "userName": "user1",
+                        "password": "User1_123",
+                        "_csrf": csrf,
+                    })
+                    check = await session.get("/profile")
+                    check_url = str(getattr(check, "url", ""))
+                    authed = check.status == 200 and "login" not in check_url
+                    if authed:
+                        logger.info("  [AUTH] NodeGoat login OK (user1)")
+                        return session
+                    else:
+                        logger.warning("  [AUTH] NodeGoat auth failed (status=%d url=%s)",
+                                       check.status, check_url)
+                except Exception as exc:
+                    logger.debug("  [AUTH] NodeGoat login: %s", exc)
+        except Exception as exc:
+            logger.debug("  [AUTH] NodeGoat auth attempt failed: %s", exc)
+
         return session
 
     def _analyze_probe_response(

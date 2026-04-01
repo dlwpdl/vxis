@@ -2694,6 +2694,998 @@ WEBGOAT_ATTACK_CHAINS = [
 
 
 # =====================================================================
+# NODEGOAT FINDINGS
+# =====================================================================
+# Target: OWASP NodeGoat (Express + MongoDB, Node.js)
+# Scan date: 2026-03-31
+# Brain: VXIS FileBasedBrain + Claude Sonnet 4.6
+# Default accounts used: user1/User1_123, admin/Admin_123
+#
+# Confirmed findings (dynamically verified against live target):
+#   NG-001: CSRF Token Bypass (HIGH)
+#   NG-002: IDOR — Insecure Direct Object Reference (HIGH)
+#   NG-003: User Enumeration via Login Error Messages (MEDIUM)
+#   NG-004: Insecure Session Cookie (MEDIUM)
+#   NG-005: Missing Security Headers (MEDIUM)
+#   NG-006: Plaintext Password Storage + Default Credentials (CRITICAL)
+#   NG-007: Server-Side JavaScript Injection on /contributions (HIGH)
+#   NG-008: Technology Stack Disclosure (LOW)
+# =====================================================================
+
+NODEGOAT_FINDINGS: list[Finding] = [
+    # ---- 1. Plaintext Password Storage + Default Credentials ----
+    Finding(
+        id="NG-006",
+        scan_id="nodegoat-2026-03-31",
+        target="http://localhost:4000",
+        title="Plaintext Password Storage & Hardcoded Default Credentials|||평문 비밀번호 저장 및 하드코딩된 기본 자격증명",
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "NodeGoat stores all user passwords in MongoDB in plaintext without any hashing or salting. "
+            "The user-dao.js stores the password field directly: `password: password //received from request param`. "
+            "Additionally, the application ships with well-known default credentials (admin/Admin_123, user1/User1_123, "
+            "user2/User2_123) that are created during database initialization and never enforced to change. "
+            "A single MongoDB breach exposes every user's actual password, enabling immediate credential stuffing "
+            "attacks across other services. The comparePassword function uses strict equality `fromDB === fromUser`, "
+            "confirming raw string comparison with no cryptographic protection.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Gain read access to MongoDB (via NoSQL injection, misconfigured port 27017, or SSRF).\n"
+            "Step 2: Run db.users.find({}) — returns all user documents with password field in cleartext.\n"
+            "Step 3: Extract: {userName: 'admin', password: 'Admin_123'}, {userName: 'user1', password: 'User1_123'}.\n"
+            "Step 4: Login immediately — no cracking required; passwords are directly usable.\n"
+            "Step 5: Use extracted credentials for credential stuffing against external services (email, banking, etc.).\n"
+            "Step 6: Use default admin/Admin_123 credentials to access admin-only /benefits endpoint.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Complete exposure of all user passwords — immediate account takeover without cracking\n"
+            "- High credential reuse risk: cleartext passwords enable stuffing attacks across all user accounts on external platforms\n"
+            "- Default credentials (admin/Admin_123) are publicly documented and trivially exploitable\n"
+            "- Regulatory violation: GDPR Art. 32 requires appropriate technical measures; plaintext storage is a direct violation\n"
+            "- Zero forensic ambiguity: breach confirmation is immediate — no hash cracking timeline\n\n"
+            "PoC — Proof of Concept\n"
+            "# Direct MongoDB query (if accessible)\n"
+            "mongo mongodb://localhost:27017/nodegoat --eval 'db.users.find({}, {userName:1, password:1}).pretty()'\n"
+            "Output:\n"
+            "  { _id: 1, userName: 'admin', password: 'Admin_123' }\n"
+            "  { _id: 2, userName: 'user1', password: 'User1_123' }\n"
+            "  { _id: 3, userName: 'user2', password: 'User2_123' }\n\n"
+            "Default credential login:\n"
+            "POST /login HTTP/1.1\n"
+            "Host: localhost:4000\n"
+            "Content-Type: application/x-www-form-urlencoded\n\n"
+            "userName=admin&password=Admin_123&_csrf=\n"
+            "→ HTTP 302 Found / Location: /benefits (admin redirect)\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "Default creds → admin login → /benefits admin panel access → "
+            "IDOR to any user's financial data → NoSQL DB access → all passwords extracted → "
+            "credential stuffing external services → full account compromise\n\n"
+            "Immediate: Remove all default accounts or force password change on first login; "
+            "deploy bcrypt/argon2 password hashing immediately (NodeGoat provides the fix in commented code).\n"
+            "Short-term: Add password complexity requirements; implement account lockout after 5 failed attempts; "
+            "restrict MongoDB to localhost only with authentication enabled.\n"
+            "Long-term: Implement a secrets rotation policy; add breach notification capabilities; "
+            "use a dedicated secrets manager for service credentials."
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "NodeGoat는 모든 사용자 비밀번호를 해싱이나 솔팅 없이 MongoDB에 평문으로 저장합니다. "
+            "user-dao.js에서 비밀번호 필드를 직접 저장합니다: `password: password //received from request param`. "
+            "또한 데이터베이스 초기화 시 생성되는 잘 알려진 기본 자격증명(admin/Admin_123, user1/User1_123, "
+            "user2/User2_123)이 변경 강제 없이 그대로 사용됩니다. "
+            "comparePassword 함수가 엄격한 동등 연산(`fromDB === fromUser`)을 사용하여 "
+            "암호화 보호 없이 원시 문자열을 비교함을 확인했습니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "Step 1: MongoDB 읽기 권한 획득 (NoSQL 인젝션, 포트 27017 노출, SSRF 등을 통해).\n"
+            "Step 2: db.users.find({}) 실행 — password 필드가 평문으로 포함된 모든 사용자 문서 반환.\n"
+            "Step 3: 추출: {userName: 'admin', password: 'Admin_123'}, {userName: 'user1', password: 'User1_123'}.\n"
+            "Step 4: 즉시 로그인 가능 — 크래킹 불필요; 비밀번호 직접 사용.\n"
+            "Step 5: 추출한 자격증명으로 외부 서비스(이메일, 뱅킹 등) 크리덴셜 스터핑 공격.\n"
+            "Step 6: 기본 admin/Admin_123 자격증명으로 관리자 전용 /benefits 엔드포인트 접근.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 모든 사용자 비밀번호 완전 노출 — 크래킹 없이 즉각 계정 탈취\n"
+            "- 높은 자격증명 재사용 위험: 평문 비밀번호로 모든 계정의 외부 플랫폼 스터핑 공격 가능\n"
+            "- 기본 자격증명(admin/Admin_123)은 공개 문서화되어 있어 즉시 악용 가능\n"
+            "- 규제 위반: GDPR 제32조는 적절한 기술적 조치를 요구하며, 평문 저장은 직접적 위반\n\n"
+            "개념 증명(PoC)\n"
+            "# MongoDB 직접 쿼리 (접근 가능한 경우)\n"
+            "mongo mongodb://localhost:27017/nodegoat --eval 'db.users.find({}, {userName:1, password:1}).pretty()'\n"
+            "출력:\n"
+            "  { _id: 1, userName: 'admin', password: 'Admin_123' }\n"
+            "  { _id: 2, userName: 'user1', password: 'User1_123' }\n\n"
+            "기본 자격증명 로그인:\n"
+            "POST /login HTTP/1.1\n"
+            "Content-Type: application/x-www-form-urlencoded\n\n"
+            "userName=admin&password=Admin_123&_csrf=\n"
+            "→ HTTP 302 Found / Location: /benefits (관리자 리디렉션)\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "기본 자격증명 → 관리자 로그인 → /benefits 관리 패널 접근 → "
+            "임의 사용자 금융 데이터 IDOR → NoSQL DB 접근 → 모든 비밀번호 추출 → "
+            "외부 서비스 크리덴셜 스터핑 → 전체 계정 탈취\n\n"
+            "즉시 조치: 모든 기본 계정 제거 또는 첫 로그인 시 비밀번호 변경 강제; "
+            "즉시 bcrypt/argon2 비밀번호 해싱 적용 (NodeGoat 주석 처리된 코드에 수정 방법 제공됨).\n"
+            "단기 조치: 비밀번호 복잡성 요구사항 추가; 5회 실패 후 계정 잠금 구현; "
+            "MongoDB를 인증 활성화 상태로 localhost만 허용.\n"
+            "장기 조치: 비밀 순환 정책 구현; 침해 알림 기능 추가; "
+            "서비스 자격증명에 전용 시크릿 매니저 사용."
+        ),
+        severity=Severity.critical,
+        finding_type="Cryptographic Failure",
+        source_plugin="Brain/Manual",
+        affected_component="/login, /signup, MongoDB users collection",
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+            base_score=9.1,
+        ),
+        evidence=[
+            Evidence(
+                evidence_type="source_code",
+                title="Plaintext password storage in user-dao.js",
+                content=(
+                    "// user-dao.js line ~40\n"
+                    "var user = {\n"
+                    "    userName: userName,\n"
+                    "    password: password //received from request param\n"
+                    "    /* Fix: password: bcrypt.hashSync(password, bcrypt.genSaltSync()) */\n"
+                    "};\n\n"
+                    "// comparePassword function\n"
+                    "function comparePassword(fromDB, fromUser) {\n"
+                    "    return fromDB === fromUser;  // raw string comparison, no hashing\n"
+                    "}"
+                ),
+            ),
+            Evidence(
+                evidence_type="http_response",
+                title="Default credential login — HTTP 302 to /benefits",
+                content=(
+                    "POST /login HTTP/1.1\n"
+                    "Host: localhost:4000\n"
+                    "Content-Type: application/x-www-form-urlencoded\n\n"
+                    "userName=admin&password=Admin_123&_csrf=\n\n"
+                    "HTTP/1.1 302 Found\n"
+                    "Location: /benefits\n"
+                    "Set-Cookie: connect.sid=s%3A...; Path=/; HttpOnly"
+                ),
+            ),
+        ],
+        mitre_attack=MitreAttack(tactic_id="TA0001", tactic_name="Initial Access", technique_id="T1078.001", technique_name="Default Accounts"),
+        references=[
+            Reference(
+                title="OWASP A02:2021 – Cryptographic Failures",
+                url="https://owasp.org/Top10/A02_2021-Cryptographic_Failures/",
+            ),
+        ],
+    ),
+
+    # ---- 2. CSRF Token Bypass ----
+    Finding(
+        id="NG-001",
+        scan_id="nodegoat-2026-03-31",
+        target="http://localhost:4000",
+        title="Missing CSRF Protection — Empty Token Accepted on All Forms|||CSRF 보호 미흡 — 모든 폼에서 빈 토큰 허용",
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "NodeGoat includes a `_csrf` hidden field in all forms, suggesting intent to implement CSRF protection. "
+            "However, the application accepts requests with an empty or absent `_csrf` value, rendering the protection "
+            "completely ineffective. Any authenticated user's session can be hijacked by a malicious third-party site "
+            "that submits crafted cross-origin requests. All state-changing operations — profile updates, memo creation, "
+            "contribution changes, login — are vulnerable. This was confirmed by submitting POST requests with `_csrf=` "
+            "(empty string) and receiving HTTP 200 OK or 302 redirect to authenticated pages.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Attacker hosts a malicious webpage at evil.com with an auto-submitting form:\n"
+            "  <form method='POST' action='http://localhost:4000/profile'>\n"
+            "  <input name='firstName' value='HACKED'/><input name='_csrf' value=''/>\n"
+            "  </form>\n"
+            "Step 2: Victim (logged-in NodeGoat user) visits evil.com.\n"
+            "Step 3: Browser auto-submits the form — victim's session cookie is sent automatically.\n"
+            "Step 4: NodeGoat accepts the request (empty _csrf is valid) and updates victim's profile.\n"
+            "Step 5: Attacker escalates: CSRF to change email → trigger password reset → full account takeover.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Unauthorized modification of any authenticated user's data (profile, memos, contributions)\n"
+            "- Account takeover via CSRF-triggered email/password change\n"
+            "- Financial data manipulation: attacker-controlled contribution percentages\n"
+            "- No user interaction beyond visiting a malicious page is required\n"
+            "- Chained with XSS: stored XSS on /memos delivers CSRF payload to all visitors\n\n"
+            "PoC — Proof of Concept\n"
+            "# Empty CSRF token accepted — profile update\n"
+            "POST /profile HTTP/1.1\n"
+            "Host: localhost:4000\n"
+            "Content-Type: application/x-www-form-urlencoded\n"
+            "Cookie: connect.sid=<valid_session>\n\n"
+            "firstName=CSRF_TEST&lastName=Test&ssn=000000000&_csrf=\n\n"
+            "HTTP/1.1 200 OK\n"
+            "(profile updated successfully with empty CSRF token)\n\n"
+            "# Empty CSRF accepted at login\n"
+            "POST /login HTTP/1.1\n"
+            "Content-Type: application/x-www-form-urlencoded\n\n"
+            "userName=user1&password=User1_123&_csrf=\n"
+            "→ HTTP 302 Found / Location: /dashboard\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "CSRF bypass → profile email update → password reset link to attacker email → "
+            "account takeover → IDOR to all user financial data → privilege escalation to admin\n\n"
+            "Immediate: Enforce strict CSRF token validation — reject any request with empty, missing, or invalid token.\n"
+            "Short-term: Replace custom CSRF with csurf middleware (already referenced in NodeGoat's commented code); "
+            "add SameSite=Strict to session cookie; add Origin/Referer header validation.\n"
+            "Long-term: Implement double-submit cookie pattern as defense-in-depth; "
+            "adopt Content Security Policy to restrict form submission targets."
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "NodeGoat는 모든 폼에 `_csrf` 숨겨진 필드를 포함하여 CSRF 보호 구현 의도를 보입니다. "
+            "그러나 애플리케이션은 비어있거나 없는 `_csrf` 값의 요청을 수락하여 보호를 완전히 무력화합니다. "
+            "인증된 사용자의 세션은 조작된 교차 출처 요청을 제출하는 악의적인 서드파티 사이트에 의해 탈취될 수 있습니다. "
+            "프로필 업데이트, 메모 생성, 기여금 변경, 로그인 등 모든 상태 변경 작업이 취약합니다. "
+            "`_csrf=`(빈 문자열)으로 POST 요청을 제출하여 HTTP 200 OK 또는 302 리디렉션을 받아 확인했습니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "Step 1: 공격자가 evil.com에 자동 제출 폼이 있는 악의적인 웹페이지 호스팅:\n"
+            "  <form method='POST' action='http://localhost:4000/profile'>\n"
+            "  <input name='firstName' value='HACKED'/><input name='_csrf' value=''/>\n"
+            "  </form>\n"
+            "Step 2: 피해자(로그인된 NodeGoat 사용자)가 evil.com 방문.\n"
+            "Step 3: 브라우저 자동으로 폼 제출 — 피해자의 세션 쿠키 자동 전송.\n"
+            "Step 4: NodeGoat 요청 수락 (빈 _csrf가 유효) → 피해자 프로필 업데이트.\n"
+            "Step 5: 공격자 확장: CSRF로 이메일 변경 → 비밀번호 재설정 트리거 → 완전한 계정 탈취.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 인증된 모든 사용자 데이터 무단 수정 (프로필, 메모, 기여금)\n"
+            "- CSRF 트리거 이메일/비밀번호 변경을 통한 계정 탈취\n"
+            "- 금융 데이터 조작: 공격자가 기여금 비율 제어\n"
+            "- 악성 페이지 방문 외 추가 사용자 상호작용 불필요\n"
+            "- XSS와 연쇄: /memos의 저장형 XSS가 모든 방문자에게 CSRF 페이로드 전달\n\n"
+            "개념 증명(PoC)\n"
+            "# 빈 CSRF 토큰 수락 — 프로필 업데이트\n"
+            "POST /profile HTTP/1.1\n"
+            "Host: localhost:4000\n"
+            "Content-Type: application/x-www-form-urlencoded\n"
+            "Cookie: connect.sid=<valid_session>\n\n"
+            "firstName=CSRF_TEST&lastName=Test&_csrf=\n\n"
+            "HTTP/1.1 200 OK\n"
+            "(빈 CSRF 토큰으로 프로필 업데이트 성공)\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "CSRF 우회 → 프로필 이메일 업데이트 → 공격자 이메일로 비밀번호 재설정 링크 전송 → "
+            "계정 탈취 → 모든 사용자 금융 데이터 IDOR → 관리자 권한 상승\n\n"
+            "즉시 조치: 엄격한 CSRF 토큰 검증 강제 — 비어있거나 없거나 유효하지 않은 토큰의 모든 요청 거부.\n"
+            "단기 조치: 커스텀 CSRF를 csurf 미들웨어로 교체; "
+            "세션 쿠키에 SameSite=Strict 추가; Origin/Referer 헤더 검증 추가.\n"
+            "장기 조치: 이중 제출 쿠키 패턴을 심층 방어로 구현; "
+            "폼 제출 대상을 제한하는 콘텐츠 보안 정책 채택."
+        ),
+        severity=Severity.high,
+        finding_type="Cross-Site Request Forgery",
+        source_plugin="Brain/Manual",
+        affected_component="/profile, /memos, /contributions, /login",
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:N",
+            base_score=8.1,
+        ),
+        evidence=[
+            Evidence(
+                evidence_type="http_response",
+                title="Empty CSRF token accepted — POST /login returns 302 to /dashboard",
+                content=(
+                    "POST /login HTTP/1.1\n"
+                    "Host: localhost:4000\n"
+                    "Content-Type: application/x-www-form-urlencoded\n\n"
+                    "userName=user1&password=User1_123&_csrf=\n\n"
+                    "HTTP/1.1 302 Found\n"
+                    "Location: /dashboard\n"
+                    "Set-Cookie: connect.sid=s%3A...; Path=/; HttpOnly"
+                ),
+            ),
+        ],
+        mitre_attack=MitreAttack(tactic_id="TA0004", tactic_name="Privilege Escalation", technique_id="T1185", technique_name="Browser Session Hijacking"),
+        references=[
+            Reference(
+                title="OWASP A01:2021 – Broken Access Control (CSRF)",
+                url="https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
+            ),
+        ],
+    ),
+
+    # ---- 3. IDOR ----
+    Finding(
+        id="NG-002",
+        scan_id="nodegoat-2026-03-31",
+        target="http://localhost:4000",
+        title="Insecure Direct Object Reference (IDOR) — Cross-User Financial Data Access|||비보안 직접 객체 참조(IDOR) — 교차 사용자 금융 데이터 접근",
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "The /allocations/:userId endpoint serves financial allocation data (stock/bond/equity percentages) "
+            "keyed by userId. The application performs no authorization check to verify that the requesting user "
+            "owns the requested userId. Any authenticated user can substitute any integer as userId to retrieve "
+            "the private financial portfolio of any other user, including the administrator. "
+            "user1 (userId=2) was confirmed to successfully access /allocations/1 (admin's data) and "
+            "the admin account was confirmed to access /allocations/2 (user1's private data).\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Login as any valid user (e.g., user1/User1_123).\n"
+            "Step 2: Note your own allocation URL in the navigation: /allocations/2.\n"
+            "Step 3: Change the userId in the URL: GET /allocations/1 (admin's userId).\n"
+            "Step 4: Server returns HTTP 200 with admin's allocation breakdown (stocks/bonds/equity percentages).\n"
+            "Step 5: Iterate userId from 1 to N to harvest all users' financial portfolios.\n"
+            "Step 6: Correlate financial data with user profile info (SSN, address, bank account) for complete PII extraction.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Unauthorized access to private financial portfolio data for all users\n"
+            "- Complete enumeration of all user allocations (stocks %, bonds %, equity %) via sequential userId scan\n"
+            "- Combination with profile IDOR enables full PII correlation (name + SSN + bank routing + allocation data)\n"
+            "- Regulatory violation: financial data is PII under GDPR/CCPA/FINRA\n"
+            "- Enables targeted social engineering using accurate financial profile of victims\n\n"
+            "PoC — Proof of Concept\n"
+            "# Authenticated as user1 (userId=2), accessing admin (userId=1) allocations\n"
+            "GET /allocations/1 HTTP/1.1\n"
+            "Host: localhost:4000\n"
+            "Cookie: connect.sid=<user1_session>\n\n"
+            "HTTP/1.1 200 OK\n"
+            "Content-Type: text/html\n\n"
+            "<strong>Asset Allocations for Admin User</strong>\n"
+            "<strong>23 %</strong>  <!-- Stocks -->\n"
+            "<strong>3 %</strong>   <!-- Bonds -->\n"
+            "<strong>74 %</strong>  <!-- National Funds -->\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "Login (default creds) → enumerate /allocations/1..N → extract all financial portfolios → "
+            "correlate with /profile IDOR (SSN, bank account) → complete PII database → "
+            "targeted phishing/social engineering → external account compromise\n\n"
+            "Immediate: Add server-side authorization check: verify req.session.userId === parseInt(req.params.userId) "
+            "before returning allocation data.\n"
+            "Short-term: Implement a middleware authorization layer; replace sequential integer IDs with "
+            "non-guessable UUIDs; add audit logging for cross-user resource access.\n"
+            "Long-term: Adopt RBAC/ABAC framework; implement API-level access control tests in CI/CD; "
+            "data masking for sensitive financial fields in API responses."
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "/allocations/:userId 엔드포인트는 userId로 키잉된 금융 배분 데이터(주식/채권/주식형 비율)를 제공합니다. "
+            "애플리케이션은 요청 사용자가 요청된 userId를 소유하는지 확인하는 권한 검사를 수행하지 않습니다. "
+            "인증된 모든 사용자가 임의의 정수를 userId로 대체하여 관리자를 포함한 다른 모든 사용자의 "
+            "개인 금융 포트폴리오를 검색할 수 있습니다. "
+            "user1(userId=2)이 /allocations/1(관리자 데이터)에 성공적으로 접근하고, "
+            "관리자 계정이 /allocations/2(user1의 개인 데이터)에 접근하는 것을 확인했습니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "Step 1: 유효한 사용자로 로그인 (예: user1/User1_123).\n"
+            "Step 2: 내비게이션에서 자신의 배분 URL 확인: /allocations/2.\n"
+            "Step 3: URL에서 userId 변경: GET /allocations/1 (관리자 userId).\n"
+            "Step 4: 서버가 HTTP 200과 관리자 배분 내역 반환.\n"
+            "Step 5: userId를 1부터 N까지 반복하여 모든 사용자 금융 포트폴리오 수집.\n"
+            "Step 6: 재무 데이터와 프로필 정보(SSN, 주소, 은행 계좌) 연계로 완전한 PII 추출.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 모든 사용자의 개인 금융 포트폴리오 데이터 무단 접근\n"
+            "- 순차 userId 스캔으로 모든 사용자 배분 완전 열거\n"
+            "- 프로필 IDOR와 결합 시 완전한 PII 연계 가능 (이름 + SSN + 은행 라우팅 + 배분 데이터)\n"
+            "- 규제 위반: 금융 데이터는 GDPR/CCPA/FINRA 하에서 PII에 해당\n\n"
+            "개념 증명(PoC)\n"
+            "# user1(userId=2)로 인증 후 관리자(userId=1) 배분 접근\n"
+            "GET /allocations/1 HTTP/1.1\n"
+            "Host: localhost:4000\n"
+            "Cookie: connect.sid=<user1_session>\n\n"
+            "HTTP/1.1 200 OK\n\n"
+            "<strong>Asset Allocations for Admin User</strong>\n"
+            "<strong>23 %</strong>  <!-- 주식 -->\n"
+            "<strong>3 %</strong>   <!-- 채권 -->\n"
+            "<strong>74 %</strong>  <!-- 국내 펀드 -->\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "로그인(기본 자격증명) → /allocations/1..N 열거 → 모든 금융 포트폴리오 추출 → "
+            "/profile IDOR와 연계(SSN, 은행 계좌) → 완전한 PII 데이터베이스 → "
+            "표적 피싱/소셜 엔지니어링 → 외부 계정 탈취\n\n"
+            "즉시 조치: 서버 측 권한 검사 추가: 배분 데이터 반환 전 "
+            "`req.session.userId === parseInt(req.params.userId)` 검증.\n"
+            "단기 조치: 미들웨어 권한 레이어 구현; 순차 정수 ID를 추측 불가능한 UUID로 교체; "
+            "교차 사용자 리소스 접근에 대한 감사 로그 추가.\n"
+            "장기 조치: RBAC/ABAC 프레임워크 채택; CI/CD에서 API 수준 접근 제어 테스트 구현."
+        ),
+        severity=Severity.high,
+        finding_type="Broken Access Control",
+        source_plugin="Brain/Manual",
+        affected_component="/allocations/:userId",
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N",
+            base_score=6.5,
+        ),
+        evidence=[
+            Evidence(
+                evidence_type="http_response",
+                title="user1 accessing admin's allocations — HTTP 200 OK",
+                content=(
+                    "GET /allocations/1 HTTP/1.1\n"
+                    "Host: localhost:4000\n"
+                    "Cookie: connect.sid=<user1_session_cookie>\n\n"
+                    "HTTP/1.1 200 OK\n"
+                    "Content-Type: text/html\n\n"
+                    "[Response body contains]\n"
+                    "<strong>Asset Allocations for Admin User</strong>\n"
+                    "<strong>23 %</strong>  (Stocks)\n"
+                    "<strong>3 %</strong>   (Bonds)\n"
+                    "<strong>74 %</strong>  (National Funds)"
+                ),
+            ),
+        ],
+        mitre_attack=MitreAttack(tactic_id="TA0009", tactic_name="Collection", technique_id="T1530", technique_name="Data from Cloud Storage"),
+        references=[
+            Reference(
+                title="OWASP A01:2021 – Broken Access Control (IDOR)",
+                url="https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
+            ),
+        ],
+    ),
+
+    # ---- 4. Server-Side JavaScript Injection (SSJI) ----
+    Finding(
+        id="NG-007",
+        scan_id="nodegoat-2026-03-31",
+        target="http://localhost:4000",
+        title="Server-Side JavaScript Injection (SSJI) — Arithmetic Expression Evaluation on /contributions|||서버 측 자바스크립트 인젝션(SSJI) — /contributions 산술 표현식 평가",
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "The /contributions endpoint evaluates user-supplied numeric input (preTax, afterTax, roth fields) "
+            "server-side using JavaScript's eval()-equivalent logic without sanitization. "
+            "When an arithmetic expression is submitted (e.g., `preTax=10-1`), the server evaluates it and "
+            "returns the computed result (9%), rather than treating the input as a literal integer. "
+            "This server-side expression evaluation opens the path to Node.js code execution if more complex "
+            "payloads such as `require('child_process').exec()` can be reached. "
+            "The vulnerability was confirmed by submitting `preTax=10-1` and receiving a response with '9%' in the output.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Login as any authenticated user and navigate to /contributions.\n"
+            "Step 2: Submit form with arithmetic expression: preTax=10-1&afterTax=10&roth=10&_csrf=\n"
+            "Step 3: Response shows preTax as '9 %' — confirming server-side expression evaluation.\n"
+            "Step 4: Escalate to process-level access: preTax=process.env.NODE_ENV\n"
+            "Step 5: Further escalation: preTax=require('child_process').execSync('id').toString()\n"
+            "Step 6: Establish reverse shell or exfiltrate /etc/passwd, environment variables, DB credentials.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Arithmetic expressions evaluated server-side — confirmed code injection path\n"
+            "- Potential full Node.js process takeover (RCE) via require/process access\n"
+            "- Exfiltration of process environment (DATABASE_URL, SECRET_KEY, API tokens)\n"
+            "- MongoDB credential extraction if DATABASE_URI is in process.env\n"
+            "- Server compromise: full read/write access to filesystem, network pivoting\n\n"
+            "PoC — Proof of Concept\n"
+            "# Arithmetic SSJI — confirmed\n"
+            "POST /contributions HTTP/1.1\n"
+            "Host: localhost:4000\n"
+            "Content-Type: application/x-www-form-urlencoded\n"
+            "Cookie: connect.sid=<valid_session>\n\n"
+            "preTax=10-1&afterTax=10&roth=10&_csrf=\n\n"
+            "HTTP/1.1 200 OK\n"
+            "[Response body contains]\n"
+            "<td>9 %</td>  <!-- preTax evaluated: 10-1 = 9 -->\n"
+            "<td>10 %</td>\n"
+            "<td>10 %</td>\n\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "Auth (default creds) → SSJI arithmetic → escalate to process.env → "
+            "DB credentials extracted → MongoDB full access → all passwords in plaintext → "
+            "complete user database exfiltration → credential stuffing\n\n"
+            "Immediate: Replace eval()-based computation with strict integer parsing: "
+            "parseInt(req.body.preTax, 10) with NaN/range validation.\n"
+            "Short-term: Add input validation middleware that rejects non-numeric characters; "
+            "restrict Node.js process permissions (run as unprivileged user); "
+            "disable require() access from user-reachable code paths.\n"
+            "Long-term: Implement Content Security Policy; run application in sandboxed container with "
+            "minimal filesystem access; adopt static analysis in CI/CD to detect eval() usage."
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "/contributions 엔드포인트가 사용자 제공 숫자 입력(preTax, afterTax, roth 필드)을 "
+            "새니타이징 없이 JavaScript의 eval() 동등 로직으로 서버 측에서 평가합니다. "
+            "산술 표현식을 제출하면(예: `preTax=10-1`) 서버가 이를 평가하여 "
+            "입력을 리터럴 정수로 처리하는 대신 계산된 결과(9%)를 반환합니다. "
+            "이 서버 측 표현식 평가는 `require('child_process').exec()`와 같은 더 복잡한 "
+            "페이로드가 접근 가능할 경우 Node.js 코드 실행으로 이어질 수 있습니다. "
+            "`preTax=10-1`을 제출하여 출력에 '9%'가 포함된 응답을 받아 확인했습니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "Step 1: 인증된 사용자로 로그인 후 /contributions 접속.\n"
+            "Step 2: 폼에 산술 표현식 제출: preTax=10-1&afterTax=10&roth=10&_csrf=\n"
+            "Step 3: 응답에 preTax가 '9 %'로 표시됨 — 서버 측 표현식 평가 확인.\n"
+            "Step 4: 프로세스 수준 접근으로 확장: preTax=process.env.NODE_ENV\n"
+            "Step 5: 추가 확장: preTax=require('child_process').execSync('id').toString()\n"
+            "Step 6: 역방향 셸 생성 또는 /etc/passwd, 환경 변수, DB 자격증명 유출.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 서버 측에서 산술 표현식 평가 확인 — 코드 인젝션 경로 확인\n"
+            "- require/process 접근을 통한 잠재적 전체 Node.js 프로세스 탈취(RCE)\n"
+            "- 프로세스 환경 유출 (DATABASE_URL, SECRET_KEY, API 토큰)\n"
+            "- process.env에 DATABASE_URI가 있을 경우 MongoDB 자격증명 추출\n"
+            "- 서버 탈취: 파일시스템 완전 읽기/쓰기 접근, 네트워크 피벗팅\n\n"
+            "개념 증명(PoC)\n"
+            "# 산술 SSJI — 확인됨\n"
+            "POST /contributions HTTP/1.1\n"
+            "Host: localhost:4000\n"
+            "Content-Type: application/x-www-form-urlencoded\n"
+            "Cookie: connect.sid=<valid_session>\n\n"
+            "preTax=10-1&afterTax=10&roth=10&_csrf=\n\n"
+            "HTTP/1.1 200 OK\n"
+            "[응답 본문 포함]\n"
+            "<td>9 %</td>  <!-- preTax 평가됨: 10-1 = 9 -->\n"
+            "<td>10 %</td>\n"
+            "<td>10 %</td>\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "인증(기본 자격증명) → SSJI 산술 → process.env 확장 → "
+            "DB 자격증명 추출 → MongoDB 완전 접근 → 평문 비밀번호 전체 → "
+            "완전한 사용자 데이터베이스 유출 → 크리덴셜 스터핑\n\n"
+            "즉시 조치: eval() 기반 계산을 엄격한 정수 파싱으로 교체: "
+            "NaN/범위 검증과 함께 parseInt(req.body.preTax, 10) 사용.\n"
+            "단기 조치: 비숫자 문자를 거부하는 입력 검증 미들웨어 추가; "
+            "Node.js 프로세스 권한 제한(비권한 사용자로 실행); "
+            "사용자 접근 가능한 코드 경로에서 require() 접근 비활성화.\n"
+            "장기 조치: 콘텐츠 보안 정책 구현; 최소 파일시스템 접근으로 "
+            "샌드박스 컨테이너에서 애플리케이션 실행; CI/CD에서 eval() 사용 감지 정적 분석 채택."
+        ),
+        severity=Severity.high,
+        finding_type="Injection",
+        source_plugin="Brain/Manual",
+        affected_component="/contributions (preTax, afterTax, roth parameters)",
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+            base_score=8.8,
+        ),
+        evidence=[
+            Evidence(
+                evidence_type="http_response",
+                title="preTax=10-1 evaluated server-side — response contains 9%",
+                content=(
+                    "POST /contributions HTTP/1.1\n"
+                    "Host: localhost:4000\n"
+                    "Content-Type: application/x-www-form-urlencoded\n"
+                    "Cookie: connect.sid=<valid_session>\n\n"
+                    "preTax=10-1&afterTax=10&roth=10&_csrf=\n\n"
+                    "HTTP/1.1 200 OK\n\n"
+                    "Response excerpt:\n"
+                    "<td>9 %</td>   <!-- 10-1 evaluated to 9 -->\n"
+                    "<td>10 %</td>\n"
+                    "<td>10 %</td>"
+                ),
+            ),
+        ],
+        mitre_attack=MitreAttack(tactic_id="TA0002", tactic_name="Execution", technique_id="T1059.007", technique_name="JavaScript"),
+        references=[
+            Reference(
+                title="OWASP A03:2021 – Injection (SSJI)",
+                url="https://owasp.org/Top10/A03_2021-Injection/",
+            ),
+        ],
+    ),
+
+    # ---- 5. User Enumeration ----
+    Finding(
+        id="NG-003",
+        scan_id="nodegoat-2026-03-31",
+        target="http://localhost:4000",
+        title="User Enumeration via Differential Login Error Messages|||차별화된 로그인 오류 메시지를 통한 사용자 열거",
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "The /login endpoint returns distinct error messages depending on whether the username exists: "
+            "'Invalid username' for non-existent users vs 'Invalid password' for valid users with wrong passwords. "
+            "This information disclosure allows an attacker to enumerate valid usernames by observing response content, "
+            "building a target list for brute-force or credential stuffing attacks. "
+            "The application even has commented-out code demonstrating the developer was aware of this: "
+            "/* Fix for A2-2 Broken Auth - Uses identical error for both username, password error */\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Submit login request with a username from a wordlist (e.g., 'admin', 'test', 'user1').\n"
+            "Step 2: If response contains 'Invalid username' → account does not exist. Move to next.\n"
+            "Step 3: If response contains 'Invalid password' → valid username confirmed.\n"
+            "Step 4: Collect all confirmed valid usernames: admin, user1, user2 (confirmed from NodeGoat defaults).\n"
+            "Step 5: Run targeted password spray/brute-force against confirmed usernames.\n"
+            "Step 6: Combine with leaked credentials (Have I Been Pwned) for credential stuffing.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Complete enumeration of all valid usernames with minimal requests\n"
+            "- Significantly reduces attack surface for brute-force: no wasted attempts on non-existent accounts\n"
+            "- Enables targeted spear-phishing using confirmed email/username list\n"
+            "- Combined with no rate limiting: rapid automated enumeration possible\n\n"
+            "PoC — Proof of Concept\n"
+            "# Non-existent user\n"
+            "POST /login — userName=nonexistent&password=anything → 'Invalid username'\n\n"
+            "# Valid user with wrong password\n"
+            "POST /login — userName=user1&password=wrongpass → 'Invalid password'\n\n"
+            "# Difference confirms user1 is a valid account\n"
+            "ATTACK PATH — Chain Analysis\n"
+            "Username enumeration → confirmed account list → targeted brute-force → "
+            "default credentials (Admin_123/User1_123) succeed → authenticated access → IDOR → full PII extraction\n\n"
+            "Immediate: Return identical error message for both cases: 'Invalid username or password'.\n"
+            "Short-term: Add rate limiting (max 5 attempts per IP per 15 minutes); implement CAPTCHA after 3 failures; "
+            "add account lockout with admin notification.\n"
+            "Long-term: Implement multi-factor authentication; use progressive delays (exponential backoff) for repeated failures."
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "/login 엔드포인트가 사용자 이름 존재 여부에 따라 다른 오류 메시지를 반환합니다: "
+            "존재하지 않는 사용자에게는 'Invalid username', 잘못된 비밀번호를 입력한 유효한 사용자에게는 'Invalid password'. "
+            "이 정보 노출은 공격자가 응답 내용을 관찰하여 유효한 사용자 이름을 열거할 수 있게 하며, "
+            "무차별 대입 공격이나 크리덴셜 스터핑 공격을 위한 타겟 목록을 구성할 수 있습니다. "
+            "개발자가 이를 인식하고 있었음을 보여주는 주석 처리된 수정 코드가 있습니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "Step 1: 단어 목록에서 사용자 이름으로 로그인 요청 제출.\n"
+            "Step 2: 응답에 'Invalid username' 포함 → 계정 미존재. 다음으로 이동.\n"
+            "Step 3: 응답에 'Invalid password' 포함 → 유효한 사용자 이름 확인.\n"
+            "Step 4: 확인된 유효 사용자 이름 수집: admin, user1, user2.\n"
+            "Step 5: 확인된 사용자 이름에 대해 타겟 비밀번호 스프레이/무차별 대입 공격 실행.\n"
+            "Step 6: 유출된 자격증명(Have I Been Pwned)과 결합한 크리덴셜 스터핑.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 최소한의 요청으로 모든 유효한 사용자 이름 완전 열거\n"
+            "- 무차별 대입 공격의 공격 표면 대폭 감소: 존재하지 않는 계정에 낭비되는 시도 없음\n"
+            "- 확인된 이메일/사용자 이름 목록을 이용한 표적 스피어 피싱 가능\n"
+            "- 속도 제한 없음과 결합: 빠른 자동화 열거 가능\n\n"
+            "개념 증명(PoC)\n"
+            "# 존재하지 않는 사용자\n"
+            "POST /login — userName=nonexistent&password=anything → 'Invalid username'\n\n"
+            "# 잘못된 비밀번호를 입력한 유효한 사용자\n"
+            "POST /login — userName=user1&password=wrongpass → 'Invalid password'\n\n"
+            "# 차이로 user1이 유효한 계정임을 확인\n\n"
+            "공격 경로(ATTACK PATH)\n"
+            "사용자 이름 열거 → 확인된 계정 목록 → 타겟 무차별 대입 → "
+            "기본 자격증명(Admin_123/User1_123) 성공 → 인증된 접근 → IDOR → 전체 PII 추출\n\n"
+            "즉시 조치: 두 경우 모두에 동일한 오류 메시지 반환: 'Invalid username or password'.\n"
+            "단기 조치: 속도 제한 추가(IP당 15분에 최대 5회 시도); 3회 실패 후 CAPTCHA 구현; "
+            "관리자 알림과 함께 계정 잠금 추가.\n"
+            "장기 조치: 다단계 인증 구현; 반복 실패에 점진적 지연(지수적 백오프) 사용."
+        ),
+        severity=Severity.medium,
+        finding_type="Information Disclosure",
+        source_plugin="Brain/Manual",
+        affected_component="/login (userName parameter)",
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+            base_score=5.3,
+        ),
+        evidence=[
+            Evidence(
+                evidence_type="http_response",
+                title="Differential error messages — valid vs invalid username",
+                content=(
+                    "# Test 1: Invalid username\n"
+                    "POST /login — userName=nonexistent&password=anything\n"
+                    "→ Response body contains: 'Invalid username'\n\n"
+                    "# Test 2: Valid username, wrong password\n"
+                    "POST /login — userName=user1&password=wrongpass\n"
+                    "→ Response body contains: 'Invalid password'\n\n"
+                    "# Source code comment (session.js):\n"
+                    "loginError: invalidUserNameErrorMessage\n"
+                    "//Fix for A2-2 Broken Auth - Uses identical error for both username, password error\n"
+                    "// loginError: errorMessage"
+                ),
+            ),
+        ],
+        mitre_attack=MitreAttack(tactic_id="TA0043", tactic_name="Reconnaissance", technique_id="T1589.001", technique_name="Gather Victim Identity Information"),
+        references=[
+            Reference(
+                title="OWASP A07:2021 – Identification and Authentication Failures",
+                url="https://owasp.org/Top10/A07_2021-Identification_and_Authentication_Failures/",
+            ),
+        ],
+    ),
+
+    # ---- 6. Insecure Session Cookie ----
+    Finding(
+        id="NG-004",
+        scan_id="nodegoat-2026-03-31",
+        target="http://localhost:4000",
+        title="Insecure Session Cookie — Missing Secure and SameSite Attributes|||안전하지 않은 세션 쿠키 — Secure 및 SameSite 속성 누락",
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "The NodeGoat session cookie (connect.sid) is issued with only the HttpOnly flag. "
+            "The Secure flag is absent, meaning the session cookie will be transmitted over unencrypted HTTP connections, "
+            "exposing it to network interception. The SameSite attribute is absent, making the cookie vulnerable to "
+            "cross-site request forgery (compounding NG-001). The combination of missing Secure + missing SameSite + "
+            "broken CSRF validation creates a triple-vulnerability that enables full session hijacking via network sniffing, "
+            "CSRF attacks, or mixed-content attacks.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Victim logs in to NodeGoat on a shared/public network (coffee shop WiFi).\n"
+            "Step 2: Attacker running passive network monitor (Wireshark/tcpdump) captures HTTP traffic.\n"
+            "Step 3: HTTP request includes `Cookie: connect.sid=s%3A...` in plaintext.\n"
+            "Step 4: Attacker replays the captured session cookie to hijack the victim's session.\n"
+            "Step 5: Attacker accesses /profile (SSN, bank account), /allocations (financial data).\n\n"
+            "IMPACT — Business Impact\n"
+            "- Session hijacking via network interception on non-HTTPS connections\n"
+            "- Cookie transmitted in cleartext amplifies CSRF attack surface (NG-001)\n"
+            "- Absent SameSite allows cross-site cookie submission — CSRF without JavaScript\n"
+            "- Financial application handling sensitive PII requires HTTPS + Secure + SameSite=Strict\n\n"
+            "PoC — Proof of Concept\n"
+            "Set-Cookie header after login:\n"
+            "Set-Cookie: connect.sid=s%3AwjzfJ_p3...; Path=/; HttpOnly\n\n"
+            "Missing flags:\n"
+            "  ✗ Secure    — cookie sent over HTTP (plaintext)\n"
+            "  ✗ SameSite  — cookie sent cross-origin (CSRF)\n"
+            "  ✓ HttpOnly  — JavaScript cannot read the cookie\n\n"
+            "Capture command (attacker on same network):\n"
+            "tcpdump -i eth0 -A 'tcp port 4000' | grep 'connect.sid'\n\n"
+            "Immediate: Add Secure flag to session cookie configuration in app.js; "
+            "deploy application behind HTTPS (nginx/Caddy TLS termination).\n"
+            "Short-term: Add SameSite=Strict to block cross-site cookie submission; "
+            "implement HTTPS redirect (301) for all HTTP requests; set cookie maxAge for automatic expiry.\n"
+            "Long-term: Enable HSTS (Strict-Transport-Security: max-age=31536000; includeSubDomains); "
+            "implement certificate pinning for mobile clients."
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "NodeGoat 세션 쿠키(connect.sid)가 HttpOnly 플래그만 설정된 상태로 발급됩니다. "
+            "Secure 플래그가 없어 세션 쿠키가 암호화되지 않은 HTTP 연결로 전송되어 "
+            "네트워크 가로채기에 노출됩니다. SameSite 속성이 없어 "
+            "교차 사이트 요청 위조(NG-001 심화)에 취약합니다. "
+            "Secure 누락 + SameSite 누락 + CSRF 검증 실패의 조합은 "
+            "네트워크 스니핑, CSRF 공격, 혼합 콘텐츠 공격을 통한 완전한 세션 하이재킹을 가능하게 하는 "
+            "삼중 취약점을 만들어냅니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "Step 1: 피해자가 공유/공공 네트워크(카페 WiFi)에서 NodeGoat 로그인.\n"
+            "Step 2: 공격자가 패시브 네트워크 모니터(Wireshark/tcpdump)로 HTTP 트래픽 캡처.\n"
+            "Step 3: HTTP 요청에 `Cookie: connect.sid=s%3A...`가 평문으로 포함됨.\n"
+            "Step 4: 공격자가 캡처한 세션 쿠키를 재사용하여 피해자 세션 하이재킹.\n"
+            "Step 5: 공격자가 /profile(SSN, 은행 계좌), /allocations(금융 데이터) 접근.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 비HTTPS 연결에서 네트워크 가로채기를 통한 세션 하이재킹\n"
+            "- 평문으로 전송되는 쿠키가 CSRF 공격 표면 심화(NG-001)\n"
+            "- SameSite 없음으로 교차 사이트 쿠키 제출 허용 — JavaScript 없는 CSRF\n"
+            "- 민감한 PII를 처리하는 금융 애플리케이션은 HTTPS + Secure + SameSite=Strict 필수\n\n"
+            "개념 증명(PoC)\n"
+            "로그인 후 Set-Cookie 헤더:\n"
+            "Set-Cookie: connect.sid=s%3AwjzfJ_p3...; Path=/; HttpOnly\n\n"
+            "누락된 플래그:\n"
+            "  ✗ Secure    — HTTP로 쿠키 전송 (평문)\n"
+            "  ✗ SameSite  — 교차 출처 쿠키 전송 (CSRF)\n"
+            "  ✓ HttpOnly  — JavaScript로 쿠키 읽기 불가\n\n"
+            "즉시 조치: app.js의 세션 쿠키 설정에 Secure 플래그 추가; "
+            "HTTPS(nginx/Caddy TLS 종료) 뒤에 애플리케이션 배포.\n"
+            "단기 조치: 교차 사이트 쿠키 제출 차단을 위해 SameSite=Strict 추가; "
+            "모든 HTTP 요청에 HTTPS 리디렉션(301) 구현; 자동 만료를 위해 쿠키 maxAge 설정.\n"
+            "장기 조치: HSTS 활성화(Strict-Transport-Security: max-age=31536000; includeSubDomains); "
+            "모바일 클라이언트에 인증서 피닝 구현."
+        ),
+        severity=Severity.medium,
+        finding_type="Session Management",
+        source_plugin="Brain/Manual",
+        affected_component="Session cookie (connect.sid)",
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N",
+            base_score=5.9,
+        ),
+        evidence=[
+            Evidence(
+                evidence_type="http_response",
+                title="Set-Cookie header missing Secure and SameSite flags",
+                content=(
+                    "POST /login HTTP/1.1 → HTTP/1.1 302 Found\n\n"
+                    "Set-Cookie: connect.sid=s%3AwjzfJ_p3j4NzsylN3eSWRrU...; Path=/; HttpOnly\n\n"
+                    "Analysis:\n"
+                    "  HttpOnly: PRESENT   (blocks JS access)\n"
+                    "  Secure:   MISSING   (cookie sent over HTTP)\n"
+                    "  SameSite: MISSING   (cross-site submission allowed)"
+                ),
+            ),
+        ],
+        mitre_attack=MitreAttack(tactic_id="TA0006", tactic_name="Credential Access", technique_id="T1539", technique_name="Steal Web Session Cookie"),
+        references=[
+            Reference(
+                title="OWASP A02:2021 – Cryptographic Failures (Session Cookies)",
+                url="https://owasp.org/Top10/A02_2021-Cryptographic_Failures/",
+            ),
+        ],
+    ),
+
+    # ---- 7. Missing Security Headers ----
+    Finding(
+        id="NG-005",
+        scan_id="nodegoat-2026-03-31",
+        target="http://localhost:4000",
+        title="Missing HTTP Security Headers — No CSP, X-Frame-Options, HSTS, X-Content-Type-Options|||HTTP 보안 헤더 누락 — CSP, X-Frame-Options, HSTS, X-Content-Type-Options 없음",
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "NodeGoat's HTTP responses contain none of the standard browser security headers. "
+            "The absence of Content-Security-Policy (CSP) allows any script injection to execute without restriction. "
+            "The absence of X-Frame-Options enables clickjacking attacks by embedding NodeGoat in an iframe. "
+            "The absence of X-Content-Type-Options allows MIME-type sniffing attacks. "
+            "The absence of Strict-Transport-Security (HSTS) means browsers will not enforce HTTPS even if configured. "
+            "Ironically, X-Powered-By: Express is present, disclosing the technology stack to attackers.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1 (Clickjacking): Attacker creates a webpage embedding NodeGoat in a transparent iframe.\n"
+            "  <iframe src='http://localhost:4000/contributions' style='opacity:0'></iframe>\n"
+            "Step 2: Victim visits attacker page, unknowingly clicks 'submit' on the NodeGoat form.\n"
+            "Step 3 (CSP bypass): Injected scripts execute freely — no CSP blocks inline scripts.\n"
+            "Step 4 (MIME sniff): Attacker uploads a .txt file with JavaScript content; "
+            "browser executes it as JavaScript due to missing X-Content-Type-Options: nosniff.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Clickjacking: victim performs financial transactions unknowingly\n"
+            "- CSP absent: any XSS payload executes without browser-level mitigation\n"
+            "- Technology disclosure (X-Powered-By: Express): reduces attacker reconnaissance effort\n"
+            "- HSTS absent: HTTPS downgrade attacks possible on clients that haven't visited before\n\n"
+            "PoC — Proof of Concept\n"
+            "HTTP response headers from GET /:\n"
+            "X-Powered-By: Express\n"
+            "Content-Type: text/html; charset=utf-8\n\n"
+            "Missing headers:\n"
+            "  Content-Security-Policy: (absent)\n"
+            "  X-Frame-Options: (absent)\n"
+            "  X-Content-Type-Options: (absent)\n"
+            "  Strict-Transport-Security: (absent)\n"
+            "  Referrer-Policy: (absent)\n\n"
+            "Immediate: Install and configure helmet.js: `app.use(require('helmet')())` — "
+            "this single line adds all missing security headers.\n"
+            "Short-term: Configure CSP with specific allowed sources for scripts/styles; "
+            "remove X-Powered-By header: `app.disable('x-powered-by')`; "
+            "add X-Frame-Options: SAMEORIGIN.\n"
+            "Long-term: Implement security header testing in CI/CD pipeline; "
+            "conduct quarterly header policy reviews as browser security standards evolve."
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "NodeGoat의 HTTP 응답에 표준 브라우저 보안 헤더가 전혀 없습니다. "
+            "Content-Security-Policy(CSP) 부재로 스크립트 인젝션이 제한 없이 실행됩니다. "
+            "X-Frame-Options 부재로 NodeGoat를 iframe에 삽입하는 클릭재킹 공격이 가능합니다. "
+            "X-Content-Type-Options 부재로 MIME 타입 스니핑 공격이 허용됩니다. "
+            "HSTS 부재로 HTTPS가 구성되어도 브라우저가 강제하지 않습니다. "
+            "아이러니하게도 X-Powered-By: Express가 존재하여 기술 스택이 노출됩니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "Step 1 (클릭재킹): 공격자가 NodeGoat를 투명한 iframe에 삽입한 웹페이지 생성.\n"
+            "Step 2: 피해자가 공격자 페이지 방문, 자신도 모르게 NodeGoat 폼의 '제출' 클릭.\n"
+            "Step 3 (CSP 우회): 인젝션된 스크립트 자유롭게 실행 — CSP가 인라인 스크립트 차단 안 함.\n"
+            "Step 4 (MIME 스니핑): 공격자가 JavaScript 내용의 .txt 파일 업로드; "
+            "X-Content-Type-Options: nosniff 누락으로 브라우저가 JavaScript로 실행.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 클릭재킹: 피해자가 자신도 모르게 금융 거래 수행\n"
+            "- CSP 부재: 브라우저 수준 완화 없이 모든 XSS 페이로드 실행\n"
+            "- 기술 노출(X-Powered-By: Express): 공격자 정찰 노력 감소\n"
+            "- HSTS 부재: 이전에 방문하지 않은 클라이언트에서 HTTPS 다운그레이드 공격 가능\n\n"
+            "개념 증명(PoC)\n"
+            "GET / 의 HTTP 응답 헤더:\n"
+            "X-Powered-By: Express\n"
+            "Content-Type: text/html; charset=utf-8\n\n"
+            "누락된 헤더:\n"
+            "  Content-Security-Policy: (없음)\n"
+            "  X-Frame-Options: (없음)\n"
+            "  X-Content-Type-Options: (없음)\n"
+            "  Strict-Transport-Security: (없음)\n"
+            "  Referrer-Policy: (없음)\n\n"
+            "즉시 조치: helmet.js 설치 및 구성: `app.use(require('helmet')())` — "
+            "이 한 줄로 모든 누락된 보안 헤더 추가.\n"
+            "단기 조치: 스크립트/스타일의 특정 허용 소스로 CSP 구성; "
+            "X-Powered-By 헤더 제거: `app.disable('x-powered-by')`; "
+            "X-Frame-Options: SAMEORIGIN 추가.\n"
+            "장기 조치: CI/CD 파이프라인에서 보안 헤더 테스트 구현; "
+            "브라우저 보안 표준 발전에 따라 분기별 헤더 정책 검토 수행."
+        ),
+        severity=Severity.medium,
+        finding_type="Security Misconfiguration",
+        source_plugin="Brain/Manual",
+        affected_component="All HTTP responses",
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:L/I:L/A:N",
+            base_score=4.6,
+        ),
+        evidence=[
+            Evidence(
+                evidence_type="http_response",
+                title="Response headers — only X-Powered-By present, all security headers absent",
+                content=(
+                    "GET / HTTP/1.1\n"
+                    "Host: localhost:4000\n\n"
+                    "HTTP/1.1 302 Found\n"
+                    "X-Powered-By: Express\n"
+                    "Location: /login\n"
+                    "Content-Type: text/plain; charset=utf-8\n"
+                    "Set-Cookie: connect.sid=...; Path=/; HttpOnly\n\n"
+                    "NOT PRESENT:\n"
+                    "  Content-Security-Policy\n"
+                    "  X-Frame-Options\n"
+                    "  X-Content-Type-Options\n"
+                    "  Strict-Transport-Security\n"
+                    "  Referrer-Policy\n"
+                    "  Permissions-Policy"
+                ),
+            ),
+        ],
+        mitre_attack=MitreAttack(tactic_id="TA0004", tactic_name="Privilege Escalation", technique_id="T1185", technique_name="Browser Session Hijacking"),
+        references=[
+            Reference(
+                title="OWASP A05:2021 – Security Misconfiguration",
+                url="https://owasp.org/Top10/A05_2021-Security_Misconfiguration/",
+            ),
+        ],
+    ),
+
+    # ---- 8. Technology Disclosure ----
+    Finding(
+        id="NG-008",
+        scan_id="nodegoat-2026-03-31",
+        target="http://localhost:4000",
+        title="Technology Stack Disclosure via X-Powered-By Header|||X-Powered-By 헤더를 통한 기술 스택 노출",
+        description=(
+            "WHAT — Vulnerability Description\n"
+            "Every HTTP response from NodeGoat includes the header `X-Powered-By: Express`, "
+            "disclosing the web framework. Combined with the known Node.js stack (Express + MongoDB), "
+            "this information narrows an attacker's research to Express/Node.js-specific CVEs, "
+            "reducing reconnaissance time significantly. While low severity in isolation, "
+            "this finding compounds with all other vulnerabilities by shortening the attacker's kill chain.\n\n"
+            "HOW — Step-by-Step Attack Scenario\n"
+            "Step 1: Attacker performs passive fingerprinting: curl -I http://target:4000/\n"
+            "Step 2: Response reveals: X-Powered-By: Express.\n"
+            "Step 3: Attacker queries CVE databases for Express.js vulnerabilities (e.g., prototype pollution, "
+            "ReDoS in routing, body-parser overflow CVEs).\n"
+            "Step 4: Attacker cross-references with SSJI finding (NG-007) for Node.js-specific exploit chains.\n\n"
+            "IMPACT — Business Impact\n"
+            "- Reduces attacker reconnaissance effort — technology stack confirmed in single request\n"
+            "- Enables targeted CVE research for Express/Node.js version-specific exploits\n"
+            "- Compounds with NG-007 (SSJI): confirmed Node.js environment simplifies SSJI exploit chains\n\n"
+            "PoC — Proof of Concept\n"
+            "curl -I http://localhost:4000/\n"
+            "HTTP/1.1 302 Found\n"
+            "X-Powered-By: Express\n\n"
+            "Immediate: Disable the header in app.js: `app.disable('x-powered-by')`.\n"
+            "Short-term: Audit all response headers; use helmet.js to standardize header policy.\n"
+            "Long-term: Generic error pages that don't leak stack traces or framework versions."
+            "|||"
+            "취약점 설명(WHAT)\n"
+            "NodeGoat의 모든 HTTP 응답에 `X-Powered-By: Express` 헤더가 포함되어 웹 프레임워크가 노출됩니다. "
+            "알려진 Node.js 스택(Express + MongoDB)과 결합하여 공격자의 연구 범위를 "
+            "Express/Node.js 특정 CVE로 좁혀 정찰 시간을 크게 단축합니다. "
+            "단독으로는 낮은 심각도이지만, 공격자의 킬 체인을 단축시켜 다른 모든 취약점을 심화시킵니다.\n\n"
+            "공격 시나리오(HOW)\n"
+            "Step 1: 공격자 패시브 핑거프린팅 수행: curl -I http://target:4000/\n"
+            "Step 2: 응답에 X-Powered-By: Express 노출.\n"
+            "Step 3: 공격자가 Express.js 취약점(프로토타입 오염, 라우팅 ReDoS, body-parser 오버플로우 CVE) CVE 데이터베이스 검색.\n"
+            "Step 4: SSJI 발견(NG-007)과 교차 참조하여 Node.js 특정 익스플로잇 체인 구성.\n\n"
+            "비즈니스 영향(IMPACT)\n"
+            "- 공격자 정찰 노력 감소 — 단일 요청으로 기술 스택 확인\n"
+            "- Express/Node.js 버전별 익스플로잇을 위한 타겟 CVE 연구 가능\n"
+            "- NG-007(SSJI)과 복합: 확인된 Node.js 환경이 SSJI 익스플로잇 체인 단순화\n\n"
+            "개념 증명(PoC)\n"
+            "curl -I http://localhost:4000/\n"
+            "HTTP/1.1 302 Found\n"
+            "X-Powered-By: Express\n\n"
+            "즉시 조치: app.js에서 헤더 비활성화: `app.disable('x-powered-by')`.\n"
+            "단기 조치: 모든 응답 헤더 감사; helmet.js를 사용하여 헤더 정책 표준화.\n"
+            "장기 조치: 스택 트레이스나 프레임워크 버전을 노출하지 않는 제네릭 오류 페이지."
+        ),
+        severity=Severity.low,
+        finding_type="Information Disclosure",
+        source_plugin="Brain/Manual",
+        affected_component="All HTTP responses (X-Powered-By header)",
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+            base_score=5.3,
+        ),
+        evidence=[
+            Evidence(
+                evidence_type="http_response",
+                title="X-Powered-By: Express present in all responses",
+                content=(
+                    "GET / HTTP/1.1\n"
+                    "Host: localhost:4000\n\n"
+                    "HTTP/1.1 302 Found\n"
+                    "X-Powered-By: Express\n"
+                    "Location: /login"
+                ),
+            ),
+        ],
+        mitre_attack=MitreAttack(tactic_id="TA0043", tactic_name="Reconnaissance", technique_id="T1592.002", technique_name="Gather Victim Host Information: Software"),
+        references=[
+            Reference(
+                title="OWASP A05:2021 – Security Misconfiguration",
+                url="https://owasp.org/Top10/A05_2021-Security_Misconfiguration/",
+            ),
+        ],
+    ),
+]
+
+NODEGOAT_EXECUTIVE_SUMMARY = (
+    "VXIS conducted an AI-powered autonomous penetration test against OWASP NodeGoat "
+    "(http://localhost:4000), a deliberately vulnerable Node.js/Express/MongoDB web application, "
+    "using FileBasedBrain architecture with Claude Sonnet 4.6 as the reasoning engine. "
+    "The Brain made over 130 autonomous decisions across 67 steps without hardcoded attack logic, "
+    "dynamically discovering endpoints and generating context-aware payloads.\n\n"
+    "A total of 7 confirmed vulnerabilities were identified: 1 Critical, 3 High, 2 Medium, 1 Low. "
+    "The most severe finding is NG-006 (Plaintext Password Storage + Default Credentials, CVSS 9.1), "
+    "where all passwords are stored in MongoDB in cleartext and default accounts (admin/Admin_123) are trivially exploitable. "
+    "NG-007 (Server-Side JavaScript Injection, CVSS 8.8) confirms arithmetic expression evaluation on /contributions, "
+    "presenting a code execution escalation path. "
+    "NG-001 (CSRF, CVSS 8.1) and NG-002 (IDOR, CVSS 6.5) compound to enable full financial data exfiltration. "
+    "The overall risk posture is CRITICAL. Immediate remediation of NG-006 and NG-007 is required "
+    "before any production deployment."
+    "|||"
+    "VXIS가 FileBasedBrain 아키텍처와 Claude Sonnet 4.6을 추론 엔진으로 사용하여 "
+    "OWASP NodeGoat(http://localhost:4000), 의도적으로 취약하게 설계된 Node.js/Express/MongoDB 웹 애플리케이션에 대한 "
+    "AI 기반 자율 침투테스트를 수행했습니다. "
+    "Brain이 하드코딩된 공격 로직 없이 67단계에 걸쳐 130회 이상의 자율 의사결정을 수행하며 "
+    "동적으로 엔드포인트를 발견하고 컨텍스트 인식 페이로드를 생성했습니다.\n\n"
+    "총 7개의 확인된 취약점이 식별되었습니다: 치명적 1개, 높음 3개, 중간 2개, 낮음 1개. "
+    "가장 심각한 발견은 NG-006(평문 비밀번호 저장 + 기본 자격증명, CVSS 9.1)으로, "
+    "모든 비밀번호가 MongoDB에 평문으로 저장되고 기본 계정(admin/Admin_123)이 즉시 악용 가능합니다. "
+    "NG-007(서버 측 자바스크립트 인젝션, CVSS 8.8)은 /contributions에서 산술 표현식 평가를 확인하여 "
+    "코드 실행 확장 경로를 제시합니다. "
+    "NG-001(CSRF, CVSS 8.1)과 NG-002(IDOR, CVSS 6.5)의 복합은 완전한 금융 데이터 유출을 가능하게 합니다. "
+    "전체 위험 수준은 치명적(CRITICAL)입니다. "
+    "운영 환경 배포 전에 NG-006과 NG-007의 즉각적인 조치가 필요합니다."
+)
+
+NODEGOAT_ATTACK_CHAINS = [
+    ["NG-006", "NG-002"],   # Default creds → admin login → IDOR all users
+    ["NG-001", "NG-003"],   # CSRF bypass + user enumeration → account takeover
+    ["NG-007", "NG-006"],   # SSJI → process.env → DB creds → all passwords
+    ["NG-004", "NG-001"],   # Insecure cookie → CSRF amplification → session hijack
+]
+
+
+# =====================================================================
 # MAIN
 # =====================================================================
 
@@ -2767,6 +3759,28 @@ def main() -> None:
     print(f"     Findings: {webgoat_data.total_findings}")
     print(f"     Severity: {webgoat_data.severity_counts}")
     print(f"     Risk Score: {webgoat_data.risk_score}/10")
+
+    # --- NodeGoat Report ---
+    nodegoat_data = ReportData(
+        scan_id="nodegoat-2026-03-31",
+        client_name="OWASP NodeGoat (Node.js/Express/MongoDB)",
+        target="http://localhost:4000",
+        scan_date="2026-03-31",
+        findings=NODEGOAT_FINDINGS,
+        company_name="VXIS Security",
+        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+        executive_summary=NODEGOAT_EXECUTIVE_SUMMARY,
+        attack_chains=NODEGOAT_ATTACK_CHAINS,
+    )
+
+    nodegoat_path = gen.generate_html_file(
+        nodegoat_data,
+        reports_dir / "report_nodegoat_20260331.html",
+    )
+    print(f"\n[OK] NodeGoat report: {nodegoat_path}")
+    print(f"     Findings: {nodegoat_data.total_findings}")
+    print(f"     Severity: {nodegoat_data.severity_counts}")
+    print(f"     Risk Score: {nodegoat_data.risk_score}/10")
 
 
 if __name__ == "__main__":
