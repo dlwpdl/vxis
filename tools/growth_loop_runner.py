@@ -51,8 +51,10 @@ REPORT_FILE = Path("tools/benchmark/growth_report.md")
 KST = timezone(timedelta(hours=9))
 
 TARGETS: dict[str, dict[str, str]] = {
-    "dvwa": {"url": "http://localhost:8081", "image": "vulnerables/web-dvwa", "port": "8081:80"},
-    "juice-shop": {"url": "http://localhost:3000", "image": "bkimminich/juice-shop", "port": "3000:3000"},
+    "dvwa":       {"url": "http://localhost:8081", "image": "vulnerables/web-dvwa",         "port": "8081:80"},
+    "juice-shop": {"url": "http://localhost:3000", "image": "bkimminich/juice-shop",        "port": "3000:3000"},
+    "webgoat":    {"url": "http://localhost:8888/WebGoat", "image": "webgoat/webgoat",        "port": "8888:8080"},
+    "nodegoat":   {"url": "http://localhost:4000", "image": "1njected/nodegoat",            "port": "4000:4000"},
 }
 
 DIM_NAMES_KO: dict[str, str] = {
@@ -478,8 +480,8 @@ def main() -> None:
         help="Brain mode: api (LLM API call) or claude-code (file protocol for Claude Code). Default: api",
     )
     parser.add_argument(
-        "--targets", default="dvwa,juice-shop",
-        help="Comma-separated target names (default: dvwa,juice-shop)",
+        "--targets", default="dvwa,juice-shop,webgoat,nodegoat",
+        help="Comma-separated target names (default: dvwa,juice-shop,webgoat,nodegoat)",
     )
     parser.add_argument(
         "--iterations", type=int, default=None,
