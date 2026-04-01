@@ -469,15 +469,12 @@ def should_continue(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="VXIS Growth Loop Runner")
-    parser.add_argument(
-        "--provider", default=None,
-        help="LLM provider: together, claude-cli, anthropic, auto (default: auto)",
+    parser = argparse.ArgumentParser(
+        description="VXIS Growth Loop Runner — LLM Brain 전용 벤치마크",
     )
     parser.add_argument(
-        "--brain", default="api",
-        choices=["api", "claude-code"],
-        help="Brain mode: api (LLM API call) or claude-code (file protocol for Claude Code). Default: api",
+        "--provider", default=None,
+        help="LLM provider: together, anthropic (default: auto-detect from env)",
     )
     parser.add_argument(
         "--targets", default="dvwa,juice-shop,webgoat,nodegoat",
@@ -498,21 +495,12 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    # LLM Provider 설정
-    if args.provider:
-        if args.provider == "claude-cli":
-            os.environ["VXIS_LLM_PROVIDER"] = "claude-cli"
-        elif args.provider == "together":
-            os.environ["VXIS_LLM_PROVIDER"] = "api"
-            os.environ.setdefault("UPSTREAM_LLM_PROVIDER", "together")
-        elif args.provider == "anthropic":
-            os.environ.setdefault("UPSTREAM_LLM_PROVIDER", "anthropic")
-
-    # Brain 모드 설정
-    if args.brain == "claude-code":
-        os.environ["VXIS_BRAIN_MODE"] = "claude-code"
-    else:
-        os.environ["VXIS_BRAIN_MODE"] = "api"
+    # LLM Provider 설정 — Brain은 항상 LLM (AgentBrain)
+    if args.provider == "together":
+        os.environ["VXIS_LLM_PROVIDER"] = "api"
+        os.environ.setdefault("UPSTREAM_LLM_PROVIDER", "together")
+    elif args.provider == "anthropic":
+        os.environ.setdefault("UPSTREAM_LLM_PROVIDER", "anthropic")
 
     # 종료 조건 결정
     max_iterations: int | None = args.iterations
@@ -530,8 +518,8 @@ def main() -> None:
     print(f"  VXIS Growth Loop Runner")
     print(f"  Time: {datetime.now(KST).strftime('%Y-%m-%d %H:%M')} KST")
     print(f"  Targets: {', '.join(target_names)}")
+    print(f"  Brain: AgentBrain (LLM)")
     print(f"  Provider: {args.provider or 'auto'}")
-    print(f"  Brain: {args.brain}")
     if until_hour_kst is not None:
         print(f"  Until: {until_hour_kst:02d}:00 KST")
     else:

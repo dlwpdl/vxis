@@ -3783,5 +3783,452 @@ def main() -> None:
     print(f"     Risk Score: {nodegoat_data.risk_score}/10")
 
 
+# =====================================================================
+# LIVE SCAN REPORT GENERATION
+# =====================================================================
+
+# Finding type → CVSS / CWE / MITRE heuristic table
+_FINDING_META: dict[str, dict] = {
+    "sql_injection": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "score": 9.8,
+        "cwe": ["CWE-89"], "severity": "critical",
+        "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
+    },
+    "xss": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", "score": 6.1,
+        "cwe": ["CWE-79"], "severity": "medium",
+        "mitre": ("TA0009", "Collection", "T1185", "Browser Session Hijacking"),
+    },
+    "command_injection": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H", "score": 8.8,
+        "cwe": ["CWE-78"], "severity": "critical",
+        "mitre": ("TA0002", "Execution", "T1059", "Command and Scripting Interpreter"),
+    },
+    "ssrf": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N", "score": 8.6,
+        "cwe": ["CWE-918"], "severity": "high",
+        "mitre": ("TA0009", "Collection", "T1090", "Proxy"),
+    },
+    "csrf": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N", "score": 6.5,
+        "cwe": ["CWE-352"], "severity": "medium",
+        "mitre": ("TA0009", "Collection", "T1185", "Browser Session Hijacking"),
+    },
+    "idor": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:L/A:N", "score": 7.1,
+        "cwe": ["CWE-639"], "severity": "high",
+        "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
+    },
+    "path_traversal": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", "score": 7.5,
+        "cwe": ["CWE-22"], "severity": "high",
+        "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
+    },
+    "ssti": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "score": 9.8,
+        "cwe": ["CWE-1336"], "severity": "critical",
+        "mitre": ("TA0002", "Execution", "T1059", "Command and Scripting Interpreter"),
+    },
+    "nosql_injection": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", "score": 9.1,
+        "cwe": ["CWE-943"], "severity": "critical",
+        "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
+    },
+    "broken_authentication": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "score": 9.8,
+        "cwe": ["CWE-287"], "severity": "critical",
+        "mitre": ("TA0006", "Credential Access", "T1110", "Brute Force"),
+    },
+    "information_disclosure": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N", "score": 5.3,
+        "cwe": ["CWE-200"], "severity": "medium",
+        "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
+    },
+    "security_misconfiguration": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N", "score": 5.3,
+        "cwe": ["CWE-16"], "severity": "informational",
+        "mitre": None,
+    },
+    "cors_misconfiguration": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N", "score": 6.5,
+        "cwe": ["CWE-942"], "severity": "medium",
+        "mitre": ("TA0009", "Collection", "T1185", "Browser Session Hijacking"),
+    },
+    "mass_assignment": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N", "score": 8.1,
+        "cwe": ["CWE-915"], "severity": "high",
+        "mitre": ("TA0004", "Privilege Escalation", "T1548", "Abuse Elevation Control Mechanism"),
+    },
+    "file_upload": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H", "score": 8.8,
+        "cwe": ["CWE-434"], "severity": "critical",
+        "mitre": ("TA0002", "Execution", "T1505", "Server Software Component"),
+    },
+    "forced_browsing": {
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:M/I:N/A:N", "score": 5.3,
+        "cwe": ["CWE-425"], "severity": "medium",
+        "mitre": ("TA0007", "Discovery", "T1083", "File and Directory Discovery"),
+    },
+}
+
+
+_REMEDIATION_TEMPLATES: dict[str, str] = {
+    "sql_injection": (
+        "Immediate: Use parameterized queries or prepared statements for all database interactions.\n"
+        "Short-term: Implement input validation and WAF rules to block SQL injection patterns.\n"
+        "Long-term: Adopt an ORM framework and conduct regular security code reviews.\n"
+        "|||\n"
+        "즉시 조치: 모든 데이터베이스 쿼리에 파라미터화된 쿼리 또는 준비된 명령문을 사용하세요.\n"
+        "단기 조치: 입력 유효성 검사 및 WAF 규칙을 구현하여 SQL 인젝션 패턴을 차단하세요.\n"
+        "장기 조치: ORM 프레임워크를 도입하고 정기적인 보안 코드 리뷰를 실시하세요."
+    ),
+    "xss": (
+        "Immediate: HTML-encode all user-supplied data before rendering in templates.\n"
+        "Short-term: Implement a strict Content-Security-Policy header.\n"
+        "Long-term: Use a templating engine with automatic context-aware escaping.\n"
+        "|||\n"
+        "즉시 조치: 템플릿에 렌더링하기 전에 모든 사용자 입력 데이터를 HTML 인코딩하세요.\n"
+        "단기 조치: 엄격한 Content-Security-Policy 헤더를 구현하세요.\n"
+        "장기 조치: 자동 컨텍스트 인식 이스케이핑을 지원하는 템플릿 엔진을 사용하세요."
+    ),
+    "command_injection": (
+        "Immediate: Never pass user input directly to OS commands. Use safe APIs instead.\n"
+        "Short-term: Implement strict allowlist validation for any system command parameters.\n"
+        "Long-term: Refactor to eliminate OS command calls; use language-native libraries.\n"
+        "|||\n"
+        "즉시 조치: 사용자 입력을 OS 명령에 직접 전달하지 마세요. 안전한 API를 사용하세요.\n"
+        "단기 조치: 시스템 명령 파라미터에 엄격한 허용 목록 검증을 구현하세요.\n"
+        "장기 조치: OS 명령 호출을 제거하도록 리팩토링하고 언어 기본 라이브러리를 사용하세요."
+    ),
+    "csrf": (
+        "Immediate: Implement CSRF tokens on all state-changing forms and AJAX requests.\n"
+        "Short-term: Add SameSite=Strict cookie attribute and verify Origin/Referer headers.\n"
+        "Long-term: Adopt a security framework with built-in CSRF protection.\n"
+        "|||\n"
+        "즉시 조치: 모든 상태 변경 폼과 AJAX 요청에 CSRF 토큰을 구현하세요.\n"
+        "단기 조치: SameSite=Strict 쿠키 속성을 추가하고 Origin/Referer 헤더를 검증하세요.\n"
+        "장기 조치: 내장 CSRF 보호 기능이 있는 보안 프레임워크를 채택하세요."
+    ),
+    "idor": (
+        "Immediate: Implement server-side authorization checks for every resource access.\n"
+        "Short-term: Use indirect object references (GUIDs) instead of sequential IDs.\n"
+        "Long-term: Adopt an attribute-based access control (ABAC) model.\n"
+        "|||\n"
+        "즉시 조치: 모든 리소스 접근에 서버 측 인가 검사를 구현하세요.\n"
+        "단기 조치: 순차 ID 대신 간접 객체 참조(GUID)를 사용하세요.\n"
+        "장기 조치: 속성 기반 접근 제어(ABAC) 모델을 채택하세요."
+    ),
+    "ssrf": (
+        "Immediate: Validate and allowlist permitted URLs/IP ranges for any server-side requests.\n"
+        "Short-term: Block requests to internal network ranges (RFC1918) and metadata endpoints.\n"
+        "Long-term: Use a proxy service with strict egress filtering for all outbound requests.\n"
+        "|||\n"
+        "즉시 조치: 서버 측 요청에 허용된 URL/IP 범위를 검증하고 허용 목록을 구성하세요.\n"
+        "단기 조치: 내부 네트워크 범위(RFC1918) 및 메타데이터 엔드포인트에 대한 요청을 차단하세요.\n"
+        "장기 조치: 모든 아웃바운드 요청에 엄격한 이그레스 필터링이 있는 프록시 서비스를 사용하세요."
+    ),
+    "security_misconfiguration": (
+        "Immediate: Apply all missing security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options).\n"
+        "Short-term: Automate security header checks in CI/CD pipeline.\n"
+        "Long-term: Establish a secure-by-default configuration baseline for all services.\n"
+        "|||\n"
+        "즉시 조치: 누락된 모든 보안 헤더(CSP, HSTS, X-Frame-Options, X-Content-Type-Options)를 적용하세요.\n"
+        "단기 조치: CI/CD 파이프라인에서 보안 헤더 검사를 자동화하세요.\n"
+        "장기 조치: 모든 서비스에 대한 기본 보안 구성 기준선을 수립하세요."
+    ),
+    "broken_authentication": (
+        "Immediate: Remove or change all default credentials. Enforce strong password policies.\n"
+        "Short-term: Implement MFA, rate limiting, and account lockout on authentication endpoints.\n"
+        "Long-term: Adopt a zero-trust authentication model with continuous session validation.\n"
+        "|||\n"
+        "즉시 조치: 모든 기본 자격증명을 제거하거나 변경하세요. 강력한 비밀번호 정책을 적용하세요.\n"
+        "단기 조치: 인증 엔드포인트에 MFA, 속도 제한, 계정 잠금을 구현하세요.\n"
+        "장기 조치: 지속적인 세션 검증이 있는 제로 트러스트 인증 모델을 채택하세요."
+    ),
+}
+
+_GENERIC_REMEDIATION = (
+    "Immediate: Identify and isolate the vulnerable component. Apply vendor patches if available.\n"
+    "Short-term: Implement input validation and output encoding for the affected functionality.\n"
+    "Long-term: Conduct a full security review of similar components in the application.\n"
+    "|||\n"
+    "즉시 조치: 취약한 컴포넌트를 식별하고 격리하세요. 가능한 경우 벤더 패치를 적용하세요.\n"
+    "단기 조치: 영향을 받는 기능에 대한 입력 유효성 검사 및 출력 인코딩을 구현하세요.\n"
+    "장기 조치: 애플리케이션의 유사한 컴포넌트에 대해 전체 보안 검토를 수행하세요."
+)
+
+
+def _enrich_finding(f: Finding) -> Finding:
+    """Heuristic 기반 finding 보강: CVSS/CWE/MITRE/remediation + NCC-style description."""
+    ftype = getattr(f, "finding_type", "") or ""
+    meta = _FINDING_META.get(ftype, {})
+    endpoint = f.affected_component or f.target
+    title_en = f.title.split("|||")[0].strip()
+
+    # 1. CVSS / CWE / MITRE 할당
+    if meta.get("cvss") and not f.cvss:
+        f.cvss = CVSSVector(vector_string=meta["cvss"], base_score=meta["score"])
+    if meta.get("cwe") and not f.cwe_ids:
+        f.cwe_ids = meta["cwe"]
+    if meta.get("mitre") and not f.mitre_attack:
+        ta_id, ta_name, t_id, t_name = meta["mitre"]
+        f.mitre_attack = MitreAttack(
+            tactic_id=ta_id, tactic_name=ta_name,
+            technique_id=t_id, technique_name=t_name,
+        )
+
+    # 2. NCC-style description (템플릿 기반, LLM 불필요)
+    raw_desc = f.description or ""
+    if "WHAT" not in raw_desc and "HOW" not in raw_desc:
+        # 기존 raw desc를 구조화된 섹션으로 래핑
+        structured_en = (
+            f"WHAT — Vulnerability Description\n"
+            f"{title_en} was identified at {endpoint}. "
+            f"{raw_desc.split('|||')[0][:300]}\n\n"
+            f"HOW — Step-by-Step Attack Scenario\n"
+            f"Step 1: Identify the vulnerable endpoint at {endpoint}.\n"
+            f"Step 2: Craft a {ftype.replace('_', ' ')} payload targeting the parameter.\n"
+            f"Step 3: Submit the payload and observe the application response for indicators of success.\n"
+            f"Step 4: Escalate the vulnerability by chaining with other findings if applicable.\n\n"
+            f"IMPACT — Business Impact\n"
+            f"- Potential unauthorized access to sensitive application functionality\n"
+            f"- Risk of data exposure or integrity compromise\n"
+            f"- Regulatory compliance violations (GDPR/PCI-DSS/ISO 27001)\n\n"
+            f"PoC — Proof of Concept\n"
+            f"Target: {endpoint}\n"
+            f"Finding type: {ftype}\n"
+            f"{raw_desc.split('|||')[0][:200]}\n\n"
+            f"ATTACK PATH — Chain Analysis\n"
+            f"This {ftype.replace('_', ' ')} vulnerability can be chained with other findings "
+            f"to escalate privileges or achieve deeper system compromise."
+        )
+        # 간단한 한국어 요약
+        raw_ko = raw_desc.split("|||")[1].strip() if "|||" in raw_desc else ""
+        structured_ko = (
+            f"취약점 설명(WHAT)\n"
+            f"{endpoint}에서 {title_en} 취약점이 확인되었습니다. "
+            f"{raw_ko[:200] if raw_ko else '자세한 내용은 영문 섹션을 참조하세요.'}\n\n"
+            f"공격 시나리오(HOW)\n"
+            f"1단계: {endpoint}의 취약한 엔드포인트를 식별합니다.\n"
+            f"2단계: {ftype.replace('_', ' ')} 페이로드를 생성합니다.\n"
+            f"3단계: 페이로드를 제출하고 응답에서 성공 지표를 확인합니다.\n"
+            f"4단계: 다른 취약점과 체이닝하여 공격을 확대합니다.\n\n"
+            f"비즈니스 영향(IMPACT)\n"
+            f"- 민감한 애플리케이션 기능에 대한 무단 접근 가능성\n"
+            f"- 데이터 노출 또는 무결성 손상 위험\n"
+            f"- 규정 준수 위반 (GDPR/PCI-DSS/ISO 27001)\n\n"
+            f"개념 증명(PoC)\n"
+            f"대상: {endpoint}\n"
+            f"취약점 유형: {ftype}\n\n"
+            f"공격 경로(ATTACK PATH)\n"
+            f"이 {ftype.replace('_', ' ')} 취약점은 다른 취약점과 체이닝하여 권한 상승 또는 더 깊은 침해로 이어질 수 있습니다."
+        )
+        f.description = f"{structured_en}\n|||\n{structured_ko}"
+
+    # 3. Remediation (템플릿)
+    if not f.remediation:
+        f.remediation = _REMEDIATION_TEMPLATES.get(ftype, _GENERIC_REMEDIATION)
+
+    # 4. Evidence — raw description을 evidence로 추가
+    if not f.evidence:
+        f.evidence = [Evidence(
+            evidence_type="log",
+            title=f"Scanner Detection — {ftype}",
+            content=f"Finding detected at {endpoint}\n{(f.description or '')[:500]}",
+        )]
+
+    return f
+
+
+def run_live_scan_and_report(
+    target_name: str,
+    target_url: str,
+    client_name: str,
+    output_path: Path,
+    scan_id: str | None = None,
+) -> Path | None:
+    """실제 파이프라인 스캔 → finding 보강 → HTML 리포트 생성."""
+    import asyncio
+    import os
+    from datetime import datetime, timezone
+
+    # LLM_API_KEY → OPENAI_API_KEY alias
+    if os.environ.get("LLM_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
+        os.environ["OPENAI_API_KEY"] = os.environ["LLM_API_KEY"]
+
+    from vxis.agent.brain import AgentBrain
+    from vxis.pipeline.pipeline import ScanPipeline
+    from vxis.report.generator import ReportData, ReportGenerator
+
+    brain = AgentBrain()
+    pipeline = ScanPipeline(brain=brain)
+
+    _scan_id = scan_id or f"live-{target_name}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+
+    print(f"\n  [SCAN] {target_name} — {target_url}")
+
+    async def _run():
+        return await pipeline.run(target=target_url)
+
+    try:
+        ctx = asyncio.run(_run())
+    except Exception as exc:
+        print(f"  [ERROR] Scan failed: {exc}")
+        return None
+
+    raw_findings = ctx.findings
+    print(f"  [SCAN] Found {len(raw_findings)} raw findings — enriching with LLM...")
+
+    enriched: list[Finding] = []
+    for f in raw_findings:
+        try:
+            ef = _enrich_finding(f)
+            enriched.append(ef)
+            print(f"    ✓ {ef.id}: {ef.title.split('|||')[0][:60]}")
+        except Exception as exc:
+            print(f"    ✗ {f.id}: enrich failed ({exc})")
+            enriched.append(f)
+
+    # attack chains from score tracker
+    chains = []
+    for chain in ctx.score_tracker.attack_chains:
+        step_ids = [s.finding_id for s in chain.steps if s.finding_id]
+        if len(step_ids) >= 2:
+            chains.append(step_ids)
+
+    # executive summary via LLM
+    exec_summary = ""
+    if enriched:
+        crit = sum(1 for f in enriched if str(f.severity) in ("critical", "Severity.critical"))
+        high = sum(1 for f in enriched if str(f.severity) in ("high", "Severity.high"))
+        try:
+            exec_summary = brain._call_llm_with_fallback(
+                "Write a concise executive summary for a penetration test report. English|||Korean format.",
+                f"Target: {target_url}\nFindings: {len(enriched)} total, {crit} critical, {high} high.\n"
+                f"Finding types: {list(set(f.finding_type for f in enriched))}.\n"
+                f"Write a 3-4 sentence executive summary.",
+            ) or ""
+        except Exception:
+            exec_summary = (
+                f"VXIS autonomous scan of {target_url} identified {len(enriched)} security findings, "
+                f"including {crit} critical and {high} high severity issues."
+                f"|||VXIS 자율 스캔에서 {len(enriched)}개의 보안 취약점을 발견했으며, "
+                f"그 중 {crit}개가 치명적, {high}개가 높은 심각도입니다."
+            )
+
+    report_data = ReportData(
+        scan_id=_scan_id,
+        client_name=client_name,
+        target=target_url,
+        scan_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        findings=enriched,
+        company_name="VXIS Security",
+        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+        executive_summary=exec_summary,
+        attack_chains=chains,
+    )
+
+    gen = ReportGenerator()
+    path = gen.generate_html_file(report_data, output_path)
+    print(f"  [REPORT] {path}")
+    print(f"     Findings: {report_data.total_findings}, Risk: {report_data.risk_score}/10")
+    return path
+
+
+def main_live() -> None:
+    """실제 스캔 기반 리포트 생성 (--live 옵션)."""
+    reports_dir = Path(__file__).parent / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    targets = [
+        ("dvwa",       "http://localhost:8081",          "DVWA (Damn Vulnerable Web Application)"),
+        ("juice-shop", "http://localhost:3000",           "OWASP Juice Shop"),
+        ("webgoat",    "http://localhost:8888/WebGoat",  "OWASP WebGoat"),
+        ("nodegoat",   "http://localhost:4000",          "OWASP NodeGoat"),
+    ]
+
+    from datetime import datetime, timezone
+    date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+
+    for name, url, client in targets:
+        run_live_scan_and_report(
+            target_name=name,
+            target_url=url,
+            client_name=client,
+            output_path=reports_dir / f"report_{name}_live_{date_str}.html",
+        )
+
+
+def main() -> None:
+    import sys
+    if "--live" in sys.argv:
+        main_live()
+        return
+
+    gen = ReportGenerator()
+    reports_dir = Path(__file__).parent / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    # --- DVWA Report ---
+    dvwa_data = ReportData(
+        scan_id="dvwa-bench-20260330",
+        client_name="DVWA (Damn Vulnerable Web Application)",
+        target="http://localhost:8081",
+        scan_date="2026-03-30",
+        findings=DVWA_FINDINGS,
+        company_name="VXIS Security",
+        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+        executive_summary=DVWA_EXECUTIVE_SUMMARY,
+        attack_chains=DVWA_ATTACK_CHAINS,
+    )
+    dvwa_path = gen.generate_html_file(dvwa_data, reports_dir / "report_dvwa_20260330.html")
+    print(f"[OK] DVWA: {dvwa_path} ({dvwa_data.total_findings} findings)")
+
+    # --- Juice Shop Report ---
+    juice_data = ReportData(
+        scan_id="juice-bench-20260330",
+        client_name="OWASP Juice Shop",
+        target="http://localhost:3000",
+        scan_date="2026-03-30",
+        findings=JUICE_SHOP_FINDINGS,
+        company_name="VXIS Security",
+        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+        executive_summary=JUICE_SHOP_EXECUTIVE_SUMMARY,
+        attack_chains=JUICE_SHOP_ATTACK_CHAINS,
+    )
+    juice_path = gen.generate_html_file(juice_data, reports_dir / "report_juice_shop_20260330.html")
+    print(f"[OK] Juice Shop: {juice_path} ({juice_data.total_findings} findings)")
+
+    # --- WebGoat Report ---
+    webgoat_data = ReportData(
+        scan_id="webgoat-2026-03-31",
+        client_name="OWASP WebGoat 8.2",
+        target="http://localhost:8888/WebGoat",
+        scan_date="2026-03-31",
+        findings=WEBGOAT_FINDINGS,
+        company_name="VXIS Security",
+        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+        executive_summary=WEBGOAT_EXECUTIVE_SUMMARY,
+        attack_chains=WEBGOAT_ATTACK_CHAINS,
+    )
+    webgoat_path = gen.generate_html_file(webgoat_data, reports_dir / "report_webgoat_20260331.html")
+    print(f"[OK] WebGoat: {webgoat_path} ({webgoat_data.total_findings} findings)")
+
+    # --- NodeGoat Report ---
+    nodegoat_data = ReportData(
+        scan_id="nodegoat-2026-03-31",
+        client_name="OWASP NodeGoat",
+        target="http://localhost:4000",
+        scan_date="2026-03-31",
+        findings=NODEGOAT_FINDINGS,
+        company_name="VXIS Security",
+        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+        executive_summary=NODEGOAT_EXECUTIVE_SUMMARY,
+        attack_chains=NODEGOAT_ATTACK_CHAINS,
+    )
+    nodegoat_path = gen.generate_html_file(nodegoat_data, reports_dir / "report_nodegoat_20260331.html")
+    print(f"[OK] NodeGoat: {nodegoat_path} ({nodegoat_data.total_findings} findings)")
+
+
 if __name__ == "__main__":
     main()

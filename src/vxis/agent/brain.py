@@ -532,6 +532,9 @@ class AgentBrain:
             chain.append({"provider": "together", "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo"})
 
         # Tier 3: OpenAI 직접 (Together에 없는 경우 대비)
+        # LLM_API_KEY는 OpenAI 키의 별칭으로 지원
+        if os.environ.get("LLM_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
+            os.environ["OPENAI_API_KEY"] = os.environ["LLM_API_KEY"]
         if os.environ.get("OPENAI_API_KEY"):
             chain.append({"provider": "openai", "model": "gpt-4o"})
             chain.append({"provider": "openai", "model": "gpt-4o-mini"})
