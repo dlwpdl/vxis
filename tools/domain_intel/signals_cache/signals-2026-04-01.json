@@ -77,6 +77,23 @@
   {
     "source": "community_pulse",
     "category": "discussion",
+    "title": "[Lobste.rs] Claude finds RCE in Vim and Emacs",
+    "url": "https://blog.calif.io/p/mad-bugs-vim-vs-emacs-vs-claude",
+    "description": "",
+    "relevance_tags": [
+      "rce"
+    ],
+    "score": 23.0,
+    "timestamp": "2026-03-30T22:26:52.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 23,
+      "comments": 13
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
     "title": "[Lobste.rs] Vulnerability Research Is Cooked",
     "url": "https://sockpuppet.org/blog/2026/03/30/vulnerability-research-is-cooked/",
     "description": "",
@@ -89,23 +106,6 @@
       "source": "lobsters",
       "score": 23,
       "comments": 2
-    }
-  },
-  {
-    "source": "community_pulse",
-    "category": "discussion",
-    "title": "[Lobste.rs] Claude finds RCE in Vim and Emacs",
-    "url": "https://blog.calif.io/p/mad-bugs-vim-vs-emacs-vs-claude",
-    "description": "",
-    "relevance_tags": [
-      "rce"
-    ],
-    "score": 22.0,
-    "timestamp": "2026-03-30T22:26:52.000-05:00",
-    "metadata": {
-      "source": "lobsters",
-      "score": 22,
-      "comments": 13
     }
   },
   {
@@ -228,6 +228,23 @@
       "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
       "due_date": "2026-04-08",
       "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Claude Wrote a Full FreeBSD Remote Kernel RCE with Root Shell (CVE-2026-4747)",
+    "url": "https://blog.calif.io/p/mad-bugs-claude-wrote-a-full-freebsd",
+    "description": "",
+    "relevance_tags": [
+      "rce"
+    ],
+    "score": 5.0,
+    "timestamp": "2026-03-31T15:04:54.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 5,
+      "comments": 0
     }
   },
   {
