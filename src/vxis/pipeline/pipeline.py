@@ -33,13 +33,58 @@ Architecture:
 
 from __future__ import annotations
 
+import json as _json
 import logging
+import re as _re
 import time
 from typing import Any, Callable, Awaitable
 
 from vxis.pipeline.context import ScanContext
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_llm_json(response: str) -> dict:
+    """LLM 응답에서 JSON 객체를 안정적으로 파싱.
+
+    claude -p 출력은 마크다운 블록, ANSI 코드, trailing comma,
+    control 문자 등을 포함할 수 있음. 여러 전략으로 정제 후 파싱.
+    """
+    clean = response.strip()
+
+    # 1. ANSI 이스케이프 + control chars 제거 (claude -p 터미널 출력 잔여물)
+    clean = _re.sub(r'\x1b\[[0-9;]*[mGKHFJA-Za-z]', '', clean)
+    clean = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', clean)
+
+    # 2. 마크다운 코드블록 제거 (```json ... ``` 또는 ``` ... ```)
+    if '```' in clean:
+        # 코드블록 내부 추출
+        _cb = _re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', clean)
+        if _cb:
+            clean = _cb.group(1).strip()
+
+    # 3. 가장 바깥 { ... } 블록 추출 — 앞뒤 설명 텍스트 제거
+    _m = _re.search(r'\{[\s\S]*\}', clean)
+    if _m:
+        clean = _m.group(0)
+
+    # 4. trailing comma 제거 (LLM의 흔한 실수: {"a": 1,})
+    clean = _re.sub(r',(\s*[}\]])', r'\1', clean)
+
+    # 5. JSON 파싱 시도
+    try:
+        return _json.loads(clean)
+    except _json.JSONDecodeError:
+        pass
+
+    # 6. 마지막 수단: 큰따옴표 안의 특수문자를 이스케이프하며 재시도
+    # (LLM이 JSON 문자열 안에 raw 개행을 넣는 경우)
+    clean_safe = _re.sub(
+        r'"((?:[^"\\]|\\.)*)"',
+        lambda m: '"' + m.group(1).replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t') + '"',
+        clean,
+    )
+    return _json.loads(clean_safe)
 
 
 # ── 벡터 카테고리별 기본 attack 파라미터 ──────────────────────────────────────
@@ -295,7 +340,7 @@ class ScanPipeline:
         FileBasedBrain일 때: Phase 실행 전에 해당 Phase의 벡터들을
         하나씩 Brain에게 물어보고 결정을 ctx._brain_decisions에 저장.
         """
-        logger.info("\n[%s]", name)
+        print(f"\n┌─ {name}", flush=True)
         t0 = time.monotonic()
         pre_count = len(ctx.findings)
 
@@ -319,6 +364,9 @@ class ScanPipeline:
         elapsed = (time.monotonic() - t0) * 1000
         new_findings = len(ctx.findings) - pre_count
         ctx.log_phase(name, duration_ms=elapsed, findings_count=new_findings)
+
+        status = f"  +{new_findings} findings" if new_findings else "  no new findings"
+        print(f"└─ done ({elapsed/1000:.1f}s){status}", flush=True)
 
     async def _consult_brain_for_phase_vectors(
         self,
@@ -449,39 +497,96 @@ class ScanPipeline:
         discovered_urls = [e.get("url", "") for e in endpoints[:15]]
         effective_endpoints = discovered_urls or live_urls[:10] or app_specific_urls[:8]
 
+        # ── OpenAPI/Swagger 스펙 자동 탐지 ──
+        api_spec_context = ""
+        is_rest_api = False
+        try:
+            import urllib.request as _ureq
+            for spec_path in ["/openapi.json", "/swagger.json", "/api-docs", "/v1/api-docs", "/docs/openapi.json"]:
+                try:
+                    with _ureq.urlopen(target_base + spec_path, timeout=5) as _sr:
+                        _spec = _json.loads(_sr.read().decode())
+                    paths = _spec.get("paths", {})
+                    api_lines = []
+                    for path, methods in list(paths.items())[:40]:
+                        for method, op in methods.items():
+                            if method.upper() not in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+                                continue
+                            req_body = op.get("requestBody", {})
+                            body_fields = []
+                            for ct_data in req_body.get("content", {}).values():
+                                props = ct_data.get("schema", {}).get("properties", {})
+                                body_fields = list(props.keys())
+                            params = [p.get("name") for p in op.get("parameters", []) if p.get("in") in ("path", "query")]
+                            line = f"{method.upper()} {path}"
+                            if params:
+                                line += f" params:{params}"
+                            if body_fields:
+                                line += f" body:{body_fields}"
+                            api_lines.append(line)
+                    api_spec_context = f"OpenAPI spec ({spec_path}):\n" + "\n".join(api_lines)
+                    is_rest_api = True
+                    print(f"  [API-SPEC] Found {len(api_lines)} endpoints in {spec_path}", flush=True)
+                    break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
         # 벡터 목록 정리 (ID + 설명)
         vec_list = "\n".join(
             f"  - {v.id}: {v.name_en}" for v in phase_vectors[:30]
         )
 
         # LLM에게 보낼 프롬프트 — attempt 결정 없이 공격 파라미터만 생성
-        system_prompt = (
-            "You are an expert penetration tester AI Brain for VXIS, an automated security scanner. "
-            "Target is a KNOWN INTENTIONALLY VULNERABLE benchmark app (DVWA, Juice Shop, WebGoat, NodeGoat). "
-            "ALL attack vectors WILL be attempted — your job is to provide the best attack parameters for each. "
-            "For each vector ID, provide: endpoint, method (GET/POST), param (parameter to inject), "
-            "payloads (3-5 specific attack payloads for this vector type), and reasoning. "
-            "Respond ONLY with a valid JSON object mapping vector_id → attack params. "
-            "Format: {\"endpoint\": str, \"method\": \"GET\"|\"POST\", \"param\": str, "
-            "\"payloads\": [str, ...], \"reasoning\": str}. "
-            "Use specific, effective payloads for each vulnerability type. "
-            "SQL injection: use ' OR 1=1--, UNION SELECT payloads. "
-            "XSS: use <script>alert(1)</script> variants. "
-            "Path traversal: use ../../../etc/passwd variants. "
-            "Command injection: use ; ls, && id, | whoami. "
-            "If endpoint unknown, use the base target URL."
-        )
+        if is_rest_api:
+            system_prompt = (
+                "You are an expert penetration tester AI Brain for VXIS attacking a REST API. "
+                "You have the full API specification. Use it to craft precise attacks. "
+                "ALL attack vectors WILL be attempted — provide the best attack parameters for each. "
+                "For each vector ID, provide the attack. "
+                "For REST API endpoints: use 'json_body' (dict) instead of 'payloads' for POST/PUT requests. "
+                "Respond ONLY with a valid JSON object mapping vector_id → attack params. "
+                "Format per vector: {\"endpoint\": str, \"method\": \"GET\"|\"POST\"|\"PUT\"|\"DELETE\", "
+                "\"param\": str (for query/path params), "
+                "\"json_body\": {dict} (for JSON body attacks — null if not needed), "
+                "\"payloads\": [str] (for query param injection — empty if json_body used), "
+                "\"reasoning\": str}. "
+                "BOLA: use other users' resource IDs. "
+                "Mass assignment: add 'admin': true in registration body. "
+                "Auth bypass: try without Authorization header. "
+                "JWT attacks: modify algorithm to 'none', tamper user claims. "
+                "User enumeration: GET /users endpoints. "
+                "Info disclosure: check all GET endpoints without auth."
+            )
+        else:
+            system_prompt = (
+                "You are an expert penetration tester AI Brain for VXIS, an automated security scanner. "
+                "Target is a KNOWN INTENTIONALLY VULNERABLE benchmark app (DVWA, Juice Shop, WebGoat, NodeGoat). "
+                "ALL attack vectors WILL be attempted — your job is to provide the best attack parameters for each. "
+                "For each vector ID, provide: endpoint, method (GET/POST), param (parameter to inject), "
+                "payloads (3-5 specific attack payloads for this vector type), and reasoning. "
+                "Respond ONLY with a valid JSON object mapping vector_id → attack params. "
+                "Format: {\"endpoint\": str, \"method\": \"GET\"|\"POST\", \"param\": str, "
+                "\"payloads\": [str, ...], \"reasoning\": str}. "
+                "Use specific, effective payloads for each vulnerability type. "
+                "SQL injection: use ' OR 1=1--, UNION SELECT payloads. "
+                "XSS: use <script>alert(1)</script> variants. "
+                "Path traversal: use ../../../etc/passwd variants. "
+                "Command injection: use ; ls, && id, | whoami. "
+                "If endpoint unknown, use the base target URL."
+            )
 
         user_prompt = (
             f"Target app: {app_name} at {ctx.target}\n"
-            f"Known vulnerable paths: {app_specific_urls[:6]}\n"
-            f"Discovered endpoints: {effective_endpoints[:8]}\n"
+            + (f"\n{api_spec_context}\n" if api_spec_context else f"Known vulnerable paths: {app_specific_urls[:6]}\n")
+            + f"Discovered endpoints: {effective_endpoints[:8]}\n"
             f"Tech stack: {tech_stack or ['web', 'http']}\n"
             f"Previous findings: {prev_findings}\n"
             f"Phase: {phase_name}\n\n"
             f"Provide attack parameters for ALL these vectors.\n"
-            f"Use the known vulnerable paths for this specific app.\n"
-            f"Vectors:\n{vec_list}\n\n"
+            + ("Use the API spec above to target real endpoints.\n" if api_spec_context else "Use the known vulnerable paths for this specific app.\n")
+            + f"Vectors:\n{vec_list}\n\n"
             f"Return JSON only. Every vector_id must have an entry."
         )
 
@@ -490,15 +595,7 @@ class ScanPipeline:
             if not response:
                 return {}
 
-            # JSON 파싱 — 마크다운 코드블록 제거
-            clean = response.strip()
-            if clean.startswith("```"):
-                clean = clean.split("```")[1]
-                if clean.startswith("json"):
-                    clean = clean[4:]
-            clean = clean.strip()
-
-            raw = _json.loads(clean)
+            raw = _parse_llm_json(response)
 
             # 모든 벡터 attempt=True 고정 — LLM은 파라미터만 결정
             decisions: dict[str, dict] = {}
@@ -513,6 +610,7 @@ class ScanPipeline:
                         "method": d.get("method", "GET"),
                         "param": d.get("param", ""),
                         "payloads": d.get("payloads", [""]),
+                        "json_body": d.get("json_body"),  # REST API JSON body 공격
                     }],
                 }
 
@@ -627,15 +725,11 @@ class ScanPipeline:
             if vid in phase_vector_ids and d.get("attempt", False)
         }
 
-        print(f"  [BRAIN-EXEC] {phase_key}: {len(decisions)} decisions total, "
-              f"{len(phase_vector_ids)} in this phase, {len(active_decisions)} active",
-              flush=True)
-
         if not active_decisions:
+            print(f"  {phase_key}: 0 vectors to attack", flush=True)
             return
 
-        logger.info("  [BRAIN-EXEC] Executing %d brain decisions with Hands",
-                     len(active_decisions))
+        print(f"  {phase_key}: Brain attacking {len(active_decisions)} vectors...", flush=True)
 
         # Hands(SessionManager) 획득 — ctx에 이미 인증된 세션이 있으면 재사용
         try:
@@ -668,6 +762,11 @@ class ScanPipeline:
                 param = target_spec.get("param", "")
                 payloads = target_spec.get("payloads", [])
                 note = target_spec.get("note", "")
+
+                # 벡터별 실시간 출력
+                _ep_short = endpoint[-45:] if len(endpoint) > 45 else endpoint
+                _json_flag = " [JSON]" if target_spec.get("json_body") else ""
+                print(f"    ▶ {vector_id:18s} {method:4s} {_ep_short}{_json_flag}", flush=True)
 
                 if not payloads:
                     payloads = [""]  # 빈 페이로드라도 엔드포인트 접근 시도
@@ -710,6 +809,59 @@ class ScanPipeline:
                         form_cache = {"fields": {}, "method": method, "action": endpoint}
                     target_spec["_form_cache"] = form_cache
 
+                # ── REST API JSON body 공격 ── (json_body 있으면 payloads 루프 전에 처리)
+                json_body = target_spec.get("json_body")
+                if json_body and isinstance(json_body, dict):
+                    try:
+                        if method in ("GET", "DELETE"):
+                            resp = await session.get(endpoint)
+                        else:
+                            resp = await session.post(endpoint, json_data=json_body)
+                        body = resp.text[:5000] if hasattr(resp, "text") else ""
+                        status = resp.status if hasattr(resp, "status") else 0
+                        headers = {}
+                        if hasattr(resp, "headers"):
+                            try:
+                                headers = {k.lower(): v for k, v in resp.headers.items()}
+                            except Exception:
+                                pass
+                        finding_created = self._analyze_probe_response(
+                            ctx, vector_id, endpoint, "json_body", str(json_body)[:100], body, status, headers,
+                        )
+                        if finding_created:
+                            new_finding = ctx.findings[-1] if ctx.findings else None
+                            from vxis.agent.brain import AgentBrain as _ABrain, AgentAction
+                            if isinstance(self.brain, _ABrain) and new_finding:
+                                _prev = [
+                                    {"type": getattr(f, "finding_type", ""), "component": getattr(f, "affected_component", "")}
+                                    for f in ctx.findings[:-1]
+                                ]
+                                _interp = self.brain.interpret_probe_result(
+                                    vector_id=vector_id, endpoint=endpoint, param="json_body",
+                                    payload=str(json_body)[:200], body=body, status=status,
+                                    current_findings=_prev,
+                                )
+                                _brain_level = _interp.get("level", 2)
+                                _hint = _interp.get("escalation_hint", "")[:55]
+                                print(f"      !! HIT  {vector_id} L{_brain_level} [JSON]"
+                                      + (f" → {_hint}" if _hint else ""), flush=True)
+                                try:
+                                    ctx.score_tracker.escalate_level(new_finding.id, _brain_level)
+                                except Exception:
+                                    pass
+                            else:
+                                print(f"      !! HIT  {vector_id} [JSON] on {endpoint[-40:]}", flush=True)
+                            from vxis.agent.brain import AgentAction
+                            self.brain.record_result(
+                                AgentAction(tool="PROBE", args=target_spec, reasoning=reasoning),
+                                {"success": True, "findings": [{"vector_id": vector_id, "endpoint": endpoint}]},
+                            )
+                            if new_finding:
+                                await self._chain_from_finding(ctx, new_finding, session, vector_id, endpoint)
+                    except Exception as exc:
+                        logger.debug("    [FAIL-JSON] %s %s: %s", vector_id, endpoint, exc)
+                    continue  # json_body 처리 완료 — payloads 루프 건너뜀
+
                 for payload in payloads[:10]:  # 페이로드당 최대 10개
                     try:
                         if form_cache and form_cache.get("fields") and param:
@@ -750,11 +902,31 @@ class ScanPipeline:
                         )
 
                         if finding_created:
-                            logger.info("    [HIT] %s on %s param=%s",
-                                        vector_id, endpoint, param)
+                            # Brain.interpret: LLM이 exploitation level 결정
+                            new_finding = ctx.findings[-1] if ctx.findings else None
+                            from vxis.agent.brain import AgentBrain as _ABrain, AgentAction
+                            if isinstance(self.brain, _ABrain) and new_finding:
+                                _prev = [
+                                    {"type": getattr(f, "finding_type", ""), "component": getattr(f, "affected_component", "")}
+                                    for f in ctx.findings[:-1]
+                                ]
+                                _interp = self.brain.interpret_probe_result(
+                                    vector_id=vector_id, endpoint=endpoint, param=param,
+                                    payload=payload, body=body, status=status,
+                                    current_findings=_prev,
+                                )
+                                _brain_level = _interp.get("level", 2)
+                                _hint = _interp.get("escalation_hint", "")[:55]
+                                print(f"      !! HIT  {vector_id} L{_brain_level} [{_interp.get('confidence','?')}]"
+                                      + (f" → {_hint}" if _hint else ""), flush=True)
+                                try:
+                                    ctx.score_tracker.escalate_level(new_finding.id, _brain_level)
+                                except Exception:
+                                    pass
+                            else:
+                                print(f"      !! HIT  {vector_id} on {endpoint[-40:]}", flush=True)
 
-                            # FileBasedBrain에 결과 기록
-                            from vxis.agent.brain import AgentAction
+                            # result 기록
                             self.brain.record_result(
                                 AgentAction(tool="PROBE", args=target_spec, reasoning=reasoning),
                                 {
@@ -770,7 +942,6 @@ class ScanPipeline:
                             )
 
                             # 체이닝: finding 확인 즉시 follow-up 공격 실행
-                            new_finding = ctx.findings[-1] if ctx.findings else None
                             if new_finding:
                                 await self._chain_from_finding(
                                     ctx, new_finding, session, vector_id, endpoint,
@@ -818,6 +989,8 @@ class ScanPipeline:
             final_impact="Escalated access via chained exploit|||체이닝 익스플로잇을 통한 권한 상승",
         )
 
+        print(f"      >> CHAIN starting from {ftype} on {endpoint[-45:]}", flush=True)
+
         # Step 1: 최초 finding을 체인의 첫 단계로 등록
         chain.steps.append(ChainStep(
             step_index=0,
@@ -829,6 +1002,74 @@ class ScanPipeline:
         ))
 
         try:
+            # ── Brain-First 체이닝: AgentBrain이 다음 공격 결정 ──
+            from vxis.agent.brain import AgentBrain as _ABrain2
+            if isinstance(self.brain, _ABrain2):
+                _prev_findings = [
+                    {"type": getattr(f, "finding_type", ""), "component": getattr(f, "affected_component", "")}
+                    for f in ctx.findings
+                ]
+                _brain_attacks = self.brain.generate_chain_attacks(
+                    finding_type=ftype,
+                    endpoint=endpoint,
+                    description=getattr(finding, "description", "")[:300],
+                    target=ctx.target,
+                    current_findings=_prev_findings,
+                )
+                if _brain_attacks:
+                    for _atk in _brain_attacks:
+                        _ep = _atk.get("endpoint", endpoint)
+                        _mth = _atk.get("method", "GET").upper()
+                        _prm = _atk.get("param", "")
+                        _payloads = _atk.get("payloads", [""])[:5]
+                        _vid = _atk.get("vector_id", "WEB-CHAIN")
+                        _lvl = _atk.get("expected_level", 3)
+                        _rsn = _atk.get("reasoning", "")
+                        logger.info("    [BRAIN-CHAIN] trying %s on %s (expected L%d)", _vid, _ep, _lvl)
+                        for _pld in _payloads:
+                            try:
+                                if _mth == "GET" and _prm:
+                                    _r = await session.get(_ep, params={_prm: _pld})
+                                elif _mth == "POST" and _prm:
+                                    _r = await session.post(_ep, data={_prm: _pld})
+                                elif _mth == "GET":
+                                    _r = await session.get(_ep)
+                                else:
+                                    _r = await session.post(_ep, data={"input": _pld})
+                                _rbody = _r.text[:3000] if hasattr(_r, "text") else ""
+                                _rstatus = _r.status if hasattr(_r, "status") else 0
+                                _chain_hit = self._analyze_probe_response(
+                                    ctx, _vid, _ep, _prm, _pld, _rbody, _rstatus, {},
+                                )
+                                if _chain_hit:
+                                    _cf = ctx.findings[-1] if ctx.findings else None
+                                    if _cf:
+                                        try:
+                                            ctx.score_tracker.escalate_level(_cf.id, _lvl)
+                                        except Exception:
+                                            pass
+                                        chain.steps.append(ChainStep(
+                                            step_index=len(chain.steps),
+                                            vector_id=_vid,
+                                            finding_id=_cf.id,
+                                            level=_lvl,
+                                            description_en=_rsn[:120],
+                                            description_ko=_rsn[:120],
+                                        ))
+                                        logger.info("    [BRAIN-CHAIN] Hit: %s on %s (L%d)", _vid, _ep, _lvl)
+                                    break
+                            except Exception as _exc:
+                                logger.debug("    [BRAIN-CHAIN] attack failed: %s", _exc)
+                    # Brain-generated chain 완료 → 체인 기록 후 리턴
+                    if chain.depth >= 2:
+                        try:
+                            ctx.score_tracker.record_chain(chain)
+                            logger.info("  [CHAIN] %s: %d steps (Brain-generated)", chain_id, chain.depth)
+                        except Exception:
+                            pass
+                    return  # 하드코딩 체인 건너뜀
+
+            # ── 하드코딩 폴백 체인 (AgentBrain 없거나 Brain 체인 비어있을 때) ──
             # ── SQLi 체인: credential extraction → admin login ──
             if ftype == "sql_injection":
                 # Step 2: UNION SELECT로 크레덴셜 추출 시도
@@ -1240,6 +1481,17 @@ class ScanPipeline:
 
         target = ctx.target
 
+        # ── VAmPI 초기화 (DB populated) ──
+        try:
+            if "5000" in target or "vampi" in target.lower():
+                init_resp = await session.get("/createdb")
+                init_body = init_resp.text if hasattr(init_resp, "text") else ""
+                if "populated" in init_body.lower():
+                    logger.info("  [AUTH] VAmPI DB initialized — populated")
+                return session
+        except Exception as exc:
+            logger.debug("  [AUTH] VAmPI init failed: %s", exc)
+
         # ── DVWA 인증 ──
         try:
             resp = await session.get("/login.php")
@@ -1429,6 +1681,160 @@ class ScanPipeline:
                 if getattr(f, "finding_type", "") == finding_type and getattr(f, "affected_component", "") == ep:
                     return True
             return False
+
+        # ── REST API JSON 응답 분석 ─────────────────────────────────
+        # HTML 응답이 아닌 JSON API 응답에서 취약점 탐지
+        import json as _json_api
+        _ct = (headers or {}).get("content-type", "")
+        _is_json = "application/json" in _ct or (body.strip().startswith("{") or body.strip().startswith("["))
+        if _is_json:
+            try:
+                _api = _json_api.loads(body)
+
+                # 1. User enumeration — GET /users 등이 전체 사용자 목록 반환
+                _users_data = None
+                if isinstance(_api, dict):
+                    for _uk in ("users", "Users", "data", "results"):
+                        if isinstance(_api.get(_uk), list) and _api[_uk]:
+                            _users_data = _api[_uk]
+                            break
+                elif isinstance(_api, list) and _api:
+                    _users_data = _api
+
+                if _users_data and isinstance(_users_data[0], dict):
+                    _keys = set(str(k).lower() for k in _users_data[0].keys())
+                    if _keys & {"username", "email", "user", "name", "admin", "password"}:
+                        # password가 포함되면 Critical, 아니면 Medium
+                        _has_pw = "password" in _keys
+                        _sev = "critical" if _has_pw else "medium"
+                        _ftype = "sensitive_data_exposure" if _has_pw else "information_disclosure"
+                        _lvl = 4 if _has_pw else 3
+                        _ded_key = _ftype + endpoint
+                        if not _already_found(_ftype, endpoint):
+                            _f = ctx.add_finding(
+                                title=(
+                                    f"API Credential Dump — {endpoint}|||API 자격증명 덤프 — {endpoint}"
+                                    if _has_pw else
+                                    f"API User Enumeration — {endpoint}|||API 사용자 열거 — {endpoint}"
+                                ),
+                                severity=_sev,
+                                finding_type=_ftype,
+                                description=(
+                                    f"API endpoint {endpoint} returns {len(_users_data)} users with plaintext passwords. "
+                                    f"Exposed fields: {sorted(_keys)}|||"
+                                    f"API 엔드포인트 {endpoint}에서 {len(_users_data)}명의 사용자와 평문 패스워드 반환. "
+                                    f"노출 필드: {sorted(_keys)}"
+                                    if _has_pw else
+                                    f"API endpoint {endpoint} returns full user list ({len(_users_data)} users). "
+                                    f"Exposed fields: {sorted(_keys)}|||"
+                                    f"API 엔드포인트 {endpoint}에서 전체 사용자 목록 반환 ({len(_users_data)}명). "
+                                    f"노출 필드: {sorted(_keys)}"
+                                ),
+                                target=ctx.target,
+                                affected_component=endpoint,
+                            )
+                            try:
+                                ctx.score_tracker.record_finding(_f.id, vector_id, level=_lvl)
+                            except Exception:
+                                pass
+                            return True
+
+                # 2. 민감 데이터 노출 — 응답에 password/token/secret 필드
+                if isinstance(_api, dict):
+                    _sensitive_keys = {"password", "token", "secret", "api_key", "auth_token", "jwt", "key"}
+                    _exposed = _sensitive_keys & set(str(k).lower() for k in _api.keys())
+                    if _exposed and not _already_found("sensitive_data_exposure", endpoint):
+                        _f = ctx.add_finding(
+                            title=f"API Sensitive Data Exposure — {endpoint}|||API 민감 데이터 노출 — {endpoint}",
+                            severity="high",
+                            finding_type="sensitive_data_exposure",
+                            description=(
+                                f"Sensitive fields exposed in API response from {endpoint}: {list(_exposed)}|||"
+                                f"{endpoint} API 응답에 민감 필드 노출: {list(_exposed)}"
+                            ),
+                            target=ctx.target,
+                            affected_component=endpoint,
+                        )
+                        try:
+                            ctx.score_tracker.record_finding(_f.id, vector_id, level=3)
+                        except Exception:
+                            pass
+                        return True
+
+                # 3. Mass assignment — 등록 시 admin:true 반환
+                if isinstance(_api, dict) and _api.get("admin") is True:
+                    if not _already_found("mass_assignment", endpoint):
+                        _f = ctx.add_finding(
+                            title=f"Mass Assignment — Admin Privilege Escalation|||대량 할당 — 관리자 권한 상승",
+                            severity="critical",
+                            finding_type="mass_assignment",
+                            description=(
+                                f"API endpoint {endpoint} accepts extra fields (e.g. 'admin':true) "
+                                f"allowing privilege escalation via mass assignment. "
+                                f"Registration response returned admin=True.|||"
+                                f"API 엔드포인트 {endpoint}에서 추가 필드(예: 'admin':true)를 허용하여 "
+                                f"대량 할당을 통한 권한 상승. 등록 응답에 admin=True 반환됨."
+                            ),
+                            target=ctx.target,
+                            affected_component=endpoint,
+                        )
+                        try:
+                            ctx.score_tracker.record_finding(_f.id, vector_id, level=4)
+                        except Exception:
+                            pass
+                        return True
+
+                # 4. BOLA (Broken Object Level Authorization) — 다른 사용자 리소스 200 반환
+                if status == 200 and isinstance(_api, dict) and "username" in _api and "json_body" not in param:
+                    # username이 응답에 있고, 현재 요청이 다른 사용자 경로인 경우
+                    import re as _re_bola
+                    if _re_bola.search(r"/users?/v?\d*/\w+", endpoint):
+                        if not _already_found("broken_access_control", endpoint):
+                            _f = ctx.add_finding(
+                                title=f"BOLA — Unauthorized Object Access via API|||BOLA — API를 통한 무단 객체 접근",
+                                severity="high",
+                                finding_type="broken_access_control",
+                                description=(
+                                    f"API endpoint {endpoint} returned another user's data (HTTP 200) "
+                                    f"without proper authorization check (BOLA/IDOR).|||"
+                                    f"API 엔드포인트 {endpoint}에서 적절한 인가 확인 없이 다른 사용자 데이터 반환 (BOLA/IDOR)."
+                                ),
+                                target=ctx.target,
+                                affected_component=endpoint,
+                            )
+                            try:
+                                ctx.score_tracker.record_finding(_f.id, vector_id, level=3)
+                            except Exception:
+                                pass
+                            return True
+
+                # 5. JWT 토큰 노출 — 응답에 auth_token 포함
+                if isinstance(_api, dict):
+                    for _jk in ("auth_token", "token", "access_token", "jwt"):
+                        _tv = _api.get(_jk, "")
+                        if isinstance(_tv, str) and len(_tv) > 20 and "." in _tv:
+                            if not _already_found("sensitive_data_exposure", endpoint + "_token"):
+                                _f = ctx.add_finding(
+                                    title=f"API Authentication Token Exposed — {endpoint}|||API 인증 토큰 노출 — {endpoint}",
+                                    severity="high",
+                                    finding_type="sensitive_data_exposure",
+                                    description=(
+                                        f"JWT/auth token returned in API response from {endpoint}. "
+                                        f"Field: '{_jk}'. Token can be used to impersonate users.|||"
+                                        f"{endpoint} API 응답에 JWT/인증 토큰 노출. 필드: '{_jk}'. "
+                                        f"토큰으로 다른 사용자 가장 가능."
+                                    ),
+                                    target=ctx.target,
+                                    affected_component=endpoint + "_token",
+                                )
+                                try:
+                                    ctx.score_tracker.record_finding(_f.id, vector_id, level=2)
+                                except Exception:
+                                    pass
+                                return True
+
+            except (_json_api.JSONDecodeError, Exception):
+                pass
 
         # ── SQL Injection 시그니처 ──
         if vector_id.startswith("WEB-SQLI") and not _already_found("sql_injection", endpoint):

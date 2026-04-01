@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re as _re
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
@@ -37,6 +38,42 @@ if TYPE_CHECKING:
     from vxis.graph.chain_reasoner import ChainReasoner
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_llm_json(response: str) -> Any:
+    """LLM 응답에서 JSON을 안정적으로 파싱 (dict or list).
+
+    claude -p 출력의 ANSI 코드, control chars, trailing comma,
+    마크다운 블록 등을 제거하고 파싱한다.
+    """
+    clean = response.strip()
+    clean = _re.sub(r'\x1b\[[0-9;]*[mGKHFJA-Za-z]', '', clean)
+    clean = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', clean)
+    if '```' in clean:
+        _cb = _re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', clean)
+        if _cb:
+            clean = _cb.group(1).strip()
+    # dict or list 추출
+    _md = _re.search(r'\{[\s\S]*\}', clean)
+    _ml = _re.search(r'\[[\s\S]*\]', clean)
+    if _md and _ml:
+        # 먼저 나타나는 것 사용
+        clean = _md.group(0) if _md.start() < _ml.start() else _ml.group(0)
+    elif _md:
+        clean = _md.group(0)
+    elif _ml:
+        clean = _ml.group(0)
+    clean = _re.sub(r',(\s*[}\]])', r'\1', clean)
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        # raw 개행이 문자열 안에 있는 경우 이스케이프
+        clean_safe = _re.sub(
+            r'"((?:[^"\\]|\\.)*)"',
+            lambda m: '"' + m.group(1).replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t') + '"',
+            clean,
+        )
+        return json.loads(clean_safe)
 
 
 # ── Data structures ─────────────────────────────────────────────
@@ -631,6 +668,129 @@ class AgentBrain:
         # ── Knowledge Store 학습 ──
         self._learn_from_result(action, result)
 
+    # ── Brain-First: Probe Interpretation + Chain Generation ─────
+
+    def interpret_probe_result(
+        self,
+        vector_id: str,
+        endpoint: str,
+        param: str,
+        payload: str,
+        body: str,
+        status: int,
+        current_findings: list[dict],
+    ) -> dict:
+        """Brain이 HTTP 응답을 해석하여 exploitation level을 결정한다.
+
+        Pattern matching이 hit을 탐지한 후, Brain이 실제 심각도를 판단.
+
+        Returns:
+            {level: int(1-4), confidence: str, evidence_summary: str, escalation_hint: str}
+        """
+        system_prompt = (
+            "You are an expert penetration tester evaluating attack results. "
+            "Given an HTTP probe result, determine the exploitation level achieved:\n"
+            "Level 1: Detected (vulnerability signature present, not yet exploitable)\n"
+            "Level 2: Confirmed (vulnerability confirmed, PoC works)\n"
+            "Level 3: Data Extracted (sensitive data leaked, credentials, PII)\n"
+            "Level 4: Full Exploit (RCE, admin access, complete system compromise)\n\n"
+            "Respond ONLY with valid JSON (no markdown): "
+            "{\"level\": <1-4>, \"confidence\": \"high|medium|low\", "
+            "\"evidence_summary\": \"<1 sentence proving the vuln>\", "
+            "\"escalation_hint\": \"<next attack step>\"}"
+        )
+        prev = [
+            {"type": f.get("type", ""), "component": f.get("component", "")}
+            for f in current_findings[-5:]
+        ]
+        user_prompt = (
+            f"Vector: {vector_id}\n"
+            f"Endpoint: {endpoint}\n"
+            f"Param: {param}\n"
+            f"Payload: {payload[:200]}\n"
+            f"HTTP Status: {status}\n"
+            f"Response (first 800 chars): {body[:800]}\n"
+            f"Previous findings: {prev}\n\n"
+            "What exploitation level was achieved? JSON only."
+        )
+        try:
+            response = self._call_llm_with_fallback(system_prompt, user_prompt)
+            if not response:
+                return {"level": 2, "confidence": "low", "evidence_summary": "", "escalation_hint": ""}
+            result = _parse_llm_json(response)
+            level = max(1, min(4, int(result.get("level", 2))))
+            return {
+                "level": level,
+                "confidence": result.get("confidence", "medium"),
+                "evidence_summary": str(result.get("evidence_summary", ""))[:200],
+                "escalation_hint": str(result.get("escalation_hint", ""))[:200],
+            }
+        except Exception as exc:
+            logger.debug("Brain.interpret_probe_result failed: %s", exc)
+            return {"level": 2, "confidence": "low", "evidence_summary": "", "escalation_hint": ""}
+
+    def generate_chain_attacks(
+        self,
+        finding_type: str,
+        endpoint: str,
+        description: str,
+        target: str,
+        current_findings: list[dict],
+    ) -> list[dict]:
+        """Brain이 finding에서 다음 공격 체인을 생성한다.
+
+        하드코딩된 체인 대신, Brain이 컨텍스트를 분석해서
+        실제로 의미있는 다음 공격 단계를 결정한다.
+
+        Returns:
+            list of {vector_id, endpoint, method, param, payloads, reasoning, expected_level}
+        """
+        system_prompt = (
+            "You are an expert penetration tester doing attack chaining. "
+            "Given a confirmed vulnerability, generate 1-3 follow-up attacks to escalate impact. "
+            "Think: what is the NEXT step toward Crown Jewel (RCE, admin access, credential theft)?\n\n"
+            "Respond ONLY with a valid JSON array (no markdown). Each item:\n"
+            "{\"vector_id\": \"WEB-CHAIN-XXX\", \"endpoint\": \"<path>\", "
+            "\"method\": \"GET\"|\"POST\", \"param\": \"<param_name>\", "
+            "\"payloads\": [\"<payload1>\", \"<payload2>\"], "
+            "\"reasoning\": \"<why this attack>\", \"expected_level\": 3|4}"
+        )
+        prev = [
+            {"type": f.get("type", ""), "component": f.get("component", "")}
+            for f in current_findings[-5:]
+        ]
+        user_prompt = (
+            f"Target: {target}\n"
+            f"Confirmed vuln: {finding_type} on {endpoint}\n"
+            f"Description: {description[:300]}\n"
+            f"Other findings: {prev}\n\n"
+            "Give 1-3 follow-up attacks to escalate. JSON array only."
+        )
+        try:
+            response = self._call_llm_with_fallback(system_prompt, user_prompt)
+            if not response:
+                return []
+            result = _parse_llm_json(response)
+            if not isinstance(result, list):
+                return []
+            attacks = []
+            for atk in result[:3]:
+                if not isinstance(atk, dict):
+                    continue
+                attacks.append({
+                    "vector_id": str(atk.get("vector_id", "WEB-CHAIN")),
+                    "endpoint": str(atk.get("endpoint", endpoint)),
+                    "method": str(atk.get("method", "GET")).upper(),
+                    "param": str(atk.get("param", "")),
+                    "payloads": [str(p) for p in atk.get("payloads", [""])[:5]],
+                    "reasoning": str(atk.get("reasoning", ""))[:200],
+                    "expected_level": max(1, min(4, int(atk.get("expected_level", 3)))),
+                })
+            return attacks
+        except Exception as exc:
+            logger.debug("Brain.generate_chain_attacks failed: %s", exc)
+            return []
+
     # ── Phase 3: Compiled Pattern Matching ───────────────────────
 
     def _try_compiled_patterns(
@@ -1179,8 +1339,40 @@ class AgentBrain:
 
         return actions
 
+    @staticmethod
+    def _call_claude_subprocess(system_prompt: str, user_prompt: str) -> str | None:
+        """claude -p 서브프로세스로 현재 Claude Code 세션을 Brain으로 사용.
+
+        API 키 없이 로그인된 Claude Code 세션을 직접 활용한다.
+        """
+        import subprocess
+        import re as _re_ctrl
+        combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
+        try:
+            result = subprocess.run(
+                ["claude", "-p", combined],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                output = result.stdout
+                # ANSI 이스케이프 코드 제거 (터미널 색상/포맷 코드)
+                output = _re_ctrl.sub(r'\x1b\[[0-9;]*[mGKHFJA-Za-z]', '', output)
+                # JSON에서 invalid한 control chars 제거 (탭·개행·캐리지리턴 제외)
+                output = _re_ctrl.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', output)
+                return output.strip() if output.strip() else None
+        except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as exc:
+            logger.debug("claude -p subprocess failed: %s", exc)
+        return None
+
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str | None:
-        """Call LLM using the same abstraction as upstream_watch."""
+        """Call LLM — claude -p 우선, 실패 시 API fallback."""
+
+        # ── Tier 0: claude -p (현재 Claude Code 세션 직접 사용) ──
+        if os.environ.get("VXIS_BRAIN", "").lower() != "api":
+            response = self._call_claude_subprocess(system_prompt, user_prompt)
+            if response:
+                return response
+
         try:
             from tools.upstream_watch.llm import chat
             response = chat(system_prompt=system_prompt, user_prompt=user_prompt, max_tokens=2000)
