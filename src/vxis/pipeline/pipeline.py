@@ -315,6 +315,8 @@ class ScanPipeline:
         # ══════════════════════════════════════════════════════
         await self._run_phase("Phase 6: Report Generation — NCC Group Style",
                               self._phase6_report, ctx)
+        await self._run_phase("Phase 16: Industry Intelligence — Sector Risk Heatmap",
+                              self._phase16_industry, ctx)
         await self._run_phase("Phase 17: Outreach",
                               self._phase17_outreach, ctx)
         await self._run_phase("Phase 18: Collective Intelligence Update",
@@ -323,11 +325,23 @@ class ScanPipeline:
                               self._phase19_bounty, ctx)
 
         # ══════════════════════════════════════════════════════
+        # SCORING (5-Dimension VXIS Score)
+        # ══════════════════════════════════════════════════════
+        try:
+            from vxis.scoring.engine import ScoringEngine
+            engine = ScoringEngine()
+            vxis_score = engine.calculate(ctx.score_tracker, ctx.findings, scan_id=ctx.scan_id)
+            ctx.vxis_score = vxis_score
+            print(vxis_score.summary_text(), flush=True)
+        except Exception as exc:
+            logger.warning("  Scoring failed: %s", exc)
+
+        # ══════════════════════════════════════════════════════
         # COMPLETE
         # ══════════════════════════════════════════════════════
         logger.info("\n" + "=" * 70)
         logger.info("  PIPELINE COMPLETE")
-        logger.info("  Phases: %d/%d", len(ctx.phases_completed), 19)
+        logger.info("  Phases: %d/%d", len(ctx.phases_completed), 20)
         logger.info("  Findings: %d", len(ctx.findings))
         logger.info("  Deferred Actions: %d approved, %d total",
                      sum(1 for a in ctx.deferred_actions if a.approved),
@@ -3076,6 +3090,17 @@ class ScanPipeline:
 
         try:
             ctx.score_tracker.record_phase_complete("Phase 18: Collective Intelligence Update")
+        except Exception:
+            pass
+
+    async def _phase16_industry(self, ctx: ScanContext) -> None:
+        """Phase 16: Industry Intelligence — 단일 타겟 스캔에서는 N/A."""
+        logger.info("  Industry Intelligence: N/A for single-target scan (multi-target mode required)")
+        try:
+            ctx.score_tracker.record_phase_skipped(
+                "Phase 16: Industry Intelligence — Sector Risk Heatmap",
+                "Single-target scan — industry-wide discovery requires multi-target mode",
+            )
         except Exception:
             pass
 
