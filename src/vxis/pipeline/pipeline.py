@@ -311,14 +311,28 @@ class ScanPipeline:
         target: str,
         app_context_en: str = "",
         app_context_ko: str = "",
+        resume_from: str | None = None,
     ) -> ScanContext:
-        """전체 19 Phase 파이프라인 실행."""
+        """전체 19 Phase 파이프라인 실행.
+
+        Args:
+            resume_from: 체크포인트 파일 경로. 지정하면 이전 스캔의 완료된 Phase를 건너뛰고 재개.
+        """
         ctx = ScanContext(
             target=target,
             app_context_en=app_context_en,
             app_context_ko=app_context_ko,
             scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",
         )
+
+        # Resume 모드: 체크포인트에서 이전 완료 상태 복원
+        if resume_from:
+            from pathlib import Path as _P
+            cp = ScanContext.load_checkpoint(_P(resume_from))
+            ctx.phases_completed = cp.get("phases_completed", [])
+            for vid in cp.get("vectors_attempted", []):
+                ctx.score_tracker.record_vector_attempt(vid)
+            logger.info("  [RESUME] %d phases already done — skipping", len(ctx.phases_completed))
 
         logger.info("=" * 70)
         logger.info("  VXIS ScanPipeline — 19 Phase Full Orchestration")
@@ -437,6 +451,11 @@ class ScanPipeline:
         FileBasedBrain일 때: Phase 실행 전에 해당 Phase의 벡터들을
         하나씩 Brain에게 물어보고 결정을 ctx._brain_decisions에 저장.
         """
+        # Resume 모드: 이미 완료된 Phase는 건너뛰기
+        if name in ctx.phases_completed:
+            print(f"\n┌─ {name}\n└─ skipped (checkpoint)", flush=True)
+            return
+
         print(f"\n┌─ {name}", flush=True)
         t0 = time.monotonic()
         pre_count = len(ctx.findings)
@@ -464,6 +483,12 @@ class ScanPipeline:
 
         status = f"  +{new_findings} findings" if new_findings else "  no new findings"
         print(f"└─ done ({elapsed/1000:.1f}s){status}", flush=True)
+
+        # Phase 완료 후 체크포인트 저장
+        try:
+            ctx.save_checkpoint()
+        except Exception:
+            pass  # 체크포인트 저장 실패해도 스캔 계속
 
     async def _consult_brain_for_phase_vectors(
         self,

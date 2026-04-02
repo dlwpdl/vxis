@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from vxis.models.finding import Finding
@@ -146,3 +148,34 @@ class ScanContext:
     @property
     def duration_seconds(self) -> float:
         return (datetime.now(timezone.utc) - self.started_at).total_seconds()
+
+    # ── Checkpoint: 실패 지점에서 재시도 ──
+
+    def save_checkpoint(self, path: Path | None = None) -> Path:
+        """현재 스캔 상태를 JSON 체크포인트로 저장."""
+        if path is None:
+            path = Path(f"tools/benchmark/.brain/{self.scan_id}-checkpoint.json")
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint = {
+            "scan_id": self.scan_id,
+            "target": self.target,
+            "target_type": self.target_type,
+            "phases_completed": self.phases_completed,
+            "finding_count": self.finding_counter,
+            "vectors_attempted": sorted(self.score_tracker.vectors_attempted),
+            "vectors_found": sorted(self.score_tracker.vectors_found),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        path.write_text(json.dumps(checkpoint, indent=2, ensure_ascii=False))
+        logger.info("[CHECKPOINT] Saved to %s (%d phases, %d findings)",
+                    path, len(self.phases_completed), self.finding_counter)
+        return path
+
+    @staticmethod
+    def load_checkpoint(path: Path) -> dict[str, Any]:
+        """체크포인트 파일에서 이전 스캔 상태 로드."""
+        data = json.loads(path.read_text())
+        logger.info("[CHECKPOINT] Loaded %s — %d phases completed",
+                    path, len(data.get("phases_completed", [])))
+        return data
