@@ -64,16 +64,26 @@ def _parse_llm_json(response: str) -> Any:
     elif _ml:
         clean = _ml.group(0)
     clean = _re.sub(r',(\s*[}\]])', r'\1', clean)
+    # Invalid \escape 제거 (유효: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX)
+    # \\ 쌍을 먼저 원자적으로 처리해야 \\w 같은 유효 시퀀스가 망가지지 않음
+    clean = _re.sub(
+        r'\\\\|\\(?!["\\/bfnrtu])',
+        lambda m: m.group(0) if len(m.group(0)) == 2 else '\\\\',
+        clean,
+    )
+    # raw_decode로 첫 번째 완전한 JSON만 파싱 ("Extra data" 방지)
     try:
-        return json.loads(clean)
+        obj, _ = json.JSONDecoder().raw_decode(clean)
+        return obj
     except json.JSONDecodeError:
-        # raw 개행이 문자열 안에 있는 경우 이스케이프
+        # raw 개행이 문자열 안에 있는 경우 이스케이프 후 재시도
         clean_safe = _re.sub(
             r'"((?:[^"\\]|\\.)*)"',
             lambda m: '"' + m.group(1).replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t') + '"',
             clean,
         )
-        return json.loads(clean_safe)
+        obj, _ = json.JSONDecoder().raw_decode(clean_safe)
+        return obj
 
 
 # ── Data structures ─────────────────────────────────────────────
@@ -366,6 +376,15 @@ DONE condition — ONLY when ALL of these are true:
   "owasp_checklist": {{"A01": true, "A02": true, ..., "A10": true}},
   "actions": [{{"tool": "DONE", "reasoning": "100% 커버리지 달성 — bedrock 도달"}}]
 }}
+
+## MANDATORY RESPONSE RULE
+
+Your ENTIRE response must be a single valid JSON object.
+- NO text before the opening {{
+- NO text after the closing }}
+- NO markdown code blocks (no ```)
+- NO explanations outside the JSON
+- If you cannot comply, output {{"reasoning": "error", "actions": []}} — still valid JSON
 """
 
 # ── Tool descriptions for the agent ─────────────────────────────
@@ -573,6 +592,7 @@ class AgentBrain:
         if os.environ.get("LLM_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
             os.environ["OPENAI_API_KEY"] = os.environ["LLM_API_KEY"]
         if os.environ.get("OPENAI_API_KEY"):
+            chain.append({"provider": "openai", "model": "gpt-5.4"})
             chain.append({"provider": "openai", "model": "gpt-4o"})
             chain.append({"provider": "openai", "model": "gpt-4o-mini"})
 
@@ -694,10 +714,10 @@ class AgentBrain:
             "Level 2: Confirmed (vulnerability confirmed, PoC works)\n"
             "Level 3: Data Extracted (sensitive data leaked, credentials, PII)\n"
             "Level 4: Full Exploit (RCE, admin access, complete system compromise)\n\n"
-            "Respond ONLY with valid JSON (no markdown): "
-            "{\"level\": <1-4>, \"confidence\": \"high|medium|low\", "
-            "\"evidence_summary\": \"<1 sentence proving the vuln>\", "
-            "\"escalation_hint\": \"<next attack step>\"}"
+            "OUTPUT RULE: Your ENTIRE response must be a single raw JSON object. "
+            "No text before {. No text after }. No markdown. No explanation. "
+            "Schema: {\"level\": <1-4>, \"confidence\": \"high|medium|low\", "
+            "\"evidence_summary\": \"<1 sentence>\", \"escalation_hint\": \"<next step>\"}"
         )
         prev = [
             {"type": f.get("type", ""), "component": f.get("component", "")}
@@ -711,7 +731,7 @@ class AgentBrain:
             f"HTTP Status: {status}\n"
             f"Response (first 800 chars): {body[:800]}\n"
             f"Previous findings: {prev}\n\n"
-            "What exploitation level was achieved? JSON only."
+            "Output ONLY the raw JSON object. Zero additional text."
         )
         try:
             response = self._call_llm_with_fallback(system_prompt, user_prompt)
@@ -749,11 +769,12 @@ class AgentBrain:
             "You are an expert penetration tester doing attack chaining. "
             "Given a confirmed vulnerability, generate 1-3 follow-up attacks to escalate impact. "
             "Think: what is the NEXT step toward Crown Jewel (RCE, admin access, credential theft)?\n\n"
-            "Respond ONLY with a valid JSON array (no markdown). Each item:\n"
-            "{\"vector_id\": \"WEB-CHAIN-XXX\", \"endpoint\": \"<path>\", "
+            "OUTPUT RULE: Your ENTIRE response must be a single raw JSON array. "
+            "No text before [. No text after ]. No markdown. No explanation. "
+            "Each item: {\"vector_id\": \"WEB-CHAIN-XXX\", \"endpoint\": \"<path>\", "
             "\"method\": \"GET\"|\"POST\", \"param\": \"<param_name>\", "
             "\"payloads\": [\"<payload1>\", \"<payload2>\"], "
-            "\"reasoning\": \"<why this attack>\", \"expected_level\": 3|4}"
+            "\"reasoning\": \"<why>\", \"expected_level\": 3|4}"
         )
         prev = [
             {"type": f.get("type", ""), "component": f.get("component", "")}
@@ -764,7 +785,7 @@ class AgentBrain:
             f"Confirmed vuln: {finding_type} on {endpoint}\n"
             f"Description: {description[:300]}\n"
             f"Other findings: {prev}\n\n"
-            "Give 1-3 follow-up attacks to escalate. JSON array only."
+            "Output ONLY the raw JSON array. Zero additional text."
         )
         try:
             response = self._call_llm_with_fallback(system_prompt, user_prompt)
@@ -1344,13 +1365,18 @@ class AgentBrain:
         """claude -p 서브프로세스로 현재 Claude Code 세션을 Brain으로 사용.
 
         API 키 없이 로그인된 Claude Code 세션을 직접 활용한다.
+
+        모델 선택 (우선순위):
+          1. VXIS_BRAIN_MODEL 환경변수 (명시적 지정)
+          2. 기본값: claude-opus-4-6 (가장 강력한 Brain)
         """
         import subprocess
         import re as _re_ctrl
+        model = os.environ.get("VXIS_BRAIN_MODEL", "claude-opus-4-6")
         combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
         try:
             result = subprocess.run(
-                ["claude", "-p", combined],
+                ["claude", "-p", combined, "--model", model],
                 capture_output=True, text=True, timeout=120,
             )
             if result.returncode == 0 and result.stdout.strip():

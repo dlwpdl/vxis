@@ -63,28 +63,38 @@ def _parse_llm_json(response: str) -> dict:
         if _cb:
             clean = _cb.group(1).strip()
 
-    # 3. 가장 바깥 { ... } 블록 추출 — 앞뒤 설명 텍스트 제거
-    _m = _re.search(r'\{[\s\S]*\}', clean)
-    if _m:
-        clean = _m.group(0)
+    # 3. { 시작 위치 찾기 — 앞 설명 텍스트 스킵
+    _start = clean.find('{')
+    if _start > 0:
+        clean = clean[_start:]
 
     # 4. trailing comma 제거 (LLM의 흔한 실수: {"a": 1,})
     clean = _re.sub(r',(\s*[}\]])', r'\1', clean)
 
-    # 5. JSON 파싱 시도
+    # 5. Invalid \escape 제거 — JSON에서 유효하지 않은 백슬래시 시퀀스
+    # 유효: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX — 그 외 \ 는 \\ 로 이스케이프
+    # \\ 쌍을 먼저 원자적으로 처리해야 \\w 같은 유효 시퀀스가 망가지지 않음
+    clean = _re.sub(
+        r'\\\\|\\(?!["\\/bfnrtu])',
+        lambda m: m.group(0) if len(m.group(0)) == 2 else '\\\\',
+        clean,
+    )
+
+    # 6. raw_decode로 첫 번째 완전한 JSON 객체만 파싱 ("Extra data" 방지)
     try:
-        return _json.loads(clean)
+        obj, _ = _json.JSONDecoder().raw_decode(clean)
+        return obj
     except _json.JSONDecodeError:
         pass
 
-    # 6. 마지막 수단: 큰따옴표 안의 특수문자를 이스케이프하며 재시도
-    # (LLM이 JSON 문자열 안에 raw 개행을 넣는 경우)
+    # 7. 마지막 수단: 문자열 값 안의 raw 개행 이스케이프
     clean_safe = _re.sub(
         r'"((?:[^"\\]|\\.)*)"',
         lambda m: '"' + m.group(1).replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t') + '"',
         clean,
     )
-    return _json.loads(clean_safe)
+    obj, _ = _json.JSONDecoder().raw_decode(clean_safe)
+    return obj
 
 
 # ── 벡터 카테고리별 기본 attack 파라미터 ──────────────────────────────────────
@@ -444,18 +454,24 @@ class ScanPipeline:
         """
         import json as _json
 
-        live_urls = getattr(ctx, "live_urls", [])
-        endpoints = getattr(ctx, "endpoints_discovered", [])
+        # 알려진 벤치마크 앱 공통 엔드포인트 (컨텍스트 부족 시 fallback)
+        target_base = ctx.target.rstrip("/")
+        target_lower = target_base.lower()
+
+        # Phase 4 CPR이 크롤한 실제 엔드포인트 사용 (ctx.api_endpoints)
+        _api_eps = getattr(ctx, "api_endpoints", [])
+        live_urls = [
+            (target_base + ep["path"] if isinstance(ep, dict) and ep.get("path", "").startswith("/")
+             else ep["path"] if isinstance(ep, dict)
+             else ep)
+            for ep in _api_eps
+        ]
         tech_stack = getattr(ctx, "tech_stack", [])
         prev_findings = [
             {"id": getattr(f, "id", ""), "type": getattr(f, "finding_type", ""),
              "component": getattr(f, "affected_component", "")}
             for f in ctx.findings[-20:]
         ]
-
-        # 알려진 벤치마크 앱 공통 엔드포인트 (컨텍스트 부족 시 fallback)
-        target_base = ctx.target.rstrip("/")
-        target_lower = target_base.lower()
 
         # 벤치마크 앱별 알려진 취약 경로
         if "8081" in target_lower or "dvwa" in target_lower:
@@ -494,8 +510,8 @@ class ScanPipeline:
             app_specific = []
 
         app_specific_urls = [target_base + p if p.startswith("/") else p for p in app_specific]
-        discovered_urls = [e.get("url", "") for e in endpoints[:15]]
-        effective_endpoints = discovered_urls or live_urls[:10] or app_specific_urls[:8]
+        # 우선순위: Phase 4 크롤 결과 → 벤치마크 하드코딩 → base URL
+        effective_endpoints = live_urls[:15] or app_specific_urls[:8] or [target_base]
 
         # ── OpenAPI/Swagger 스펙 자동 탐지 ──
         api_spec_context = ""
@@ -544,37 +560,32 @@ class ScanPipeline:
                 "You are an expert penetration tester AI Brain for VXIS attacking a REST API. "
                 "You have the full API specification. Use it to craft precise attacks. "
                 "ALL attack vectors WILL be attempted — provide the best attack parameters for each. "
-                "For each vector ID, provide the attack. "
                 "For REST API endpoints: use 'json_body' (dict) instead of 'payloads' for POST/PUT requests. "
-                "Respond ONLY with a valid JSON object mapping vector_id → attack params. "
-                "Format per vector: {\"endpoint\": str, \"method\": \"GET\"|\"POST\"|\"PUT\"|\"DELETE\", "
-                "\"param\": str (for query/path params), "
-                "\"json_body\": {dict} (for JSON body attacks — null if not needed), "
-                "\"payloads\": [str] (for query param injection — empty if json_body used), "
-                "\"reasoning\": str}. "
                 "BOLA: use other users' resource IDs. "
                 "Mass assignment: add 'admin': true in registration body. "
                 "Auth bypass: try without Authorization header. "
                 "JWT attacks: modify algorithm to 'none', tamper user claims. "
                 "User enumeration: GET /users endpoints. "
-                "Info disclosure: check all GET endpoints without auth."
+                "Info disclosure: check all GET endpoints without auth.\n\n"
+                "OUTPUT RULE: Your ENTIRE response must be a single raw JSON object. "
+                "No text before {. No text after }. No markdown (no ```). No explanation. "
+                "Schema per vector_id key: {\"endpoint\": str, \"method\": \"GET\"|\"POST\"|\"PUT\"|\"DELETE\", "
+                "\"param\": str, \"json_body\": dict|null, \"payloads\": [str], \"reasoning\": str}"
             )
         else:
             system_prompt = (
                 "You are an expert penetration tester AI Brain for VXIS, an automated security scanner. "
                 "Target is a KNOWN INTENTIONALLY VULNERABLE benchmark app (DVWA, Juice Shop, WebGoat, NodeGoat). "
-                "ALL attack vectors WILL be attempted — your job is to provide the best attack parameters for each. "
-                "For each vector ID, provide: endpoint, method (GET/POST), param (parameter to inject), "
-                "payloads (3-5 specific attack payloads for this vector type), and reasoning. "
-                "Respond ONLY with a valid JSON object mapping vector_id → attack params. "
-                "Format: {\"endpoint\": str, \"method\": \"GET\"|\"POST\", \"param\": str, "
-                "\"payloads\": [str, ...], \"reasoning\": str}. "
-                "Use specific, effective payloads for each vulnerability type. "
+                "ALL attack vectors WILL be attempted — provide the best attack parameters for each. "
                 "SQL injection: use ' OR 1=1--, UNION SELECT payloads. "
                 "XSS: use <script>alert(1)</script> variants. "
                 "Path traversal: use ../../../etc/passwd variants. "
                 "Command injection: use ; ls, && id, | whoami. "
-                "If endpoint unknown, use the base target URL."
+                "If endpoint unknown, use the base target URL.\n\n"
+                "OUTPUT RULE: Your ENTIRE response must be a single raw JSON object. "
+                "No text before {. No text after }. No markdown (no ```). No explanation. "
+                "Schema per vector_id key: {\"endpoint\": str, \"method\": \"GET\"|\"POST\", "
+                "\"param\": str, \"payloads\": [str, ...], \"reasoning\": str}"
             )
 
         user_prompt = (
@@ -587,7 +598,7 @@ class ScanPipeline:
             f"Provide attack parameters for ALL these vectors.\n"
             + ("Use the API spec above to target real endpoints.\n" if api_spec_context else "Use the known vulnerable paths for this specific app.\n")
             + f"Vectors:\n{vec_list}\n\n"
-            f"Return JSON only. Every vector_id must have an entry."
+            "Output ONLY the raw JSON object. Every vector_id must be a key. Zero additional text."
         )
 
         try:
@@ -959,6 +970,7 @@ class ScanPipeline:
         session: Any,
         vector_id: str,
         endpoint: str,
+        _depth: int = 0,
     ) -> None:
         """Finding 확인 즉시 Brain-first 체이닝 follow-up 실행.
 
@@ -1056,7 +1068,12 @@ class ScanPipeline:
                                             description_en=_rsn[:120],
                                             description_ko=_rsn[:120],
                                         ))
-                                        logger.info("    [BRAIN-CHAIN] Hit: %s on %s (L%d)", _vid, _ep, _lvl)
+                                        print(f"      >> CHAIN L{_lvl} hit: {_vid} on {_ep[-40:]}", flush=True)
+                                        # 재귀 체이닝 — 새 finding에서 다시 체인 (max depth 3)
+                                        if _depth < 3:
+                                            await self._chain_from_finding(
+                                                ctx, _cf, session, _vid, _ep, _depth + 1,
+                                            )
                                     break
                             except Exception as _exc:
                                 logger.debug("    [BRAIN-CHAIN] attack failed: %s", _exc)
