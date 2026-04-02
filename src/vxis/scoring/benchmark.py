@@ -66,7 +66,7 @@ class BenchmarkRunner:
             scan_id: 스캔 ID (없으면 자동 생성).
 
         Returns:
-            계산된 VXISScore.
+            계산된 VXISScore. (ctx는 self.last_ctx에 보관)
         """
         if target_type not in _VALID_TARGET_TYPES:
             raise ValueError(
@@ -94,6 +94,8 @@ class BenchmarkRunner:
             findings=ctx.findings,
             scan_id=_scan_id,
         )
+
+        self.last_ctx = ctx  # 리포트 생성용 — findings, scan_id 등 보관
 
         logger.info(
             "[BENCHMARK] Score: %.1f [%s] for %s on %s",

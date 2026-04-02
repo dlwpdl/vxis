@@ -160,7 +160,7 @@ def run_single_benchmark(
     target_url: str,
     target_type: str = "web",
 ) -> dict:
-    """단일 타겟 벤치마크 실행. LLM Brain이 스캔을 수행한다."""
+    """단일 타겟 벤치마크 실행. LLM Brain이 스캔을 수행하고 NCC Group 스타일 HTML 리포트를 생성한다."""
     try:
         from vxis.scoring.benchmark import BenchmarkRunner
 
@@ -172,6 +172,43 @@ def run_single_benchmark(
             return score, comparison
 
         score, comparison = asyncio.run(_run())
+
+        # ── NCC Group 스타일 HTML 리포트 자동 생성 ──
+        report_path = None
+        ctx = getattr(runner, "last_ctx", None)
+        if ctx and ctx.findings:
+            try:
+                from vxis.report.generator import ReportGenerator, ReportData
+                scan_date = datetime.now(KST).strftime("%Y-%m-%d")
+                report_data = ReportData(
+                    scan_id=ctx.scan_id,
+                    client_name=f"{target_name.upper()} Security Assessment",
+                    target=target_url,
+                    scan_date=scan_date,
+                    findings=ctx.findings,
+                    company_name="VXIS Security",
+                    author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+                    executive_summary=(
+                        f"Automated security assessment of {target_name} at {target_url}. "
+                        f"VXIS autonomous Brain discovered {len(ctx.findings)} findings. "
+                        f"Score: {score.total:.1f}/1000 [{score.grade}]."
+                        f"|||"
+                        f"{target_name} ({target_url}) 자동 보안 평가. "
+                        f"VXIS 자율 Brain이 {len(ctx.findings)}개 취약점을 발견. "
+                        f"점수: {score.total:.1f}/1000 [{score.grade}]."
+                    ),
+                    attack_chains=[
+                        [f.id for f in ctx.findings]
+                    ] if len(ctx.findings) > 1 else None,
+                )
+                gen = ReportGenerator()
+                date_str = datetime.now(KST).strftime("%Y%m%d")
+                report_file = Path(f"reports/report_{target_name}_{date_str}.html")
+                gen.generate_html_file(report_data, report_file)
+                report_path = str(report_file)
+                print(f"  [REPORT] {report_path} ({len(ctx.findings)} findings)", flush=True)
+            except Exception as exc:
+                print(f"  [REPORT-FAIL] {exc}", flush=True)
 
         return {
             "target": target_name,
@@ -189,6 +226,7 @@ def run_single_benchmark(
             "score_obj": score,
             "comparison": comparison,
             "runner": runner,
+            "report_path": report_path,
             "error": None,
         }
     except Exception as exc:
