@@ -686,5 +686,21 @@
       "completeness": 100.0
     },
     "delta": 0.0
+  },
+  {
+    "date": "2026-04-02",
+    "iteration": 1,
+    "target_name": "mutillidae",
+    "target_type": "web",
+    "total": 783.8805970149253,
+    "grade": "A",
+    "dimensions": {
+      "vector_coverage": 123.88059701492537,
+      "exploitation_reach": 260.0,
+      "chain_intelligence": 100.0,
+      "finding_precision": 200.0,
+      "completeness": 100.0
+    },
+    "delta": 0.0
   }
 ]

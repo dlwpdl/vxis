@@ -55,6 +55,10 @@ TARGETS: dict[str, dict[str, str]] = {
     "juice-shop": {"url": "http://localhost:3000", "image": "bkimminich/juice-shop",        "port": "3000:3000"},
     "webgoat":    {"url": "http://localhost:8888/WebGoat", "image": "webgoat/webgoat",        "port": "8888:8080"},
     "nodegoat":   {"url": "http://localhost:4000", "image": "1njected/nodegoat",            "port": "4000:4000"},
+    "mutillidae": {"url": "http://localhost:8082", "image": "citizenstig/nowasp",           "port": "8082:80"},
+    "bwapp":      {"url": "http://localhost:8083", "image": "raesene/bwapp",                "port": "8083:80"},
+    "dvga":       {"url": "http://localhost:5013", "image": "dolevf/dvga",                  "port": "5013:5013"},
+    "crapi":      {"url": "http://localhost:8025", "compose": "tools/targets/crapi",         "port": "8025:8025"},
 }
 
 DIM_NAMES_KO: dict[str, str] = {
@@ -99,15 +103,27 @@ def ensure_docker_targets(target_names: list[str]) -> list[tuple[str, str]]:
             continue
 
         # Docker 기동 시도
-        print(f"  [START] {name} — docker run {cfg['image']}...")
-        try:
-            subprocess.run(
-                ["docker", "run", "-d", "--name", f"vxis-{name}",
-                 "-p", cfg["port"], cfg["image"]],
-                capture_output=True, text=True, timeout=60,
-            )
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
-            print(f"  [WARN] Docker start failed for {name}: {exc}")
+        if "compose" in cfg:
+            compose_dir = cfg["compose"]
+            print(f"  [START] {name} — docker compose up in {compose_dir}...")
+            try:
+                subprocess.run(
+                    ["docker", "compose", "-f", f"{compose_dir}/docker-compose.yml",
+                     "up", "-d"],
+                    capture_output=True, text=True, timeout=120,
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+                print(f"  [WARN] Docker compose failed for {name}: {exc}")
+        else:
+            print(f"  [START] {name} — docker run {cfg['image']}...")
+            try:
+                subprocess.run(
+                    ["docker", "run", "-d", "--name", f"vxis-{name}",
+                     "-p", cfg["port"], cfg["image"]],
+                    capture_output=True, text=True, timeout=60,
+                )
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
+                print(f"  [WARN] Docker start failed for {name}: {exc}")
 
         # 준비 대기 (최대 30초)
         if _wait_for_health(name, url, timeout=30):

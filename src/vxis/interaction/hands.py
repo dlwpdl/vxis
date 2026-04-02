@@ -487,21 +487,38 @@ class TargetSession:
             if data is not None:
                 data = self.csrf.inject_into_data(data)
 
-        try:
-            resp = await self._client.request(
-                method=method.upper(),
-                url=path,
-                data=data,
-                json=json_data,
-                headers=extra_headers if extra_headers else None,
-                params=params,
-            )
-        except httpx.TimeoutException:
-            logger.warning("Timeout: %s %s%s", method, self.base_url, path)
-            raise
-        except httpx.ConnectError as e:
-            logger.warning("Connection failed: %s %s%s: %s", method, self.base_url, path, e)
-            raise
+        max_retries = 2
+        last_exc: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                resp = await self._client.request(
+                    method=method.upper(),
+                    url=path,
+                    data=data,
+                    json=json_data,
+                    headers=extra_headers if extra_headers else None,
+                    params=params,
+                )
+                last_exc = None
+                break
+            except httpx.TimeoutException as e:
+                last_exc = e
+                _display_url = path if path.startswith("http") else f"{self.base_url}{path}"
+                if attempt < max_retries:
+                    wait = (attempt + 1) * 2.0
+                    logger.info("Timeout (attempt %d/%d): %s %s — retrying in %.0fs",
+                                attempt + 1, max_retries + 1, method, _display_url, wait)
+                    import asyncio as _aio
+                    await _aio.sleep(wait)
+                else:
+                    logger.warning("Timeout (final): %s %s", method, _display_url)
+            except httpx.ConnectError as e:
+                _display_url = path if path.startswith("http") else f"{self.base_url}{path}"
+                logger.warning("Connection failed: %s %s: %s", method, _display_url, e)
+                raise
+
+        if last_exc is not None:
+            raise last_exc
 
         self._request_count += 1
         self._last_request_time = time.monotonic()

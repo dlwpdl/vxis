@@ -168,6 +168,61 @@ _APP_VECTOR_ENDPOINTS: dict[str, dict[str, str]] = {
         "WEB-AUTH-001": "/WebGoat/auth-bypass/",
         "WEB-CSRF-001": "/WebGoat/csrf/basic-get-flag",
     },
+    "mutillidae_8082": {
+        "WEB-SQLI-001": "/index.php?page=user-info.php",
+        "WEB-SQLI-002": "/index.php?page=user-info.php",
+        "WEB-SQLI-003": "/index.php?page=login.php",
+        "WEB-SQLI-004": "/index.php?page=view-someones-blog.php",
+        "WEB-SQLI-005": "/index.php?page=user-info.php",
+        "WEB-SQLI-006": "/index.php?page=user-info.php",
+        "WEB-XSS-001": "/index.php?page=dns-lookup.php",
+        "WEB-XSS-002": "/index.php?page=add-to-your-blog.php",
+        "WEB-XSS-003": "/index.php?page=pen-test-tool-lookup.php",
+        "WEB-XSS-004": "/index.php?page=browser-info.php",
+        "WEB-CMDI-001": "/index.php?page=dns-lookup.php",
+        "WEB-CMDI-002": "/index.php?page=dns-lookup.php",
+        "WEB-LDAP-001": "/index.php?page=login.php",
+        "WEB-XPATH-001": "/index.php?page=login.php",
+        "WEB-XXE-001": "/index.php?page=xml-validator.php",
+        "WEB-UPLOAD-001": "/index.php?page=arbitrary-file-inclusion.php",
+        "WEB-AC-001": "/index.php?page=secret-administrative-pages.php",
+        "WEB-AC-004": "/index.php?page=arbitrary-file-inclusion.php",
+        "WEB-AUTH-001": "/index.php?page=login.php",
+        "WEB-AUTH-010": "/index.php?page=login.php",
+        "WEB-SSRF-001": "/index.php?page=text-file-viewer.php",
+        "WEB-SSRF-002": "/index.php?page=text-file-viewer.php",
+        "WEB-CSRF-001": "/index.php?page=register.php",
+        "WEB-SSTI-001": "/index.php?page=user-poll.php",
+        "WEB-MISCONF-001": "/index.php?page=source-viewer.php",
+    },
+    "bwapp_8083": {
+        "WEB-SQLI-001": "/bWAPP/sqli_1.php",
+        "WEB-SQLI-002": "/bWAPP/sqli_blind_1.php",
+        "WEB-SQLI-003": "/bWAPP/sqli_blind_2.php",
+        "WEB-SQLI-004": "/bWAPP/sqli_2.php",
+        "WEB-SQLI-005": "/bWAPP/sqli_6.php",
+        "WEB-XSS-001": "/bWAPP/xss_reflected_1.php",
+        "WEB-XSS-002": "/bWAPP/xss_stored_1.php",
+        "WEB-XSS-003": "/bWAPP/xss_dom.php",
+        "WEB-CMDI-001": "/bWAPP/os_cmd_exec.php",
+        "WEB-CMDI-002": "/bWAPP/os_cmd_exec.php",
+        "WEB-SSRF-001": "/bWAPP/ssrf.php",
+        "WEB-CSRF-001": "/bWAPP/csrf_1.php",
+        "WEB-AC-004": "/bWAPP/lfi.php",
+        "WEB-XXE-001": "/bWAPP/xxe-1.php",
+        "WEB-LDAP-001": "/bWAPP/ldapi.php",
+        "WEB-UPLOAD-001": "/bWAPP/unrestricted_file_upload.php",
+        "WEB-AUTH-001": "/bWAPP/login.php",
+    },
+    "dvga_5013": {
+        "WEB-API-003": "/graphql",
+        "WEB-API-004": "/graphql",
+        "WEB-SQLI-001": "/graphql",
+        "WEB-NOSQL-001": "/graphql",
+        "WEB-AUTH-001": "/graphql",
+        "WEB-AC-001": "/graphql",
+        "WEB-INJECT-018": "/graphql",
+    },
 }
 
 
@@ -184,13 +239,21 @@ def _make_fallback_decision(vec: Any, target: str, app_specific_urls: list[str])
         app_key = "nodegoat_4000"
     elif "8888" in target_lower:
         app_key = "webgoat_8888"
+    elif "8082" in target_lower:
+        app_key = "mutillidae_8082"
+    elif "8083" in target_lower:
+        app_key = "bwapp_8083"
+    elif "5013" in target_lower:
+        app_key = "dvga_5013"
 
     endpoint = target
     if app_key and vid in _APP_VECTOR_ENDPOINTS.get(app_key, {}):
         rel_path = _APP_VECTOR_ENDPOINTS[app_key][vid]
-        endpoint = target.rstrip("/") + rel_path
+        endpoint = rel_path
     elif app_specific_urls:
-        endpoint = app_specific_urls[0]  # 앱별 첫 번째 알려진 경로
+        _base = target.rstrip("/")
+        _first = app_specific_urls[0]
+        endpoint = _first[len(_base):] if _first.startswith(_base) else _first
 
     # 벡터 prefix로 fallback 파라미터 선택
     fb = {}
@@ -209,6 +272,16 @@ def _make_fallback_decision(vec: Any, target: str, app_specific_urls: list[str])
             "payloads": fb.get("payloads", [""]),
         }],
     }
+
+
+def _normalize_endpoint(endpoint: str, base_url: str) -> str:
+    """Strip base_url prefix from endpoint to avoid httpx double-concatenation."""
+    if not endpoint.startswith("http"):
+        return endpoint
+    base = base_url.rstrip("/")
+    if endpoint.startswith(base):
+        return endpoint[len(base):] or "/"
+    return endpoint
 
 
 class ScanPipeline:
@@ -329,7 +402,7 @@ class ScanPipeline:
         # ══════════════════════════════════════════════════════
         try:
             from vxis.scoring.engine import ScoringEngine
-            engine = ScoringEngine()
+            engine = ScoringEngine(ctx.target_type)
             vxis_score = engine.calculate(ctx.score_tracker, ctx.findings, scan_id=ctx.scan_id)
             ctx.vxis_score = vxis_score
             print(vxis_score.summary_text(), flush=True)
@@ -519,13 +592,63 @@ class ScanPipeline:
                 "/contributions", "/allocations/1", "/allocations/2",
                 "/login", "/profile", "/research", "/memo", "/tutorial",
             ]
+        elif "8082" in target_lower or "mutillidae" in target_lower:
+            app_name = "OWASP Mutillidae II"
+            app_specific = [
+                "/index.php?page=login.php",
+                "/index.php?page=user-info.php",
+                "/index.php?page=dns-lookup.php",
+                "/index.php?page=text-file-viewer.php",
+                "/index.php?page=source-viewer.php",
+                "/index.php?page=xml-validator.php",
+                "/index.php?page=set-up-database.php",
+                "/index.php?page=add-to-your-blog.php",
+                "/index.php?page=view-someones-blog.php",
+                "/index.php?page=register.php",
+                "/index.php?page=browser-info.php",
+                "/index.php?page=user-poll.php",
+                "/index.php?page=pen-test-tool-lookup.php",
+                "/index.php?page=capture-data.php",
+                "/index.php?page=arbitrary-file-inclusion.php",
+                "/index.php?page=secret-administrative-pages.php",
+                "/index.php?page=user-agent-impersonation.php",
+                "/index.php?page=view-user-privilege-level.php",
+                "/index.php?page=document-viewer.php",
+                "/index.php?page=site-footer-xss-discussion.php",
+                "/webservices/rest/ws-user-account.php",
+                "/webservices/soap/ws-lookup-dns.php",
+                "/ajax/index.php?page=pen-test-tool-lookup-ajax.php",
+                "/passwords/accounts.xml",
+            ]
+        elif "8083" in target_lower or "bwapp" in target_lower:
+            app_name = "bWAPP (Buggy Web Application)"
+            app_specific = [
+                "/bWAPP/sqli_1.php", "/bWAPP/sqli_2.php", "/bWAPP/sqli_6.php",
+                "/bWAPP/sqli_blind_1.php", "/bWAPP/sqli_blind_2.php",
+                "/bWAPP/xss_stored_1.php", "/bWAPP/xss_reflected_1.php",
+                "/bWAPP/xss_dom.php", "/bWAPP/os_cmd_exec.php",
+                "/bWAPP/htmli_get.php", "/bWAPP/htmli_post.php",
+                "/bWAPP/ssrf.php", "/bWAPP/csrf_1.php",
+                "/bWAPP/lfi.php", "/bWAPP/rfi.php",
+                "/bWAPP/unrestricted_file_upload.php",
+                "/bWAPP/xxe-1.php", "/bWAPP/xxe-2.php",
+                "/bWAPP/ldapi.php", "/bWAPP/smtp.php",
+                "/bWAPP/rlfi.php", "/bWAPP/ssi.php",
+                "/bWAPP/login.php",
+            ]
+        elif "5013" in target_lower or "dvga" in target_lower:
+            app_name = "Damn Vulnerable GraphQL Application (DVGA)"
+            app_specific = [
+                "/graphql",
+                "/graphiql",
+            ]
         else:
             app_name = "Unknown web application"
             app_specific = []
 
         app_specific_urls = [target_base + p if p.startswith("/") else p for p in app_specific]
         # 우선순위: Phase 4 크롤 결과 → 벤치마크 하드코딩 → base URL
-        effective_endpoints = live_urls[:15] or app_specific_urls[:8] or [target_base]
+        effective_endpoints = live_urls[:20] or app_specific_urls[:20] or [target_base]
 
         # ── OpenAPI/Swagger 스펙 자동 탐지 ──
         api_spec_context = ""
@@ -589,7 +712,7 @@ class ScanPipeline:
         else:
             system_prompt = (
                 "You are an expert penetration tester AI Brain for VXIS, an automated security scanner. "
-                "Target is a KNOWN INTENTIONALLY VULNERABLE benchmark app (DVWA, Juice Shop, WebGoat, NodeGoat). "
+                f"Target is {app_name}, a KNOWN INTENTIONALLY VULNERABLE benchmark app. "
                 "ALL attack vectors WILL be attempted — provide the best attack parameters for each. "
                 "SQL injection: use ' OR 1=1--, UNION SELECT payloads. "
                 "XSS: use <script>alert(1)</script> variants. "
@@ -602,11 +725,28 @@ class ScanPipeline:
                 "\"param\": str, \"payloads\": [str, ...], \"reasoning\": str}"
             )
 
+        # Vector→Endpoint 매핑 힌트 생성
+        _app_key = None
+        _tl = ctx.target.lower()
+        for _port, _key in [("8081", "dvwa_8081"), ("4000", "nodegoat_4000"),
+                            ("8888", "webgoat_8888"), ("8082", "mutillidae_8082"),
+                            ("8083", "bwapp_8083"), ("5013", "dvga_5013")]:
+            if _port in _tl:
+                _app_key = _key
+                break
+        _vec_endpoint_hints = ""
+        if _app_key and _app_key in _APP_VECTOR_ENDPOINTS:
+            _hints = _APP_VECTOR_ENDPOINTS[_app_key]
+            _vec_endpoint_hints = "Vector→Endpoint mapping (use these exact paths):\n" + "\n".join(
+                f"  {vid}: {path}" for vid, path in _hints.items()
+            ) + "\n"
+
         user_prompt = (
             f"Target app: {app_name} at {ctx.target}\n"
-            + (f"\n{api_spec_context}\n" if api_spec_context else f"Known vulnerable paths: {app_specific_urls[:6]}\n")
-            + f"Discovered endpoints: {effective_endpoints[:8]}\n"
-            f"Tech stack: {tech_stack or ['web', 'http']}\n"
+            + (f"\n{api_spec_context}\n" if api_spec_context else f"Known vulnerable paths: {app_specific_urls[:20]}\n")
+            + f"Discovered endpoints: {effective_endpoints[:15]}\n"
+            + _vec_endpoint_hints
+            + f"Tech stack: {tech_stack or ['web', 'http']}\n"
             f"Previous findings: {prev_findings}\n"
             f"Phase: {phase_name}\n\n"
             f"Provide attack parameters for ALL these vectors.\n"
@@ -783,6 +923,7 @@ class ScanPipeline:
 
             for target_spec in targets:
                 endpoint = target_spec.get("endpoint", "/")
+                endpoint = _normalize_endpoint(endpoint, ctx.target)
                 method = target_spec.get("method", "GET").upper()
                 param = target_spec.get("param", "")
                 payloads = target_spec.get("payloads", [])

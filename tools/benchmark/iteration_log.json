@@ -1,72 +1,33 @@
 {
-  "date": "2026-04-01",
+  "date": "2026-04-02",
   "total_iterations": 1,
-  "start_score": 867.3744911804613,
-  "final_score": 867.3744911804613,
+  "start_score": 783.8805970149253,
+  "final_score": 783.8805970149253,
   "total_growth": 0,
   "iterations": [
     {
       "iteration": 1,
-      "timestamp": "2026-04-01T04:38:52.120313+00:00",
-      "best_score": 867.3744911804613,
+      "timestamp": "2026-04-02T06:39:13.085031+00:00",
+      "best_score": 783.8805970149253,
       "weakest_dimension": "vector_coverage",
-      "weakest_pct": 0.57,
+      "weakest_pct": 0.5,
       "all_dimensions": {
-        "vector_coverage": 143.28358208955223,
-        "exploitation_reach": 274.0909090909091,
-        "chain_intelligence": 150.0,
+        "vector_coverage": 123.88059701492537,
+        "exploitation_reach": 260.0,
+        "chain_intelligence": 100.0,
         "finding_precision": 200.0,
         "completeness": 100.0
       },
       "improvement": 0.0,
       "results_per_target": [
         {
-          "target": "dvwa",
-          "score": 867.3744911804613,
+          "target": "mutillidae",
+          "score": 783.8805970149253,
           "grade": "A",
           "dimensions": {
-            "vector_coverage": 143.28358208955223,
-            "exploitation_reach": 274.0909090909091,
-            "chain_intelligence": 150.0,
-            "finding_precision": 200.0,
-            "completeness": 100.0
-          },
-          "error": null
-        },
-        {
-          "target": "juice-shop",
-          "score": 823.5820895522388,
-          "grade": "A",
-          "dimensions": {
-            "vector_coverage": 133.5820895522388,
-            "exploitation_reach": 240.0,
-            "chain_intelligence": 150.0,
-            "finding_precision": 200.0,
-            "completeness": 100.0
-          },
-          "error": null
-        },
-        {
-          "target": "webgoat",
-          "score": 829.4029850746268,
-          "grade": "A",
-          "dimensions": {
-            "vector_coverage": 139.40298507462686,
-            "exploitation_reach": 240.0,
-            "chain_intelligence": 150.0,
-            "finding_precision": 200.0,
-            "completeness": 100.0
-          },
-          "error": null
-        },
-        {
-          "target": "nodegoat",
-          "score": 831.5848032564451,
-          "grade": "A",
-          "dimensions": {
-            "vector_coverage": 139.40298507462686,
-            "exploitation_reach": 242.1818181818182,
-            "chain_intelligence": 150.0,
+            "vector_coverage": 123.88059701492537,
+            "exploitation_reach": 260.0,
+            "chain_intelligence": 100.0,
             "finding_precision": 200.0,
             "completeness": 100.0
           },
