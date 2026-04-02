@@ -1028,7 +1028,10 @@ class ScanPipeline:
                         logger.debug("    [FAIL-JSON] %s %s: %s", vector_id, endpoint, exc)
                     continue  # json_body 처리 완료 — payloads 루프 건너뜀
 
+                _endpoint_timed_out = False
                 for payload in payloads[:10]:  # 페이로드당 최대 10개
+                    if _endpoint_timed_out:
+                        break  # 이 엔드포인트는 응답 느림 → 나머지 페이로드 스킵
                     try:
                         if form_cache and form_cache.get("fields") and param:
                             # 폼 리플레이: 원본 필드 유지, 타겟만 교체
@@ -1114,6 +1117,9 @@ class ScanPipeline:
                                 )
 
                     except Exception as exc:
+                        import httpx as _httpx
+                        if isinstance(exc, _httpx.TimeoutException):
+                            _endpoint_timed_out = True  # 타임아웃 → 나머지 페이로드 스킵
                         logger.debug("    [FAIL] %s %s: %s", vector_id, endpoint, exc)
 
         # 세션은 닫지 않음 — 다음 Phase에서 재사용

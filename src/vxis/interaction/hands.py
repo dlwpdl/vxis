@@ -444,6 +444,9 @@ class TargetSession:
         self._history: list[AnalyzedResponse] = []
         self._max_history = 500  # OOM 방지
         self._discovered_endpoints: set[str] = set()
+        self._consecutive_timeouts = 0
+        self._base_timeout = timeout
+        self._effective_timeout = timeout  # 적응형: 느린 타겟이면 자동 증가
 
         client_kwargs: dict[str, Any] = {
             "base_url": self.base_url,
@@ -487,38 +490,31 @@ class TargetSession:
             if data is not None:
                 data = self.csrf.inject_into_data(data)
 
-        max_retries = 2
-        last_exc: Exception | None = None
-        for attempt in range(max_retries + 1):
-            try:
-                resp = await self._client.request(
-                    method=method.upper(),
-                    url=path,
-                    data=data,
-                    json=json_data,
-                    headers=extra_headers if extra_headers else None,
-                    params=params,
-                )
-                last_exc = None
-                break
-            except httpx.TimeoutException as e:
-                last_exc = e
-                _display_url = path if path.startswith("http") else f"{self.base_url}{path}"
-                if attempt < max_retries:
-                    wait = (attempt + 1) * 2.0
-                    logger.info("Timeout (attempt %d/%d): %s %s — retrying in %.0fs",
-                                attempt + 1, max_retries + 1, method, _display_url, wait)
-                    import asyncio as _aio
-                    await _aio.sleep(wait)
-                else:
-                    logger.warning("Timeout (final): %s %s", method, _display_url)
-            except httpx.ConnectError as e:
-                _display_url = path if path.startswith("http") else f"{self.base_url}{path}"
-                logger.warning("Connection failed: %s %s: %s", method, _display_url, e)
-                raise
+        # 적응형 타임아웃: 연속 타임아웃 시 서버가 느린 거 → 타임아웃 증가
+        if self._consecutive_timeouts >= 2 and self._effective_timeout < self._base_timeout * 3:
+            self._effective_timeout = min(self._effective_timeout * 1.5, self._base_timeout * 3)
+            self._client.timeout = httpx.Timeout(self._effective_timeout)
+            logger.info("  [ADAPTIVE] Slow target detected — timeout → %.0fs", self._effective_timeout)
 
-        if last_exc is not None:
-            raise last_exc
+        try:
+            resp = await self._client.request(
+                method=method.upper(),
+                url=path,
+                data=data,
+                json=json_data,
+                headers=extra_headers if extra_headers else None,
+                params=params,
+            )
+            self._consecutive_timeouts = 0
+        except httpx.TimeoutException:
+            self._consecutive_timeouts += 1
+            _display_url = path if path.startswith("http") else f"{self.base_url}{path}"
+            logger.warning("Timeout (%ds): %s %s", int(self._effective_timeout), method, _display_url)
+            raise
+        except httpx.ConnectError as e:
+            _display_url = path if path.startswith("http") else f"{self.base_url}{path}"
+            logger.warning("Connection failed: %s %s: %s", method, _display_url, e)
+            raise
 
         self._request_count += 1
         self._last_request_time = time.monotonic()
