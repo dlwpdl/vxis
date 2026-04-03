@@ -187,7 +187,7 @@ def run_single_benchmark(
                     scan_date=scan_date,
                     findings=ctx.findings,
                     company_name="VXIS Security",
-                    author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+                    author="VXIS Autonomous Brain",
                     executive_summary=(
                         f"Automated security assessment of {target_name} at {target_url}. "
                         f"VXIS autonomous Brain discovered {len(ctx.findings)} findings. "

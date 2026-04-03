@@ -3186,6 +3186,129 @@ class ScanPipeline:
         except Exception:
             pass
 
+    async def _enrich_findings_with_brain(self, ctx: ScanContext) -> None:
+        """Brain에게 각 finding의 상세 정보를 요청하여 CLAUDE.md 리포트 규칙에 맞게 보강.
+
+        description → WHAT/HOW/IMPACT/PoC/ATTACK PATH (bilingual)
+        remediation → Immediate/Short-term/Long-term (bilingual)
+        cvss, cwe_ids, evidence, references 추가
+        """
+        from vxis.agent.brain import AgentBrain as _ABrain
+        if not isinstance(self.brain, _ABrain):
+            return
+        if not ctx.findings:
+            return
+
+        print(f"  [ENRICH] Enriching {len(ctx.findings)} findings with Brain...", flush=True)
+
+        from vxis.models.finding import CVSSVector, Evidence, Reference, MitreAttack
+
+        for i, finding in enumerate(ctx.findings):
+            # 이미 보강된 finding은 건너뛰기 (description에 WHAT이 있으면 이미 상세)
+            if "WHAT" in finding.description and "HOW" in finding.description:
+                continue
+
+            system_prompt = (
+                "You are a senior security consultant writing an NCC Group style finding report. "
+                "For the given finding, generate DETAILED enrichment data in JSON format.\n\n"
+                "REQUIRED JSON schema:\n"
+                "{\n"
+                '  "description_en": "WHAT — ...\\nHOW — Step 1: ... Step N: ...\\nIMPACT — \\n- bullet1\\n- bullet2\\nPoC — Request/Response raw\\nATTACK PATH — ...",\n'
+                '  "description_ko": "취약점 설명(WHAT) — ...\\n공격 시나리오(HOW) — 1단계: ...\\n비즈니스 영향(IMPACT) — \\n- ...\\n개념 증명(PoC) — ...\\n공격 경로(ATTACK PATH) — ...",\n'
+                '  "remediation_en": "Immediate: ...\\nShort-term: ...\\nLong-term: ...",\n'
+                '  "remediation_ko": "즉시 조치: ...\\n단기 조치: ...\\n장기 조치: ...",\n'
+                '  "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",\n'
+                '  "cvss_score": 9.1,\n'
+                '  "cwe_ids": ["CWE-89"],\n'
+                '  "mitre_technique_id": "T1190",\n'
+                '  "mitre_technique_name": "Exploit Public-Facing Application",\n'
+                '  "mitre_tactic": "Initial Access",\n'
+                '  "references": [{"title": "OWASP ...", "url": "https://..."}]\n'
+                "}\n\n"
+                "OUTPUT RULE: Your ENTIRE response must be a single raw JSON object. "
+                "No text before {. No text after }. No markdown. No explanation."
+            )
+
+            user_prompt = (
+                f"Finding: {finding.title}\n"
+                f"Type: {finding.finding_type}\n"
+                f"Severity: {finding.severity.value}\n"
+                f"Target: {finding.target}\n"
+                f"Affected component: {finding.affected_component}\n"
+                f"Current description: {finding.description}\n"
+                f"Endpoint context: This is a {ctx.target} vulnerability scan finding.\n\n"
+                "Generate the complete enrichment JSON."
+            )
+
+            try:
+                response = self.brain._call_llm_with_fallback(system_prompt, user_prompt)
+                if not response:
+                    continue
+                enriched = _parse_llm_json(response)
+                if not enriched:
+                    continue
+
+                # description 보강
+                desc_en = enriched.get("description_en", "")
+                desc_ko = enriched.get("description_ko", "")
+                if desc_en and desc_ko:
+                    finding.description = f"{desc_en}|||{desc_ko}"
+
+                # remediation 보강
+                rem_en = enriched.get("remediation_en", "")
+                rem_ko = enriched.get("remediation_ko", "")
+                if rem_en and rem_ko:
+                    finding.remediation = f"{rem_en}|||{rem_ko}"
+
+                # CVSS
+                cvss_vec = enriched.get("cvss_vector", "")
+                cvss_score = enriched.get("cvss_score", 0)
+                if cvss_vec and "CVSS:3.1/" in cvss_vec:
+                    try:
+                        finding.cvss = CVSSVector(vector_string=cvss_vec, base_score=float(cvss_score))
+                    except Exception:
+                        pass
+
+                # CWE
+                cwe_list = enriched.get("cwe_ids", [])
+                if cwe_list and isinstance(cwe_list, list):
+                    finding.cwe_ids = cwe_list
+
+                # MITRE ATT&CK
+                mitre_tid = enriched.get("mitre_technique_id", "")
+                mitre_name = enriched.get("mitre_technique_name", "")
+                mitre_tactic = enriched.get("mitre_tactic", "")
+                if mitre_tid:
+                    try:
+                        finding.mitre_attack = MitreAttack(
+                            technique_id=mitre_tid,
+                            technique_name=mitre_name,
+                            tactic=mitre_tactic,
+                        )
+                    except Exception:
+                        pass
+
+                # Evidence (HTTP request/response from original description)
+                if not finding.evidence:
+                    finding.evidence = [Evidence(
+                        evidence_type="http_request_response",
+                        title=f"Probe result for {finding.affected_component}",
+                        content=f"Endpoint: {finding.affected_component}\nFinding type: {finding.finding_type}\nSeverity: {finding.severity.value}",
+                    )]
+
+                # References
+                refs = enriched.get("references", [])
+                if refs and isinstance(refs, list) and not finding.references:
+                    finding.references = [
+                        Reference(title=r.get("title", ""), url=r.get("url", ""))
+                        for r in refs if r.get("url")
+                    ]
+
+                print(f"    ✓ {finding.id}: enriched", flush=True)
+
+            except Exception as exc:
+                logger.debug("  [ENRICH-FAIL] %s: %s", finding.id, exc)
+
     async def _phase6_report(self, ctx: ScanContext) -> None:
         """Phase 6: NCC Group 스타일 리포트 생성."""
         try:
@@ -3195,6 +3318,9 @@ class ScanPipeline:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
+
+        # ── Brain으로 findings 보강 (CLAUDE.md 리포트 규칙 준수) ──
+        await self._enrich_findings_with_brain(ctx)
 
         from vxis.report.generator import ReportGenerator, ReportData
         from vxis.models.finding import Severity

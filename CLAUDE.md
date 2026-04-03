@@ -122,7 +122,7 @@ ReportData(
     scan_date="YYYY-MM-DD or ISO8601",
     findings=FINDINGS_LIST,
     company_name="VXIS Security",
-    author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
+    author="VXIS Autonomous Brain",
     executive_summary="English summary|||한국어 요약",
     attack_chains=[["ID-001", "ID-002"], ...],       # 체인 공격 경로
 )
