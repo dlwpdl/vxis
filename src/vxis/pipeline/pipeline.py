@@ -399,32 +399,29 @@ class ScanPipeline:
                               self._phase11_mutation, ctx)
 
         # ══════════════════════════════════════════════════════
-        # STAGE 6: DEFENSE + LEARNING (방어 + 자가 학습)
-        # Phase 10(Red vs Blue)은 전체 findings 필요
-        # Phase 12(자가 진화)는 커버리지 갭 분석
-        # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 10: Red vs Blue — Defense Rule Generation",
-                              self._phase10_red_vs_blue, ctx)
-        await self._run_phase("Phase 12: Self-Evolving Agent — Coverage Gap Analysis",
-                              self._phase12_evolution, ctx)
-
-        # ══════════════════════════════════════════════════════
-        # STAGE 7: DEFERRED ACTIONS (데이터 변조 — 승인 후 실행)
+        # STAGE 6: DEFERRED ACTIONS (데이터 변조 — 승인 후 실행)
         # ══════════════════════════════════════════════════════
         if ctx.deferred_actions and self.enable_deferred_approval:
             await self._execute_deferred_actions(ctx)
 
         # ══════════════════════════════════════════════════════
-        # STAGE 8: OUTPUT (리포트 + 공유 + 제출)
-        # Phase 6(리포트)은 모든 findings + chains + defense rules 완료 후
-        # Phase 16-19는 리포트 이후 후속 작업
+        # STAGE 7: OUTPUT (리포트 + 공유 + 제출)
         # ══════════════════════════════════════════════════════
         await self._run_phase("Phase 6: Report Generation — NCC Group Style",
                               self._phase6_report, ctx)
-        await self._run_phase("Phase 16: Industry Intelligence — Sector Risk Heatmap",
-                              self._phase16_industry, ctx)
         await self._run_phase("Phase 17: Outreach",
                               self._phase17_outreach, ctx)
+
+        # ══════════════════════════════════════════════════════
+        # STAGE 8: OPTIONAL — Defense + Learning + Intelligence
+        # 핵심 스캔/리포트와 무관. 있으면 좋지만 없어도 됨.
+        # ══════════════════════════════════════════════════════
+        await self._run_phase("Phase 10: Red vs Blue — Defense Rule Generation",
+                              self._phase10_red_vs_blue, ctx)
+        await self._run_phase("Phase 12: Self-Evolving Agent — Coverage Gap Analysis",
+                              self._phase12_evolution, ctx)
+        await self._run_phase("Phase 16: Industry Intelligence — Sector Risk Heatmap",
+                              self._phase16_industry, ctx)
         await self._run_phase("Phase 18: Collective Intelligence Update",
                               self._phase18_collective, ctx)
         await self._run_phase("Phase 19: Bug Bounty Submission",
