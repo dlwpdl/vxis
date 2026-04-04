@@ -43,6 +43,7 @@ class MissionConfig(BaseModel):
     perspective: Perspective = Perspective.EXTERNAL
     scope: Scope = Scope.FULL
     custom_agents: list[str] = []
+    proxy_pool: list[str] = []
     memory: MemoryConfig = MemoryConfig()
     # Convenience field: populates memory.client_id when provided directly.
     # Not stored as a persistent field — resolved via model_validator.

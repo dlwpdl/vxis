@@ -52,6 +52,9 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from vxis.ghost.layer import ghost_layer
+from vxis.ghost.transport import GhostTransport
+
 logger = logging.getLogger(__name__)
 
 
@@ -434,6 +437,7 @@ class TargetSession:
         verify_ssl: bool = False,
         user_agent: str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         proxy: str | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.auth_state = AuthState.ANONYMOUS
@@ -461,7 +465,9 @@ class TargetSession:
                 "Accept-Encoding": "gzip, deflate, br",
             },
         }
-        if proxy:
+        if transport is not None:
+            client_kwargs["transport"] = transport
+        elif proxy:
             client_kwargs["proxy"] = proxy
         self._client = httpx.AsyncClient(**client_kwargs)
 
@@ -711,12 +717,16 @@ class TargetSession:
             logger.warning("WAF block detected — session marked as blocked")
 
     async def _throttle(self) -> None:
-        if self._min_delay > 0:
+        if ghost_layer.is_active():
+            effective = max(ghost_layer.next_delay(), self._min_delay)
+        else:
+            effective = self._min_delay
+
+        if effective > 0:
             elapsed = time.monotonic() - self._last_request_time
-            if elapsed < self._min_delay:
-                await asyncio.sleep(self._min_delay - elapsed)
-            # 성공 시 딜레이 점진적 감소 (cooldown)
-            elif self._min_delay > 0 and elapsed > self._min_delay * 3:
+            if elapsed < effective:
+                await asyncio.sleep(effective - elapsed)
+            elif not ghost_layer.is_active() and self._min_delay > 0 and elapsed > self._min_delay * 3:
                 self._min_delay = max(self._min_delay - 0.2, 0.0)
 
 
@@ -857,9 +867,12 @@ class SessionManager:
         """타겟 URL에 대한 세션 반환 (없으면 생성)."""
         key = urlparse(base_url).netloc
         if key not in self._sessions:
+            # GhostLayer 활성 시 GhostTransport 주입
+            if ghost_layer.is_active() and "transport" not in kwargs:
+                kwargs["transport"] = GhostTransport(ghost_layer)
             session = TargetSession(base_url, **kwargs)
             self._sessions[key] = session
-            logger.info("New session created: %s", base_url)
+            logger.info("New session created: %s (ghost=%s)", base_url, ghost_layer.is_active())
         return self._sessions[key]
 
     async def close_session(self, base_url: str) -> None:

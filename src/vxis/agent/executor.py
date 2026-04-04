@@ -30,6 +30,8 @@ from vxis.core.events import ScanEventBus
 from vxis.core.orchestrator import ScanOrchestrator, ScanResult
 from vxis.core.scanner import ToolResult, run_tool
 from vxis.models.finding import Finding
+from vxis.ghost.layer import ghost_layer
+from vxis.ghost.trigger import parse_ghost_trigger
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +148,15 @@ class AgentExecutor:
 
         logger.info("VXIS Agent starting autonomous scan: %s", target)
 
+        # ── Phase 0-pre: GhostLayer 트리거 체크 ─────────────────
+        self._ghost_activated_here = False
+        ghost_activated, target = parse_ghost_trigger(target, self._config)
+        if ghost_activated:
+            proxy_pool = list(getattr(self._config, "proxy_pool", []))
+            ghost_layer.activate(proxy_pool)
+            self._ghost_activated_here = True
+            logger.info("[Ghost] 익명화 모드 — target: %s, proxies: %d개", target, len(proxy_pool))
+
         # ── Phase 0: CPR 인터랙션 레이어 시작 ──
         if self._interaction_controller_cls is not None:
             try:
@@ -258,6 +269,11 @@ class AgentExecutor:
                 await self._sandbox_manager.cleanup_all()
             except Exception as exc:
                 logger.warning("sandbox 정리 중 오류 (무시): %s", exc)
+            finally:
+                if self._ghost_activated_here:
+                    ghost_layer.deactivate()
+        elif self._ghost_activated_here:
+            ghost_layer.deactivate()
 
         return AgentScanResult(
             target=target,

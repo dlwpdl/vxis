@@ -21,6 +21,8 @@ from dataclasses import field
 from datetime import datetime, timezone
 from typing import Any, TextIO
 
+from vxis.ghost.trigger import detect_ghost_keyword
+from vxis.ghost.layer import ghost_layer
 from vxis.agent.brain import (
     AgentAction,
     AgentObservation,
@@ -66,6 +68,13 @@ class InteractiveBrain:
                 logger.warning("stdin closed or empty — 스캔 종료")
                 self.is_done = True
                 return {"actions": [{"tool": "DONE", "reasoning": "stdin closed"}]}
+
+            # ghost 키워드 감지 (JSON 파싱 전 raw text 검사)
+            if detect_ghost_keyword(line) and not ghost_layer.is_active():
+                ghost_layer.activate()
+                self._emit({"type": "ghost_activated", "message": "[GHOST MODE ACTIVATED] 익명화 모드 활성화됨"})
+                logger.info("[Ghost] Brain 자연어 트리거 감지 → 활성화")
+
             return json.loads(line.strip())
         except json.JSONDecodeError as e:
             logger.error("Invalid JSON from stdin: %s", e)
