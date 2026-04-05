@@ -26,8 +26,13 @@ class GhostVerifier:
         try:
             resp = await session.get("/")
             if resp.status == 200:
-                data = json.loads(resp.text)
-                result["detected_ip"] = data.get("ip")
+                text = resp.text.strip()
+                try:
+                    data = json.loads(text)
+                    result["detected_ip"] = data.get("ip")
+                except json.JSONDecodeError:
+                    # plain text IP 응답 (쿼리스트링 누락 시)
+                    result["detected_ip"] = text
                 logger.info("[GhostVerifier] 노출 IP: %s", result["detected_ip"])
             else:
                 result["error"] = f"HTTP {resp.status}"

@@ -39,8 +39,10 @@ class SubfinderPlugin(BasePlugin):
             "aggressive": 30,
         }
         threads = threads_map.get(scan_profile, 10)
+        from urllib.parse import urlparse
+        domain = urlparse(target).hostname or target
         return (
-            f"subfinder -d {target} -all -recursive -timeout 30"
+            f"subfinder -d {domain} -all -recursive -timeout 30"
             f" -t {threads} -oJ -silent"
         )
 

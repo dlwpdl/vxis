@@ -33,7 +33,9 @@ class CheckdmarcPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        return f"checkdmarc {target} -f json"
+        from urllib.parse import urlparse
+        domain = urlparse(target).hostname or target
+        return f"checkdmarc {domain} -f json"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []

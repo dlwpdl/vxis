@@ -119,8 +119,9 @@ class AgentExecutor:
 
         # ── Sandbox 초기화 ──────────────────────────────────────
         self._sandbox_available: bool = DockerSandbox.is_available()
+        _proxy = self._config.proxy_pool[0] if self._config.proxy_pool else None
         self._sandbox_manager: SandboxManager | None = (
-            get_sandbox_manager() if self._sandbox_available else None
+            get_sandbox_manager(proxy_url=_proxy) if self._sandbox_available else None
         )
         if self._sandbox_available:
             logger.info("Docker sandbox 활성화 — 도구를 컨테이너 안에서 실행합니다.")

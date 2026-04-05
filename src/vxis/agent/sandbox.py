@@ -95,7 +95,7 @@ class DockerSandbox:
 
     # ── Container lifecycle ──────────────────────────────────────
 
-    async def create_container(self) -> str:
+    async def create_container(self, proxy_url: str | None = None) -> str:
         """컨테이너를 생성하고 시작한 뒤 container_id를 반환.
 
         컨테이너는 `sleep infinity`로 대기 상태를 유지한다.
@@ -118,6 +118,16 @@ class DockerSandbox:
 
         container_name = f"vxis-sandbox-{uuid.uuid4().hex[:12]}"
 
+        proxy_env: list[str] = []
+        if proxy_url:
+            proxy_env = [
+                "--env", f"ALL_PROXY={proxy_url}",
+                "--env", f"HTTPS_PROXY={proxy_url}",
+                "--env", f"HTTP_PROXY={proxy_url}",
+                "--env", "NO_PROXY=localhost,127.0.0.1",
+            ]
+            logger.info("컨테이너 프록시 설정: %s", proxy_url)
+
         cmd = [
             "docker", "run",
             "--detach",
@@ -125,6 +135,7 @@ class DockerSandbox:
             "--network", "bridge",
             # 워크스페이스 볼륨 마운트
             "--volume", f"{_WORKSPACE_HOST}:{_WORKSPACE_CONTAINER}:rw",
+            *proxy_env,
             # 리소스 제한 — 단일 컨테이너가 호스트 CPU/메모리를 독점하지 않도록
             "--memory", "2g",
             "--cpus", "2.0",
@@ -312,9 +323,11 @@ class SandboxManager:
         self,
         image: str = _DEFAULT_IMAGE,
         default_timeout: int = 600,
+        proxy_url: str | None = None,
     ) -> None:
         self._image = image
         self._default_timeout = default_timeout
+        self._proxy_url = proxy_url
         # target str → DockerSandbox
         self._sandboxes: dict[str, DockerSandbox] = {}
         # 컨테이너 생성 중 동시 접근 방지용 락 (target별)
@@ -350,7 +363,7 @@ class SandboxManager:
                 image=self._image,
                 timeout=self._default_timeout,
             )
-            await sandbox.create_container()
+            await sandbox.create_container(proxy_url=self._proxy_url)
             self._sandboxes[target] = sandbox
             logger.info(
                 "SandboxManager: 새 컨테이너 할당 — target=%s cid=%s",
@@ -418,12 +431,14 @@ _global_manager: SandboxManager | None = None
 def get_sandbox_manager(
     image: str = _DEFAULT_IMAGE,
     default_timeout: int = 600,
+    proxy_url: str | None = None,
 ) -> SandboxManager:
     """전역 SandboxManager 싱글톤을 반환 (없으면 생성).
 
     Args:
         image: Docker 이미지. 첫 호출 시에만 적용된다.
         default_timeout: 기본 툴 실행 타임아웃(초).
+        proxy_url: 컨테이너에 주입할 프록시 URL.
 
     Returns:
         SandboxManager 싱글톤 인스턴스.
@@ -433,5 +448,6 @@ def get_sandbox_manager(
         _global_manager = SandboxManager(
             image=image,
             default_timeout=default_timeout,
+            proxy_url=proxy_url,
         )
     return _global_manager

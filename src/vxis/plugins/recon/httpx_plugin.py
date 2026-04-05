@@ -41,26 +41,34 @@ class HttpxPlugin(BasePlugin):
         }
         rate = rate_map.get(scan_profile, 150)
 
+        from urllib.parse import urlparse
+
         # Collect subdomains from subfinder output; fall back to target itself.
         subdomains: list[str] = ctx.get_data("subfinder", "subdomains", [])
         if not subdomains:
-            subdomains = [target]
+            # URL → hostname 변환 (Docker 컨테이너에서 읽을 수 있는 형태)
+            host = urlparse(target).hostname or target
+            subdomains = [host]
 
-        # Write subdomains to a deterministic temp file path.  In real execution
-        # the engine would manage temp-file lifecycle; we embed the write here so
-        # that the command string is immediately usable.
-        tmp = tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".txt",
-            prefix="vxis_httpx_",
-            delete=False,
-        )
-        tmp.write("\n".join(subdomains))
-        tmp.close()
-        input_file = tmp.name
+        if len(subdomains) == 1:
+            # 단일 호스트는 파일 없이 직접 전달 (Windows temp 경로 → Docker 불일치 방지)
+            return (
+                f"httpx -u {subdomains[0]} -json -title -tech-detect -status-code"
+                f" -follow-redirects -rate-limit {rate} -tls-grab -cdn -cname -asn"
+                f" -response-header -favicon -method -websocket -ip -silent"
+            )
+
+        # 여러 호스트는 /workspace에 파일 저장 (Docker 마운트 경로)
+        import os
+        workspace = "/tmp/vxis_workspace"
+        os.makedirs(workspace, exist_ok=True)
+        input_file_host = os.path.join(workspace, "httpx_input.txt")
+        input_file_container = "/workspace/httpx_input.txt"
+        with open(input_file_host, "w") as f:
+            f.write("\n".join(subdomains))
 
         return (
-            f"httpx -l {input_file} -json -title -tech-detect -status-code"
+            f"httpx -l {input_file_container} -json -title -tech-detect -status-code"
             f" -follow-redirects -rate-limit {rate} -tls-grab -cdn -cname -asn"
             f" -response-header -favicon -method -websocket -ip -silent"
         )

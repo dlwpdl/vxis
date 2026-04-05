@@ -252,6 +252,18 @@ class DAGExecutor:
                     elapsed_seconds=elapsed,
                 ))
 
+            except asyncio.CancelledError:
+                node.state = TaskState.FAILED
+                elapsed = time.monotonic() - node.started_at
+                node.error = "Cancelled"
+                await self._emit(NodeEvent(
+                    event_type=EventType.NODE_FAILED,
+                    plugin_name=name,
+                    elapsed_seconds=elapsed,
+                    error="Cancelled",
+                ))
+                raise
+
             except Exception as exc:  # noqa: BLE001
                 node.state = TaskState.FAILED
                 elapsed = time.monotonic() - node.started_at

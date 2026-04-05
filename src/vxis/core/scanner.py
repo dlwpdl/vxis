@@ -100,6 +100,13 @@ async def run_tool(
             raise TimeoutError(
                 f"Command '{command_label}' timed out after {timeout} second(s)."
             )
+        except asyncio.CancelledError:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            await process.wait()
+            raise
         stdout = stdout_bytes.decode(errors="replace")
         stderr = stderr_bytes.decode(errors="replace")
 
@@ -173,5 +180,12 @@ async def _stream_output(
         raise TimeoutError(
             f"Command '{command_label}' timed out after {timeout} second(s)."
         )
+    except asyncio.CancelledError:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        await process.wait()
+        raise
 
     return "\n".join(stdout_lines), "\n".join(stderr_lines), lines_emitted
