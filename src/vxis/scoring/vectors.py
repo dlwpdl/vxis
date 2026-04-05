@@ -793,6 +793,63 @@ GAME_VECTORS: tuple[AttackVector, ...] = (
         target_types=("game",), phase="Phase 12", max_depth=3,
         owasp_id="API1:2023",
     ),
+    # ── Extended: Vectors used by game_pipeline sub-phases ──
+    AttackVector(
+        id="GAME-MOBILE-XREF-001", category="client",
+        name_en="Mobile Game Cross-Platform Advisory — Mobile Pipeline Recommended",
+        name_ko="모바일 게임 크로스플랫폼 권고사항 — 모바일 파이프라인 추가 실행 권장",
+        target_types=("game",), phase="Phase 1", max_depth=1,
+        owasp_id="API8:2023",
+    ),
+    AttackVector(
+        id="GAME-PROTO-REPLAY-001", category="protocol",
+        name_en="HTTP API Replay Attack — Critical Action Re-Submission",
+        name_ko="HTTP API 리플레이 공격 — 중요 요청 재전송 취약점",
+        target_types=("game",), phase="Phase 4", max_depth=3,
+        owasp_id="API8:2023",
+    ),
+    AttackVector(
+        id="GAME-LOGIC-GM-001", category="game_logic",
+        name_en="GM / Admin Command Injection — Unauthorized Privilege Escalation",
+        name_ko="GM / 관리자 명령 인젝션 — 비인가 권한 상승",
+        target_types=("game",), phase="Phase 5", max_depth=4,
+        owasp_id="API1:2023",
+    ),
+    AttackVector(
+        id="GAME-LOGIC-TIME-001", category="game_logic",
+        name_en="Client Timestamp Manipulation — Time-Based Logic Bypass",
+        name_ko="클라이언트 타임스탬프 조작 — 시간 기반 로직 우회",
+        target_types=("game",), phase="Phase 8", max_depth=3,
+        owasp_id="API4:2023",
+    ),
+    AttackVector(
+        id="GAME-LOGIC-GACHA-001", category="game_logic",
+        name_en="Gacha / RNG Manipulation — Predictable Randomness",
+        name_ko="가챠 / RNG 조작 — 예측 가능한 난수",
+        target_types=("game",), phase="Phase 8", max_depth=3,
+        owasp_id="API4:2023",
+    ),
+    AttackVector(
+        id="GAME-ECON-TRADE-001", category="economy",
+        name_en="Gift & Trade System Abuse — Negative Quantity / Self-Transfer",
+        name_ko="선물 & 거래 시스템 남용 — 음수 수량 / 자기 전송",
+        target_types=("game",), phase="Phase 8", max_depth=3,
+        owasp_id="API4:2023",
+    ),
+    AttackVector(
+        id="GAME-CLIENT-SAVE-001", category="client",
+        name_en="Save File Manipulation — Plaintext Values / Cheat Options Exposure",
+        name_ko="세이브파일 조작 — 평문 값 / 치트 옵션 노출",
+        target_types=("game",), phase="Phase 10", max_depth=3,
+        owasp_id="API8:2023",
+    ),
+    AttackVector(
+        id="GAME-CLIENT-CLOUD-001", category="client",
+        name_en="Cloud Save Integrity Bypass — Tampered Progress Upload",
+        name_ko="클라우드 세이브 무결성 우회 — 조작된 진행도 업로드",
+        target_types=("game",), phase="Phase 10", max_depth=3,
+        owasp_id="API8:2023",
+    ),
 )
 
 
