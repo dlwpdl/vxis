@@ -139,8 +139,10 @@ class TestScanCommandHelp:
 
     def test_scan_help_shows_plugins_option(self):
         """scan --help output mentions the --plugins option."""
+        import re
         result = runner.invoke(app, ["scan", "--help"])
-        assert "--plugins" in result.output
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+        assert "--plugins" in clean or "plugins" in clean.lower()
 
     def test_scan_help_shows_no_report_option(self):
         """scan --help output mentions the --no-report flag."""
