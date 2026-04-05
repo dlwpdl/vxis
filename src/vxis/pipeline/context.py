@@ -81,6 +81,7 @@ class ScanContext:
 
     # ── Ghost Mode ──
     ghost_active: bool = False
+    ghost_verified_ip: str | None = None  # 실제 노출 IP (None = 검증 안됨)
 
     # ── Deferred Actions (데이터 변조 대기열) ──
     deferred_actions: list[DeferredAction] = field(default_factory=list)

@@ -149,6 +149,23 @@ class VXISConfig(BaseSettings):
     github_token: SecretStr | None = None
 
     # ------------------------------------------------------------------
+    # Ghost Mode — 익명화 프록시 풀
+    # ------------------------------------------------------------------
+    proxy_pool: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Ghost 모드 프록시 목록. 콤마 구분 env var: VXIS_PROXY_POOL. "
+            "예: socks5://127.0.0.1:9050,http://user:pass@proxy:8080. "
+            "Tor(socks5://127.0.0.1:9050) 사용 시 출구 노드 오염 경고 발생. "
+            "VXIS_GHOST_ALLOW_TOR=true 로 경고 무시 가능."
+        ),
+    )
+    ghost_allow_tor: bool = Field(
+        default=False,
+        description="Tor 출구 노드 오염 경고를 무시하고 강제 사용. VXIS_GHOST_ALLOW_TOR=true.",
+    )
+
+    # ------------------------------------------------------------------
     # Ollama (local uncensored LLM)
     # ------------------------------------------------------------------
     ollama_base_url: str = Field(

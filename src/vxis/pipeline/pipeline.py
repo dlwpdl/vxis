@@ -347,8 +347,33 @@ class ScanPipeline:
                 logger.info("[Ghost] brain_mode=uncensored 감지 → 자동 익명화 활성화")
         if _ghost_activated:
             _proxy_pool = list(getattr(self.config, "proxy_pool", []) if self.config else [])
+            # ── Tor 출구 노드 오염 경고 ─────────────────────────────
+            _tor_proxies = [p for p in _proxy_pool if "9050" in p or "9150" in p]
+            _allow_tor = getattr(self.config, "ghost_allow_tor", False) if self.config else False
+            if _tor_proxies and not _allow_tor:
+                logger.warning(
+                    "[Ghost] ⚠️  Tor 출구 노드 감지: %s\n"
+                    "         출구 노드 IP가 과거 범죄에 연루됐을 수 있음 (오염 위험).\n"
+                    "         Residential proxy 또는 전용 VPS 사용 권장.\n"
+                    "         강제 사용: VXIS_GHOST_ALLOW_TOR=true",
+                    _tor_proxies,
+                )
+                _proxy_pool = [p for p in _proxy_pool if p not in _tor_proxies]
+                if not _proxy_pool:
+                    logger.warning("[Ghost] 사용 가능한 프록시 없음 — UA/timing만 적용 (IP 노출)")
+            # ────────────────────────────────────────────────────────
             _ghost_layer.activate(_proxy_pool)
             ctx.ghost_active = True
+            # 실제 노출 IP 검증
+            try:
+                from vxis.ghost.verifier import GhostVerifier
+                import asyncio as _asyncio
+                _v = GhostVerifier()
+                _vr = _asyncio.get_event_loop().run_until_complete(_v.check())
+                _v.log_summary(_vr)
+                ctx.ghost_verified_ip = _vr.get("detected_ip")
+            except Exception as _ve:
+                logger.debug("[Ghost] IP 검증 실패 (무시): %s", _ve)
         # ─────────────────────────────────────────────────────────
 
         logger.info("=" * 70)
