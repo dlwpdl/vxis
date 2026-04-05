@@ -76,7 +76,7 @@ jobs:
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
         run: |
           python - <<'PYEOF'
-          import json, os, sys, urllib.request, urllib.error, logging
+          import json, os, sys, textwrap, urllib.request, urllib.error, logging
           from pathlib import Path
 
           logging.basicConfig(level=logging.INFO)
@@ -116,62 +116,57 @@ jobs:
           # Claude/Together API 호출
           use_anthropic = bool(os.environ.get("ANTHROPIC_API_KEY"))
 
-          system_prompt = """You are a senior security engineer implementing a code change for VXIS,
-an AI-powered autonomous pentesting platform.
+          system_prompt = textwrap.dedent("""\
+              You are a senior security engineer implementing a code change for VXIS,
+              an AI-powered autonomous pentesting platform.
 
-You will receive:
-1. A GitHub Issue describing what needs to be implemented
-2. A summary of the VXIS codebase structure
+              You will receive:
+              1. A GitHub Issue describing what needs to be implemented
+              2. A summary of the VXIS codebase structure
 
-Your job:
-1. Analyze the issue and determine which files need to change
-2. Write the actual code changes (full file content or patches)
-3. Output a JSON with your implementation plan and code
+              Your job:
+              1. Analyze the issue and determine which files need to change
+              2. Write the actual code changes (full file content or patches)
+              3. Output a JSON with your implementation plan and code
 
-Output valid JSON:
-{
-  "plan": "한국어로 구현 계획 설명 (3-5문장)",
-  "files": [
-    {
-      "path": "src/vxis/path/to/file.py",
-      "action": "modify|create",
-      "description": "이 파일에서 무엇을 바꾸는지",
-      "content": "... full file content or diff ..."
-    }
-  ],
-  "test_files": [
-    {
-      "path": "tests/unit/test_xxx.py",
-      "content": "... test code ..."
-    }
-  ],
-  "commit_message": "feat: 한 줄 커밋 메시지"
-}
+              Output valid JSON:
+              {
+                "plan": "한국어로 구현 계획 설명 (3-5문장)",
+                "files": [
+                  {
+                    "path": "src/vxis/path/to/file.py",
+                    "action": "modify|create",
+                    "description": "이 파일에서 무엇을 바꾸는지",
+                    "content": "... full file content or diff ..."
+                  }
+                ],
+                "test_files": [
+                  {
+                    "path": "tests/unit/test_xxx.py",
+                    "content": "... test code ..."
+                  }
+                ],
+                "commit_message": "feat: 한 줄 커밋 메시지"
+              }
 
-Rules:
-- ALL text in Korean
-- Follow existing code patterns (dataclass, type hints, docstrings)
-- All text bilingual: "English|||한국어"
-- No external dependencies (stdlib + existing deps only)
-- AGPL code must NOT be copied
-- Write actual working code, not pseudocode"""
+              Rules:
+              - ALL text in Korean
+              - Follow existing code patterns (dataclass, type hints, docstrings)
+              - All text bilingual: "English|||한국어"
+              - No external dependencies (stdlib + existing deps only)
+              - AGPL code must NOT be copied
+              - Write actual working code, not pseudocode""")
 
-          user_prompt = f"""## GitHub Issue
-
-**Title:** {title}
-
-**Body:**
-{body[:3000]}
-
-**Labels:** {', '.join(labels)}
-
-## VXIS Codebase Structure
-
-{codebase_summary}
-
----
-
-Implement the changes described in the issue. Return JSON with the implementation plan and actual code."""
+          user_prompt = (
+              f"## GitHub Issue\n\n"
+              f"**Title:** {title}\n\n"
+              f"**Body:**\n{body[:3000]}\n\n"
+              f"**Labels:** {', '.join(labels)}\n\n"
+              f"## VXIS Codebase Structure\n\n"
+              f"{codebase_summary}\n\n"
+              f"---\n\n"
+              f"Implement the changes described in the issue. Return JSON with the implementation plan and actual code."
+          )
 
           if use_anthropic:
               url = "https://api.anthropic.com/v1/messages"

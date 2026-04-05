@@ -528,8 +528,22 @@ jobs:
           git add tools/benchmark/ 2>/dev/null || true
           if ! git diff --staged --quiet; then
             git commit -m "chore: growth loop results $(date -u +%Y-%m-%d)"
-            git pull --rebase origin main
-            git push
+            # rebase 충돌 시 benchmark 데이터는 항상 새로 생성한 CI 버전 우선
+            for i in 1 2 3; do
+              git fetch origin main
+              if git rebase origin/main; then
+                git push && break
+              else
+                # rebase 중 --theirs = 현재 CI 커밋(새 데이터)
+                git checkout --theirs -- tools/benchmark/ 2>/dev/null || true
+                git add tools/benchmark/
+                GIT_EDITOR=true git rebase --continue 2>/dev/null \
+                  || git rebase --skip \
+                  || git rebase --abort
+                git push && break
+              fi
+              sleep 5
+            done
           fi
 
       - name: Create growth summary issue
