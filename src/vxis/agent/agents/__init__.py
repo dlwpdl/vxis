@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 # Import all agents so @register decorators fire on module load.
-from . import (
+from . import (  # noqa: F401
     # Layer 1 — Physical
     physical_usb_agent,
     side_channel_agent,
