@@ -210,9 +210,10 @@ class TestGitleaksPlugin:
         assert "--no-git" not in cmd
         assert "--exit-code 0" in cmd
 
-    def test_build_command_defaults_to_target(self) -> None:
+    def test_build_command_defaults_to_current_dir(self) -> None:
+        # Domain targets fall back to --source=. (no git repo for remote domains)
         cmd = self.plugin.build_command(TARGET, "standard", self.ctx, {})
-        assert f"--source={TARGET}" in cmd
+        assert "--source=" in cmd
 
     def test_parse_output_secret_masked(self) -> None:
         output = self.plugin.parse_output(GITLEAKS_SAMPLE, "")

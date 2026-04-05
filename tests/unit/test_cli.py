@@ -180,6 +180,7 @@ class TestScanCommand:
 
         with (
             patch("vxis.cli.main._get_config", return_value=MagicMock()),
+            patch("vxis.core.orchestrator.ScanOrchestrator.__init__", return_value=None),
             patch(
                 "vxis.core.orchestrator.ScanOrchestrator.run_scan",
                 new_callable=AsyncMock,
@@ -196,6 +197,7 @@ class TestScanCommand:
 
         with (
             patch("vxis.cli.main._get_config", return_value=MagicMock()),
+            patch("vxis.core.orchestrator.ScanOrchestrator.__init__", return_value=None),
             patch(
                 "vxis.core.orchestrator.ScanOrchestrator.run_scan",
                 new_callable=AsyncMock,
@@ -254,8 +256,9 @@ class TestReportCommand:
         assert result.exit_code == 0
 
     def test_report_cmd_exits_zero(self):
-        """report command exits with code 0 (not implemented message)."""
-        result = runner.invoke(app, ["report", "some-scan-id"])
+        """report command exits with code 0 when report generates successfully."""
+        with patch("vxis.cli.main.asyncio.run", return_value=None):
+            result = runner.invoke(app, ["report", "42"])
         assert result.exit_code == 0
 
     def test_report_cmd_mentions_scan_id(self):
