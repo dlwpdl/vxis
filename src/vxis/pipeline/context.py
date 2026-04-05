@@ -79,6 +79,9 @@ class ScanContext:
     # ── Red vs Blue ──
     defense_rules: list[dict[str, Any]] = field(default_factory=list)
 
+    # ── Ghost Mode ──
+    ghost_active: bool = False
+
     # ── Deferred Actions (데이터 변조 대기열) ──
     deferred_actions: list[DeferredAction] = field(default_factory=list)
     _deferred_counter: int = 0

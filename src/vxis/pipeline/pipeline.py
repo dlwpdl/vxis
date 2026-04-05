@@ -334,10 +334,28 @@ class ScanPipeline:
                 ctx.score_tracker.record_vector_attempt(vid)
             logger.info("  [RESUME] %d phases already done — skipping", len(ctx.phases_completed))
 
+        # ── Ghost 자동 활성화 ─────────────────────────────────────
+        # brain_mode=uncensored → 프로덕 블랙박스 가정 → Ghost 자동 ON
+        # ghost:// prefix 또는 MissionConfig.stealth=True 도 트리거
+        from vxis.ghost.layer import ghost_layer as _ghost_layer
+        from vxis.ghost.trigger import parse_ghost_trigger as _parse_ghost_trigger
+        _ghost_activated, target = _parse_ghost_trigger(target, self.config)
+        if not _ghost_activated:
+            _brain_mode = getattr(self.brain, "_brain_mode", "standard")
+            if _brain_mode == "uncensored":
+                _ghost_activated = True
+                logger.info("[Ghost] brain_mode=uncensored 감지 → 자동 익명화 활성화")
+        if _ghost_activated:
+            _proxy_pool = list(getattr(self.config, "proxy_pool", []) if self.config else [])
+            _ghost_layer.activate(_proxy_pool)
+            ctx.ghost_active = True
+        # ─────────────────────────────────────────────────────────
+
         logger.info("=" * 70)
         logger.info("  VXIS ScanPipeline — 19 Phase Full Orchestration")
         logger.info("  Target: %s", target)
         logger.info("  Scan ID: %s", ctx.scan_id)
+        logger.info("  Ghost: %s", "ON 🕵️" if _ghost_layer.is_active() else "OFF")
 
         # ── 벡터 사전 등록 제거 ──
         # Brain이 attempt=true로 결정한 벡터만 record_vector_attempt 되어야 정확한 scoring
@@ -459,6 +477,10 @@ class ScanPipeline:
                      len(ctx.deferred_actions))
         logger.info("  Duration: %.1fs", ctx.duration_seconds)
         logger.info("=" * 70)
+
+        # Ghost 비활성화 (이 파이프라인이 켠 경우만)
+        if getattr(ctx, "ghost_active", False):
+            _ghost_layer.deactivate()
 
         return ctx
 
