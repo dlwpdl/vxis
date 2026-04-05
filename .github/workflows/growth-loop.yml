@@ -50,10 +50,6 @@ jobs:
         image: bkimminich/juice-shop
         ports:
           - 3000:3000
-      webgoat:
-        image: webgoat/webgoat
-        ports:
-          - 8888:8080
       vampi:
         image: erev0s/vampi:latest
         ports:
@@ -126,7 +122,6 @@ jobs:
           targets = [
               ("dvwa",       "http://localhost:8081",           "web"),
               ("juice-shop", "http://localhost:3000",           "web"),
-              ("webgoat",    "http://localhost:8888/WebGoat",   "web"),
               ("vampi",      "http://localhost:5001",           "web"),
           ]
 
