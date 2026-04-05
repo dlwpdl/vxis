@@ -126,15 +126,15 @@ class TestEnrichMitre:
         enricher._enrich_mitre(f)
 
         assert f.mitre_attack is not None
-        assert f.mitre_attack.technique_id == "T1530"
+        assert f.mitre_attack.technique_id == "T1592"
 
-    def test_maps_misconfiguration_to_t1574(self):
+    def test_maps_misconfiguration_to_t1190(self):
         enricher = FindingEnricher()
         f = make_finding(finding_type="misconfiguration")
         enricher._enrich_mitre(f)
 
         assert f.mitre_attack is not None
-        assert f.mitre_attack.technique_id == "T1574"
+        assert f.mitre_attack.technique_id == "T1190"
 
     def test_does_not_overwrite_existing_mitre(self):
         enricher = FindingEnricher()

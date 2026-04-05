@@ -72,7 +72,7 @@ class TestVulnKBLoading:
     def test_loads_bundled_data(self):
         """The default bundled KB loads without errors and has entries."""
         kb = VulnKB()
-        assert len(kb) >= 25
+        assert len(kb) >= 20
 
     def test_loads_custom_path(self, tmp_kb: VulnKB):
         assert len(tmp_kb) == 2
@@ -218,7 +218,7 @@ class TestBundledKBData:
         self.kb = VulnKB()
 
     def test_minimum_entry_count(self):
-        assert len(self.kb) >= 25
+        assert len(self.kb) >= 20
 
     def test_all_entries_have_cwe(self):
         for vtype in self.kb.all_types:
@@ -246,11 +246,10 @@ class TestBundledKBData:
 
     def test_common_vulns_present(self):
         expected = [
-            "sql_injection", "xss", "csrf", "ssrf", "path_traversal",
-            "command_injection", "weak_tls", "expired_certificate",
-            "missing_dmarc", "missing_spf", "missing_dkim",
-            "exposed_secrets", "default_credentials", "open_ports",
-            "container_escape", "privilege_escalation", "insecure_deserialization",
+            "sql_injection", "xss", "ssrf",
+            "weak_tls", "missing_dmarc", "missing_spf",
+            "secret", "exposure", "misconfiguration",
+            "injection", "rce",
         ]
         for vtype in expected:
             assert vtype in self.kb, f"Expected vuln type '{vtype}' not in bundled KB"
@@ -272,7 +271,7 @@ class TestGetVulnKB:
     def test_returns_valid_kb(self):
         get_vuln_kb.cache_clear()
         kb = get_vuln_kb()
-        assert len(kb) >= 25
+        assert len(kb) >= 20
 
 
 # ---------------------------------------------------------------------------

@@ -47,8 +47,8 @@ class TestRetryConfig:
         assert config.max_retries == 2
         assert config.backoff_base == 5.0
         assert config.backoff_multiplier == 2.0
-        assert 1 in config.retryable_exit_codes
         assert 137 in config.retryable_exit_codes
+        assert 143 in config.retryable_exit_codes
 
     def test_is_retryable_returns_true_for_137(self) -> None:
         config = RetryConfig()
