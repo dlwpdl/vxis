@@ -399,36 +399,44 @@ class ScanPipeline:
                               self._phase11_mutation, ctx)
 
         # ══════════════════════════════════════════════════════
-        # STAGE 6: DEFERRED ACTIONS (데이터 변조 — 승인 후 실행)
+        # STAGE 3: 인젝션 승인 + 실행 (필수 — 무조건 컨펌 후 실행)
         # ══════════════════════════════════════════════════════
         if ctx.deferred_actions and self.enable_deferred_approval:
             await self._execute_deferred_actions(ctx)
 
         # ══════════════════════════════════════════════════════
-        # STAGE 7: OUTPUT (리포트 + 공유 + 제출)
+        # STAGE 4: 레포트
         # ══════════════════════════════════════════════════════
         await self._run_phase("Phase 6: Report Generation — NCC Group Style",
                               self._phase6_report, ctx)
-        await self._run_phase("Phase 17: Outreach",
-                              self._phase17_outreach, ctx)
 
         # ══════════════════════════════════════════════════════
-        # STAGE 8: OPTIONAL — Defense + Learning + Intelligence
-        # 핵심 스캔/리포트와 무관. 있으면 좋지만 없어도 됨.
+        # STAGE 6: 자가 분석 (필수) — 스코어링 직후 실행
+        # 이번 스캔 결과를 Brain이 분석 → Knowledge Store 업데이트
         # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 10: Red vs Blue — Defense Rule Generation",
-                              self._phase10_red_vs_blue, ctx)
         await self._run_phase("Phase 12: Self-Evolving Agent — Coverage Gap Analysis",
                               self._phase12_evolution, ctx)
-        await self._run_phase("Phase 16: Industry Intelligence — Sector Risk Heatmap",
-                              self._phase16_industry, ctx)
-        await self._run_phase("Phase 18: Collective Intelligence Update",
-                              self._phase18_collective, ctx)
-        await self._run_phase("Phase 19: Bug Bounty Submission",
-                              self._phase19_bounty, ctx)
 
         # ══════════════════════════════════════════════════════
-        # SCORING (5-Dimension VXIS Score)
+        # STAGE 7: 성장루프 발동 (필수)
+        # 컴파일된 패턴 즉시 반영 → 다음 스캔부터 LLM 호출 감소
+        # GH Actions growth-loop.yml(매주)과 별개 — 스캔 직후 즉시 반영
+        # ══════════════════════════════════════════════════════
+        await self._run_phase("Phase 18: Collective Intelligence Update",
+                              self._phase18_collective, ctx)
+
+        # ══════════════════════════════════════════════════════
+        # [미래 구현 예정] — 현재 비활성
+        # Phase 9  CVE Watch         → GH Actions cve-watch.yml이 담당 (매시간)
+        # Phase 14 Forecast          → GH Actions domain-intel.yml이 담당 (매일)
+        # Phase 16 Industry Intel    → GH Actions domain-intel.yml이 담당 (매일)
+        # Phase 10 Red vs Blue       → 방어 룰 자동 생성, 미래 구현 예정
+        # Phase 17 Outreach          → 취약점 공개/고객 알림, 미래 구현 예정
+        # Phase 19 Bug Bounty        → 버그바운티 자동 제출, 미래 구현 예정
+        # ══════════════════════════════════════════════════════
+
+        # ══════════════════════════════════════════════════════
+        # STAGE 5: 스코어링 (5-Dimension VXIS Score)
         # ══════════════════════════════════════════════════════
         try:
             from vxis.scoring.engine import ScoringEngine

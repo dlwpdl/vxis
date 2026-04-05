@@ -149,6 +149,18 @@ class VXISConfig(BaseSettings):
     github_token: SecretStr | None = None
 
     # ------------------------------------------------------------------
+    # Ollama (local uncensored LLM)
+    # ------------------------------------------------------------------
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        description="Ollama API base URL. Default: http://localhost:11434",
+    )
+    ollama_uncensored_model: str = Field(
+        default="qwen2.5-coder:14b",
+        description="Ollama model for uncensored brain mode. Override with VXIS_OLLAMA_UNCENSORED_MODEL.",
+    )
+
+    # ------------------------------------------------------------------
     # Scan profiles
     # ------------------------------------------------------------------
     profiles: dict[str, ScanProfile] = Field(

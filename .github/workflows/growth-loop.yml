@@ -1,16 +1,22 @@
 name: VXIS Growth Loop
 
 on:
-  # 매주 일요일 15:00 UTC (일요일 자정 KST) — 밤새 반복 성장
+  # 매주 일요일 15:00 UTC — 코드 개선 성장 루프
   schedule:
     - cron: "0 15 * * 0"
 
+  # src/vxis 변경 시 자동 트리거 (코드가 바뀌면 바로 검증)
+  push:
+    branches: [main]
+    paths:
+      - 'src/vxis/**'
+
   workflow_dispatch:
     inputs:
-      max_iterations:
-        description: "최대 반복 횟수 (기본 5)"
+      score_target:
+        description: "목표 점수 (기본 1000)"
         required: false
-        default: "5"
+        default: "1000"
         type: string
       target_type:
         description: "벤치마크 대상"
@@ -30,49 +36,28 @@ permissions:
   issues: write
 
 jobs:
-  growth-benchmark:
-    name: Growth Measurement
+  growth-loop:
+    name: Autonomous Growth Loop
     runs-on: ubuntu-latest
+    timeout-minutes: 350
 
-    # Docker 취약 앱 — 매일 밤 자동 기동 (모두 법적으로 허용된 테스트 전용 앱)
     services:
       dvwa:
-        image: vulnerables/web-dvwa          # OWASP DVWA — PHP/MySQL 기반
+        image: vulnerables/web-dvwa
         ports:
           - 8081:80
       juice-shop:
-        image: bkimminich/juice-shop         # OWASP Juice Shop — Node.js SPA
+        image: bkimminich/juice-shop
         ports:
           - 3000:3000
       webgoat:
-        image: webgoat/webgoat               # OWASP WebGoat — Spring Boot
+        image: webgoat/webgoat
         ports:
           - 8888:8080
-      mutillidae:
-        image: citizenstig/nowasp            # OWASP Mutillidae II — PHP/MySQL, 100+ 취약점
-        ports:
-          - 8082:80
-      bwapp:
-        image: raesene/bwapp                 # bWAPP — PHP 버그 많은 웹앱, 100+ CWE
-        ports:
-          - 8083:80
-      nodegoat:
-        image: owasp/nodegoat                # OWASP NodeGoat — Node.js OWASP Top 10
-        ports:
-          - 4000:4000
       vampi:
-        image: erev0s/vampi:latest           # VAmPI — Flask REST API 취약점 (OWASP API Top 10)
+        image: erev0s/vampi:latest
         ports:
           - 5001:5000
-      bodgeit:
-        image: psiinon/bodgeit               # BodgeIt Store — Java/Tomcat, 간단한 레거시 앱
-        ports:
-          - 8084:8080
-
-    strategy:
-      matrix:
-        target_type: [web]
-      fail-fast: false
 
     steps:
       - name: Checkout
@@ -87,7 +72,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install VXIS
-        run: pip install -e ".[dev]" 2>/dev/null || echo "PYTHONPATH=src" >> $GITHUB_ENV
+        run: pip install -e ".[dev]" 2>/dev/null || { echo "PYTHONPATH=src" >> $GITHUB_ENV; pip install -e . 2>/dev/null || true; }
 
       - name: Restore score history
         uses: actions/cache@v4
@@ -96,60 +81,69 @@ jobs:
           key: growth-loop-${{ github.run_id }}
           restore-keys: growth-loop-
 
-      - name: Growth Loop — 측정→분석→개선→재측정 반복
-        id: benchmark
+      - name: Growth Loop — 점수 목표까지 자율 성장
+        id: growth
         env:
           PYTHONPATH: src
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           VXIS_BRAIN_MODE: api
-        timeout-minutes: 370  # 자정~06:00 KST (6시간 + 여유)
+          SCORE_TARGET: ${{ github.event.inputs.score_target || '1000' }}
+        timeout-minutes: 340
         run: |
-          MAX_ITER=${{ github.event.inputs.max_iterations || '0' }}
-          python - "$MAX_ITER" <<'PYEOF'
-          import asyncio, json, os, sys, time, urllib.request, urllib.error
-          from pathlib import Path
+          python - <<'PYEOF'
+          import asyncio, json, os, subprocess, sys, time, urllib.request, urllib.error
           from datetime import datetime, timezone
+          from pathlib import Path
 
           sys.path.insert(0, "src")
 
-          # 0 = 시간 기반 (06:00 KST = 21:00 UTC까지), 양수 = 횟수 제한
-          _max_iter_arg = int(sys.argv[1]) if len(sys.argv) > 1 else 0
-          MAX_ITERATIONS = _max_iter_arg if _max_iter_arg > 0 else None  # None = 시간까지 무한
-          STOP_HOUR_UTC = 21  # 21:00 UTC = 06:00 KST
+          SCORE_TARGET = int(os.environ.get("SCORE_TARGET", "1000"))
+          STAGNATION_LIMIT = 2        # 연속 N회 개선 없으면 종료
+          MIN_IMPROVEMENT = 5.0       # 개선으로 인정하는 최소 점수 차
           HISTORY_FILE = Path("tools/benchmark/score_history.json")
           BASELINE_FILE = Path("tools/benchmark/baseline.json")
           ITERATION_LOG = Path("tools/benchmark/iteration_log.json")
+          CVE_CANDIDATES = Path("tools/cve_watch/growth_loop_candidates.json")
           HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+          together_key = os.environ.get("TOGETHER_API_KEY", "")
+          anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 
           history = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else []
           iterations: list[dict] = []
 
+          # ── CVE 피드 로드 ─────────────────────────────────────────────
+          cve_vectors: list[dict] = []
+          if CVE_CANDIDATES.exists():
+              try:
+                  cve_data = json.loads(CVE_CANDIDATES.read_text())
+                  cve_vectors = cve_data.get("vectors", [])
+                  print(f"[CVE] {len(cve_vectors)}개 CVE 공격 벡터 로드")
+              except Exception as exc:
+                  print(f"[CVE] 로드 실패: {exc}")
+
           targets = [
-              ("dvwa",       "http://localhost:8081"),
-              ("juice-shop", "http://localhost:3000"),
-              ("webgoat",    "http://localhost:8888/WebGoat"),
-              ("mutillidae", "http://localhost:8082/mutillidae"),
-              ("bwapp",      "http://localhost:8083/bWAPP"),
-              ("nodegoat",   "http://localhost:4000"),
-              ("vampi",      "http://localhost:5001"),
-              ("bodgeit",    "http://localhost:8084/bodgeit"),
+              ("dvwa",       "http://localhost:8081",           "web"),
+              ("juice-shop", "http://localhost:3000",           "web"),
+              ("webgoat",    "http://localhost:8888/WebGoat",   "web"),
+              ("vampi",      "http://localhost:5001",           "web"),
           ]
 
-          # Docker 서비스 준비 대기
-          for name, url in targets:
-              for attempt in range(15):
+          # ── Docker 준비 대기 ──────────────────────────────────────────
+          for name, url, _ in targets:
+              for attempt in range(20):
                   try:
-                      urllib.request.urlopen(url, timeout=2)
+                      urllib.request.urlopen(url, timeout=3)
                       print(f"[READY] {name}")
                       break
                   except Exception:
-                      time.sleep(2)
+                      time.sleep(3)
               else:
-                  print(f"[SKIP] {name} not ready")
+                  print(f"[SKIP] {name} not ready after 60s")
 
-          def run_benchmark(target_name, target_url, target_type="web"):
-              """단일 타겟 벤치마크 실행."""
+          # ── 벤치마크 실행 ─────────────────────────────────────────────
+          def run_benchmark(target_name: str, target_url: str, target_type: str = "web") -> dict:
               try:
                   from vxis.scoring.benchmark import BenchmarkRunner
                   runner = BenchmarkRunner(baseline_path=str(BASELINE_FILE))
@@ -157,688 +151,416 @@ jobs:
                   async def _run():
                       score = await runner.run_benchmark(target_type, target_url)
                       comparison = runner.compare_with_baseline(score)
-                      return score, comparison
+                      return score, comparison, runner
 
-                  score, comparison = asyncio.run(_run())
+                  score, comparison, runner = asyncio.run(_run())
                   return {
                       "target": target_name,
                       "total": score.total,
                       "grade": score.grade,
                       "dimensions": {
-                          "vector_coverage": score.vector_coverage.score,
+                          "vector_coverage":    score.vector_coverage.score,
                           "exploitation_reach": score.exploitation_reach.score,
                           "chain_intelligence": score.chain_intelligence.score,
-                          "finding_precision": score.finding_precision.score,
-                          "completeness": score.completeness.score,
+                          "finding_precision":  score.finding_precision.score,
+                          "completeness":       score.completeness.score,
                       },
-                      "delta": comparison.total_delta if comparison else 0,
-                      "score_obj": score,
+                      "delta":      comparison.total_delta if comparison else 0,
+                      "score_obj":  score,
                       "comparison": comparison,
-                      "runner": runner,
+                      "runner":     runner,
                   }
               except Exception as exc:
-                  return {"target": target_name, "total": 0, "grade": "D", "error": str(exc)[:200]}
+                  return {"target": target_name, "total": 0.0, "grade": "D", "error": str(exc)[:300]}
 
-          def find_weakest_dimension(result):
-              """가장 약한 차원 찾기."""
-              if "dimensions" not in result:
-                  return None, 0
-              dims = result["dimensions"]
-              max_scores = {
-                  "vector_coverage": 250,
-                  "exploitation_reach": 300,
-                  "chain_intelligence": 150,
-                  "finding_precision": 200,
-                  "completeness": 100,
+          # ── 약점 차원 찾기 ────────────────────────────────────────────
+          _DIM_MAX = {
+              "vector_coverage": 250, "exploitation_reach": 300,
+              "chain_intelligence": 150, "finding_precision": 200,
+              "completeness": 100,
+          }
+          _DIM_KO = {
+              "vector_coverage": "벡터 커버리지", "exploitation_reach": "공격 깊이",
+              "chain_intelligence": "체인 지능",   "finding_precision": "발견 정확도",
+              "completeness": "완전성",
+          }
+
+          def find_weakest(result: dict) -> tuple[str, float]:
+              dims = result.get("dimensions", {})
+              if not dims:
+                  return "", 0.0
+              return min(
+                  ((d, s / _DIM_MAX[d]) for d, s in dims.items() if d in _DIM_MAX),
+                  key=lambda x: x[1],
+              )
+
+          # ── LLM 코드 개선 패치 생성 ───────────────────────────────────
+          _DIM_FILES = {
+              "vector_coverage":    ["src/vxis/scoring/vectors.py", "src/vxis/pipeline/pipeline.py"],
+              "exploitation_reach": ["src/vxis/agent/brain.py"],
+              "chain_intelligence": ["src/vxis/agent/brain.py"],
+              "finding_precision":  ["src/vxis/agent/brain.py"],
+              "completeness":       ["src/vxis/pipeline/pipeline.py"],
+          }
+
+          def llm_generate_patches(weakest_dim: str, dim_score: float, iteration: int) -> list[dict]:
+              """LLM에게 약점 차원 개선 search/replace 패치 생성 요청."""
+              if not together_key and not anthropic_key:
+                  return []
+
+              relevant_files = _DIM_FILES.get(weakest_dim, [])
+              file_ctx_parts = []
+              for fpath in relevant_files[:2]:
+                  p = Path(fpath)
+                  if p.exists():
+                      content = p.read_text(encoding="utf-8", errors="ignore")
+                      file_ctx_parts.append(f"### {fpath}\n```python\n{content[:1800]}\n...(truncated)\n```")
+
+              pct = (dim_score / _DIM_MAX.get(weakest_dim, 100)) * 100
+
+              system_prompt = """You are a senior security engineer improving VXIS, an autonomous AI pentesting platform.
+          VXIS Brain (LLM) drives all attack decisions. 5D scoring measures real attack capability on live vulnerable apps.
+
+          Output ONLY valid JSON (no markdown wrapper):
+          {
+            "analysis": "why this dimension scores low and what to improve",
+            "patches": [
+              {
+                "file": "src/vxis/...",
+                "search": "exact existing code string to find",
+                "replace": "replacement string"
               }
-              weakest = None
-              weakest_pct = 1.0
-              for dim, score in dims.items():
-                  pct = score / max_scores[dim]
-                  if pct < weakest_pct:
-                      weakest_pct = pct
-                      weakest = dim
-              return weakest, weakest_pct
+            ]
+          }
 
-          def analyze_and_improve(weakest_dim, iteration):
-              """약점 차원에 맞는 자동 개선 시도.
+          Rules:
+          - max 3 patches
+          - search must EXACTLY match existing code (copy-paste accuracy)
+          - changes must be minimal and targeted to the specific dimension
+          - do NOT break existing function signatures or class interfaces
+          - focus on Brain prompt quality, strategy hints, or pipeline coverage"""
 
-              실제 코드를 바꾸지는 않지만, Brain의 전략을 동적으로 조정.
-              """
-              # 개선 전략 매핑
-              strategies = {
-                  "vector_coverage": {
-                      "action": "더 많은 벡터를 시도하도록 Brain 전략 조정",
-                      "env_hint": "VXIS_STRATEGY=aggressive_coverage",
-                  },
-                  "exploitation_reach": {
-                      "action": "L2+ 도달을 위해 익스플로잇 체인 강화",
-                      "env_hint": "VXIS_STRATEGY=deep_exploit",
-                  },
-                  "chain_intelligence": {
-                      "action": "발견 간 연결점 탐색 강화, 피벗 로직 활성화",
-                      "env_hint": "VXIS_STRATEGY=chain_focus",
-                  },
-                  "finding_precision": {
-                      "action": "FP 필터 강화, 증거 수집 로직 활성화",
-                      "env_hint": "VXIS_STRATEGY=precision_mode",
-                  },
-                  "completeness": {
-                      "action": "스킵된 Phase 재시도, 타임아웃 증가",
-                      "env_hint": "VXIS_STRATEGY=full_coverage",
-                  },
-              }
+              user_prompt = f"""Weakest dimension: {weakest_dim} ({_DIM_KO.get(weakest_dim, '')})
+          Score: {dim_score:.1f}/{_DIM_MAX.get(weakest_dim, 100)} ({pct:.0f}%)
+          Iteration: {iteration}
 
-              strategy = strategies.get(weakest_dim, {})
-              if strategy:
-                  # 환경변수로 전략 힌트 전달 (다음 벤치마크에서 Brain이 참고)
-                  os.environ["VXIS_GROWTH_STRATEGY"] = strategy.get("env_hint", "")
-                  print(f"  [IMPROVE] 전략 조정: {strategy['action']}")
-                  return strategy["action"]
-              return "개선 전략 없음"
+          Relevant source code:
+          {chr(10).join(file_ctx_parts) if file_ctx_parts else '(no context)'}
 
-          # ═══════════════════════════════════════════════════════════
-          #  메인 루프: 측정 → 분석 → 개선 → 재측정 (최대 N회)
-          # ═══════════════════════════════════════════════════════════
+          Generate targeted patches to improve the {weakest_dim} score on real vulnerable web apps (DVWA, Juice Shop, WebGoat, VAmPI)."""
 
+              # Together AI 우선 (저렴), Anthropic 폴백
+              if together_key:
+                  url = "https://api.together.xyz/v1/chat/completions"
+                  payload = json.dumps({
+                      "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+                      "max_tokens": 1500,
+                      "temperature": 0.2,
+                      "messages": [
+                          {"role": "system", "content": system_prompt},
+                          {"role": "user", "content": user_prompt},
+                      ],
+                  }).encode()
+                  headers = {
+                      "Content-Type": "application/json",
+                      "Authorization": f"Bearer {together_key}",
+                  }
+              else:
+                  url = "https://api.anthropic.com/v1/messages"
+                  payload = json.dumps({
+                      "model": "claude-haiku-4-5-20251001",
+                      "max_tokens": 1500,
+                      "system": system_prompt,
+                      "messages": [{"role": "user", "content": user_prompt}],
+                  }).encode()
+                  headers = {
+                      "Content-Type": "application/json",
+                      "x-api-key": anthropic_key,
+                      "anthropic-version": "2023-06-01",
+                  }
+
+              req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+              try:
+                  with urllib.request.urlopen(req, timeout=90) as resp:
+                      data = json.loads(resp.read().decode())
+
+                  if together_key:
+                      raw = data["choices"][0]["message"]["content"]
+                  else:
+                      raw = data["content"][0]["text"]
+
+                  # JSON 추출
+                  raw = raw.strip()
+                  if "```json" in raw:
+                      raw = raw.split("```json")[1].split("```")[0]
+                  elif "```" in raw:
+                      raw = raw.split("```")[1].split("```")[0]
+
+                  result = json.loads(raw.strip())
+                  analysis = result.get("analysis", "")
+                  patches = result.get("patches", [])
+                  print(f"  [LLM] 분석: {analysis[:120]}")
+                  print(f"  [LLM] 패치 {len(patches)}개 생성")
+                  return patches
+              except Exception as exc:
+                  print(f"  [LLM] 패치 생성 실패: {exc}")
+                  return []
+
+          def apply_patches(patches: list[dict]) -> dict[str, str]:
+              """패치 적용. 적용 전 백업 반환 {filepath: original_content}."""
+              backups: dict[str, str] = {}
+              for patch in patches:
+                  fpath = Path(patch.get("file", ""))
+                  search = patch.get("search", "")
+                  replace = patch.get("replace", "")
+                  if not fpath.exists() or not search or search == replace:
+                      continue
+                  content = fpath.read_text(encoding="utf-8")
+                  if search in content:
+                      backups[str(fpath)] = content
+                      fpath.write_text(content.replace(search, replace, 1), encoding="utf-8")
+                      print(f"  [PATCH] {fpath} 패치 적용")
+                  else:
+                      print(f"  [PATCH] 검색 문자열 없음: {fpath}")
+              return backups
+
+          def restore_backups(backups: dict[str, str]) -> None:
+              for fpath_str, content in backups.items():
+                  Path(fpath_str).write_text(content, encoding="utf-8")
+              if backups:
+                  subprocess.run(["pip", "install", "-e", ".", "-q"], check=False,
+                                 capture_output=True)
+                  print(f"  [REVERT] {len(backups)}개 파일 롤백 완료")
+
+          def reinstall_vxis() -> bool:
+              result = subprocess.run(
+                  ["pip", "install", "-e", ".", "-q"],
+                  capture_output=True, text=True,
+              )
+              return result.returncode == 0
+
+          def commit_improvement(weakest_dim: str, iteration: int, score_delta: float) -> None:
+              try:
+                  subprocess.run(["git", "config", "user.name", "vxis-growth[bot]"], check=False)
+                  subprocess.run(["git", "config", "user.email", "vxis-growth@users.noreply.github.com"], check=False)
+                  subprocess.run(["git", "add", "src/"], check=False)
+                  msg = (
+                      f"feat(growth): improve {weakest_dim} +{score_delta:.1f}pt "
+                      f"[iter {iteration}]\n\n"
+                      f"Autonomous growth loop — dimension: {_DIM_KO.get(weakest_dim, weakest_dim)}"
+                  )
+                  result = subprocess.run(
+                      ["git", "commit", "-m", msg],
+                      capture_output=True, text=True,
+                  )
+                  if result.returncode == 0:
+                      subprocess.run(["git", "pull", "--rebase", "origin", "main"], check=False)
+                      subprocess.run(["git", "push"], check=False)
+                      print(f"  [GIT] 개선 코드 커밋 완료")
+              except Exception as exc:
+                  print(f"  [GIT] 커밋 실패: {exc}")
+
+          # ═══════════════════════════════════════════════════════════════
+          #  메인 루프: 점수 목표 달성까지 자율 성장
+          # ═══════════════════════════════════════════════════════════════
           now = datetime.now(timezone.utc)
-          stop_label = f"06:00 KST (21:00 UTC)" if MAX_ITERATIONS is None else f"최대 {MAX_ITERATIONS}회"
           print(f"\n{'#'*60}")
           print(f"  VXIS Growth Loop — {now.strftime('%Y-%m-%d %H:%M')} UTC")
-          print(f"  종료 조건: {stop_label}")
+          print(f"  목표: {SCORE_TARGET}점 | 정체 한도: {STAGNATION_LIMIT}회")
+          print(f"  CVE 공격벡터: {len(cve_vectors)}개")
           print(f"{'#'*60}\n")
 
-          prev_best = 0
+          prev_best = 0.0
+          consecutive_no_improve = 0
           iteration = 0
+          stop_reason = "unknown"
 
-          def _should_continue():
-              """계속 돌릴지 판단."""
-              if MAX_ITERATIONS is not None:
-                  return iteration < MAX_ITERATIONS
-              utc_now = datetime.now(timezone.utc)
-              return utc_now.hour < STOP_HOUR_UTC or (utc_now.hour == STOP_HOUR_UTC and utc_now.minute == 0)
-
-          while _should_continue():
+          while True:
               iteration += 1
-              iter_label = f"{iteration}" if MAX_ITERATIONS is None else f"{iteration}/{MAX_ITERATIONS}"
-              time_left = ""
-              if MAX_ITERATIONS is None:
-                  utc_now = datetime.now(timezone.utc)
-                  mins_left = (STOP_HOUR_UTC - utc_now.hour) * 60 - utc_now.minute
-                  time_left = f" | 남은시간 ~{mins_left}분"
               print(f"\n{'='*60}")
-              print(f"  ITERATION {iter_label}{time_left}")
+              print(f"  ITERATION {iteration}")
               print(f"{'='*60}")
 
+              # 전체 타겟 벤치마크
               iter_results = []
-
-              for target_name, target_url in targets:
+              for target_name, target_url, target_type in targets:
                   print(f"\n  --- {target_name} ---")
-                  result = run_benchmark(target_name, target_url)
+                  result = run_benchmark(target_name, target_url, target_type)
                   iter_results.append(result)
-
                   if "error" not in result:
-                      print(f"  Score: {result['total']:.1f} [{result['grade']}] (delta: {result.get('delta',0):+.1f})")
-
-                      # 히스토리 기록
+                      print(f"  Score: {result['total']:.1f} [{result['grade']}]")
                       history.append({
                           "date": now.strftime("%Y-%m-%d"),
                           "iteration": iteration,
                           "target_name": target_name,
-                          "target_type": "web",
+                          "target_type": target_type,
                           "total": result["total"],
                           "grade": result["grade"],
                           "dimensions": result["dimensions"],
-                          "delta": result.get("delta", 0),
                       })
-
-                      # baseline 업데이트 (점수 오르면)
-                      if result.get("comparison") and result["comparison"].total_delta > 0:
-                          result["runner"].save_baseline(result["score_obj"])
-                          print(f"  Baseline updated!")
                   else:
                       print(f"  ERROR: {result['error']}")
 
-              # 이번 반복의 최고 점수
               valid_results = [r for r in iter_results if "error" not in r]
               if not valid_results:
-                  print("\n  [STOP] 모든 타겟 실패 — 루프 중단")
+                  stop_reason = "all_targets_failed"
+                  print("\n[STOP] 모든 타겟 실패")
                   break
 
               current_best = max(r["total"] for r in valid_results)
               best_result = max(valid_results, key=lambda r: r["total"])
+              best_target = next(t for t in targets if t[0] == best_result["target"])
 
-              # 약점 분석
-              weakest_dim, weakest_pct = find_weakest_dimension(best_result)
-              dim_names_ko = {
-                  "vector_coverage": "벡터 커버리지",
-                  "exploitation_reach": "공격 깊이",
-                  "chain_intelligence": "체인 지능",
-                  "finding_precision": "발견 정확도",
-                  "completeness": "완전성",
-              }
+              print(f"\n  현재 최고: {current_best:.1f}점 [{best_result['grade']}]")
 
-              print(f"\n  Best: {current_best:.1f} | Weakest: {dim_names_ko.get(weakest_dim, '?')} ({weakest_pct:.0%})")
+              # ── 목표 달성 체크 ────────────────────────────────────────
+              if current_best >= SCORE_TARGET:
+                  stop_reason = "target_reached"
+                  print(f"\n[SUCCESS] 목표 {SCORE_TARGET}점 달성! ({current_best:.1f}점)")
+                  break
 
-              # iteration 기록 — 상세 스텝 로그
+              # ── 정체 체크 ─────────────────────────────────────────────
+              improvement = current_best - prev_best
+              if iteration > 1:
+                  if improvement < MIN_IMPROVEMENT:
+                      consecutive_no_improve += 1
+                      print(f"  [PLATEAU] 개선 {improvement:+.1f}점 — 정체 {consecutive_no_improve}/{STAGNATION_LIMIT}")
+                      if consecutive_no_improve >= STAGNATION_LIMIT:
+                          stop_reason = "stagnation"
+                          print(f"\n[STOP] {STAGNATION_LIMIT}회 연속 정체 → 종료")
+                          break
+                  else:
+                      consecutive_no_improve = 0
+                      print(f"  [GROWTH] +{improvement:.1f}점 성장!")
+
+              # ── 약점 분석 ─────────────────────────────────────────────
+              weakest_dim, weakest_pct = find_weakest(best_result)
+              dim_score = best_result["dimensions"].get(weakest_dim, 0)
+              print(f"  약점: {_DIM_KO.get(weakest_dim, weakest_dim)} ({weakest_pct:.0%})")
+
+              # ── LLM 코드 개선 ─────────────────────────────────────────
               iter_log = {
                   "iteration": iteration,
                   "timestamp": datetime.now(timezone.utc).isoformat(),
                   "best_score": current_best,
                   "weakest_dimension": weakest_dim,
                   "weakest_pct": round(weakest_pct, 2),
-                  "all_dimensions": best_result.get("dimensions", {}),
-                  "results_per_target": [
-                      {
-                          "target": r.get("target", "?"),
-                          "score": r.get("total", 0),
-                          "grade": r.get("grade", "?"),
-                          "dimensions": r.get("dimensions", {}),
-                          "error": r.get("error", ""),
-                      }
-                      for r in iter_results
-                  ],
+                  "improvement": round(improvement, 1),
+                  "consecutive_no_improve": consecutive_no_improve,
+                  "action": "none",
+                  "code_improved": False,
               }
 
-              # 개선 여부 판단
-              improvement = current_best - prev_best
-              iter_log["improvement"] = round(improvement, 1)
+              patches = llm_generate_patches(weakest_dim, dim_score, iteration)
+              if patches:
+                  backups = apply_patches(patches)
+                  if backups:
+                      ok = reinstall_vxis()
+                      if ok:
+                          # 최고 타겟에서 재테스트
+                          print(f"  [TEST] {best_target[0]}에서 개선 효과 검증...")
+                          verify_result = run_benchmark(*best_target)
+                          verify_score = verify_result.get("total", 0.0)
+                          verify_delta = verify_score - current_best
 
-              if improvement <= 0 and iteration > 1:
-                  print(f"  [PLATEAU] 개선 없음 — 계속 시도")
-              elif iteration > 1:
-                  print(f"  [GROWTH] +{improvement:.1f}점 성장!")
+                          if verify_delta >= MIN_IMPROVEMENT / 2:
+                              print(f"  [KEEP] +{verify_delta:.1f}점 개선 확인 → 커밋")
+                              commit_improvement(weakest_dim, iteration, verify_delta)
+                              iter_log["action"] = f"improved_{weakest_dim}"
+                              iter_log["code_improved"] = True
+                              iter_log["verify_delta"] = round(verify_delta, 1)
+                          else:
+                              print(f"  [REVERT] 개선 효과 없음 ({verify_delta:+.1f}) → 롤백")
+                              restore_backups(backups)
+                              iter_log["action"] = f"reverted_{weakest_dim}"
+                      else:
+                          print("  [REVERT] 재설치 실패 → 롤백")
+                          restore_backups(backups)
+                          iter_log["action"] = "reinstall_failed"
+                  else:
+                      iter_log["action"] = "no_patches_applied"
+              else:
+                  iter_log["action"] = "no_patches_generated"
 
-              # 횟수 제한 모드에서만 마지막 반복 체크
-              if MAX_ITERATIONS is not None and iteration >= MAX_ITERATIONS:
-                  iter_log["action"] = "max_iterations_reached"
-                  iterations.append(iter_log)
-                  break
-
-              # 개선 시도
-              action = analyze_and_improve(weakest_dim, iteration)
-              iter_log["action"] = action
               iterations.append(iter_log)
-
               prev_best = current_best
 
-              # 다음 반복 전 잠시 대기 (리소스 안정화)
-              print(f"\n  [WAIT] 30초 후 다음 반복...")
-              time.sleep(30)
+              print(f"\n  [WAIT] 20초 후 다음 iteration...")
+              time.sleep(20)
 
           # ═══ 최종 결과 저장 ═══
-
-          # 히스토리 정리 (최대 365일)
           if len(history) > 365:
               history[:] = history[-365:]
-          HISTORY_FILE.write_text(json.dumps(history, indent=2))
+          HISTORY_FILE.write_text(json.dumps(history, indent=2, ensure_ascii=False))
 
-          # Iteration 로그 저장
-          ITERATION_LOG.write_text(json.dumps({
+          final_log = {
               "date": now.strftime("%Y-%m-%d"),
+              "stop_reason": stop_reason,
               "total_iterations": len(iterations),
+              "score_target": SCORE_TARGET,
               "start_score": iterations[0]["best_score"] if iterations else 0,
               "final_score": iterations[-1]["best_score"] if iterations else 0,
               "total_growth": round(
-                  (iterations[-1]["best_score"] - iterations[0]["best_score"]) if len(iterations) >= 2 else 0, 1
+                  (iterations[-1]["best_score"] - iterations[0]["best_score"])
+                  if len(iterations) >= 2 else 0, 1
               ),
+              "code_improvements": sum(1 for it in iterations if it.get("code_improved")),
               "iterations": iterations,
-          }, indent=2, ensure_ascii=False))
-
-          # ═══ 상세 마크다운 리포트 (전체 스텝 볼 수 있게) ═══
-          STEP_REPORT = Path("tools/benchmark/nightly_steps.md")
-          dim_names_ko = {
-              "vector_coverage": "벡터 커버리지",
-              "exploitation_reach": "공격 깊이",
-              "chain_intelligence": "체인 지능",
-              "finding_precision": "발견 정확도",
-              "completeness": "완전성",
           }
-          dim_max = {
-              "vector_coverage": 250, "exploitation_reach": 300,
-              "chain_intelligence": 150, "finding_precision": 200,
-              "completeness": 100,
-          }
+          ITERATION_LOG.write_text(json.dumps(final_log, indent=2, ensure_ascii=False))
 
-          md = [
-              f"# Nightly Growth Steps — {now.strftime('%Y-%m-%d')}",
-              "",
-              f"**반복 횟수:** {len(iterations)}",
-          ]
-          if iterations:
-              start_s = iterations[0]["best_score"]
-              final_s = iterations[-1]["best_score"]
-              md.append(f"**시작:** {start_s:.1f}점 → **최종:** {final_s:.1f}점 (**{final_s - start_s:+.1f}점**)")
-          md.append("")
-
-          # 반복별 상세 테이블
-          md.append("## Step-by-Step")
-          md.append("")
-          md.append("| # | 점수 | 등급 | 변화 | 약점 | 약점% | 전략 |")
-          md.append("|---|------|------|------|------|-------|------|")
-
-          for it in iterations:
-              weak_ko = dim_names_ko.get(it.get("weakest_dimension", ""), "?")
-              wpct = it.get("weakest_pct", 0)
-              imp = it.get("improvement", 0)
-              imp_icon = "📈" if imp > 0 else ("📉" if imp < 0 else "➡️")
-              action = it.get("action", "")[:30]
-              md.append(
-                  f"| {it['iteration']} | {it['best_score']:.1f} | "
-                  f"— | {imp_icon} {imp:+.1f} | {weak_ko} | {wpct:.0%} | {action} |"
-              )
-
-          md.append("")
-
-          # 각 반복의 차원별 상세
-          md.append("## Dimension Breakdown per Iteration")
-          md.append("")
-          for it in iterations:
-              md.append(f"### Iteration {it['iteration']} — {it['best_score']:.1f}점")
-              dims = it.get("all_dimensions", {})
-              if dims:
-                  md.append("| 차원 | 점수 | 최대 | % | |")
-                  md.append("|------|------|------|---|---|")
-                  for dk, dv in dims.items():
-                      dmax = dim_max.get(dk, 100)
-                      pct = dv / dmax if dmax else 0
-                      bar = "🟢" if pct >= 0.7 else ("🟡" if pct >= 0.4 else "🔴")
-                      md.append(f"| {dim_names_ko.get(dk, dk)} | {dv:.1f} | {dmax} | {pct:.0%} | {bar} |")
-                  md.append("")
-
-              # 타겟별 결과
-              for tr in it.get("results_per_target", []):
-                  if tr.get("error"):
-                      md.append(f"- **{tr['target']}**: ❌ {tr['error'][:50]}")
-                  else:
-                      md.append(f"- **{tr['target']}**: {tr.get('score', 0):.1f}점 [{tr.get('grade', '?')}]")
-              md.append("")
-
-          STEP_REPORT.write_text("\n".join(md), encoding="utf-8")
-
+          # 요약 출력
           print(f"\n{'#'*60}")
-          print(f"  Growth Loop 완료")
+          print(f"  Growth Loop 완료 — {stop_reason}")
           print(f"  반복: {len(iterations)}회")
-          if iterations:
-              print(f"  시작: {iterations[0]['best_score']:.1f}")
-              print(f"  최종: {iterations[-1]['best_score']:.1f}")
-              growth = iterations[-1]['best_score'] - iterations[0]['best_score']
-              print(f"  성장: {growth:+.1f}점")
-              print(f"  상세 리포트: {STEP_REPORT}")
+          print(f"  점수: {final_log['start_score']:.1f} → {final_log['final_score']:.1f} (+{final_log['total_growth']:.1f})")
+          print(f"  코드 개선: {final_log['code_improvements']}회")
           print(f"{'#'*60}")
-          PYEOF
 
-      - name: Compare and judge
-        id: judge
-        env:
-          PYTHONPATH: src
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          python - <<'PYEOF'
-          import json, os, subprocess
-          from pathlib import Path
-          from datetime import datetime, timedelta, timezone
-
-          HISTORY_FILE = Path("tools/benchmark/score_history.json")
-          VERDICT_FILE = Path("tools/benchmark/verdict.json")
-
-          if not HISTORY_FILE.exists():
-              print("No history — skip comparison")
-              exit(0)
-
-          history = json.loads(HISTORY_FILE.read_text())
-          if len(history) < 2:
-              print("Not enough data for comparison")
-              exit(0)
-
-          now = datetime.now(timezone.utc)
-          today = now.strftime("%Y-%m-%d")
-          yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
-
-          # 오늘 vs 어제 비교 (같은 타겟)
-          today_entries = [e for e in history if e.get("date") == today and not e.get("error")]
-          yesterday_entries = [e for e in history if e.get("date") == yesterday and not e.get("error")]
-
-          if not today_entries:
-              print("No today entries — skip")
-              exit(0)
-
-          # 최근 머지된 커밋 조회 (오늘 반영된 변경사항)
-          recent_commits = []
-          try:
-              result = subprocess.run(
-                  ["git", "log", "--oneline", "--since=24 hours ago", "--format=%h %s"],
-                  capture_output=True, text=True, timeout=10,
-              )
-              recent_commits = result.stdout.strip().split("\n") if result.stdout.strip() else []
-          except Exception:
-              pass
-
-          # 타겟별 비교
-          verdicts = []
-          for today_e in today_entries:
-              target_name = today_e.get("target_name", "unknown")
-              today_score = today_e.get("total", 0)
-
-              # 어제 같은 타겟 찾기
-              prev = [e for e in yesterday_entries if e.get("target_name") == target_name]
-              if not prev:
-                  # 어제 데이터 없으면 전체 이전 데이터에서 같은 타겟 최근값
-                  prev = [e for e in history[:-len(today_entries)]
-                          if e.get("target_name") == target_name and not e.get("error")]
-              if not prev:
-                  verdicts.append({
-                      "target": target_name,
-                      "today": today_score,
-                      "previous": 0,
-                      "delta": 0,
-                      "verdict": "first_run",
-                  })
-                  continue
-
-              prev_score = prev[-1].get("total", 0)
-              delta = today_score - prev_score
-
-              if delta > 5:
-                  verdict = "improved"
-              elif delta < -5:
-                  verdict = "regressed"
-              else:
-                  verdict = "stable"
-
-              verdicts.append({
-                  "target": target_name,
-                  "today": today_score,
-                  "previous": prev_score,
-                  "delta": round(delta, 1),
-                  "verdict": verdict,
-              })
-
-          # 최종 판정
-          regressions = [v for v in verdicts if v["verdict"] == "regressed"]
-          improvements = [v for v in verdicts if v["verdict"] == "improved"]
-
-          verdict_summary = {
-              "date": today,
-              "verdicts": verdicts,
-              "recent_commits": recent_commits[:10],
-              "overall": "regressed" if regressions else ("improved" if improvements else "stable"),
-          }
-          VERDICT_FILE.write_text(json.dumps(verdict_summary, indent=2, ensure_ascii=False))
-
-          print(f"\n{'='*50}")
-          print(f"  VERDICT — {today}")
-          print(f"{'='*50}")
-          for v in verdicts:
-              icon = {"improved": "📈", "regressed": "📉", "stable": "➡️", "first_run": "🆕"}[v["verdict"]]
-              print(f"  {icon} {v['target']}: {v['today']:.1f} (delta: {v['delta']:+.1f}) → {v['verdict'].upper()}")
-
-          if recent_commits:
-              print(f"\n  최근 커밋 ({len(recent_commits)}건):")
-              for c in recent_commits[:5]:
-                  print(f"    {c}")
-
-          # Regression 발견 시 GitHub Issue 생성
-          if regressions:
-              print(f"\n  ⚠️ REGRESSION in {len(regressions)} target(s)")
-              reg_details = "\n".join(
-                  f"- **{r['target']}**: {r['previous']:.1f} → {r['today']:.1f} ({r['delta']:+.1f})"
-                  for r in regressions
-              )
-              commits_str = "\n".join(f"- `{c}`" for c in recent_commits[:10]) if recent_commits else "- 커밋 정보 없음"
-
-              issue_body = f"""## Growth Loop — Regression 감지
-
-### 점수 하락
-
-{reg_details}
-
-### 최근 커밋 (원인 후보)
-
-{commits_str}
-
-### 판정
-
-코드 변경 후 벤치마크 점수가 하락했습니다.
-다음 중 하나를 결정해야 합니다:
-
-- [ ] **Revert**: 원인 커밋을 되돌림
-- [ ] **Fix**: 하락 원인을 분석하고 수정
-- [ ] **Accept**: 의도된 변경 (예: 오탐 필터 강화로 일시적 하락)
-
----
-*VXIS Growth Loop 자동 생성*"""
-
-              try:
-                  subprocess.run(
-                      ["gh", "issue", "create",
-                       "--title", f"[Growth] Regression detected — {', '.join(r['target'] for r in regressions)}",
-                       "--body", issue_body,
-                       "--label", "regression,growth-loop,automated"],
-                      capture_output=True, text=True, timeout=30,
-                  )
-                  print("  → Regression Issue 생성됨")
-              except Exception as e:
-                  print(f"  → Issue 생성 실패: {e}")
-
-          elif improvements:
-              print(f"\n  ✅ IMPROVED in {len(improvements)} target(s) — 코드 변경 효과 확인")
-
-          PYEOF
-
-      - name: Generate growth report
-        id: report
-        env:
-          PYTHONPATH: src
-        run: |
-          python - <<'PYEOF'
-          import json, os
-          from pathlib import Path
-          from datetime import datetime, timezone
-
-          HISTORY_FILE = Path("tools/benchmark/score_history.json")
-          REPORT_FILE = Path("tools/benchmark/growth_report.md")
-          VERDICT_FILE = Path("tools/benchmark/verdict.json")
-
-          if not HISTORY_FILE.exists():
-              print("No history yet")
-              exit(0)
-
-          history = json.loads(HISTORY_FILE.read_text())
-          if not history:
-              exit(0)
-
-          now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-          latest = history[-1]
-
-          # Verdict 로드
-          verdict = {}
-          if VERDICT_FILE.exists():
-              verdict = json.loads(VERDICT_FILE.read_text())
-
-          # 성장 추이 계산
-          lines = [
-              "# VXIS Growth Report",
-              f"**Date:** {now}",
-              f"**Overall Verdict:** {verdict.get('overall', 'unknown').upper()}",
-              f"**Latest Score:** {latest.get('total', 0):.1f} / 1000 [{latest.get('grade', '?')}]",
-              "",
-              "## Score History",
-              "",
-              "| Date | Score | Grade | Delta | Trend |",
-              "|------|-------|-------|-------|-------|",
-          ]
-
-          for i, entry in enumerate(history[-12:]):  # 최근 12주
-              delta = entry.get("delta", 0)
-              trend = "📈" if delta > 0 else ("📉" if delta < 0 else "➡️")
-              error = f" ⚠️ {entry['error'][:30]}" if entry.get("error") else ""
-              lines.append(
-                  f"| {entry['date']} | {entry.get('total', 0):.1f} | "
-                  f"{entry.get('grade', '?')} | {delta:+.1f} | {trend}{error} |"
-              )
-
-          # 약점 분석
-          if "dimensions" in latest:
-              dims = latest["dimensions"]
-              lines.extend([
-                  "",
-                  "## Dimension Breakdown (Latest)",
-                  "",
-                  "| Dimension | Score | Max | % | Status |",
-                  "|-----------|-------|-----|---|--------|",
-              ])
-              dim_config = [
-                  ("Vector Coverage", "vector_coverage", 250),
-                  ("Exploitation Reach", "exploitation_reach", 300),
-                  ("Chain Intelligence", "chain_intelligence", 150),
-                  ("Finding Precision", "finding_precision", 200),
-                  ("Completeness", "completeness", 100),
-              ]
-              weakest = None
-              weakest_pct = 1.0
-              for name, key, max_score in dim_config:
-                  score = dims.get(key, 0)
-                  pct = score / max_score if max_score else 0
-                  status = "🟢" if pct >= 0.7 else ("🟡" if pct >= 0.4 else "🔴")
-                  lines.append(f"| {name} | {score:.1f} | {max_score} | {pct:.0%} | {status} |")
-                  if pct < weakest_pct:
-                      weakest_pct = pct
-                      weakest = (name, key, pct)
-
-              if weakest:
-                  lines.extend([
-                      "",
-                      f"## Weakest Dimension: {weakest[0]} ({weakest[2]:.0%})",
-                      "",
-                      "**다음 주 개선 포인트:**",
-                  ])
-                  improvement_tips = {
-                      "vector_coverage": "- 더 많은 공격 벡터를 시도하도록 에이전트 확장\n- 누락된 벡터 카테고리 확인 (injection, auth, crypto 등)",
-                      "exploitation_reach": "- L2+ 도달률을 높이기 위해 익스플로잇 로직 강화\n- Chain Reasoner로 더 깊은 공격 경로 탐색",
-                      "chain_intelligence": "- 체인 깊이를 늘리기 위해 피벗/횡이동 로직 추가\n- 발견된 취약점 간 연결점 탐색 강화",
-                      "finding_precision": "- FP 필터링 파이프라인 개선\n- 증거 수집 로직 강화 (evidence 2개 이상)",
-                      "completeness": "- 실패/스킵되는 Phase 원인 분석\n- 도구 설치/환경 문제 해결",
-                  }
-                  lines.append(improvement_tips.get(weakest[1], "- 해당 차원 코드 리뷰 필요"))
-
-          # 성장률 계산
-          if len(history) >= 2:
-              first = history[0].get("total", 0)
-              last = latest.get("total", 0)
-              growth = last - first
-              weeks = len(history)
-              lines.extend([
-                  "",
-                  f"## Growth Summary",
-                  f"- **총 성장:** {growth:+.1f}점 ({weeks}주간)",
-                  f"- **주간 평균 성장:** {growth / max(weeks, 1):+.1f}점/주",
-              ])
-
-          REPORT_FILE.write_text("\n".join(lines), encoding="utf-8")
-          print(f"Growth report saved: {REPORT_FILE}")
-
-          # GitHub Actions output
+          # 환경변수로 결과 전달
           with open(os.environ.get("GITHUB_OUTPUT", "/dev/null"), "a") as f:
-              f.write(f"score={latest.get('total', 0):.1f}\n")
-              f.write(f"grade={latest.get('grade', '?')}\n")
+              f.write(f"final_score={final_log['final_score']:.1f}\n")
+              f.write(f"stop_reason={stop_reason}\n")
+              f.write(f"iterations={len(iterations)}\n")
+              f.write(f"code_improvements={final_log['code_improvements']}\n")
           PYEOF
 
-      - name: Commit score history
+      - name: Commit benchmark data
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add tools/benchmark/ 2>/dev/null || true
           if ! git diff --staged --quiet; then
-            git commit -m "chore: growth loop — score update $(date -u +%Y-%m-%d)"
+            git commit -m "chore: growth loop results $(date -u +%Y-%m-%d)"
             git pull --rebase origin main
             git push
           fi
 
-      - name: Send morning report (아침에 컨펌용)
+      - name: Create growth summary issue
         if: always()
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python - <<'PYEOF'
-          import json, os, urllib.request
-          from pathlib import Path
+          FINAL_SCORE="${{ steps.growth.outputs.final_score }}"
+          STOP_REASON="${{ steps.growth.outputs.stop_reason }}"
+          ITERATIONS="${{ steps.growth.outputs.iterations }}"
+          CODE_IMPROVEMENTS="${{ steps.growth.outputs.code_improvements }}"
 
-          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-          if not token or not chat_id:
-              print("Telegram not configured")
-              exit(0)
+          if [ -n "$FINAL_SCORE" ]; then
+            BODY="## Growth Loop Summary — $(date -u +%Y-%m-%d)
 
-          # Iteration 로그에서 밤새 성장 결과 로드
-          iter_file = Path("tools/benchmark/iteration_log.json")
-          if not iter_file.exists():
-              exit(0)
+          | 항목 | 값 |
+          |------|-----|
+          | 최종 점수 | ${FINAL_SCORE} / 1000 |
+          | 종료 이유 | ${STOP_REASON} |
+          | 총 반복 | ${ITERATIONS}회 |
+          | 코드 개선 | ${CODE_IMPROVEMENTS}회 |
 
-          data = json.loads(iter_file.read_text())
-          total_iter = data.get("total_iterations", 0)
-          start = data.get("start_score", 0)
-          final = data.get("final_score", 0)
-          growth = data.get("total_growth", 0)
+          자세한 내용: \`tools/benchmark/iteration_log.json\`"
 
-          if growth > 0:
-              icon = "📈"
-              status = "성장"
-          elif growth < 0:
-              icon = "📉"
-              status = "하락"
-          else:
-              icon = "➡️"
-              status = "변화없음"
-
-          # 각 반복의 약점 변화 추적
-          iter_details = ""
-          for it in data.get("iterations", [])[-5:]:
-              dim_ko = {
-                  "vector_coverage": "벡터", "exploitation_reach": "깊이",
-                  "chain_intelligence": "체인", "finding_precision": "정확도",
-                  "completeness": "완전성",
-              }
-              weak = dim_ko.get(it.get("weakest_dimension", ""), "?")
-              iter_details += f"\n  #{it['iteration']}: {it['best_score']:.0f}점 (약점: {weak} {it.get('weakest_pct',0):.0%})"
-
-          # Verdict 로드
-          verdict_file = Path("tools/benchmark/verdict.json")
-          verdict_msg = ""
-          if verdict_file.exists():
-              v = json.loads(verdict_file.read_text())
-              overall = v.get("overall", "unknown")
-              verdict_icon = {"improved": "✅ 반영 확정", "regressed": "⚠️ REGRESSION", "stable": "➡️ 안정"}.get(overall, "❓")
-              verdict_msg = f"\n\n📋 <b>판정:</b> {verdict_icon}"
-
-          msg = (
-              f"🌙 <b>VXIS 밤새 성장 리포트</b>\n"
-              f"\n"
-              f"🔄 <b>반복:</b> {total_iter}회\n"
-              f"🏁 <b>시작:</b> {start:.0f}점\n"
-              f"🏆 <b>최종:</b> {final:.0f}점\n"
-              f"{icon} <b>{status}:</b> {growth:+.1f}점\n"
-              f"\n<b>반복 로그:</b>{iter_details}"
-              f"{verdict_msg}\n"
-              f"\n💡 <i>코드 변경이 필요하면 승인해주세요</i>"
-          )
-
-          payload = json.dumps({
-              "chat_id": chat_id,
-              "text": msg,
-              "parse_mode": "HTML",
-          }).encode("utf-8")
-
-          req = urllib.request.Request(
-              f"https://api.telegram.org/bot{token}/sendMessage",
-              data=payload,
-              headers={"Content-Type": "application/json"},
-              method="POST",
-          )
-          try:
-              urllib.request.urlopen(req, timeout=15)
-              print("Morning report sent")
-          except Exception as e:
-              print(f"Telegram failed: {e}")
-          PYEOF
+            gh issue create \
+              --title "Growth Loop: $(date -u +%Y-%m-%d) — ${FINAL_SCORE}/1000 [${STOP_REASON}]" \
+              --body "$BODY" \
+              --label "growth-loop,benchmark" 2>/dev/null || true
+          fi

@@ -521,6 +521,7 @@ class AgentBrain:
         compressor: "ContextCompressor | None" = None,
         token_router: "TokenRouter | None" = None,
         chain_reasoner: "ChainReasoner | None" = None,
+        brain_mode: str = "standard",
     ) -> None:
         self.max_steps = max_steps
         self.steps: list[AgentStep] = []
@@ -529,6 +530,9 @@ class AgentBrain:
         self._model = model or os.environ.get("UPSTREAM_LLM_MODEL", "")
         self._step_count = 0
         self._memory = memory
+        # "standard" | "uncensored"
+        # uncensored: Ollama local → Together DeepSeek-R1 우선 (정책 거부 없음)
+        self._brain_mode = brain_mode
         # Phase 3 모듈
         self._knowledge_store = knowledge_store
         self._compressor = compressor
@@ -542,23 +546,52 @@ class AgentBrain:
     def _build_fallback_chain(self) -> list[dict[str, str]]:
         """LLM Fallback 체인을 구성한다.
 
-        정책 거부 시 순차적으로 다음 모델로 전환.
-
-        전략:
-        - Tier 1: Anthropic (추론 최강, 하지만 보안 정책 엄격)
-        - Tier 2: Together.ai 통합 게이트웨이 (중국 모델 포함, 정책 느슨)
-          → Kimi K2.5 (1T, 추론 특화)
-          → GLM-5 (744B, 에이전트 특화)
-          → GLM-4.7 (202K 컨텍스트)
-          → DeepSeek-V3.1 (671B, 코드/분석 강력)
-          → DeepSeek-R1 (추론 체인)
-          → Qwen3-235B (빠른 응답)
-          → OpenAI GPT-OSS-120B (저렴한 범용)
-          → Llama-3.3-70B (오픈소스 최강)
-
-        Together.ai 하나로 거의 모든 모델을 커버.
-        별도 API 키 없이 중국 모델까지 사용 가능.
+        brain_mode에 따라 두 가지 전략:
+        - "standard":   Claude → Together → OpenAI → Gemini
+        - "uncensored": Ollama(로컬) → Together DeepSeek-R1/V3.1 → standard fallback
+                        페이로드 생성/체인 추론 시 정책 거부 없이 동작
         """
+        if self._brain_mode == "uncensored":
+            return self._build_uncensored_chain()
+        return self._build_standard_chain()
+
+    def _build_uncensored_chain(self) -> list[dict[str, str]]:
+        """Uncensored 모드 fallback 체인.
+
+        우선순위:
+        1. Ollama 로컬 — 무료, 빠름, 완전 무검열 (12GB VRAM 한계)
+        2. Together DeepSeek-R1-Distill-Qwen-32B — $0.54/1M, 추론 특화
+        3. Together DeepSeek-V3.1 — $0.27/1M, 코드/분석 강력
+        4. Standard 체인 fallback — 위 모두 실패 시
+        """
+        chain: list[dict[str, str]] = []
+
+        # Tier 1: Ollama 로컬 (키 불필요, VXIS_OLLAMA_UNCENSORED_MODEL 환경변수로 모델 교체)
+        ollama_base = os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434")
+        ollama_model = os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", "qwen2.5-coder:14b")
+        chain.append({
+            "provider": "ollama",
+            "model": ollama_model,
+            "base_url": ollama_base,
+        })
+
+        # Tier 2: Together.ai — 무검열 추론/코딩 모델
+        if os.environ.get("TOGETHER_API_KEY"):
+            # 코딩 에이전트 특화 Next — 페이로드 생성 최적, 가성비 ($0.50/$1.20)
+            chain.append({"provider": "together", "model": "Qwen/Qwen3-Coder-Next-FP8"})
+            # 코딩 에이전트 480B — 최고 품질, 고비용 ($2.00 flat)
+            chain.append({"provider": "together", "model": "Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8"})
+            # 671B V3.1 — 복잡한 공격 체인 추론 ($0.60/$1.70)
+            chain.append({"provider": "together", "model": "deepseek-ai/DeepSeek-V3.1"})
+            # R1-0528 — 최고 추론, 비쌈 ($3.00/$7.00)
+            chain.append({"provider": "together", "model": "deepseek-ai/DeepSeek-R1-0528"})
+
+        # Tier 3: Standard 체인으로 fallback (위 모두 실패 시)
+        chain.extend(self._build_standard_chain())
+        return chain
+
+    def _build_standard_chain(self) -> list[dict[str, str]]:
+        """Standard 모드 fallback 체인 (기존 로직)."""
         chain: list[dict[str, str]] = []
 
         # Tier 1: Anthropic (기본 Brain — 추론/전략 최강)
@@ -572,20 +605,20 @@ class AgentBrain:
         if os.environ.get("TOGETHER_API_KEY"):
             # 추론 특화 (Opus 대체 후보)
             chain.append({"provider": "together", "model": "moonshotai/Kimi-K2.5"})
-            # 에이전트 특화 (도구 사용, function calling)
-            chain.append({"provider": "together", "model": "zai-org/GLM-5"})
-            # 긴 컨텍스트 (202K)
-            chain.append({"provider": "together", "model": "zai-org/GLM-4.7"})
-            # 코드/분석 강력 (보안 정책 느슨)
+            # function calling 특화 ($1.00/$3.20)
+            chain.append({"provider": "together", "model": "zai-org/GLM-5-FP4"})
+            # 코드/분석 ($0.60/$1.70)
             chain.append({"provider": "together", "model": "deepseek-ai/DeepSeek-V3.1"})
-            # 추론 체인 (단계별 사고)
-            chain.append({"provider": "together", "model": "deepseek-ai/DeepSeek-R1"})
-            # 빠른 범용
-            chain.append({"provider": "together", "model": "Qwen/Qwen3-235B-A22B"})
-            # 저렴한 범용 ($0.15/M)
+            # 추론 체인 ($3.00/$7.00)
+            chain.append({"provider": "together", "model": "deepseek-ai/DeepSeek-R1-0528"})
+            # 범용 대형 ($0.60/$3.60)
+            chain.append({"provider": "together", "model": "Qwen/Qwen3.5-397B-A17B"})
+            # 범용 235B 저렴 ($0.20/$0.60)
+            chain.append({"provider": "together", "model": "Qwen/Qwen3-235B-A22B-Instruct-2507-FP8"})
+            # 중간 범용 ($0.15/$0.60)
             chain.append({"provider": "together", "model": "openai/gpt-oss-120b"})
-            # 오픈소스 최강
-            chain.append({"provider": "together", "model": "meta-llama/Llama-3.3-70B-Instruct-Turbo"})
+            # 경량 최저가 ($0.05/$0.20)
+            chain.append({"provider": "together", "model": "openai/gpt-oss-20b"})
 
         # Tier 3: OpenAI 직접 (Together에 없는 경우 대비)
         # LLM_API_KEY는 OpenAI 키의 별칭으로 지원
@@ -1086,6 +1119,12 @@ class AgentBrain:
             return self._call_gemini(system_prompt, user_prompt, model)
         elif provider == "deepseek":
             return self._call_deepseek(system_prompt, user_prompt, model)
+        elif provider == "ollama":
+            # fallback dict에서 base_url을 꺼내야 하므로 환경변수에서 직접 읽음
+            base_url = os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434")
+            return self._call_openai_compatible(
+                system_prompt, user_prompt, "ollama", model, base_url=base_url
+            )
         elif provider in ("together", "openai"):
             return self._call_openai_compatible(
                 system_prompt, user_prompt, provider, model
@@ -1099,21 +1138,29 @@ class AgentBrain:
         user: str,
         provider: str,
         model: str,
+        base_url: str = "",
     ) -> str | None:
-        """OpenAI 호환 API 호출 (Together, OpenAI)."""
-        urls = {
-            "together": "https://api.together.xyz/v1/chat/completions",
-            "openai": "https://api.openai.com/v1/chat/completions",
-        }
-        keys = {
-            "together": os.environ.get("TOGETHER_API_KEY", ""),
-            "openai": os.environ.get("OPENAI_API_KEY", ""),
-        }
+        """OpenAI 호환 API 호출 (Together, OpenAI, Ollama).
 
-        url = urls.get(provider)
-        api_key = keys.get(provider)
-        if not url or not api_key:
-            return None
+        Ollama는 키가 없으며 base_url만 사용 (http://localhost:11434).
+        """
+        if base_url:
+            # 명시적 base_url이 주어진 경우 (ollama 등)
+            url = base_url.rstrip("/") + "/v1/chat/completions"
+            api_key = "ollama"  # Ollama는 인증 불필요, dummy 값
+        else:
+            urls = {
+                "together": "https://api.together.xyz/v1/chat/completions",
+                "openai": "https://api.openai.com/v1/chat/completions",
+            }
+            keys = {
+                "together": os.environ.get("TOGETHER_API_KEY", ""),
+                "openai": os.environ.get("OPENAI_API_KEY", ""),
+            }
+            url = urls.get(provider)
+            api_key = keys.get(provider)
+            if not url or not api_key:
+                return None
 
         payload = json.dumps({
             "model": model,

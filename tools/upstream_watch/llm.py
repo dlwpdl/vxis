@@ -119,7 +119,11 @@ def _get_provider() -> str:
 
 
 def _get_api_key() -> str:
-    """Resolve API key: UPSTREAM_LLM_API_KEY → provider-specific → fallbacks."""
+    """Resolve API key for the configured provider only.
+
+    UPSTREAM_LLM_API_KEY → provider-specific key.
+    provider-specific key 없으면 빈 문자열 반환 (chat()의 fallback chain이 처리).
+    """
     key = os.environ.get("UPSTREAM_LLM_API_KEY", "")
     if key:
         return key
@@ -138,12 +142,16 @@ def _get_api_key() -> str:
         if key:
             return key
 
-    # Fallback chain: TOGETHER → ANTHROPIC → OPENAI
-    for fallback in ("TOGETHER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY"):
-        key = os.environ.get(fallback, "")
+    return ""
+
+
+def _get_any_available_key() -> str:
+    """어떤 provider든 키가 있으면 반환 (is_available() 전용)."""
+    for env_var in ("TOGETHER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+                    "GOOGLE_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"):
+        key = os.environ.get(env_var, "")
         if key:
             return key
-
     return ""
 
 
@@ -161,8 +169,8 @@ def _get_model() -> str:
 
 
 def is_available() -> bool:
-    """Return True if an LLM API key is configured."""
-    return bool(_get_api_key())
+    """Return True if any LLM API key is configured."""
+    return bool(_get_api_key() or _get_any_available_key())
 
 
 def _try_provider(
@@ -202,21 +210,24 @@ def chat(
     """
     primary_provider = _get_provider()
     primary_key = _get_api_key()
-    if not primary_key:
-        return None
+    # primary key 없으면 fallback chain으로 바로 진입 (None 반환 안 함)
+    skip_primary = not primary_key
 
     model = _get_model()
 
-    # Try primary provider first
-    logger.info("LLM request: %s/%s (prompt ~%d chars)", primary_provider, model, len(user_prompt))
-    try:
-        result = _try_provider(primary_provider, primary_key, model, system_prompt, user_prompt, max_tokens)
-        if result is not None:
-            logger.info("LLM success: %s/%s (%d chars response)", result.provider, result.model, len(result.text))
-            return result
-        logger.warning("Primary LLM returned None (%s/%s)", primary_provider, model)
-    except Exception as exc:
-        logger.warning("Primary LLM failed (%s/%s): %s: %s", primary_provider, model, type(exc).__name__, exc)
+    # Try primary provider first (키가 있을 때만)
+    if not skip_primary:
+        logger.info("LLM request: %s/%s (prompt ~%d chars)", primary_provider, model, len(user_prompt))
+        try:
+            result = _try_provider(primary_provider, primary_key, model, system_prompt, user_prompt, max_tokens)
+            if result is not None:
+                logger.info("LLM success: %s/%s (%d chars response)", result.provider, result.model, len(result.text))
+                return result
+            logger.warning("Primary LLM returned None (%s/%s)", primary_provider, model)
+        except Exception as exc:
+            logger.warning("Primary LLM failed (%s/%s): %s: %s", primary_provider, model, type(exc).__name__, exc)
+    else:
+        logger.info("Primary provider %s has no key — going directly to fallback", primary_provider)
 
     # Fallback chain: try other providers that have keys
     _FALLBACK_ORDER = [
