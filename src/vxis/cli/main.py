@@ -267,33 +267,23 @@ def _convert_finding_records(records) -> list:
 
 @app.command()
 def scan(
-    target: str = typer.Argument(help="Target domain or IP address"),
-    profile: str = typer.Option(
-        "standard",
-        "--profile",
-        "-p",
-        help="Scan profile: passive | stealth | standard | aggressive",
-    ),
-    plugins: Optional[str] = typer.Option(
-        None,
-        "--plugins",
-        help="Comma-separated list of plugin names to run (default: all)",
-    ),
+    target: str = typer.Argument(help="Target URL or domain"),
     output: Optional[Path] = typer.Option(
         None,
         "--output",
         "-o",
-        help="Path to write the HTML report (default: ./report_<target>.html)",
+        help="Path to write the HTML report (default: reports/report_<target>_<date>.html)",
     ),
-    no_report: bool = typer.Option(
-        False,
-        "--no-report",
-        help="Skip report generation after the scan",
-    ),
-    client: Optional[str] = typer.Option(
+    resume: Optional[str] = typer.Option(
         None,
-        "--client",
-        help="Client ID for branded report (loads client branding config)",
+        "--resume",
+        help="Resume from checkpoint file (skip completed phases)",
+    ),
+    interactive: bool = typer.Option(
+        False,
+        "--interactive",
+        "-i",
+        help="Claude Code가 Brain으로 작동 (stdin/stdout JSON)",
     ),
     verbose: bool = typer.Option(
         False,
@@ -302,162 +292,114 @@ def scan(
         help="Enable verbose (DEBUG) logging",
     ),
 ) -> None:
-    """Run a security scan against the target."""
-    # Configure logging level
+    """Run a Brain-First security scan against the target.
+
+    \b
+    기본: LLM API Brain이 20 Phase 파이프라인을 자율 실행
+    --interactive: Claude Code가 Brain (stdin/stdout JSON 프로토콜)
+    --resume: 이전 스캔의 체크포인트에서 재개
+    """
     log_level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    if interactive:
+        logging.basicConfig(stream=sys.stderr, level=log_level,
+                            format="%(asctime)s [%(name)s] %(message)s", datefmt="%H:%M:%S")
+    else:
+        logging.basicConfig(level=log_level,
+                            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
 
     _print_banner()
 
-    # Parse optional plugin list
-    selected_plugins: list[str] | None = None
-    if plugins:
-        selected_plugins = [p.strip() for p in plugins.split(",") if p.strip()]
+    from vxis.registry import VERSION
 
     # Display scan parameters
     param_table = Table.grid(padding=(0, 2))
     param_table.add_column(style="bold", no_wrap=True)
     param_table.add_column()
     param_table.add_row("Target:", f"[cyan]{target}[/cyan]")
-    param_table.add_row("Profile:", f"[yellow]{profile}[/yellow]")
-    if selected_plugins:
-        param_table.add_row("Plugins:", ", ".join(selected_plugins))
-    console.print(Panel(param_table, title="Scan Parameters", border_style="blue"))
+    param_table.add_row("Brain:", "[yellow]Claude Code (Interactive)[/yellow]" if interactive else "[green]AgentBrain (LLM API)[/green]")
+    param_table.add_row("Version:", f"v{VERSION}")
+    if resume:
+        param_table.add_row("Resume:", f"[yellow]{resume}[/yellow]")
+    console.print(Panel(param_table, title="VXIS Scan", border_style="cyan"))
 
-    # --- Run scan ---
-    config = _get_config()
+    async def _run():
+        from vxis.pipeline.pipeline import ScanPipeline
 
-    from vxis.core.events import ScanEventBus, ScanSnapshotCollector
-    from vxis.core.orchestrator import ScanOrchestrator
-    from vxis.core.scope import ScopeViolationError
-    from vxis.cli.live_display import ScanLiveDisplay
+        if interactive:
+            from vxis.agent.brain_interactive import InteractiveBrain
+            brain = InteractiveBrain()
+        else:
+            from vxis.agent.brain import AgentBrain
+            brain = AgentBrain()
 
-    event_bus = ScanEventBus()
-    collector = ScanSnapshotCollector()
-    event_bus.on_any(collector.handle_event)
-
-    orchestrator = ScanOrchestrator(config, event_bus=event_bus)
-
-    async def _run_with_live_display() -> "ScanResult":
-        """Run the scan while updating the live TUI display."""
-        scan_task = asyncio.create_task(
-            orchestrator.run_scan(
-                target=target,
-                profile=profile,
-                selected_plugins=selected_plugins,
-            )
+        pipeline = ScanPipeline(brain=brain)
+        ctx = await pipeline.run(
+            target=target,
+            resume_from=resume,
         )
+        return ctx
 
-        # Refresh loop: update TUI until scan finishes
-        while not scan_task.done():
-            display.update(collector.snapshot)
-            await asyncio.sleep(0.25)
+    try:
+        ctx = asyncio.run(_run())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Scan interrupted by user[/yellow]")
+        raise typer.Exit(code=130)
+    except Exception as exc:
+        err_console.print(f"[bold red]Scan failed:[/bold red] {exc}")
+        if verbose:
+            console.print_exception()
+        raise typer.Exit(code=1) from exc
 
-        # Final update
-        display.update(collector.snapshot)
-        return await scan_task
-
-    display = ScanLiveDisplay(console)
-    with display:
-        try:
-            result = asyncio.run(_run_with_live_display())
-        except ScopeViolationError as exc:
-            err_console.print(f"[bold red]Scope violation:[/bold red] {exc}")
-            raise typer.Exit(code=1) from exc
-        except ValueError as exc:
-            err_console.print(f"[bold red]Configuration error:[/bold red] {exc}")
-            raise typer.Exit(code=1) from exc
-        except Exception as exc:  # noqa: BLE001
-            err_console.print(f"[bold red]Scan failed:[/bold red] {exc}")
-            if verbose:
-                console.print_exception()
-            raise typer.Exit(code=1) from exc
-
-    # --- Results summary table ---
+    # --- Results summary ---
+    from vxis.models.finding import Severity
     severity_order = ["critical", "high", "medium", "low", "informational"]
     severity_styles = {
-        "critical": "bold red",
-        "high": "red",
-        "medium": "yellow",
-        "low": "blue",
-        "informational": "dim",
+        "critical": "bold red", "high": "red", "medium": "yellow",
+        "low": "blue", "informational": "dim",
     }
 
     summary_table = Table(
-        title=f"Scan Results — {result.scan_id[:8]}",
-        show_header=True,
-        header_style="bold",
-        border_style="green",
-        expand=False,
+        title=f"Scan Results — {ctx.scan_id}",
+        show_header=True, header_style="bold", border_style="green",
     )
     summary_table.add_column("Severity", style="bold", no_wrap=True)
     summary_table.add_column("Count", justify="right")
 
-    counts = result.severity_counts
     for sev in severity_order:
-        count = counts.get(sev, 0)
+        count = sum(1 for f in ctx.findings if f.severity.value == sev)
         style = severity_styles.get(sev, "")
-        summary_table.add_row(
-            f"[{style}]{sev.capitalize()}[/{style}]",
-            f"[{style}]{count}[/{style}]",
-        )
+        summary_table.add_row(f"[{style}]{sev.capitalize()}[/{style}]", f"[{style}]{count}[/{style}]")
 
     console.print(summary_table)
 
-    # Tool run status table
-    if result.tool_runs:
-        run_table = Table(
-            title="Plugin Execution Summary",
-            show_header=True,
-            header_style="bold dim",
-            border_style="dim",
-            expand=False,
-        )
-        run_table.add_column("Plugin", no_wrap=True)
-        run_table.add_column("State", no_wrap=True)
-        run_table.add_column("Duration", justify="right")
+    # Findings detail
+    if ctx.findings:
+        finding_table = Table(title="Findings", show_header=True, header_style="bold dim")
+        finding_table.add_column("ID", no_wrap=True)
+        finding_table.add_column("Severity", no_wrap=True)
+        finding_table.add_column("Title", max_width=60)
+        finding_table.add_column("Component", max_width=30)
 
-        state_styles = {
-            "completed": "green",
-            "failed": "red",
-            "timed_out": "yellow",
-            "skipped": "dim",
-            "running": "cyan",
-            "pending": "dim",
-        }
+        for f in ctx.findings:
+            sev = f.severity.value.upper()
+            style = severity_styles.get(f.severity.value, "")
+            title = f.title.split("|||")[0][:60]
+            finding_table.add_row(f.id, f"[{style}]{sev}[/{style}]", title, f.affected_component[:30])
 
-        for run in result.tool_runs:
-            state = run.get("state", "unknown")
-            duration = run.get("duration_seconds")
-            style = state_styles.get(state, "")
-            duration_str = f"{duration:.1f}s" if duration is not None else "—"
-            run_table.add_row(
-                run["plugin"],
-                f"[{style}]{state}[/{style}]",
-                duration_str,
-            )
+        console.print(finding_table)
 
-        console.print(run_table)
+    # Score
+    vxis_score = getattr(ctx, "vxis_score", None)
+    if vxis_score:
+        console.print(f"\n[bold]VXIS Score:[/bold] [cyan]{vxis_score.total:.1f}/1000[/cyan] [{vxis_score.grade}]")
 
-    # Duration summary
+    # Duration
     console.print(
         f"\n[bold green]Scan completed[/bold green] in "
-        f"[cyan]{result.duration_seconds:.1f}s[/cyan]  |  "
-        f"[bold]{len(result.findings)}[/bold] finding(s) after dedup + FP filtering"
+        f"[cyan]{ctx.duration_seconds:.1f}s[/cyan]  |  "
+        f"[bold]{len(ctx.findings)}[/bold] finding(s)  |  "
+        f"{len(ctx.phases_completed)} phases completed"
     )
-
-    # --- Report generation ---
-    if not no_report:
-        report_path = output or Path(f"report_{target.replace('/', '_')}.html")
-        # Report generation is wired up when the report module is available.
-        # For now, note the intended path.
-        console.print(
-            f"[dim]Report would be written to:[/dim] [underline]{report_path}[/underline]"
-        )
 
 
 @app.command()
@@ -1028,92 +970,12 @@ def trend_cmd(
 @app.command(name="agent-scan")
 def agent_scan(
     target: str = typer.Argument(help="Target URL or domain"),
-    brain: str = typer.Option(
-        "auto",
-        "--brain",
-        "-b",
-        help="Brain mode: auto (LLM API 자율) | claude-code (stdin/stdout JSON)",
-    ),
-    max_steps: int = typer.Option(15, "--max-steps", "-s", help="최대 스캔 단계"),
-    profile: str = typer.Option("standard", "--profile", "-p", help="스캔 프로필"),
 ) -> None:
-    """AI 자율 펜테스트 — Brain이 판단하고 실행하는 풀오토 스캔.
-
-    \b
-    Mode 1: --brain=auto       → 등록된 LLM API 키로 자율 실행
-    Mode 2: --brain=claude-code → Claude Code가 Brain (stdin/stdout JSON)
-    """
-    async def _run() -> None:
-        from vxis.agent.executor import AgentExecutor
-
-        brain_instance = None
-
-        if brain == "claude-code":
-            from vxis.agent.brain_interactive import InteractiveBrain
-            brain_instance = InteractiveBrain(max_steps=max_steps)
-            # claude-code 모드: 로깅은 stderr, stdout은 JSON 프로토콜 전용
-            logging.basicConfig(
-                stream=sys.stderr,
-                level=logging.INFO,
-                format="%(asctime)s [%(name)s] %(message)s",
-                datefmt="%H:%M:%S",
-            )
-            err_console.print(
-                f"[bold cyan]VXIS Agent Scan[/bold cyan] — "
-                f"Brain: [bold yellow]Claude Code (Interactive)[/bold yellow]"
-            )
-            err_console.print(f"Target: [bold]{target}[/bold] | Max steps: {max_steps}")
-        else:
-            logging.basicConfig(
-                level=logging.INFO,
-                format="%(asctime)s [%(name)s] %(message)s",
-                datefmt="%H:%M:%S",
-            )
-            console.print(
-                f"[bold cyan]VXIS Agent Scan[/bold cyan] — "
-                f"Brain: [bold green]Auto (LLM API)[/bold green]"
-            )
-            console.print(f"Target: [bold]{target}[/bold] | Max steps: {max_steps}")
-
-        executor = AgentExecutor(max_steps=max_steps, brain=brain_instance)
-        result = await executor.run(target=target, profile=profile)
-
-        # 결과 출력
-        if brain == "claude-code":
-            # JSON 완료 메시지
-            import json as _json
-            sys.stdout.write(_json.dumps({
-                "type": "complete",
-                "target": result.target,
-                "findings_count": len(result.findings),
-                "steps_taken": result.steps_taken,
-                "duration_seconds": result.duration_seconds,
-            }, ensure_ascii=False) + "\n")
-            sys.stdout.flush()
-        else:
-            console.print(f"\n[bold green]Scan Complete[/bold green]")
-            console.print(f"  Steps: {result.steps_taken}")
-            console.print(f"  Duration: {result.duration_seconds:.1f}s")
-            console.print(f"  Findings: {len(result.findings)}")
-            if result.findings:
-                table = Table(title="Findings")
-                table.add_column("Severity", style="bold")
-                table.add_column("Title")
-                table.add_column("Source")
-                for f in result.findings:
-                    sev = f.severity.value.upper()
-                    style = {
-                        "CRITICAL": "bold red",
-                        "HIGH": "red",
-                        "MEDIUM": "yellow",
-                        "LOW": "blue",
-                        "INFO": "dim",
-                    }.get(sev, "")
-                    table.add_row(f"[{style}]{sev}[/{style}]", f.title, f.source_plugin)
-                console.print(table)
-            console.print(f"\n{result.execution_log}")
-
-    asyncio.run(_run())
+    """[DEPRECATED] Use 'vxis scan' instead. 'vxis scan --interactive' for Claude Code mode."""
+    console.print("[yellow]agent-scan is deprecated. Use:[/yellow]")
+    console.print("  [bold]vxis scan[/bold] <target>               # LLM API Brain")
+    console.print("  [bold]vxis scan[/bold] <target> --interactive  # Claude Code Brain")
+    raise typer.Exit(code=0)
 
 
 @app.command()
