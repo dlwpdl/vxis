@@ -698,7 +698,457 @@ After implementation, the following must work:
 | MCP rewrite breaks existing tests | Keep old mcp_server.py as `mcp_server_legacy.py` during transition. CI runs both. |
 | Claude Code Task tool limits | Max N parallel sub-agents per profile. `stealth_3` uses 1. |
 
-## Follow-up Work (Post-MVP)
+## Self-Growth Intelligence Layer (Addition)
+
+### Motivation
+
+VXIS already has data collection (CVE Watch, Upstream Watch, Domain Intel) and
+validation (Growth Loop), but these workflows operate in isolation. Each produces
+Telegram alerts or digest markdown — humans must manually translate insights into
+code upgrades. This section describes the missing feedback loop that closes the
+circle: **every new piece of threat intelligence autonomously upgrades VXIS code,
+phase guides, knowledge store, and attack vectors, with benchmark validation and
+automatic rollback on regression**.
+
+### Design Principle
+
+"Whatever a human security expert does when reading a new CVE or threat report
+— extract insights, map them to the right system component, apply improvements —
+VXIS Brain does the same thing, continuously, 24/7, with rollback safety."
+
+### 7-Step Self-Growth Loop
+
+```
+1. INGEST     — All sources → signals/inbox/*.jsonl
+2. EXTRACT    — LLM Brain parses each signal into structured intelligence
+3. CLASSIFY   — Route each intelligence to the correct VXIS component
+4. VALIDATE   — Sanity checks (syntax, duplicates, trust score, blast radius)
+5. APPLY      — Low-risk: auto-apply. High-risk: queue as GitHub Issue for approval.
+6. BENCHMARK  — Run Growth Loop. IMPROVED → commit. REGRESSED → auto-rollback.
+7. REPORT     — Weekly digest (Telegram + Dashboard + GitHub Discussion)
+```
+
+### Integration with Existing GitHub Actions
+
+Existing workflows are NOT rewritten. They are extended to feed the new pipeline:
+
+| Existing Workflow | Change |
+|-------------------|--------|
+| `cve-watch.yml` | Already produces Telegram alerts. Add step: write structured result to `.vxis/signals/inbox/cve-<timestamp>.jsonl` |
+| `upstream-watch.yml` | Add step: write to `.vxis/signals/inbox/upstream-<timestamp>.jsonl` |
+| `domain-intel.yml` | Add step: write to `.vxis/signals/inbox/domain-<timestamp>.jsonl` |
+| `growth-loop.yml` | Add `repository_dispatch` trigger type (`growth-loop-validate`) + rollback logic for `signal-driven` changes |
+| `action-bridge.yml` | Repurpose as orchestrator between signal pipeline workflows |
+
+Three new workflows complete the loop:
+
+#### `signal-ingest.yml` (hourly)
+```yaml
+name: Signal Ingest
+on:
+  schedule:
+    - cron: "15 * * * *"
+  workflow_run:
+    workflows: ["CVE Watch", "Upstream Watch", "Domain Intelligence"]
+    types: [completed]
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -e .
+      - run: python -m vxis.growth.ingest
+        # - Read latest cve-watch output
+        # - Read latest upstream-watch output
+        # - Read latest domain-intel output
+        # - Run ThreatNewsWatcher (RSS feeds)
+        # - Unify all signals into .vxis/signals/inbox/
+      - name: Commit signals
+        run: |
+          git config user.name "vxis-growth[bot]"
+          git add .vxis/signals/inbox/
+          git diff --staged --quiet || git commit -m "chore(signals): ingest hourly batch"
+          git push || true
+```
+
+#### `signal-analyze.yml` (every 2 hours)
+```yaml
+name: Signal Analyze
+on:
+  schedule:
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      signal_file:
+        description: "Process specific signal file only"
+        required: false
+  repository_dispatch:
+    types: [manual-analyze]
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: pip install -e .
+
+      - name: LLM Analysis — extract structured intelligence
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+        run: python -m vxis.growth.analyze
+        # Brain (LLM) processes each signal:
+        # - Extract CVEs, TTPs, threat actors, techniques
+        # - Map to VXIS components (vectors, phase guides, KB)
+        # - Generate upgrade proposals
+        # - Assign trust score based on source
+        # Output: .vxis/signals/proposals/<timestamp>-<topic>.json
+
+      - name: Apply low-risk changes
+        id: apply
+        run: python -m vxis.growth.apply --low-risk
+        # Auto-apply if:
+        #   - trust_score >= 0.7
+        #   - change_type in [vector_add, guide_advice_append, kb_pattern_add, wordlist_expand]
+        #   - blast_radius < 5% (diff size limit)
+        # Writes to:
+        #   - src/vxis/scoring/vectors.py
+        #   - src/vxis/phases/guides/*.py
+        #   - ~/.vxis/knowledge_store.json
+        #   - src/vxis/primitives/wordlists/
+
+      - name: Queue high-risk changes as GitHub Issues
+        run: python -m vxis.growth.queue_high_risk
+        # high-risk = phase order change, scope rule change, new phase, approval gate mod
+        # Creates GitHub Issue with label: ["needs-approval", "growth-proposal"]
+
+      - name: Commit applied changes
+        if: steps.apply.outputs.changes_applied == 'true'
+        run: |
+          git config user.name "vxis-growth[bot]"
+          git add src/ .vxis/signals/applied/
+          git commit -m "feat(growth): auto-apply ${{ steps.apply.outputs.change_count }} upgrades from signals"
+          git push
+
+      - name: Trigger Growth Loop benchmark
+        if: steps.apply.outputs.changes_applied == 'true'
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: growth-loop-validate
+          client-payload: |
+            {
+              "source": "signal-analyze",
+              "apply_commit": "${{ steps.apply.outputs.commit_sha }}",
+              "change_summary": "${{ steps.apply.outputs.change_summary }}"
+            }
+```
+
+#### `growth-digest.yml` (Sunday 18:00 UTC)
+```yaml
+name: Growth Weekly Digest
+on:
+  schedule:
+    - cron: "0 18 * * 0"
+  workflow_dispatch:
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+      - run: pip install -e .
+
+      - run: python -m vxis.growth.digest --week
+        # Aggregate:
+        # - signals processed (by source)
+        # - auto-applied changes (by type)
+        # - rolled-back changes (with reasons)
+        # - pending approvals count
+        # - score delta this week
+        # - top 10 insights
+        # Writes: docs/growth-digests/YYYY-MM-DD.md
+
+      - name: Notify
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m vxis.growth.notify --digest docs/growth-digests/$(date +%Y-%m-%d).md
+
+      - name: Create GitHub Discussion
+        uses: abirismyname/create-discussion@v1
+        with:
+          title: "VXIS Weekly Growth Digest — $(date +%Y-%m-%d)"
+          body-filepath: docs/growth-digests/$(date +%Y-%m-%d).md
+          category-id: ${{ secrets.GROWTH_DISCUSSION_CATEGORY_ID }}
+```
+
+### New Python Module: `src/vxis/growth/`
+
+```
+src/vxis/growth/
+├── __init__.py
+├── ingest.py          # Unify signals from all sources → inbox/
+├── analyze.py         # LLM-powered extraction + classification
+├── apply.py           # Low-risk auto-apply to code + KB
+├── queue_high_risk.py # Create GitHub Issues for approval
+├── rollback.py        # Undo applied changes
+├── digest.py          # Weekly summary generation
+├── notify.py          # Telegram + GitHub Discussion
+├── trust.py           # Source trust scoring (per-domain reputation)
+├── classifier.py      # Risk level assessment (low vs high)
+├── changelog.py       # .vxis/growth_log.jsonl management
+└── schemas.py         # NewsIntelligence, Proposal, UpgradeChange dataclasses
+```
+
+### Extraction Schema
+
+```python
+@dataclass
+class NewsIntelligence:
+    """Structured intelligence extracted from a signal."""
+    signal_id: str
+    source: str           # "cve_watch" | "upstream_watch" | "domain_intel" | "threat_news"
+    article_url: str
+    article_title: str
+    pub_date: str
+    trust_score: float    # 0.0-1.0
+
+    # Factual (regex)
+    cves: list[str]
+    iocs: dict[str, list[str]]  # {"ip": [...], "domain": [...], "hash": [...]}
+
+    # LLM-extracted
+    threat_actors: list[str]
+    malware_families: list[str]
+    ttps: list[dict]  # [{"mitre_id": "T1566.001", "description": "..."}]
+    attack_chain: list[str]
+    target_industries: list[str]
+    target_technologies: list[str]
+
+    # VXIS upgrade proposals
+    proposed_vectors: list[dict]          # new AttackVector entries
+    proposed_phase_updates: list[dict]    # [{"phase_id": "P4_cpr", "field": "strategic_advice_ko", "append": "..."}]
+    proposed_kb_patterns: list[dict]
+    proposed_waf_variants: list[dict]
+    proposed_actor_updates: list[dict]
+```
+
+### Phase-by-Phase Upgrade Mapping
+
+| Phase | News-driven upgrades |
+|-------|---------------------|
+| **P0 Foundation** | New Ghost/anonymization techniques → `primitives/ghost_layer.py` |
+| **P1 Director** | Chain reasoning patterns from real breach reports |
+| **P4 CPR (Recon)** | **Major**. New fingerprints, new JS analysis, new exposed-file patterns (e.g., .lnk) → `recommended_primitives` + wordlists |
+| **P15 Digital Twin** | New sandbox evasion techniques to test in simulation |
+| **P13 OSINT** | **Major**. New threat actor TTPs, new GitHub/LinkedIn/Shodan queries → `threat_actors.json` |
+| **P2 Agents** | **Major**. New attack vectors → `vectors.py` via existing `cve_to_vector.py` |
+| **P3 Hypothesis** | **Major**. "if tech == X then likely Y" patterns → Knowledge Store |
+| **P5 Special (IoT/Web3)** | New IoT CVEs, smart contract attacks, LotL techniques |
+| **P7 Hardware** | Side-channel / DMA papers → research vectors |
+| **P8 Synthesis** | **Major**. Breach report chain patterns ("credential dump → lateral → DA") |
+| **P11 Mutation** | **Major**. New WAF bypass payloads → `waf_bypass_db.json` auto-expand |
+| **P6 Report** | New compliance requirements → report template updates |
+| **P12 Evolution** | **Already self-growth phase** — directly consumes news intelligence |
+| **P18 Collective** | **Already KB update phase** — directly stores news-derived patterns |
+| **Growth Loop** | **Already validation phase** — validates signal-driven changes |
+
+### Safety Mechanisms
+
+| Safeguard | Description |
+|-----------|-------------|
+| **Trust scoring** | Per-source reputation. securityaffairs=0.9, unknown blog=0.3. Low trust forces human review |
+| **Change budget** | Max N auto-applied changes per 24h. Excess queues for manual batch review |
+| **Dry-run mode** | First month: generate proposals only, no code changes. Human reviews everything |
+| **Rollback history** | Every change recorded in `.vxis/growth_log.jsonl` with reverse diff |
+| **Blast radius limits** | Reject if single change exceeds 5% of target file's lines |
+| **Human approval gates** | Phase order changes, scope rule changes, new phases, approval gate modifications |
+| **Regression guard** | Growth Loop benchmarks all changes. Score drop > 5 points → auto-rollback |
+| **Duplicate detection** | Same CVE/TTP already in VXIS → skip |
+| **Source allowlist** | Only accept signals from pre-approved sources (in `trust_scores.json`) |
+| **Rate limiting** | Max 20 proposals per source per day → prevent flooding |
+
+### Signal Storage Layout
+
+```
+.vxis/
+├── signals/
+│   ├── inbox/                    # Raw ingested (JSONL, append-only)
+│   │   ├── cve-2026-04-07-14.jsonl
+│   │   ├── news-2026-04-07-14.jsonl
+│   │   ├── upstream-2026-04-07-02.jsonl
+│   │   └── domain-2026-04-07-00.jsonl
+│   ├── proposals/                # LLM analysis output
+│   │   ├── 2026-04-07T14-dprk-lnk-github-c2.json
+│   │   └── 2026-04-07T15-cloudflare-http3-bypass.json
+│   ├── applied/                  # Auto-applied changes log
+│   │   └── 2026-04-07/
+│   │       ├── vectors-added.json
+│   │       ├── guides-updated.json
+│   │       ├── kb-patterns.json
+│   │       └── summary.json
+│   ├── rejected/                 # Rejected or rolled-back
+│   │   └── 2026-04-07-regression.json
+│   └── pending/                  # High-risk awaiting approval
+│       └── 2026-04-07-new-phase-proposal.json
+├── growth_log.jsonl              # Full growth history (append-only)
+├── trust_scores.json             # Per-source reputation
+└── upgrade_history.json          # Applied changes with reverse diffs
+```
+
+### Dashboard Extension
+
+Add new route to FastAPI dashboard (already planned in Batch 1F):
+
+- `/growth` — Main growth dashboard
+  - Daily/weekly signals processed (by source)
+  - Auto-applied changes list (with diff links)
+  - Pending approvals count + details
+  - Score trend graph (signal-driven vs manual)
+  - Top 10 insights this week
+  - Rollback history
+
+### Case Study: DPRK LNK + GitHub C2 Article
+
+Real example of what the loop would autonomously do when given the Security
+Affairs article on DPRK phishing:
+
+**Input**: ThreatNewsWatcher pulls the article from Security Affairs RSS.
+
+**Extract** (LLM output):
+```json
+{
+  "cves": [],
+  "threat_actors": ["dprk", "kimsuky"],
+  "malware_families": ["xenorat"],
+  "ttps": [
+    {"mitre_id": "T1566.001", "description": "Spear-phishing with LNK attachment"},
+    {"mitre_id": "T1059.001", "description": "PowerShell execution from LNK"},
+    {"mitre_id": "T1053.005", "description": "Scheduled Task persistence"},
+    {"mitre_id": "T1102", "description": "GitHub as C2 channel"}
+  ],
+  "attack_chain": ["phishing_email", "lnk_obfuscation", "powershell_lotl", "scheduled_task", "github_c2"],
+  "target_industries": ["south_korean_enterprises"],
+  "iocs": {
+    "github_accounts": ["motoralis", "God0808RAMA", "Pigresy80", "entire73", "pandora0009"]
+  },
+  "trust_score": 0.9
+}
+```
+
+**Classify**:
+```json
+{
+  "proposed_vectors": [
+    {
+      "id": "WEB-PHISH-001",
+      "name_en": "Exposed LNK file discovery in public directories",
+      "name_ko": "공개 디렉토리 .lnk 파일 노출 탐지",
+      "phase": "P4_cpr",
+      "risk": "low"
+    },
+    {
+      "id": "WEB-C2-001",
+      "name_en": "GitHub API anomalous traffic pattern (C2 indicator)",
+      "name_ko": "GitHub API 이상 트래픽 패턴 (C2 의심)",
+      "phase": "P13_biometrics",
+      "risk": "low"
+    }
+  ],
+  "proposed_phase_updates": [
+    {
+      "phase_id": "P4_cpr",
+      "field": "strategic_advice_ko",
+      "append": "최근 DPRK 캠페인은 /downloads, /files, /public 경로의 노출된 .lnk 파일을 악용한다. 크롤링 시 .lnk 확장자 체크 필수."
+    },
+    {
+      "phase_id": "P13_biometrics",
+      "field": "strategic_advice_ko",
+      "append": "DPRK 행위자는 GitHub 비공개 레포를 C2 인프라로 사용한다. 한국 타겟 스캔 시 JS 번들/네트워크 플로우에서 비정상 GitHub API 트래픽 패턴 확인."
+    }
+  ],
+  "proposed_kb_patterns": [
+    {"if": "industry == 'south_korean_enterprise'", "then": "priority_actors += ['dprk_kimsuky']"},
+    {"if": "exposed .lnk file found", "then": "priority_vector = 'WEB-PHISH-001'"},
+    {"if": "github_api_anomaly", "then": "check_vector = 'WEB-C2-001'"}
+  ],
+  "proposed_actor_updates": [
+    {
+      "actor_id": "dprk_kimsuky",
+      "aliases_add": ["APT43", "Black Banshee", "Thallium"],
+      "ttps_add": ["T1566.001", "T1059.001", "T1053.005", "T1102"],
+      "campaigns_append": {
+        "year": 2026,
+        "source": "securityaffairs/190413",
+        "summary": "LNK + PowerShell LotL + GitHub C2",
+        "iocs": {"github_accounts": ["motoralis", "..."]}
+      }
+    }
+  ]
+}
+```
+
+**Validate**: All new (no duplicates), syntax OK, trust 0.9 > 0.7 threshold, within blast radius limits.
+
+**Apply** (automatic):
+- `src/vxis/scoring/vectors.py` ← append WEB-PHISH-001, WEB-C2-001
+- `src/vxis/phases/guides/p4_cpr.py` ← append strategic_advice
+- `src/vxis/phases/guides/p13_biometrics.py` ← append strategic_advice
+- `src/vxis/data/threat_actors.json` ← update DPRK profile
+- `~/.vxis/knowledge_store.json` ← 3 new patterns
+
+**Benchmark**: Growth Loop runs on Mutillidae + DVWA + Juice Shop → score delta +3 points → KEEP → commit.
+
+**Report (weekly digest)**:
+```
+VXIS Growth Digest — 2026-04-08
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Articles processed: 142
+New vectors added: 7
+Phase guides updated: 4
+KB patterns added: 23
+Threat actor profiles updated: 5
+Score delta: +12 points (831 → 843)
+
+Top insights this week:
+1. DPRK LNK + GitHub C2 (Security Affairs) → +2 vectors, P4/P13 updated
+2. Cloudflare HTTP/3 bypass (BleepingComputer) → +8 WAF variants
+3. Laravel Livewire CVE-2026-XXXXX → +1 critical vector
+...
+
+Rollbacks: 1 (pattern conflict)
+Pending approvals: 2 (Phase order change suggestions)
+```
+
+### Implementation Addition to Roadmap
+
+Add to the 10-day roadmap:
+
+| Day | Work |
+|-----|------|
+| 11 | `src/vxis/growth/` module foundation (ingest, schemas, changelog) |
+| 12 | `src/vxis/growth/analyze.py` — LLM extraction + classification logic |
+| 13 | `src/vxis/growth/apply.py` + `rollback.py` — code modification + reverse diff |
+| 14 | 3 new GitHub Actions workflows (signal-ingest, signal-analyze, growth-digest) |
+| 15 | Existing workflow extensions (cve-watch, upstream-watch, domain-intel, growth-loop) |
+| 16 | Trust scoring + classifier + high-risk queue (GitHub Issues integration) |
+| 17 | Dashboard `/growth` route + digest notification + Discussion auto-post |
+| 18 | Case study dry-run on DPRK article + 10 more real articles |
+
+**Revised total: 18 days** (original 10 days MCP architecture + 8 days self-growth layer).
+
+### Follow-up Work (Post-MVP)
 
 - **Resource URIs**: `vxis://scans/<id>/findings`, `vxis://reports/<id>` for large data
 - **Streaming progress**: MCP `notifications/progress` for real-time phase updates
@@ -707,6 +1157,9 @@ After implementation, the following must work:
 - **Retest workflow**: `vxis retest <scan_id>` reuses scope + compares results
 - **Phase Guide hot-reload**: Edit guide → MCP picks up without restart
 - **Custom vector injection**: `vxis_inject_vector()` for user-defined attacks
+- **Growth ML model**: Train classifier on approved/rejected proposals for better auto-apply
+- **Cross-source correlation**: "Same CVE mentioned in 3 sources → high confidence"
+- **Proactive research**: When trending topic detected, auto-query NVD/GitHub for related
 
 ## Summary
 
@@ -722,8 +1175,10 @@ This plan transforms VXIS into a true AI-native pentesting platform. The key inn
 8. **Scope + PII protection is server-enforced** — Brain can't bypass
 9. **Approval gates for destructive actions** — user stays in control
 10. **Profile system unifies stealth + parallelism** — 5 levels from aggressive to stealth_3
+11. **Self-Growth Intelligence Layer** — CVE Watch / Upstream Watch / Domain Intel / Threat News RSS → auto-upgrade code + KB + phase guides, with benchmark validation and auto-rollback
+12. **Existing GitHub Actions become the growth nervous system** — no rewrite, extended to feed signal pipeline
 
-Total implementation effort: **10 days** for production-ready state.
+Total implementation effort: **18 days** for production-ready state (10 days MCP architecture + 8 days self-growth).
 
 ---
 
