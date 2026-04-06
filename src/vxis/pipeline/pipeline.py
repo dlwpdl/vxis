@@ -45,6 +45,36 @@ from vxis.pipeline.context import ScanContext
 logger = logging.getLogger(__name__)
 
 
+def _compress_findings_for_prompt(findings: list, max_items: int = 15) -> list[dict]:
+    """Brain 프롬프트용 findings 요약.
+
+    매 LLM 호출마다 전체 findings 배열을 보내면 토큰이 폭증.
+    최근 N개만, 그리고 severity/type/component 요약만 전달.
+    """
+    if not findings:
+        return []
+
+    # Severity 기준 정렬 (critical > high > ... > info) — 중요한 것 우선
+    from vxis.models.finding import Severity
+    _sev_order = {
+        Severity.critical: 0, Severity.high: 1, Severity.medium: 2,
+        Severity.low: 3, Severity.informational: 4,
+    }
+    sorted_findings = sorted(
+        findings,
+        key=lambda f: (_sev_order.get(f.severity, 5), -findings.index(f)),
+    )
+
+    result = []
+    for f in sorted_findings[:max_items]:
+        result.append({
+            "type": getattr(f, "finding_type", "")[:40],
+            "severity": f.severity.value if hasattr(f.severity, "value") else str(f.severity),
+            "component": getattr(f, "affected_component", "")[:60],
+        })
+    return result
+
+
 def _parse_llm_json(response: str) -> dict:
     """LLM 응답에서 JSON 객체를 안정적으로 파싱.
 
@@ -400,32 +430,66 @@ class ScanPipeline:
         logger.info("=" * 70)
 
         # ══════════════════════════════════════════════════════
-        # Phase 실행 — registry.WEB_PHASES 순서대로 (SSOT)
+        # Phase 실행 — parallel_group 단위로 병렬 실행 (DAG)
+        # 같은 parallel_group 숫자의 Phase는 asyncio.gather로 동시 실행
         # ══════════════════════════════════════════════════════
         from vxis.registry import WEB_PHASES, STAGE_NAMES
+        import asyncio as _aio
+        from collections import defaultdict as _dd
+
+        # parallel_group별로 Phase 그룹핑
+        _groups: dict[int, list] = _dd(list)
+        for p in WEB_PHASES:
+            _groups[p.parallel_group].append(p)
+
+        # LLM 동시성을 profile에 맞춰 설정
+        _profile = getattr(self.config, 'active_profile', 'standard') if self.config else 'standard'
+        _llm_concurrent = {'stealth': 2, 'standard': 4, 'aggressive': 8}.get(_profile, 4)
+        try:
+            from vxis.agent.brain import AgentBrain as _ABrain3
+            _ABrain3.set_max_concurrent(_llm_concurrent)
+        except Exception:
+            pass
 
         _prev_stage = ""
-        for phase_info in WEB_PHASES:
-            # Stage 변경 시 구분선
-            if phase_info.stage != _prev_stage:
-                _stage_label = STAGE_NAMES.get(phase_info.stage, phase_info.stage)
+        for group_id in sorted(_groups.keys()):
+            group_phases = _groups[group_id]
+
+            # Stage 구분선 (첫 phase의 stage 기준)
+            first_stage = group_phases[0].stage
+            if first_stage != _prev_stage:
+                _stage_label = STAGE_NAMES.get(first_stage, first_stage)
                 logger.info("\n  ── %s ──", _stage_label)
-                _prev_stage = phase_info.stage
+                _prev_stage = first_stage
 
             # Deferred Actions: report stage 진입 전에 실행
-            if phase_info.stage == "report" and ctx.deferred_actions and self.enable_deferred_approval:
+            if first_stage == "report" and ctx.deferred_actions and self.enable_deferred_approval:
                 await self._execute_deferred_actions(ctx)
 
-            phase_method = getattr(self, phase_info.method, None)
-            if phase_method is None:
-                logger.warning("  [SKIP] Phase %d method %s not found", phase_info.id, phase_info.method)
-                continue
-
-            await self._run_phase(
-                f"Phase {phase_info.id}: {phase_info.name}",
-                phase_method,
-                ctx,
-            )
+            # 이 그룹의 Phase들을 병렬 실행
+            if len(group_phases) == 1:
+                # 단일 Phase — 그냥 실행
+                p = group_phases[0]
+                method = getattr(self, p.method, None)
+                if method is None:
+                    logger.warning("  [SKIP] Phase %d method %s not found", p.id, p.method)
+                    continue
+                await self._run_phase(f"Phase {p.id}: {p.name}", method, ctx)
+            else:
+                # 여러 Phase 병렬 — gather
+                logger.info("  [PARALLEL] Running %d phases: %s",
+                            len(group_phases), ", ".join(f"P{p.id}" for p in group_phases))
+                _coros = []
+                for p in group_phases:
+                    method = getattr(self, p.method, None)
+                    if method is None:
+                        logger.warning("  [SKIP] Phase %d method %s not found", p.id, p.method)
+                        continue
+                    _coros.append(self._run_phase(f"Phase {p.id}: {p.name}", method, ctx))
+                _results = await _aio.gather(*_coros, return_exceptions=True)
+                for p, res in zip(group_phases, _results):
+                    if isinstance(res, Exception):
+                        logger.warning("  [PARALLEL-FAIL] Phase %d: %s", p.id, res)
 
         # ══════════════════════════════════════════════════════
         # STAGE 5: 스코어링 (5-Dimension VXIS Score)
@@ -508,7 +572,9 @@ class ScanPipeline:
             phase_failed = True
             error_msg = str(exc)[:200]
             self._emit("phase_error", {"name": name, "error": error_msg})
+            # logger.exception으로 스택트레이스 기록 (DEBUG에서 보임)
             logger.warning("  %s failed: %s (continuing)", name, exc)
+            logger.debug("  %s traceback:", name, exc_info=True)
 
         await self._execute_brain_decisions(name, ctx)
         self._build_chains_and_mark_tp(ctx, name)
@@ -625,11 +691,8 @@ class ScanPipeline:
             for ep in _api_eps
         ]
         tech_stack = getattr(ctx, "tech_stack", [])
-        prev_findings = [
-            {"id": getattr(f, "id", ""), "type": getattr(f, "finding_type", ""),
-             "component": getattr(f, "affected_component", "")}
-            for f in ctx.findings[-20:]
-        ]
+        # 요약된 findings — 토큰 절약 (critical/high 우선, 최대 15개)
+        prev_findings = _compress_findings_for_prompt(ctx.findings, max_items=15)
 
         # 벤치마크 앱별 알려진 취약 경로
         if "8081" in target_lower or "dvwa" in target_lower:
@@ -886,19 +949,12 @@ class ScanPipeline:
 
         from vxis.agent.brain import AgentObservation
 
+        # 요약 findings — 토큰 절약
+        _compressed = _compress_findings_for_prompt(ctx.findings, max_items=15)
         obs = AgentObservation(
             target=ctx.target,
             tech_stack=getattr(ctx, "tech_stack", []),
-            findings=[
-                {
-                    "id": getattr(f, "id", ""),
-                    "title": getattr(f, "title", ""),
-                    "severity": getattr(f, "severity", ""),
-                    "finding_type": getattr(f, "finding_type", ""),
-                    "affected_component": getattr(f, "affected_component", ""),
-                }
-                for f in ctx.findings[-50:]
-            ],
+            findings=_compressed,
             executed_tools=[
                 {"tool": p, "status": "done"}
                 for p in ctx.phases_completed[-20:]
@@ -1083,10 +1139,7 @@ class ScanPipeline:
                             new_finding = ctx.findings[-1] if ctx.findings else None
                             from vxis.agent.brain import AgentBrain as _ABrain, AgentAction
                             if isinstance(self.brain, _ABrain) and new_finding:
-                                _prev = [
-                                    {"type": getattr(f, "finding_type", ""), "component": getattr(f, "affected_component", "")}
-                                    for f in ctx.findings[:-1]
-                                ]
+                                _prev = _compress_findings_for_prompt(ctx.findings[:-1], max_items=10)
                                 _interp = self.brain.interpret_probe_result(
                                     vector_id=vector_id, endpoint=endpoint, param="json_body",
                                     payload=str(json_body)[:200], body=body, status=status,
@@ -1160,10 +1213,7 @@ class ScanPipeline:
                             new_finding = ctx.findings[-1] if ctx.findings else None
                             from vxis.agent.brain import AgentBrain as _ABrain, AgentAction
                             if isinstance(self.brain, _ABrain) and new_finding:
-                                _prev = [
-                                    {"type": getattr(f, "finding_type", ""), "component": getattr(f, "affected_component", "")}
-                                    for f in ctx.findings[:-1]
-                                ]
+                                _prev = _compress_findings_for_prompt(ctx.findings[:-1], max_items=10)
                                 _interp = self.brain.interpret_probe_result(
                                     vector_id=vector_id, endpoint=endpoint, param=param,
                                     payload=payload, body=body, status=status,
@@ -1218,9 +1268,17 @@ class ScanPipeline:
 
                     except Exception as exc:
                         import httpx as _httpx
+                        # 예외 타입별 분류 — 원인 추적
                         if isinstance(exc, _httpx.TimeoutException):
-                            _endpoint_timed_out = True  # 타임아웃 → 나머지 페이로드 스킵
-                        logger.debug("    [FAIL] %s %s: %s", vector_id, endpoint, exc)
+                            _endpoint_timed_out = True
+                            logger.debug("    [TIMEOUT] %s %s", vector_id, endpoint)
+                        elif isinstance(exc, _httpx.ConnectError):
+                            logger.warning("    [CONNECT-FAIL] %s %s: %s", vector_id, endpoint, exc)
+                        elif isinstance(exc, _httpx.HTTPError):
+                            logger.debug("    [HTTP-FAIL] %s %s: %s", vector_id, endpoint, exc)
+                        else:
+                            logger.warning("    [VECTOR-FAIL] %s %s: %s", vector_id, endpoint, exc)
+                            logger.debug("    %s traceback:", vector_id, exc_info=True)
 
         # 세션은 닫지 않음 — 다음 Phase에서 재사용
 

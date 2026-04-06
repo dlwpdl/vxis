@@ -509,7 +509,29 @@ class AgentBrain:
             for action in actions:
                 result = execute_tool(action)
                 brain.record_result(action, result)
+
+    Async-safety: _llm_semaphore로 동시 LLM 호출 수 제한 (Phase 병렬 실행 대응).
+    기본 max_concurrent=4 — profile에 따라 조정 가능.
     """
+
+    # 클래스 레벨 semaphore — 전체 프로세스에서 동시 LLM 호출 수 제한
+    # asyncio 이벤트 루프 필요 시 lazy init
+    _llm_semaphore: "asyncio.Semaphore | None" = None
+    _llm_max_concurrent: int = 4
+
+    @classmethod
+    def _get_semaphore(cls) -> "asyncio.Semaphore":
+        """lazy init — 첫 호출 시 현재 이벤트 루프에서 semaphore 생성."""
+        import asyncio as _aio
+        if cls._llm_semaphore is None:
+            cls._llm_semaphore = _aio.Semaphore(cls._llm_max_concurrent)
+        return cls._llm_semaphore
+
+    @classmethod
+    def set_max_concurrent(cls, n: int) -> None:
+        """LLM 동시 호출 상한 설정 (profile에 따라)."""
+        cls._llm_max_concurrent = max(1, n)
+        cls._llm_semaphore = None  # reset → 다음 호출 시 새로 생성
 
     def __init__(
         self,
@@ -1028,15 +1050,51 @@ class AgentBrain:
 
     # ── Phase 3: LLM Fallback Chain ──────────────────────────────
 
+    async def _call_llm_with_fallback_async(
+        self, system_prompt: str, user_prompt: str,
+        max_retries: int = 2,
+    ) -> str | None:
+        """Async wrapper — semaphore로 동시 호출 제한."""
+        import asyncio as _aio
+        sem = self._get_semaphore()
+        async with sem:
+            # sync 호출을 executor로 실행
+            loop = _aio.get_event_loop()
+            return await loop.run_in_executor(
+                None,
+                self._call_llm_with_fallback,
+                system_prompt, user_prompt, max_retries,
+            )
+
     def _call_llm_with_fallback(
         self, system_prompt: str, user_prompt: str,
+        max_retries: int = 2,
     ) -> str | None:
         """Fallback 체인을 사용하여 LLM 호출.
 
         정책 거부(refusal) 시 다음 모델로 자동 전환.
+        일시적 에러는 지수 백오프로 재시도.
         """
-        # 먼저 기본 모델 시도
-        response = self._call_llm(system_prompt, user_prompt)
+        import time as _time
+
+        # ── 먼저 기본 모델 시도 (재시도 포함) ──
+        response = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._call_llm(system_prompt, user_prompt)
+                if response:
+                    break
+            except Exception as exc:
+                if attempt < max_retries:
+                    wait = (2 ** attempt)
+                    logger.warning(
+                        "LLM call failed (attempt %d/%d): %s — retrying in %ds",
+                        attempt + 1, max_retries + 1, exc, wait,
+                    )
+                    _time.sleep(wait)
+                else:
+                    logger.exception("LLM call failed after %d retries", max_retries)
+
         if response and not self._is_refusal(response):
             return response
 
@@ -1046,24 +1104,34 @@ class AgentBrain:
                 self._provider,
             )
 
-        # Fallback 체인 순회
+        # ── Fallback 체인 순회 (각 fallback도 재시도) ──
         for fallback in self._fallback_providers:
             if (
                 fallback["provider"] == self._provider
                 and fallback["model"] == self._model
             ):
-                continue  # 이미 시도한 모델 스킵
+                continue
 
             logger.info(
                 "Fallback: %s/%s 시도",
                 fallback["provider"], fallback["model"],
             )
 
-            response = self._call_llm_direct(
-                system_prompt, user_prompt,
-                provider=fallback["provider"],
-                model=fallback["model"],
-            )
+            response = None
+            for attempt in range(max_retries + 1):
+                try:
+                    response = self._call_llm_direct(
+                        system_prompt, user_prompt,
+                        provider=fallback["provider"],
+                        model=fallback["model"],
+                    )
+                    if response:
+                        break
+                except Exception as exc:
+                    if attempt < max_retries:
+                        _time.sleep(2 ** attempt)
+                    else:
+                        logger.debug("Fallback %s failed: %s", fallback["provider"], exc)
 
             if response and not self._is_refusal(response):
                 logger.info(

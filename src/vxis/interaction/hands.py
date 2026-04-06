@@ -444,7 +444,13 @@ class TargetSession:
         self.csrf = CSRFTracker()
         self._request_count = 0
         self._last_request_time = 0.0
-        self._min_delay = 0.0  # 적응형 딜레이 (WAF 우회)
+
+        # Profile에 따른 기본 딜레이 설정
+        import os as _os
+        _profile = _os.environ.get("VXIS_SCAN_PROFILE", "standard")
+        _profile_delays = {"stealth": 2.0, "standard": 0.1, "aggressive": 0.0}
+        self._min_delay = _profile_delays.get(_profile, 0.1)
+
         self._history: list[AnalyzedResponse] = []
         self._max_history = 500  # OOM 방지
         self._discovered_endpoints: set[str] = set()

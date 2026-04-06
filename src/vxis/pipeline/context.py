@@ -99,8 +99,12 @@ class ScanContext:
         """ScoreTracker를 target_type에 맞게 초기화한다."""
         object.__setattr__(self, "score_tracker", ScoreTracker(target_type=self.target_type))
 
+    # findings 무제한 증가 방지 — 메모리 상한
+    MAX_FINDINGS: int = 500
+    MAX_ATTACK_CHAINS: int = 100
+
     def add_finding(self, **kwargs: Any) -> Finding:
-        """Finding 추가."""
+        """Finding 추가 (메모리 상한 적용)."""
         from vxis.models.finding import Finding as F
         self.finding_counter += 1
         kwargs.setdefault("id", f"VXIS-{self.finding_counter:03d}")
@@ -108,6 +112,24 @@ class ScanContext:
         kwargs.setdefault("source_plugin", "vxis-pipeline")
         f = F(**kwargs)
         self.findings.append(f)
+
+        # 메모리 상한 초과 → 오래된 informational/low부터 제거
+        if len(self.findings) > self.MAX_FINDINGS:
+            from vxis.models.finding import Severity
+            # informational 우선 제거, 그 다음 low, 그 다음 오래된 순
+            removable_idx = [
+                i for i, fnd in enumerate(self.findings)
+                if fnd.severity == Severity.informational
+            ] or [
+                i for i, fnd in enumerate(self.findings)
+                if fnd.severity == Severity.low
+            ]
+            if removable_idx:
+                del self.findings[removable_idx[0]]
+            else:
+                # 오래된 것 제거 (첫 번째)
+                del self.findings[0]
+            logger.debug("[MEMORY] findings cap hit (%d), evicted old finding", self.MAX_FINDINGS)
         logger.info("[%s] %s: %s", f.severity.value.upper(), f.id, f.title.split("|||")[0])
         return f
 

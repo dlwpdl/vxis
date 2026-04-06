@@ -425,6 +425,78 @@ WEB_VECTORS: tuple[AttackVector, ...] = (
         target_types=("web",), phase="Phase 8", max_depth=2,
         owasp_id="A01:2021",
     ),
+    AttackVector(
+        id="WEB-API-006", category="api",
+        name_en="gRPC — Reflection Service Exposed",
+        name_ko="gRPC — Reflection 서비스 노출",
+        target_types=("web",), phase="Phase 2", max_depth=2,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="WEB-API-007", category="api",
+        name_en="gRPC — Method Enumeration + Injection",
+        name_ko="gRPC — 메서드 열거 + 인젝션",
+        target_types=("web",), phase="Phase 5", max_depth=3,
+        owasp_id="A03:2021",
+    ),
+    AttackVector(
+        id="WEB-API-008", category="api",
+        name_en="BOPLA — Broken Object Property Level Auth",
+        name_ko="BOPLA — 객체 속성 수준 인증 손상",
+        target_types=("web",), phase="Phase 8", max_depth=3,
+        owasp_id="A01:2021",
+    ),
+    AttackVector(
+        id="WEB-API-009", category="api",
+        name_en="BFLA — Broken Function Level Auth",
+        name_ko="BFLA — 기능 수준 인증 손상",
+        target_types=("web",), phase="Phase 8", max_depth=3,
+        owasp_id="A01:2021",
+    ),
+    # ── SAML / SSO ──
+    AttackVector(
+        id="WEB-AUTH-011", category="auth",
+        name_en="SAML — Assertion Signing Bypass",
+        name_ko="SAML — 서명 우회",
+        target_types=("web",), phase="Phase 4", max_depth=4,
+        owasp_id="A07:2021",
+    ),
+    AttackVector(
+        id="WEB-AUTH-012", category="auth",
+        name_en="SAML — Replay Attack",
+        name_ko="SAML — 리플레이 공격",
+        target_types=("web",), phase="Phase 4", max_depth=3,
+        owasp_id="A07:2021",
+    ),
+    AttackVector(
+        id="WEB-AUTH-013", category="auth",
+        name_en="OAuth — State Parameter Missing (CSRF)",
+        name_ko="OAuth — State 파라미터 누락 (CSRF)",
+        target_types=("web",), phase="Phase 4", max_depth=3,
+        owasp_id="A01:2021",
+    ),
+    # ── Modern Injection ──
+    AttackVector(
+        id="WEB-INJECT-022", category="injection",
+        name_en="Prototype Pollution — JSON Merge",
+        name_ko="프로토타입 오염 — JSON Merge",
+        target_types=("web",), phase="Phase 5", max_depth=4,
+        owasp_id="A03:2021",
+    ),
+    AttackVector(
+        id="WEB-INJECT-023", category="injection",
+        name_en="CSP Bypass — Script-src Nonce Leak",
+        name_ko="CSP 우회 — Script-src Nonce 유출",
+        target_types=("web",), phase="Phase 3", max_depth=2,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="WEB-INJECT-024", category="injection",
+        name_en="Cache Poisoning — Web Cache Deception",
+        name_ko="캐시 오염 — 웹 캐시 기만",
+        target_types=("web",), phase="Phase 5", max_depth=3,
+        owasp_id="A03:2021",
+    ),
     # ── Infrastructure ──
     AttackVector(
         id="WEB-INFRA-001", category="infrastructure",

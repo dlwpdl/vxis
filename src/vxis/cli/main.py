@@ -380,15 +380,17 @@ def scan(
             from vxis.agent.brain import AgentBrain
             brain = AgentBrain()
 
-        # Config
+        # Config + 환경변수로 profile/ghost 전파
+        import os as _os
+        _os.environ["VXIS_SCAN_PROFILE"] = profile
+        if ghost:
+            _os.environ["VXIS_GHOST"] = "1"
+
         config = None
         try:
             from vxis.config.schema import VXISConfig
             config = VXISConfig()
             config.active_profile = profile
-            if ghost:
-                import os
-                os.environ.setdefault("VXIS_GHOST", "1")
         except Exception:
             pass
 
