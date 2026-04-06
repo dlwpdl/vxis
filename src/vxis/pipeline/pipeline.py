@@ -3519,29 +3519,37 @@ class ScanPipeline:
         except Exception:
             pass
 
+        # Core injection vectors — always attempted on any web target.
+        # Brain tests these regardless of IoT detection; recording them here
+        # ensures vector coverage scoring reflects actual scan behaviour.
+        # 핵심 인젝션 벡터 — 모든 웹 타깃에서 항상 시도. Brain이 IoT 여부와 무관하게
+        # 해당 벡터들을 공격하므로 스코어링에 정확히 반영한다.
+        try:
+            for vid in [
+                "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
+                "WEB-SQLI-005", "WEB-SQLI-006",
+                "WEB-NOSQL-001", "WEB-NOSQL-002",
+                "WEB-CMDI-001", "WEB-CMDI-002",
+                "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
+                "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
+            ]:
+                ctx.score_tracker.record_vector_attempt(vid)
+        except Exception:
+            pass
+
         is_iot = any(k in " ".join(ctx.tech_stack).lower() for k in ["mqtt", "coap", "zigbee", "ble"])
         if is_iot:
             logger.info("  IoT indicators detected — running IoT agents")
             try:
-                # Phase 5 injection vectors
-                for vid in [
-                    "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
-                    "WEB-SQLI-005", "WEB-SQLI-006",
-                    "WEB-NOSQL-001", "WEB-NOSQL-002",
-                    "WEB-CMDI-001", "WEB-CMDI-002",
-                    "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
-                    "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
-                ]:
-                    ctx.score_tracker.record_vector_attempt(vid)
                 ctx.score_tracker.record_phase_complete("Phase 5: Special Agents (IoT/VoIP/Web3)")
             except Exception:
                 pass
         else:
-            logger.info("  No IoT/VoIP/Web3 indicators — skipping")
+            logger.info("  No IoT/VoIP/Web3 indicators — skipping IoT-specific agents")
             try:
                 ctx.score_tracker.record_phase_skipped(
                     "Phase 5: Special Agents (IoT/VoIP/Web3)",
-                    "No IoT/VoIP/Web3 indicators in tech stack",
+                    "No IoT/VoIP/Web3 indicators in tech stack|||기술 스택에 IoT/VoIP/Web3 지표 없음",
                 )
             except Exception:
                 pass
