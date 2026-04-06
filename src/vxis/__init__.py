@@ -1,3 +1,3 @@
 """VXIS — AI-powered security automation platform."""
 
-__version__ = "0.1.0"
+from vxis.registry import VERSION as __version__  # noqa: F401 — SSOT

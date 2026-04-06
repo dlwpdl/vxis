@@ -50,32 +50,7 @@ REPORT_FILE = Path("tools/benchmark/growth_report.md")
 
 KST = timezone(timedelta(hours=9))
 
-TARGETS: dict[str, dict[str, str]] = {
-    "dvwa":       {"url": "http://localhost:8081", "image": "vulnerables/web-dvwa",         "port": "8081:80"},
-    "juice-shop": {"url": "http://localhost:3000", "image": "bkimminich/juice-shop",        "port": "3000:3000"},
-    "webgoat":    {"url": "http://localhost:8888/WebGoat", "image": "webgoat/webgoat",        "port": "8888:8080"},
-    "nodegoat":   {"url": "http://localhost:4000", "image": "1njected/nodegoat",            "port": "4000:4000"},
-    "mutillidae": {"url": "http://localhost:8082", "image": "citizenstig/nowasp",           "port": "8082:80"},
-    "bwapp":      {"url": "http://localhost:8083", "image": "raesene/bwapp",                "port": "8083:80"},
-    "dvga":       {"url": "http://localhost:5013", "image": "dolevf/dvga",                  "port": "5013:5013"},
-    "crapi":      {"url": "http://localhost:8025", "compose": "tools/targets/crapi",         "port": "8025:8025"},
-}
-
-DIM_NAMES_KO: dict[str, str] = {
-    "vector_coverage": "벡터 커버리지",
-    "exploitation_reach": "공격 깊이",
-    "chain_intelligence": "체인 지능",
-    "finding_precision": "발견 정확도",
-    "completeness": "완전성",
-}
-
-DIM_MAX: dict[str, int] = {
-    "vector_coverage": 250,
-    "exploitation_reach": 300,
-    "chain_intelligence": 150,
-    "finding_precision": 200,
-    "completeness": 100,
-}
+from vxis.registry import TARGETS_DICT as TARGETS, DIM_NAMES_KO, DIM_MAX
 
 # 판정 임계값
 IMPROVED_THRESHOLD = 5.0   # +5점 이상 → 자동 반영

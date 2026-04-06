@@ -92,13 +92,19 @@ def _app_callback(ctx: typer.Context) -> None:
 
 @app.command()
 def help() -> None:
-    """VXIS 전체 사용법 가이드 — 스캔, 리포트, 타겟, 벤치마크."""
+    """VXIS 전체 사용법 가이드 — 스캔, 리포트, 타겟, 파이프라인, 벤치마크."""
     _print_banner()
 
+    from vxis.registry import (
+        VERSION, WEB_PHASES, EXTERNAL_PHASES, FUTURE_PHASES,
+        BENCHMARK_TARGETS, STAGE_NAMES,
+    )
     from rich.markdown import Markdown
+    from rich.table import Table
 
-    guide = """
-## 스캔
+    console.print(f"  [bold]v{VERSION}[/bold]\n")
+
+    guide = """## 스캔
 
 ```bash
 # 벤치마크 스캔 (스코어링 + HTML 리포트 자동 생성)
@@ -121,32 +127,6 @@ vxis agent-scan http://localhost:8081   # AI 자율 풀오토
 vxis report <SCAN_ID> -o reports/output.html
 ```
 
-## 타겟 앱 (Docker)
-
-```bash
-docker run -d --name dvwa -p 8081:80 vulnerables/web-dvwa
-docker run -d --name juice-shop -p 3000:3000 bkimminich/juice-shop
-docker run -d --name webgoat -p 8888:8080 webgoat/webgoat
-docker run -d --name mutillidae -p 8082:80 citizenstig/nowasp
-docker run -d --name bwapp -p 8083:80 raesene/bwapp
-docker run -d --name dvga -p 5013:5013 dolevf/dvga
-# NodeGoat (MongoDB 필요)
-docker start nodegoat-mongo && docker start vxis-nodegoat
-```
-
-## 등록된 벤치마크 타겟
-
-| 이름 | 포트 | 특화 |
-|------|------|------|
-| dvwa | 8081 | OWASP Top 10 기본 |
-| juice-shop | 3000 | 현대적 웹앱 |
-| webgoat | 8888 | 학습용 취약점 |
-| nodegoat | 4000 | Node.js 취약점 |
-| mutillidae | 8082 | OWASP Top 10 풀커버 |
-| bwapp | 8083 | 100+ 취약점 |
-| dvga | 5013 | GraphQL 특화 |
-| crapi | 8025 | API 보안 (compose 필요) |
-
 ## 기타 명령어
 
 ```bash
@@ -160,6 +140,45 @@ vxis version          # 버전 정보
 ```
 """
     console.print(Markdown(guide))
+
+    # ── Pipeline Phases (registry에서 동적 생성) ──
+    console.print("\n[bold]Pipeline Phases[/bold]\n")
+    phase_table = Table(show_header=True, header_style="bold cyan")
+    phase_table.add_column("Phase", width=8)
+    phase_table.add_column("Name", width=45)
+    phase_table.add_column("Stage", width=20)
+
+    prev_stage = ""
+    for p in WEB_PHASES:
+        stage_label = STAGE_NAMES.get(p.stage, p.stage)
+        if p.stage != prev_stage:
+            phase_table.add_row("", "", "", style="dim")
+            prev_stage = p.stage
+        phase_table.add_row(f"P{p.id}", p.name, stage_label)
+
+    phase_table.add_row("", "", "", style="dim")
+    for p in EXTERNAL_PHASES:
+        phase_table.add_row(f"P{p.id}", f"{p.name} [dim](GHA)[/dim]", "External", style="dim")
+    for p in FUTURE_PHASES:
+        phase_table.add_row(f"P{p.id}", f"{p.name} [dim](planned)[/dim]", "Future", style="dim")
+
+    console.print(phase_table)
+
+    # ── Benchmark Targets (registry에서 동적 생성) ──
+    console.print("\n[bold]Benchmark Targets[/bold]\n")
+    target_table = Table(show_header=True, header_style="bold cyan")
+    target_table.add_column("Name", width=12)
+    target_table.add_column("Port", width=10)
+    target_table.add_column("Category", width=10)
+    target_table.add_column("Description", width=30)
+    target_table.add_column("Docker", width=30)
+
+    for t in BENCHMARK_TARGETS:
+        port = t.port.split(":")[0]
+        docker_cmd = f"docker run -d -p {t.port} {t.image}" if t.image else f"docker compose ({t.compose})"
+        target_table.add_row(t.name, port, t.category, t.description, docker_cmd)
+
+    console.print(target_table)
 
 
 # ---------------------------------------------------------------------------
