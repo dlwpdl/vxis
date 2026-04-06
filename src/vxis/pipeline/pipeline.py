@@ -419,7 +419,6 @@ class ScanPipeline:
             # 실제 노출 IP 검증
             try:
                 from vxis.ghost.verifier import GhostVerifier
-                import asyncio as _asyncio
                 _v = GhostVerifier()
                 _vr = _asyncio.get_event_loop().run_until_complete(_v.check())
                 _v.log_summary(_vr)
@@ -1339,8 +1338,7 @@ class ScanPipeline:
                                 )
 
                     except Exception as exc:
-                        import httpx as _httpx
-                        # 예외 타입별 분류 — 원인 추적
+                        # 예외 타입별 분류 — 원인 추적 (module-level _httpx 사용)
                         if isinstance(exc, _httpx.TimeoutException):
                             _endpoint_timed_out = True
                             logger.debug("    [TIMEOUT] %s %s", vector_id, endpoint)

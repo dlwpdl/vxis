@@ -97,6 +97,9 @@ class ScanContext:
     xray_flows: int = 0
     xray_vulns: list[dict[str, Any]] = field(default_factory=list)
 
+    # ── Chain recursion budget (LLM 호출 폭증 방지) ──
+    _chain_llm_count: int = 0
+
     def __post_init__(self) -> None:
         """ScoreTracker를 target_type에 맞게 초기화한다."""
         object.__setattr__(self, "score_tracker", ScoreTracker(target_type=self.target_type))
