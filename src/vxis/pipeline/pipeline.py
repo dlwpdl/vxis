@@ -1,34 +1,35 @@
-"""ScanPipeline — 19 Phase 통합 오케스트레이터.
+"""ScanPipeline — Brain-First 통합 오케스트레이터.
 
 하나의 파이프라인. Brain만 갈아끼움. 모든 Phase 강제 실행.
 데이터 변조(POST/PATCH/DELETE)는 deferred queue에 모아서 마지막에 승인 후 실행.
 
-Architecture:
-    ┌────────────────────────────────────────────────┐
-    │              ScanPipeline.run(target)            │
-    │                                                │
-    │  Pre-Contact:                                  │
-    │    P15 Digital Twin → P9 CVE Watch              │
-    │    P13 Biometrics → P14 Forecast                │
-    │                                                │
-    │  Contact + Scan:                               │
-    │    P0 Foundation → P1 Director → P4 CPR         │
-    │    P2 Agents (Brain selects) → P3 Hypothesis    │
-    │                                                │
-    │  Analysis:                                     │
-    │    P8 Synthesis → P11 Mutation                  │
-    │    P5/P7 Special (if applicable)                │
-    │                                                │
-    │  Defense + Learn:                              │
-    │    P10 Red vs Blue → P12 Evolution              │
-    │                                                │
-    │  Deferred Actions:                             │
-    │    Present all data modifications → User Y/N    │
-    │    Execute approved only                        │
-    │                                                │
-    │  Output:                                       │
-    │    P6/P17 Report → P18 Collective → P19 Bounty  │
-    └────────────────────────────────────────────────┘
+Architecture (14 active phases):
+    ┌──────────────────────────────────────────────────┐
+    │              ScanPipeline.run(target)              │
+    │                                                  │
+    │  Stage 1 — Foundation:                           │
+    │    P0 Config → P1 Director                       │
+    │                                                  │
+    │  Stage 2 — Recon:                                │
+    │    P4 CPR → P15 Digital Twin → P13 Biometrics    │
+    │                                                  │
+    │  Stage 3 — Intelligence:                         │
+    │    P2 Agents → P3 Hypothesis                     │
+    │                                                  │
+    │  Stage 4 — Exploitation:                         │
+    │    P5 Special → P7 Hardware                      │
+    │                                                  │
+    │  Stage 5 — Chain Analysis:                       │
+    │    P8 Synthesis → P11 Mutation                   │
+    │                                                  │
+    │  Stage 6 — Deferred Actions (승인 후 실행)        │
+    │  Stage 7 — Report: P6 NCC Style                  │
+    │  Stage 8 — Learning: P12 Evolution → P18 KB      │
+    │                                                  │
+    │  GH Actions 담당 (파이프라인 외부):               │
+    │    cve-watch.yml, domain-intel.yml,              │
+    │    upstream-watch.yml, growth-loop.yml           │
+    └──────────────────────────────────────────────────┘
 """
 
 from __future__ import annotations
@@ -285,7 +286,7 @@ def _normalize_endpoint(endpoint: str, base_url: str) -> str:
 
 
 class ScanPipeline:
-    """19 Phase 통합 파이프라인.
+    """Brain-First 통합 파이프라인.
 
     Usage:
         pipeline = ScanPipeline(brain=brain_instance, config=config)
@@ -313,7 +314,7 @@ class ScanPipeline:
         app_context_ko: str = "",
         resume_from: str | None = None,
     ) -> ScanContext:
-        """전체 19 Phase 파이프라인 실행.
+        """전체 파이프라인 실행.
 
         Args:
             resume_from: 체크포인트 파일 경로. 지정하면 이전 스캔의 완료된 Phase를 건너뛰고 재개.
@@ -377,7 +378,7 @@ class ScanPipeline:
         # ─────────────────────────────────────────────────────────
 
         logger.info("=" * 70)
-        logger.info("  VXIS ScanPipeline — 19 Phase Full Orchestration")
+        logger.info("  VXIS ScanPipeline — Brain-First Full Orchestration")
         logger.info("  Target: %s", target)
         logger.info("  Scan ID: %s", ctx.scan_id)
         logger.info("  Ghost: %s", "ON 🕵️" if _ghost_layer.is_active() else "OFF")
@@ -410,13 +411,9 @@ class ScanPipeline:
 
         # ══════════════════════════════════════════════════════
         # STAGE 3: INTELLIGENCE (지능 분석 — tech_stack 기반)
-        # Phase 9(CVE), 14(예측)는 Phase 4의 tech_stack 필요
         # Phase 2(에이전트), 3(가설)는 target_profile 필요
+        # Phase 9(CVE Watch), 14(Forecast) → GH Actions가 담당 (파이프라인 외부)
         # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 9: CVE Watch — Component Vulnerability Matching",
-                              self._phase9_cve_watch, ctx)
-        await self._run_phase("Phase 14: Temporal Vulnerability Forecast",
-                              self._phase14_forecast, ctx)
         await self._run_phase("Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch",
                               self._phase2_agents, ctx)
         await self._run_phase("Phase 3: Hypothesis Engine — Pattern Matching + Context Compression",
@@ -469,13 +466,12 @@ class ScanPipeline:
                               self._phase18_collective, ctx)
 
         # ══════════════════════════════════════════════════════
-        # [미래 구현 예정] — 현재 비활성
-        # Phase 9  CVE Watch         → GH Actions cve-watch.yml이 담당 (매시간)
-        # Phase 14 Forecast          → GH Actions domain-intel.yml이 담당 (매일)
-        # Phase 16 Industry Intel    → GH Actions domain-intel.yml이 담당 (매일)
-        # Phase 10 Red vs Blue       → 방어 룰 자동 생성, 미래 구현 예정
-        # Phase 17 Outreach          → 취약점 공개/고객 알림, 미래 구현 예정
-        # Phase 19 Bug Bounty        → 버그바운티 자동 제출, 미래 구현 예정
+        # GH Actions 담당 (파이프라인 외부):
+        #   cve-watch.yml   → CVE 모니터링 (매시간)
+        #   domain-intel.yml → Forecast + Industry Intel (매일)
+        #   upstream-watch.yml → 공급망 모니터링 (매주)
+        # 미래 구현 예정:
+        #   Phase 10 Red vs Blue, Phase 17 Outreach, Phase 19 Bug Bounty
         # ══════════════════════════════════════════════════════
 
         # ══════════════════════════════════════════════════════
@@ -495,7 +491,7 @@ class ScanPipeline:
         # ══════════════════════════════════════════════════════
         logger.info("\n" + "=" * 70)
         logger.info("  PIPELINE COMPLETE")
-        logger.info("  Phases: %d/%d", len(ctx.phases_completed), 20)
+        logger.info("  Phases: %d completed", len(ctx.phases_completed))
         logger.info("  Findings: %d", len(ctx.findings))
         logger.info("  Deferred Actions: %d approved, %d total",
                      sum(1 for a in ctx.deferred_actions if a.approved),
@@ -3106,54 +3102,8 @@ class ScanPipeline:
         except Exception:
             pass
 
-    async def _phase9_cve_watch(self, ctx: ScanContext) -> None:
-        """Phase 9: CVE Watch — 타깃 컴포넌트 CVE 매칭."""
-        try:
-            # Phase 9 대응 벡터: 암호화 결함
-            for vid in ["WEB-CRYPTO-002", "WEB-CRYPTO-003", "WEB-CRYPTO-004"]:
-                ctx.score_tracker.record_vector_attempt(vid)
-        except Exception:
-            pass
-
-        try:
-            from vxis.watchers.cve_daemon import CVEWatcher
-            watcher = CVEWatcher()
-            # tech stack에서 버전 추출 → CVE 매칭
-            for tech in ctx.tech_stack:
-                cves = watcher.check_component(tech) if hasattr(watcher, 'check_component') else []
-                ctx.matched_cves.extend(cves)
-            logger.info("  Matched %d CVEs for tech stack: %s", len(ctx.matched_cves), ctx.tech_stack)
-        except Exception as exc:
-            logger.info("  CVE Watch: %s", exc)
-
-        try:
-            ctx.score_tracker.record_phase_complete("Phase 9: CVE Watch — Component Vulnerability Matching")
-        except Exception:
-            pass
-
-    async def _phase10_red_vs_blue(self, ctx: ScanContext) -> None:
-        """Phase 10: Red vs Blue — 각 finding에 방어 규칙 생성."""
-        try:
-            # Phase 10 대응 벡터: 경쟁 조건
-            ctx.score_tracker.record_vector_attempt("WEB-RACE-001")
-        except Exception:
-            pass
-
-        try:
-            from vxis.synthesis.red_vs_blue import RedVsBlueEngine
-            engine = RedVsBlueEngine()
-            for finding in ctx.findings:
-                defense = engine.generate_defense(finding) if hasattr(engine, 'generate_defense') else {}
-                if defense:
-                    ctx.defense_rules.append({"finding_id": finding.id, **defense})
-            logger.info("  Generated %d defense rules", len(ctx.defense_rules))
-        except Exception as exc:
-            logger.info("  Red vs Blue: %s", exc)
-
-        try:
-            ctx.score_tracker.record_phase_complete("Phase 10: Red vs Blue — Defense Rule Generation")
-        except Exception:
-            pass
+    # Phase 9 (CVE Watch) → GH Actions cve-watch.yml (매시간)
+    # Phase 10 (Red vs Blue) → 미래 구현 예정
 
     async def _phase11_mutation(self, ctx: ScanContext) -> None:
         """Phase 11: Chain Mutation — 대체 공격 경로 탐색."""
@@ -3225,21 +3175,7 @@ class ScanPipeline:
         except Exception:
             pass
 
-    async def _phase14_forecast(self, ctx: ScanContext) -> None:
-        """Phase 14: 90일 취약점 예측."""
-        try:
-            from vxis.forecast.predictor import VulnerabilityPredictor
-            predictor = VulnerabilityPredictor()
-            forecast = predictor.predict(ctx.tech_stack) if hasattr(predictor, 'predict') else []
-            ctx.forecast_90d = forecast
-            logger.info("  90-day forecast: %d predictions", len(forecast))
-        except Exception as exc:
-            logger.info("  Forecast: %s", exc)
-
-        try:
-            ctx.score_tracker.record_phase_complete("Phase 14: Temporal Vulnerability Forecast")
-        except Exception:
-            pass
+    # Phase 14 (Forecast) → GH Actions domain-intel.yml (매일)
 
     async def _phase15_digital_twin(self, ctx: ScanContext) -> None:
         """Phase 15: Digital Twin — 사전 시뮬레이션."""
@@ -3421,7 +3357,7 @@ class ScanPipeline:
                 f"Deferred actions: {deferred_str}\n"
                 f"Duration: {ctx.duration_seconds:.0f}s"
             ),
-            methodology=f"19 Phase Pipeline. Phases: {phases_str}",
+            methodology=f"Brain-First Pipeline. Phases: {phases_str}",
         )
 
         gen = ReportGenerator()
@@ -3437,13 +3373,7 @@ class ScanPipeline:
         except Exception:
             pass
 
-    async def _phase17_outreach(self, ctx: ScanContext) -> None:
-        """Phase 17: Outreach — 리포트 전달."""
-        logger.info("  Outreach: report generated, manual delivery required")
-        try:
-            ctx.score_tracker.record_phase_complete("Phase 17: Outreach")
-        except Exception:
-            pass
+    # Phase 17 (Outreach) → 미래 구현 예정
 
     async def _phase18_collective(self, ctx: ScanContext) -> None:
         """Phase 18: Collective Intelligence — 패턴 공유."""
@@ -3462,21 +3392,5 @@ class ScanPipeline:
         except Exception:
             pass
 
-    async def _phase16_industry(self, ctx: ScanContext) -> None:
-        """Phase 16: Industry Intelligence — 단일 타겟 스캔에서는 N/A."""
-        logger.info("  Industry Intelligence: N/A for single-target scan (multi-target mode required)")
-        try:
-            ctx.score_tracker.record_phase_skipped(
-                "Phase 16: Industry Intelligence — Sector Risk Heatmap",
-                "Single-target scan — industry-wide discovery requires multi-target mode",
-            )
-        except Exception:
-            pass
-
-    async def _phase19_bounty(self, ctx: ScanContext) -> None:
-        """Phase 19: Bug Bounty — 승인 후 제출."""
-        logger.info("  Bug Bounty: not configured (requires explicit authorization)")
-        try:
-            ctx.score_tracker.record_phase_complete("Phase 19: Bug Bounty Submission")
-        except Exception:
-            pass
+    # Phase 16 (Industry Intel) → GH Actions domain-intel.yml (매일)
+    # Phase 19 (Bug Bounty) → 미래 구현 예정

@@ -1,4 +1,4 @@
-"""MobilePipeline — 20 Phase 모바일 앱 펜테스트 오케스트레이터.
+"""MobilePipeline — Brain-First 모바일 앱 펜테스트 오케스트레이터.
 
 iOS/Android 앱 보안 분석 전 과정을 자동화.
 ScanPipeline과 동일한 패턴: async phase 메서드, graceful degradation,
@@ -32,7 +32,7 @@ _OWASP_MOBILE = {
 
 
 class MobilePipeline:
-    """20 Phase 모바일 펜테스트 파이프라인.
+    """Brain-First 모바일 펜테스트 파이프라인.
 
     Usage:
         pipeline = MobilePipeline(config=config)
@@ -64,7 +64,7 @@ class MobilePipeline:
         app_context_en: str = "",
         app_context_ko: str = "",
     ) -> MobileScanContext:
-        """전체 20 Phase 모바일 파이프라인 실행."""
+        """전체 Brain-First 모바일 파이프라인 실행."""
         ctx = MobileScanContext(
             target=target,
             platform=platform.lower(),
@@ -77,7 +77,7 @@ class MobilePipeline:
 
         platform_label = "iOS" if ctx.is_ios else "Android"
         logger.info("=" * 70)
-        logger.info("  VXIS MobilePipeline — 20 Phase Mobile Pentesting")
+        logger.info("  VXIS MobilePipeline — Brain-First Mobile Pentesting")
         logger.info("  Target: %s  Platform: %s", target, platform_label)
         logger.info("  Binary: %s", app_binary_path or "(none)")
         logger.info("  Scan ID: %s", ctx.scan_id)
@@ -4219,7 +4219,7 @@ class MobilePipeline:
             company_name="VXIS Security",
             author="VXIS MobilePipeline",
             executive_summary=(
-                f"VXIS MobilePipeline executed all 20 phases against {platform_label} app "
+                f"VXIS MobilePipeline executed all phases against {platform_label} app "
                 f"'{ctx.app_package or ctx.target}'.\n\n"
                 f"Platform: {platform_label} | Version: {ctx.app_version or 'unknown'}\n"
                 f"Package: {ctx.app_package or 'unknown'}\n"
@@ -4239,7 +4239,7 @@ class MobilePipeline:
                 f"Duration: {ctx.duration_seconds:.0f}s"
             ),
             methodology=(
-                "20-Phase VXIS Mobile Pentesting Pipeline. "
+                "VXIS Brain-First Mobile Pentesting Pipeline. "
                 "Static analysis (jadx/apktool/plistlib), "
                 "dynamic analysis (Frida instrumentation), "
                 "network interception (mitmproxy/X-Ray), "

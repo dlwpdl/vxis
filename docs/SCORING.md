@@ -192,7 +192,7 @@ Phase 상태:
   ⊗ skipped_error→ 에러 스킵 (페널티)
   ✗ failed       → 실패 (페널티)
 
-예시 (Web 19-Phase):
+예시 (Web Pipeline):
   완료: 15
   N/A 스킵: 2 (게임 전용 Phase)
   에러 스킵: 1

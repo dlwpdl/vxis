@@ -57,6 +57,26 @@ X-Ray  = 투시 (트래픽 가로채기)
 - 100% 공격 벡터 커버리지 필수, Phase 건너뛰기 금지
 - Enterprise 스캔 시 인젝션은 마지막에 승인 후 실행
 
+## 파이프라인 Phase 구조 (14 active)
+
+```
+Stage 1 — Foundation:     P0 Config → P1 Director
+Stage 2 — Recon:          P4 CPR → P15 Digital Twin → P13 Biometrics
+Stage 3 — Intelligence:   P2 Agents → P3 Hypothesis
+Stage 4 — Exploitation:   P5 Special → P7 Hardware
+Stage 5 — Chain Analysis: P8 Synthesis → P11 Mutation
+Stage 6 — Deferred Actions (승인 후 실행)
+Stage 7 — Report:         P6 NCC Style
+Stage 8 — Learning:       P12 Evolution → P18 Collective KB
+```
+
+### GH Actions 담당 (파이프라인 외부)
+
+- `cve-watch.yml` — CVE 모니터링 (매시간)
+- `domain-intel.yml` — Forecast + Industry Intel (매일/매주/매월)
+- `upstream-watch.yml` — 공급망 모니터링 (매주)
+- `growth-loop.yml` — 자율 성장 벤치마크 (매주)
+
 ## 리포트 작성 규칙 (MANDATORY — 절대 변경 금지)
 
 새 스캔 레포트를 작성할 때 `generate_benchmark_reports.py`의 WEBGOAT_FINDINGS 섹션을 템플릿으로 사용한다.

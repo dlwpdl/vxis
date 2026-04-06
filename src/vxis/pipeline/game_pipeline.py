@@ -1,4 +1,4 @@
-"""GamePipeline — 16 Phase 게임 보안 분석 파이프라인.
+"""GamePipeline — Brain-First 게임 보안 분석 파이프라인.
 
 게임 클라이언트, 서버, 경제, 메모리, 프로토콜 등 게임 특화 보안 분석.
 ScanPipeline과 동일한 패턴을 따름 (Phase async 메서드 + GameScanContext 공유).
@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 class GamePipeline:
-    """16 Phase 게임 보안 분석 파이프라인.
+    """Brain-First 게임 보안 분석 파이프라인.
 
     Usage:
         pipeline = GamePipeline(brain=brain_instance)
@@ -79,7 +79,7 @@ class GamePipeline:
         app_context_en: str = "",
         app_context_ko: str = "",
     ) -> GameScanContext:
-        """전체 16 Phase 게임 파이프라인 실행.
+        """전체 Brain-First 게임 파이프라인 실행.
 
         Args:
             target: 게임 서버 베이스 URL (e.g., "https://game.example.com").
@@ -100,7 +100,7 @@ class GamePipeline:
         )
 
         logger.info("=" * 70)
-        logger.info("  VXIS GamePipeline — 16 Phase Game Security Assessment")
+        logger.info("  VXIS GamePipeline — Brain-First Game Security Assessment")
         logger.info("  Target:  %s", target)
         logger.info("  Scan ID: %s", ctx.scan_id)
         logger.info("  Type:    %s | Binary: %s", game_type, client_binary or "N/A")
