@@ -1,34 +1,11 @@
 {
   "date": "2026-04-06",
-  "stop_reason": "stagnation",
-  "total_iterations": 2,
+  "stop_reason": "all_targets_failed",
+  "total_iterations": 0,
   "score_target": 1000,
-  "start_score": 666.4935064935065,
-  "final_score": 666.4935064935065,
-  "total_growth": 0.0,
+  "start_score": 0,
+  "final_score": 0,
+  "total_growth": 0,
   "code_improvements": 0,
-  "iterations": [
-    {
-      "iteration": 1,
-      "timestamp": "2026-04-06T05:35:45.091169+00:00",
-      "best_score": 666.4935064935065,
-      "weakest_dimension": "vector_coverage",
-      "weakest_pct": 0.31,
-      "improvement": 666.5,
-      "consecutive_no_improve": 0,
-      "action": "no_patches_generated",
-      "code_improved": false
-    },
-    {
-      "iteration": 2,
-      "timestamp": "2026-04-06T05:40:24.031722+00:00",
-      "best_score": 666.4935064935065,
-      "weakest_dimension": "vector_coverage",
-      "weakest_pct": 0.31,
-      "improvement": 0.0,
-      "consecutive_no_improve": 1,
-      "action": "no_patches_generated",
-      "code_improved": false
-    }
-  ]
+  "iterations": []
 }
