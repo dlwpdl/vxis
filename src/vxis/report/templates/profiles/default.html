@@ -994,6 +994,18 @@
 
   <p>{{ report.methodology | bilingual | safe }}</p>
 
+  {% if report.screenshots %}
+  <h2><span class="en">Target Screenshots</span><span class="ko">타겟 스크린샷</span></h2>
+  <div class="screenshots-grid">
+    {% for label, path in report.screenshots.items() %}
+      <figure style="margin: 12px 0; page-break-inside: avoid;">
+        <img src="{{ path }}" alt="{{ label }}" style="max-width: 100%; border: 1px solid #ccc;" />
+        <figcaption style="font-size: 0.85em; color: #555;">{{ label }}</figcaption>
+      </figure>
+    {% endfor %}
+  </div>
+  {% endif %}
+
   <div class="page-break"></div>
 
   {# ============================================================

@@ -262,6 +262,44 @@
   </div>
   {% endif %}
 
+  {% if collab %}
+  <!-- Review status -->
+  <div class="bg-surface rounded-lg border border-surface-border p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-base font-semibold">Review Status</h3>
+      {% set rstatus = (review.status if review else 'pending') %}
+      <span class="px-2 py-1 rounded text-xs font-bold uppercase
+        {% if rstatus == 'approved' %}bg-green-900/40 text-green-300 border border-green-700
+        {% elif rstatus == 'rejected' %}bg-red-900/40 text-red-300 border border-red-700
+        {% elif rstatus == 'false_positive' %}bg-yellow-900/40 text-yellow-300 border border-yellow-700
+        {% else %}bg-gray-800 text-gray-300 border border-gray-700{% endif %}">
+        {{ rstatus }}
+      </span>
+    </div>
+
+    {% if current_user and current_user.role in ['reviewer', 'admin'] %}
+    <form method="POST" action="/findings/{{ finding.id }}/review" class="flex flex-wrap gap-2">
+      {% for s in ['approved', 'rejected', 'false_positive', 'pending'] %}
+      <button type="submit" name="status" value="{{ s }}"
+              class="px-3 py-1.5 rounded bg-gray-800 hover:bg-gray-700 text-xs text-gray-200">
+        {{ s }}
+      </button>
+      {% endfor %}
+    </form>
+    {% else %}
+    <p class="text-xs text-gray-500">Reviewer or admin privileges required to change status.</p>
+    {% endif %}
+  </div>
+
+  <!-- Comments -->
+  <div class="bg-surface rounded-lg border border-surface-border p-6">
+    <h3 class="text-base font-semibold mb-4">Comments</h3>
+    <div hx-get="/findings/{{ finding.id }}/comments" hx-trigger="load" hx-swap="innerHTML">
+      {% include "partials/comments.html" with context %}
+    </div>
+  </div>
+  {% endif %}
+
   <!-- Back button -->
   <div>
     <a href="/scan/{{ scan_id }}"

@@ -204,3 +204,71 @@ class ToolRunRecord(Base):
 
     # Relationship
     scan: Mapped["ScanRecord"] = relationship("ScanRecord", back_populates="tool_runs")
+
+
+# ---------------------------------------------------------------------------
+# Multi-user collaboration models
+# ---------------------------------------------------------------------------
+
+
+class UserRecord(Base):
+    """Dashboard user account.
+
+    Roles:
+        viewer    — read-only access to scans/findings.
+        reviewer  — can comment and set review status on findings.
+        admin     — full access including user management.
+    """
+
+    __tablename__ = "user_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    email: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False, default="viewer")
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
+class FindingCommentRecord(Base):
+    """Comment posted by a user on a finding."""
+
+    __tablename__ = "finding_comment_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    finding_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("finding_records.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("user_records.id", ondelete="CASCADE"), nullable=False
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
+class FindingReviewRecord(Base):
+    """Latest review status for a finding by a reviewer."""
+
+    __tablename__ = "finding_review_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    finding_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("finding_records.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("user_records.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    reviewed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )

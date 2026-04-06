@@ -1,0 +1,35 @@
+<div id="comments-section">
+  <ul class="space-y-3">
+    {% for item in comments %}
+    <li class="bg-gray-900/40 border border-surface-border rounded-md p-3">
+      <div class="flex items-center gap-2 text-xs text-gray-500 mb-1">
+        <span class="font-semibold text-gray-300">{{ item.user.username }}</span>
+        <span class="px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">{{ item.user.role }}</span>
+        <span>·</span>
+        <span>{{ item.comment.created_at | fmtdt }}</span>
+      </div>
+      <p class="text-sm text-gray-200 whitespace-pre-wrap">{{ item.comment.content }}</p>
+    </li>
+    {% else %}
+    <li class="text-sm text-gray-500 italic">No comments yet.</li>
+    {% endfor %}
+  </ul>
+
+  {% if current_user %}
+  <form
+    hx-post="/findings/{{ finding_id }}/comments"
+    hx-target="#comments-section"
+    hx-swap="outerHTML"
+    class="mt-4 space-y-2"
+  >
+    <textarea name="content" rows="3" required
+              placeholder="Add a comment..."
+              class="w-full px-3 py-2 rounded bg-gray-900 border border-surface-border text-sm text-gray-100
+                     focus:outline-none focus:ring-2 focus:ring-cyan-500"></textarea>
+    <button type="submit"
+            class="px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium">
+      Post comment
+    </button>
+  </form>
+  {% endif %}
+</div>

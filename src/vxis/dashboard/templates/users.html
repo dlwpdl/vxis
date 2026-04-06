@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Users — VXIS{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex items-center gap-2 text-sm">
+  <a href="/" class="text-gray-500 hover:text-gray-300">Dashboard</a>
+  <span class="text-gray-700">/</span>
+  <span class="text-gray-100 font-medium">Users</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl space-y-6">
+
+  <div class="bg-surface rounded-lg border border-surface-border p-6">
+    <h2 class="text-lg font-semibold mb-4">Create user</h2>
+    <form method="POST" action="/users" class="grid grid-cols-1 md:grid-cols-5 gap-3">
+      <input name="username" placeholder="username" required
+             class="px-3 py-2 rounded bg-gray-900 border border-surface-border text-sm" />
+      <input name="email" placeholder="email (optional)"
+             class="px-3 py-2 rounded bg-gray-900 border border-surface-border text-sm" />
+      <input name="password" type="password" placeholder="password" required
+             class="px-3 py-2 rounded bg-gray-900 border border-surface-border text-sm" />
+      <select name="role"
+              class="px-3 py-2 rounded bg-gray-900 border border-surface-border text-sm">
+        <option value="viewer">viewer</option>
+        <option value="reviewer">reviewer</option>
+        <option value="admin">admin</option>
+      </select>
+      <button type="submit"
+              class="px-4 py-2 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-medium text-sm">
+        Add
+      </button>
+    </form>
+  </div>
+
+  <div class="bg-surface rounded-lg border border-surface-border overflow-hidden">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-900/60 text-gray-400 text-xs uppercase">
+        <tr>
+          <th class="text-left px-4 py-3">ID</th>
+          <th class="text-left px-4 py-3">Username</th>
+          <th class="text-left px-4 py-3">Email</th>
+          <th class="text-left px-4 py-3">Role</th>
+          <th class="text-left px-4 py-3">Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr class="border-t border-surface-border">
+          <td class="px-4 py-3 text-gray-500">{{ u.id }}</td>
+          <td class="px-4 py-3 font-medium">{{ u.username }}</td>
+          <td class="px-4 py-3 text-gray-400">{{ u.email or '—' }}</td>
+          <td class="px-4 py-3">
+            <span class="px-2 py-0.5 rounded text-xs bg-gray-800 text-gray-300">{{ u.role }}</span>
+          </td>
+          <td class="px-4 py-3 text-gray-500">{{ u.created_at | fmtdt }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="px-4 py-6 text-center text-gray-500">No users yet.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+{% endblock %}

@@ -77,6 +77,7 @@ class ReportData:
     executive_summary: str = ""
     methodology: str = field(default=_DEFAULT_METHODOLOGY)
     attack_chains: list[list[str]] | None = None  # finding_id 체인 리스트
+    screenshots: dict[str, str] = field(default_factory=dict)  # label → file path/URL
 
     @property
     def attack_graph_svg(self) -> str:

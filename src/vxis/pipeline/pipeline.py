@@ -573,6 +573,33 @@ class ScanPipeline:
             logger.warning("  Scoring failed: %s", exc)
 
         # ══════════════════════════════════════════════════════
+        # STAGE 5b: External integration hooks (no-op if unconfigured)
+        # ══════════════════════════════════════════════════════
+        try:
+            from vxis.integrations.registry import load_hooks_from_env
+            _hooks = load_hooks_from_env()
+            if _hooks:
+                for _f in (ctx.findings or []):
+                    _sev = getattr(_f, "severity", None)
+                    _sev_str = getattr(_sev, "value", str(_sev or "")).lower()
+                    if _sev_str not in ("critical", "high"):
+                        continue
+                    for _h in _hooks:
+                        try:
+                            _h.on_finding(_f)
+                            if _sev_str == "critical":
+                                _h.on_critical(_f)
+                        except Exception as _exc:
+                            logger.warning("[integrations] %s on_finding failed: %s", _h.name, _exc)
+                for _h in _hooks:
+                    try:
+                        _h.on_scan_complete(ctx)
+                    except Exception as _exc:
+                        logger.warning("[integrations] %s on_scan_complete failed: %s", _h.name, _exc)
+        except Exception as _exc:
+            logger.warning("[integrations] hook dispatch failed: %s", _exc)
+
+        # ══════════════════════════════════════════════════════
         # COMPLETE
         # ══════════════════════════════════════════════════════
         logger.info("\n" + "=" * 70)
@@ -953,16 +980,64 @@ class ScanPipeline:
             "Output ONLY the raw JSON object. Every vector_id must be a key. Zero additional text."
         )
 
+        # ── Knowledge Store: 사전 조회로 LLM 호출 절약 ──
+        # KB에 컴파일된 패턴이 있으면 LLM 호출 없이 사용
+        kb_decisions: dict[str, dict] = {}
+        kb_store = None
+        kb_context_sig = ""
+        KB_CONFIDENCE_THRESHOLD = 0.7
         try:
+            from vxis.knowledge.store import KnowledgeStore, ExecutionRecord
+            kb_store = KnowledgeStore()
+            kb_context_sig = KnowledgeStore.build_context_signature(
+                tech_stack=tech_stack or ["web", "http"],
+            )
+            for vec in phase_vectors:
+                vec_sig = f"{kb_context_sig}+{vec.id}"
+                matched = kb_store.match_patterns(vec_sig)
+                if not matched:
+                    matched = kb_store.match_patterns(kb_context_sig)
+                if matched and matched[0].confidence >= KB_CONFIDENCE_THRESHOLD:
+                    p = matched[0]
+                    args = p.action_args or {}
+                    kb_decisions[vec.id] = {
+                        "attempt": True,
+                        "reasoning": f"[KB-HIT] {p.reasoning} (conf {p.confidence:.0%})",
+                        "targets": [{
+                            "endpoint": args.get("endpoint", ctx.target),
+                            "method": args.get("method", "GET"),
+                            "param": args.get("param", ""),
+                            "payloads": args.get("payloads", [args.get("summary", "")]),
+                            "json_body": args.get("json_body"),
+                        }],
+                        "_kb_pattern_id": p.id,
+                    }
+            if kb_decisions:
+                logger.info("  [KB-HIT] %d/%d vectors served from Knowledge Store (skipping LLM)",
+                            len(kb_decisions), len(phase_vectors))
+        except Exception as _kb_exc:
+            logger.debug("  [KB] lookup failed: %s", _kb_exc)
+            kb_store = None
+
+        # KB가 모든 벡터를 커버하면 LLM 호출 자체 스킵
+        remaining_vectors = [v for v in phase_vectors if v.id not in kb_decisions]
+        if not remaining_vectors:
+            logger.info("  [KB-FULL] Phase %s: all %d vectors served from KB",
+                        phase_name, len(phase_vectors))
+            return kb_decisions
+
+        try:
+            logger.info("  [LLM-CALL] Phase %s: %d vectors not in KB → calling LLM",
+                        phase_name, len(remaining_vectors))
             response = self.brain._call_llm_with_fallback(system_prompt, user_prompt)
             if not response:
-                return {}
+                return kb_decisions
 
             raw = _parse_llm_json(response)
 
             # 모든 벡터 attempt=True 고정 — LLM은 파라미터만 결정
-            decisions: dict[str, dict] = {}
-            for vec in phase_vectors:
+            decisions: dict[str, dict] = dict(kb_decisions)
+            for vec in remaining_vectors:
                 vid = vec.id
                 d = raw.get(vid, {})
                 decisions[vid] = {
@@ -977,8 +1052,35 @@ class ScanPipeline:
                     }],
                 }
 
-            logger.info("  [LLM-BRAIN] Phase %s: %d/%d vectors (all attempt)",
-                        phase_name, len(decisions), len(phase_vectors))
+            logger.info("  [LLM-BRAIN] Phase %s: %d/%d vectors (all attempt, %d from KB)",
+                        phase_name, len(decisions), len(phase_vectors), len(kb_decisions))
+
+            # ── Knowledge Store: LLM 결정 기록 ──
+            if kb_store is not None:
+                try:
+                    for vec in remaining_vectors:
+                        d = raw.get(vec.id, {})
+                        if not d:
+                            continue
+                        vec_sig = f"{kb_context_sig}+{vec.id}"
+                        endpoint = d.get("endpoint", ctx.target)
+                        method = d.get("method", "GET")
+                        param = d.get("param", "")
+                        payloads = d.get("payloads", [])
+                        args_summary = f"{method} {endpoint} param={param} n_payloads={len(payloads) if isinstance(payloads, list) else 0}"
+                        record = ExecutionRecord(
+                            tool=f"brain:{vec.id}",
+                            context_signature=vec_sig,
+                            args_summary=args_summary,
+                            effectiveness=0.5,  # 초기 추정 — 실제 결과는 record_finding에서 보정
+                            findings_produced=0,
+                            finding_types=[getattr(vec, "category", "")] if hasattr(vec, "category") else [],
+                            target_tech=list(tech_stack or []),
+                        )
+                        kb_store.record_execution(record)
+                except Exception as _rec_exc:
+                    logger.debug("  [KB] record failed: %s", _rec_exc)
+
             return decisions
 
         except Exception as exc:
@@ -1237,6 +1339,15 @@ class ScanPipeline:
                         logger.debug("    [FAIL-JSON] %s %s: %s", vector_id, endpoint, exc)
                     continue  # json_body 처리 완료 — payloads 루프 건너뜀
 
+                # WAF bypass engine — lazy init, shared per scan
+                if not hasattr(ctx, "_waf_bypass_engine") or ctx._waf_bypass_engine is None:
+                    try:
+                        from vxis.agent.waf_bypass import WAFBypassEngine
+                        ctx._waf_bypass_engine = WAFBypassEngine(max_iterations=3)
+                    except Exception:
+                        ctx._waf_bypass_engine = None
+                target_spec.setdefault("_waf_bypass_attempts", 0)
+
                 _endpoint_timed_out = False
                 for payload in payloads[:10]:  # 페이로드당 최대 10개
                     if _endpoint_timed_out:
@@ -1274,6 +1385,104 @@ class ScanPipeline:
                                 headers = {k.lower(): v for k, v in resp.headers.items()}
                             except Exception:
                                 pass
+
+                        # ── Adaptive WAF Bypass ──
+                        _waf_engine = getattr(ctx, "_waf_bypass_engine", None)
+                        if _waf_engine is not None:
+                            _waf_marker = _waf_engine._detect_waf(body, status, headers)
+                            while (
+                                _waf_marker
+                                and target_spec["_waf_bypass_attempts"] < 3
+                            ):
+                                target_spec["_waf_bypass_attempts"] += 1
+                                logger.info(
+                                    "    [WAF-BLOCK] %s %s blocked (%s) — try %d",
+                                    vector_id, endpoint, _waf_marker,
+                                    target_spec["_waf_bypass_attempts"],
+                                )
+                                self._emit("waf_bypass", {
+                                    "vector_id": vector_id,
+                                    "endpoint": endpoint,
+                                    "stage": "blocked",
+                                    "marker": _waf_marker,
+                                    "attempt": target_spec["_waf_bypass_attempts"],
+                                    "payload": (payload or "")[:120],
+                                })
+                                try:
+                                    new_payload = await _waf_engine.evolve_payload(
+                                        original_payload=payload,
+                                        response_body=body,
+                                        response_status=status,
+                                        vector_type=vector_id,
+                                        brain=self.brain,
+                                        headers=headers,
+                                    )
+                                except Exception as _wexc:
+                                    logger.debug("    [WAF-BYPASS] evolve failed: %s", _wexc)
+                                    new_payload = None
+                                if not new_payload:
+                                    break
+                                logger.info(
+                                    "    [WAF-BYPASS-TRY] %s -> %s",
+                                    vector_id, new_payload[:80],
+                                )
+                                self._emit("waf_bypass", {
+                                    "vector_id": vector_id,
+                                    "endpoint": endpoint,
+                                    "stage": "try",
+                                    "attempt": target_spec["_waf_bypass_attempts"],
+                                    "payload": new_payload[:120],
+                                })
+                                try:
+                                    if form_cache and form_cache.get("fields") and param:
+                                        form_data = dict(form_cache["fields"])
+                                        form_data[param] = new_payload
+                                        form_method = form_cache.get("method", method)
+                                        form_action = form_cache.get("action", endpoint)
+                                        if form_method == "GET":
+                                            resp = await session.get(form_action, params=form_data)
+                                        else:
+                                            if form_cache.get("enctype", "").startswith("application/json"):
+                                                resp = await session.post(form_action, json_data=form_data)
+                                            else:
+                                                resp = await session.post(form_action, data=form_data)
+                                    elif method == "GET" and param:
+                                        resp = await session.get(endpoint, params={param: new_payload})
+                                    elif method == "POST" and param:
+                                        resp = await session.post(endpoint, data={param: new_payload})
+                                    elif method == "GET":
+                                        resp = await session.get(endpoint)
+                                    else:
+                                        resp = await session.post(endpoint, data={"input": new_payload})
+                                    body = resp.text[:5000] if hasattr(resp, "text") else ""
+                                    status = resp.status if hasattr(resp, "status") else 0
+                                    headers = {}
+                                    if hasattr(resp, "headers"):
+                                        try:
+                                            headers = {k.lower(): v for k, v in resp.headers.items()}
+                                        except Exception:
+                                            pass
+                                    payload = new_payload
+                                    _waf_marker_new = _waf_engine._detect_waf(body, status, headers)
+                                    if not _waf_marker_new:
+                                        logger.info(
+                                            "    [WAF-BYPASS-SUCCESS] %s evaded WAF on %s",
+                                            vector_id, endpoint,
+                                        )
+                                        self._emit("waf_bypass", {
+                                            "vector_id": vector_id,
+                                            "endpoint": endpoint,
+                                            "stage": "success",
+                                            "payload": new_payload[:120],
+                                        })
+                                        _waf_marker = None
+                                        break
+                                    _waf_marker = _waf_marker_new
+                                except Exception as _retry_exc:
+                                    logger.debug(
+                                        "    [WAF-BYPASS] retry request failed: %s", _retry_exc,
+                                    )
+                                    break
 
                         finding_created = self._analyze_probe_response(
                             ctx, vector_id, endpoint, param, payload, body, status, headers,
@@ -2971,6 +3180,38 @@ class ScanPipeline:
         except Exception:
             logger.info("  Evidence Engine unavailable")
 
+        # ── Threat Modeling (STRIDE) — Brain-First ──
+        try:
+            from vxis.agent.threat_modeling import ThreatModeler
+
+            modeler = ThreatModeler()
+            stride = await modeler.generate_stride(
+                target=ctx.target,
+                tech_stack=ctx.tech_stack,
+                brain=self.brain,
+            )
+            if stride.total_threats() > 0:
+                ctx.threat_model = {
+                    "stride": stride.to_dict(),
+                    "priority_vector_prefixes": stride.priority_vector_prefixes(),
+                }
+                new_hyps = modeler.stride_to_hypotheses(stride)
+                ctx.hypotheses.extend(new_hyps)
+                logger.info(
+                    "  Threat Model: %d STRIDE threats → %d hypotheses",
+                    stride.total_threats(),
+                    len(new_hyps),
+                )
+                self._emit("threat_model", {
+                    "target": ctx.target,
+                    "stride": stride.to_dict(),
+                    "hypothesis_count": len(new_hyps),
+                })
+            else:
+                logger.info("  Threat Model: skipped (brain unavailable or empty)")
+        except Exception as exc:
+            logger.info("  Threat Modeling failed (graceful skip): %s", exc)
+
         try:
             ctx.score_tracker.record_phase_complete("Phase 1: Director — Attack Graph Init")
         except Exception:
@@ -3206,6 +3447,47 @@ class ScanPipeline:
         # ... (여기에 brain_scan.py의 PROBE 로직이 들어감)
         # → 추후 Phase 2 에이전트로 이관
 
+        # ── Eyes 스크린샷 캡처 (Playwright 활성화된 경우만) ──
+        try:
+            from vxis.interaction.eyes import is_available as _eyes_available
+            if _eyes_available() and ctx.target_profile.get("available_senses", {}).get("eyes"):
+                from pathlib import Path as _Path
+                shot_dir = _Path("reports/screenshots") / (ctx.scan_id or "default")
+                shot_dir.mkdir(parents=True, exist_ok=True)
+
+                # 캡처 대상: homepage + finding 발생 affected_components 중 URL path
+                shot_targets: list[tuple[str, str]] = [("/", "homepage")]
+                seen_paths: set[str] = {"/"}
+                for _f in list(ctx.findings):
+                    comp = (_f.affected_component or "").strip()
+                    if comp.startswith("/") and comp not in seen_paths and len(comp) < 200:
+                        label = f"finding_{_f.id}".replace("/", "_")
+                        shot_targets.append((comp, label))
+                        seen_paths.add(comp)
+                        if len(shot_targets) >= 6:
+                            break
+
+                for path_url, label in shot_targets:
+                    try:
+                        out_path = shot_dir / f"{label}.png"
+                        sc_res = await ctrl.execute(InteractionAction(
+                            intent=InteractionIntent.SCREENSHOT,
+                            url=path_url,
+                        ))
+                        if sc_res.success and sc_res.screenshot_path:
+                            try:
+                                import shutil as _shutil
+                                _shutil.move(sc_res.screenshot_path, str(out_path))
+                            except Exception:
+                                if getattr(ctrl, "_page", None) is not None:
+                                    await ctrl._page.screenshot(path=str(out_path))  # type: ignore[attr-defined]
+                            ctx.screenshots[label] = str(out_path)
+                            logger.info("  [SHOT] %s → %s", path_url, out_path)
+                    except Exception as _se:
+                        logger.debug("  Screenshot failed for %s: %s", path_url, _se)
+        except Exception as _e:
+            logger.debug("  Eyes screenshot block skipped: %s", _e)
+
         # Cleanup — 리소스 누수 방지 (예외 시에도 실행하려면 phase body 전체를 try로 감싸야 하나
         # 이는 indent 변경이 필요 — 대신 try/except로 cleanup만 보호)
         try:
@@ -3263,6 +3545,103 @@ class ScanPipeline:
                 )
             except Exception:
                 pass
+
+        # ── Multi-step Business Logic Attack (Brain-First) ──
+        try:
+            await self._phase_business_logic(ctx)
+        except Exception as exc:
+            logger.warning("  [BIZ-LOGIC] phase failed: %s", exc)
+
+    async def _phase_business_logic(self, ctx: ScanContext) -> None:
+        """Brain이 앱 상태머신을 학습하고 각 전환점에서 비즈니스 로직 공격을 수행."""
+        from vxis.agent.business_logic import BusinessLogicAnalyzer
+        from vxis.models.finding import Severity
+
+        logger.info("  [BIZ-LOGIC] Multi-step Business Logic Attack starting")
+
+        for vid in ("WEB-BIZ-001", "WEB-BIZ-002", "WEB-BIZ-003", "WEB-BIZ-004", "WEB-BIZ-005"):
+            try:
+                ctx.score_tracker.record_vector_attempt(vid)
+            except Exception:
+                pass
+
+        session = getattr(ctx, "_brain_session", None)
+        if session is None:
+            logger.info("  [BIZ-LOGIC] no _brain_session — skipping live attacks")
+            return
+
+        analyzer = BusinessLogicAnalyzer()
+        try:
+            graph = await analyzer.learn_state_graph(
+                target=ctx.target,
+                session=session,
+                brain=self.brain,
+                initial_endpoints=list(ctx.api_endpoints or []),
+                tech_stack=list(ctx.tech_stack or []),
+            )
+        except Exception as exc:
+            logger.warning("  [BIZ-LOGIC] learn_state_graph error: %s", exc)
+            return
+
+        if not graph.edges:
+            logger.info("  [BIZ-LOGIC] Brain returned no transitions — nothing to attack")
+            return
+
+        try:
+            results = await analyzer.attack_transitions(graph, session, self.brain, ctx)
+        except Exception as exc:
+            logger.warning("  [BIZ-LOGIC] attack_transitions error: %s", exc)
+            return
+
+        successes = [r for r in results if r.success]
+        logger.info("  [BIZ-LOGIC] %d transitions tested, %d apparent successes",
+                    len(results), len(successes))
+
+        title_map = {
+            "WEB-BIZ-001": ("Business Logic — Negative Value Accepted",
+                            "비즈니스 로직 — 음수 값 수락"),
+            "WEB-BIZ-002": ("Business Logic — State Transition Skip",
+                            "비즈니스 로직 — 상태 전환 우회"),
+            "WEB-BIZ-003": ("Business Logic — Race Condition on Transaction",
+                            "비즈니스 로직 — 트랜잭션 경쟁 상태"),
+            "WEB-BIZ-004": ("Business Logic — Transaction Replay Allowed",
+                            "비즈니스 로직 — 트랜잭션 재전송 허용"),
+            "WEB-BIZ-005": ("Business Logic — Privilege/Identifier Tampering",
+                            "비즈니스 로직 — 권한/식별자 변조"),
+        }
+
+        for r in successes:
+            try:
+                ctx.score_tracker.record_vector_found(r.vector_id)
+            except Exception:
+                pass
+            en, ko = title_map.get(r.vector_id, (r.attack_type, r.attack_type))
+            try:
+                ctx.add_finding(
+                    target=ctx.target,
+                    title=f"{en}|||{ko}",
+                    description=(
+                        f"Transition: {r.transition.from_state} -> {r.transition.to_state}\n"
+                        f"Attack: {r.attack_type}\n"
+                        f"Reasoning: {r.reasoning}\n"
+                        f"Evidence:\n{r.evidence}"
+                        f"|||"
+                        f"전환: {r.transition.from_state} → {r.transition.to_state}\n"
+                        f"공격 유형: {r.attack_type}\n"
+                        f"분석: {r.reasoning}\n"
+                        f"증거:\n{r.evidence}"
+                    ),
+                    severity=Severity.high,
+                    finding_type="business_logic",
+                    affected_component=r.transition.endpoint or ctx.target,
+                )
+            except Exception as exc:
+                logger.debug("  [BIZ-LOGIC] add_finding failed: %s", exc)
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 5: Business Logic Attack")
+        except Exception:
+            pass
 
     async def _phase7_hardware(self, ctx: ScanContext) -> None:
         """Phase 7: Hardware agents — 해당 시에만."""
@@ -3637,6 +4016,7 @@ class ScanPipeline:
             author="VXIS ScanPipeline",
             executive_summary=exec_summary,
             methodology=f"Brain-First Pipeline. Phases: {phases_str}",
+            screenshots=dict(getattr(ctx, "screenshots", {}) or {}),
         )
 
         gen = ReportGenerator()

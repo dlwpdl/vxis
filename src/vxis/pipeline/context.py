@@ -59,6 +59,9 @@ class ScanContext:
     tls_info: dict[str, Any] = field(default_factory=dict)
     target_profile: dict[str, Any] = field(default_factory=dict)
 
+    # ── Threat Model (STRIDE) ──
+    threat_model: dict[str, Any] = field(default_factory=dict)
+
     # ── Attack Graph ──
     hypotheses: list[dict[str, Any]] = field(default_factory=list)
     attack_chains: list[dict[str, Any]] = field(default_factory=list)
@@ -92,6 +95,9 @@ class ScanContext:
     # ── Phase 실행 추적 ──
     phases_completed: list[str] = field(default_factory=list)
     phase_logs: list[dict[str, Any]] = field(default_factory=list)
+
+    # ── Screenshots (Phase 4 Eyes) ──
+    screenshots: dict[str, str] = field(default_factory=dict)
 
     # ── X-Ray 플로우 ──
     xray_flows: int = 0

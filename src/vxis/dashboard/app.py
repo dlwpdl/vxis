@@ -44,6 +44,12 @@ async def _lifespan(application: FastAPI):  # type: ignore[no-untyped-def]
     """Initialise the DB schema on startup."""
     engine = getattr(application.state, "engine", _engine)
     await init_db(engine)
+    try:
+        from vxis.dashboard.auth import ensure_default_admin
+
+        await ensure_default_admin(engine)
+    except Exception:
+        pass
     yield
 
 
@@ -57,7 +63,7 @@ templates = Jinja2Templates(directory=str(_TEMPLATE_DIR))
 # ---------------------------------------------------------------------------
 
 # Paths that are always accessible without a token.
-_PUBLIC_PATHS: set[str] = {"/health", "/login"}
+_PUBLIC_PATHS: set[str] = {"/health", "/login", "/logout"}
 
 
 def _get_dashboard_token() -> str | None:
@@ -643,33 +649,61 @@ async def client_detail(request: Request, client_id: str) -> HTMLResponse:
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: str | None = Query(None)) -> HTMLResponse:
-    """Simple login page that asks for the dashboard token."""
-    if _get_dashboard_token() is None:
-        return RedirectResponse(url="/", status_code=303)  # type: ignore[return-value]
+    """Login page — supports both user credentials and dashboard token."""
     return templates.TemplateResponse(
         request,
         "login.html",
-        {"error": error},
+        {"error": error, "token_required": _get_dashboard_token() is not None},
     )
 
 
 @app.post("/login")
-async def login_submit(request: Request) -> RedirectResponse:
-    """Validate the submitted token and redirect to the dashboard."""
+async def login_submit(request: Request):  # type: ignore[no-untyped-def]
+    """Validate submitted credentials and create a session cookie."""
+    from vxis.dashboard.auth import (
+        set_session_cookie,
+        verify_password,
+    )
+    from vxis.models.db_models import UserRecord
+
     form = await request.form()
-    submitted_token = form.get("token", "")
+    username = str(form.get("username", "")).strip()
+    password = str(form.get("password", ""))
+    submitted_token = str(form.get("token", ""))
 
+    # Optional dashboard token still honoured (kept in URL for middleware).
     token = _get_dashboard_token()
+    token_qs = ""
+    if token is not None:
+        if submitted_token != token:
+            return RedirectResponse(url="/login?error=invalid", status_code=303)
+        token_qs = f"?token={token}"
 
-    if token is None:
-        return RedirectResponse(url="/", status_code=303)
+    if not username or not password:
+        return RedirectResponse(url="/login?error=invalid", status_code=303)
 
-    if submitted_token == token:
-        # Redirect with the token as a query parameter so the middleware allows it.
-        # For a simple internal tool this is acceptable; the token stays in the URL.
-        return RedirectResponse(url=f"/?token={token}", status_code=303)
+    engine = _get_engine(request)
+    async with get_session(engine) as session:
+        result = await session.execute(
+            select(UserRecord).where(UserRecord.username == username)
+        )
+        user = result.scalar_one_or_none()
 
-    return RedirectResponse(url="/login?error=invalid", status_code=303)
+    if user is None or not verify_password(password, user.password_hash):
+        return RedirectResponse(url="/login?error=invalid", status_code=303)
+
+    response = RedirectResponse(url=f"/{token_qs}", status_code=303)
+    set_session_cookie(response, user.id)
+    return response
+
+
+@app.get("/logout")
+async def logout(request: Request):  # type: ignore[no-untyped-def]
+    from vxis.dashboard.auth import clear_session_cookie
+
+    response = RedirectResponse(url="/login", status_code=303)
+    clear_session_cookie(response)
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -1139,3 +1173,272 @@ async def phases_page(request: Request) -> HTMLResponse:
 async def health() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "ok", "version": "0.1.0"}
+
+
+# ---------------------------------------------------------------------------
+# Multi-user collaboration: users, comments, reviews
+# ---------------------------------------------------------------------------
+
+
+def _expose_current_user_to_templates() -> None:
+    """Inject ``current_user`` (resolved per-request) via Jinja2 globals.
+
+    Templates use ``request.state.user`` instead — populated by the
+    middleware below.
+    """
+
+
+@app.middleware("http")
+async def _populate_user_state(request: Request, call_next):  # type: ignore[no-untyped-def]
+    from vxis.dashboard.auth import current_user
+
+    try:
+        request.state.user = await current_user(request)
+    except Exception:
+        request.state.user = None
+    return await call_next(request)
+
+
+@app.get("/users", response_class=HTMLResponse)
+async def users_list(request: Request) -> HTMLResponse:
+    """Admin-only list of dashboard users."""
+    from vxis.dashboard.auth import current_user
+    from vxis.models.db_models import UserRecord
+
+    user = await current_user(request)
+    if user is None:
+        return RedirectResponse(url="/login", status_code=303)  # type: ignore[return-value]
+    if user.role != "admin":
+        return HTMLResponse("Forbidden", status_code=403)
+
+    engine = _get_engine(request)
+    async with get_session(engine) as session:
+        result = await session.execute(
+            select(UserRecord).order_by(UserRecord.created_at.desc())
+        )
+        users = list(result.scalars().all())
+
+    return templates.TemplateResponse(
+        request, "users.html", {"users": users, "current_user": user},
+    )
+
+
+@app.post("/users")
+async def users_create(request: Request):  # type: ignore[no-untyped-def]
+    """Admin-only — create a new user."""
+    from vxis.dashboard.auth import current_user, hash_password
+    from vxis.models.db_models import UserRecord
+
+    user = await current_user(request)
+    if user is None:
+        return RedirectResponse(url="/login", status_code=303)
+    if user.role != "admin":
+        return HTMLResponse("Forbidden", status_code=403)
+
+    form = await request.form()
+    username = str(form.get("username", "")).strip()
+    email = str(form.get("email", "")).strip() or None
+    role = str(form.get("role", "viewer")).strip() or "viewer"
+    password = str(form.get("password", ""))
+
+    if not username or not password or role not in {"viewer", "reviewer", "admin"}:
+        return RedirectResponse(url="/users", status_code=303)
+
+    engine = _get_engine(request)
+    async with get_session(engine) as session:
+        existing = (
+            await session.execute(select(UserRecord).where(UserRecord.username == username))
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(
+                UserRecord(
+                    username=username,
+                    email=email,
+                    role=role,
+                    password_hash=hash_password(password),
+                )
+            )
+
+    return RedirectResponse(url="/users", status_code=303)
+
+
+@app.get("/findings/{finding_id}", response_class=HTMLResponse)
+async def finding_detail_page(request: Request, finding_id: int) -> HTMLResponse:
+    """Single-finding detail page including comments + review status."""
+    from vxis.dashboard.auth import current_user
+    from vxis.models.db_models import (
+        FindingCommentRecord,
+        FindingReviewRecord,
+        UserRecord,
+    )
+
+    user = await current_user(request)
+    if user is None:
+        return RedirectResponse(url="/login", status_code=303)  # type: ignore[return-value]
+
+    engine = _get_engine(request)
+    async with get_session(engine) as session:
+        finding = (
+            await session.execute(
+                select(FindingRecord).where(FindingRecord.id == finding_id)
+            )
+        ).scalar_one_or_none()
+        if finding is None:
+            return templates.TemplateResponse(
+                request, "404.html", {"message": "Finding not found"}, status_code=404,
+            )
+        scan = (
+            await session.execute(
+                select(ScanRecord).where(ScanRecord.id == finding.scan_id)
+            )
+        ).scalar_one_or_none()
+
+        comments_rows = (
+            await session.execute(
+                select(FindingCommentRecord, UserRecord)
+                .join(UserRecord, UserRecord.id == FindingCommentRecord.user_id)
+                .where(FindingCommentRecord.finding_id == finding_id)
+                .order_by(FindingCommentRecord.created_at.asc())
+            )
+        ).all()
+        comments = [
+            {"comment": c, "user": u} for c, u in comments_rows
+        ]
+
+        review = (
+            await session.execute(
+                select(FindingReviewRecord)
+                .where(FindingReviewRecord.finding_id == finding_id)
+                .order_by(FindingReviewRecord.reviewed_at.desc())
+            )
+        ).scalars().first()
+
+    return templates.TemplateResponse(
+        request,
+        "finding_detail.html",
+        {
+            "finding": finding,
+            "scan": scan,
+            "scan_id": scan.id if scan else None,
+            "comments": comments,
+            "review": review,
+            "current_user": user,
+            "collab": True,
+        },
+    )
+
+
+@app.get("/findings/{finding_id}/comments", response_class=HTMLResponse)
+async def finding_comments_partial(request: Request, finding_id: int) -> HTMLResponse:
+    """HTMX partial — comments list for a finding."""
+    from vxis.dashboard.auth import current_user
+    from vxis.models.db_models import FindingCommentRecord, UserRecord
+
+    user = await current_user(request)
+    if user is None:
+        return HTMLResponse("Unauthorized", status_code=401)
+
+    engine = _get_engine(request)
+    async with get_session(engine) as session:
+        rows = (
+            await session.execute(
+                select(FindingCommentRecord, UserRecord)
+                .join(UserRecord, UserRecord.id == FindingCommentRecord.user_id)
+                .where(FindingCommentRecord.finding_id == finding_id)
+                .order_by(FindingCommentRecord.created_at.asc())
+            )
+        ).all()
+        comments = [{"comment": c, "user": u} for c, u in rows]
+
+    return templates.TemplateResponse(
+        request,
+        "partials/comments.html",
+        {"comments": comments, "finding_id": finding_id, "current_user": user},
+    )
+
+
+@app.post("/findings/{finding_id}/comments", response_class=HTMLResponse)
+async def finding_comments_create(
+    request: Request, finding_id: int
+) -> HTMLResponse:
+    """Add a comment to a finding (any authenticated user)."""
+    from vxis.dashboard.auth import current_user
+    from vxis.models.db_models import FindingCommentRecord, UserRecord
+
+    user = await current_user(request)
+    if user is None:
+        return HTMLResponse("Unauthorized", status_code=401)
+
+    form = await request.form()
+    content = str(form.get("content", "")).strip()
+    if not content:
+        return await finding_comments_partial(request, finding_id)
+
+    engine = _get_engine(request)
+    async with get_session(engine) as session:
+        session.add(
+            FindingCommentRecord(
+                finding_id=finding_id,
+                user_id=user.id,
+                content=content,
+            )
+        )
+
+    # Return refreshed partial
+    async with get_session(engine) as session:
+        rows = (
+            await session.execute(
+                select(FindingCommentRecord, UserRecord)
+                .join(UserRecord, UserRecord.id == FindingCommentRecord.user_id)
+                .where(FindingCommentRecord.finding_id == finding_id)
+                .order_by(FindingCommentRecord.created_at.asc())
+            )
+        ).all()
+        comments = [{"comment": c, "user": u} for c, u in rows]
+
+    return templates.TemplateResponse(
+        request,
+        "partials/comments.html",
+        {"comments": comments, "finding_id": finding_id, "current_user": user},
+    )
+
+
+@app.post("/findings/{finding_id}/review")
+async def finding_review_set(request: Request, finding_id: int):  # type: ignore[no-untyped-def]
+    """Set the review status of a finding (reviewer/admin only)."""
+    from vxis.dashboard.auth import ROLE_LEVELS, current_user
+    from vxis.models.db_models import FindingReviewRecord
+
+    user = await current_user(request)
+    if user is None:
+        return RedirectResponse(url="/login", status_code=303)
+    if ROLE_LEVELS.get(user.role, 0) < ROLE_LEVELS["reviewer"]:
+        return HTMLResponse("Forbidden", status_code=403)
+
+    form = await request.form()
+    status = str(form.get("status", "pending"))
+    if status not in {"pending", "approved", "rejected", "false_positive"}:
+        status = "pending"
+
+    engine = _get_engine(request)
+    async with get_session(engine) as session:
+        existing = (
+            await session.execute(
+                select(FindingReviewRecord).where(
+                    FindingReviewRecord.finding_id == finding_id
+                )
+            )
+        ).scalars().first()
+        if existing is None:
+            session.add(
+                FindingReviewRecord(
+                    finding_id=finding_id,
+                    user_id=user.id,
+                    status=status,
+                )
+            )
+        else:
+            existing.status = status
+            existing.user_id = user.id
+
+    return RedirectResponse(url=f"/findings/{finding_id}", status_code=303)

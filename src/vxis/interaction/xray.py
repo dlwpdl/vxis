@@ -520,3 +520,177 @@ addons = [FlowLogger()]
     @property
     def is_running(self) -> bool:
         return self._process is not None and self._process.returncode is None
+
+    # ── Export: HAR / mitm / pcap ──────────────────────────────
+    # Note: 사용자 명세상 "TrafficInterceptor"라고 했으나 실제 클래스명은
+    # MitmProxyManager. mitmproxy addon이 JSONL로 플로우를 기록하므로 실제로
+    # 캡처가 가능하다. 캡처가 비어있으면(stub 상태) no-op + 경고로 동작.
+
+    def export_har(self, output_path: Path) -> Path:
+        """캡처된 플로우를 HAR 1.2 (HTTP Archive) 포맷으로 export.
+
+        HAR은 단순 JSON 구조라 외부 의존성 없이 동작.
+        """
+        from datetime import datetime, timezone
+
+        output_path = Path(output_path)
+        flows = self.get_captured_flows()
+
+        if not flows:
+            logger.warning("export_har: no captured flows (xray may not have run); writing empty HAR")
+
+        entries: list[dict[str, Any]] = []
+        for flow in flows:
+            started = datetime.fromtimestamp(
+                flow.timestamp or 0, tz=timezone.utc
+            ).isoformat()
+            req_headers = [{"name": k, "value": v} for k, v in flow.request_headers.items()]
+            resp_headers = [{"name": k, "value": v} for k, v in flow.response_headers.items()]
+            entry = {
+                "startedDateTime": started,
+                "time": 0,
+                "request": {
+                    "method": flow.method or "GET",
+                    "url": flow.url,
+                    "httpVersion": "HTTP/1.1",
+                    "headers": req_headers,
+                    "queryString": [],
+                    "cookies": [],
+                    "headersSize": -1,
+                    "bodySize": len(flow.request_body or ""),
+                    "postData": (
+                        {
+                            "mimeType": flow.request_content_type or "application/octet-stream",
+                            "text": flow.request_body or "",
+                        }
+                        if flow.request_body
+                        else None
+                    ),
+                },
+                "response": {
+                    "status": flow.status_code or 0,
+                    "statusText": "",
+                    "httpVersion": "HTTP/1.1",
+                    "headers": resp_headers,
+                    "cookies": [],
+                    "content": {
+                        "size": len(flow.response_body or ""),
+                        "mimeType": flow.response_content_type or "application/octet-stream",
+                        "text": flow.response_body or "",
+                    },
+                    "redirectURL": flow.response_headers.get("location", ""),
+                    "headersSize": -1,
+                    "bodySize": len(flow.response_body or ""),
+                },
+                "cache": {},
+                "timings": {"send": 0, "wait": 0, "receive": 0},
+            }
+            # Drop None postData (HAR spec)
+            if entry["request"]["postData"] is None:
+                del entry["request"]["postData"]
+            entries.append(entry)
+
+        har = {
+            "log": {
+                "version": "1.2",
+                "creator": {"name": "VXIS X-Ray", "version": "1.0"},
+                "entries": entries,
+            }
+        }
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(har, indent=2, ensure_ascii=False))
+        logger.info("export_har: wrote %d entries to %s", len(entries), output_path)
+        return output_path
+
+    def export_pcap(self, output_path: Path) -> Path:
+        """캡처된 플로우를 .pcap (scapy 있을 때) 또는 .mitm (네이티브 JSONL)로 export.
+
+        - scapy 설치되어 있으면 HTTP 플로우를 TCP 패킷으로 변환해 .pcap 작성.
+        - 없으면 .mitm (사실상 mitmproxy addon이 작성한 JSONL) 경로로 폴백.
+        - 캡처된 플로우가 없으면 (stub 상태) 경고만 남기고 빈 파일 생성.
+        """
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        flows = self.get_captured_flows()
+
+        if not flows:
+            logger.warning("export_pcap: no captured flows; writing empty placeholder at %s", output_path)
+            output_path.write_bytes(b"")
+            return output_path
+
+        # Try scapy
+        try:
+            from scapy.all import IP, TCP, Ether, Raw, wrpcap  # type: ignore
+            from urllib.parse import urlparse
+
+            packets = []
+            seq = 1000
+            for flow in flows:
+                parsed = urlparse(flow.url)
+                dst_host = parsed.hostname or "0.0.0.0"
+                dst_port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+                req_line = f"{flow.method} {parsed.path or '/'} HTTP/1.1\r\n"
+                req_headers = "".join(f"{k}: {v}\r\n" for k, v in flow.request_headers.items())
+                req_raw = (req_line + req_headers + "\r\n" + (flow.request_body or "")).encode(
+                    "utf-8", errors="replace"
+                )
+
+                resp_line = f"HTTP/1.1 {flow.status_code} OK\r\n"
+                resp_headers = "".join(f"{k}: {v}\r\n" for k, v in flow.response_headers.items())
+                resp_raw = (resp_line + resp_headers + "\r\n" + (flow.response_body or "")).encode(
+                    "utf-8", errors="replace"
+                )
+
+                try:
+                    pkt_req = (
+                        Ether()
+                        / IP(dst=dst_host)
+                        / TCP(sport=12345, dport=dst_port, flags="PA", seq=seq)
+                        / Raw(load=req_raw)
+                    )
+                    pkt_resp = (
+                        Ether()
+                        / IP(src=dst_host)
+                        / TCP(sport=dst_port, dport=12345, flags="PA", seq=seq + 1)
+                        / Raw(load=resp_raw)
+                    )
+                    packets.append(pkt_req)
+                    packets.append(pkt_resp)
+                    seq += 2
+                except Exception as e:  # pragma: no cover
+                    logger.debug("export_pcap: skip flow %s: %s", flow.id, e)
+
+            wrpcap(str(output_path), packets)
+            logger.info("export_pcap: wrote %d packets to %s (scapy)", len(packets), output_path)
+            return output_path
+
+        except ImportError:
+            logger.warning(
+                "export_pcap: scapy not installed; falling back to native .mitm (JSONL) format"
+            )
+            # Native .mitm fallback — copy JSONL or write equivalent
+            mitm_path = output_path.with_suffix(".mitm")
+            if os.path.exists(self._flow_file):
+                shutil.copy(self._flow_file, mitm_path)
+            else:
+                with open(mitm_path, "w") as f:
+                    for flow in flows:
+                        f.write(
+                            json.dumps(
+                                {
+                                    "timestamp": flow.timestamp,
+                                    "method": flow.method,
+                                    "url": flow.url,
+                                    "request_headers": flow.request_headers,
+                                    "request_body": flow.request_body,
+                                    "status_code": flow.status_code,
+                                    "response_headers": flow.response_headers,
+                                    "response_body": flow.response_body,
+                                }
+                            )
+                            + "\n"
+                        )
+            logger.info("export_pcap: wrote %d flows to %s (.mitm fallback)", len(flows), mitm_path)
+            return mitm_path

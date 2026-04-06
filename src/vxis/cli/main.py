@@ -1005,6 +1005,30 @@ def dashboard(
     uvicorn.run(dash_app, host=host, port=port)
 
 
+@app.command(name="dashboard-init")
+def dashboard_init() -> None:
+    """Initialise dashboard DB tables and seed default admin/admin user."""
+    import asyncio
+
+    from vxis.core.db import create_engine, init_db
+    from vxis.dashboard.auth import ensure_default_admin
+
+    async def _run() -> None:
+        engine = create_engine("sqlite+aiosqlite:///vxis.db")
+        await init_db(engine)
+        created = await ensure_default_admin(engine)
+        if created is not None:
+            console.print(
+                "[green]Default admin user created:[/green] "
+                "username=[bold]admin[/bold] password=[bold]admin[/bold]"
+            )
+            console.print("[yellow]Change the password immediately.[/yellow]")
+        else:
+            console.print("[dim]Users already exist — no seeding performed.[/dim]")
+
+    asyncio.run(_run())
+
+
 @app.command(name="diff")
 def diff_cmd(
     scan_id_a: int = typer.Argument(help="Baseline scan ID (older)"),
@@ -1443,6 +1467,52 @@ kb_app = typer.Typer(help="Browse the vulnerability knowledge base", no_args_is_
 app.add_typer(kb_app, name="kb")
 
 
+# ---------------------------------------------------------------------------
+# Integrations sub-command group
+# ---------------------------------------------------------------------------
+
+integrations_app = typer.Typer(
+    help="External integration hooks (Slack/Discord/Jira/Linear/GitHub)",
+    no_args_is_help=True,
+)
+app.add_typer(integrations_app, name="integrations")
+
+
+@integrations_app.command("test")
+def integrations_test() -> None:
+    """Send a test notification to every configured integration hook.
+
+    Reads VXIS_SLACK_WEBHOOK / VXIS_DISCORD_WEBHOOK / VXIS_JIRA_* /
+    VXIS_LINEAR_* / VXIS_GITHUB_* env vars. Hooks without configuration
+    are skipped silently.
+    """
+    from vxis.integrations.registry import load_hooks_from_env
+
+    hooks = load_hooks_from_env()
+    if not hooks:
+        console.print(
+            "[yellow]No integration hooks configured.[/yellow] "
+            "Set VXIS_SLACK_WEBHOOK / VXIS_DISCORD_WEBHOOK / VXIS_JIRA_* / "
+            "VXIS_LINEAR_* / VXIS_GITHUB_* to enable."
+        )
+        return
+
+    table = Table(title="Integration Test Results")
+    table.add_column("Hook", style="cyan")
+    table.add_column("Status")
+    table.add_column("Detail", overflow="fold")
+
+    for h in hooks:
+        try:
+            ok, detail = h.test()
+        except Exception as exc:  # noqa: BLE001
+            ok, detail = False, f"{type(exc).__name__}: {exc}"
+        status = "[green]OK[/green]" if ok else "[red]FAIL[/red]"
+        table.add_row(h.name, status, (detail or "")[:200])
+
+    console.print(table)
+
+
 @kb_app.command("search")
 def kb_search(
     keyword: str = typer.Argument(..., help="Search keyword (e.g. 'injection', 'xss', 'CWE-89')"),
@@ -1569,6 +1639,316 @@ def db_history() -> None:
 
     cfg = _alembic_cfg()
     command.history(cfg, verbose=True)
+
+
+# ---------------------------------------------------------------------------
+# Scheduler — Continuous Monitoring + Auto-Retest|||지속 모니터링 및 자동 재테스트
+# ---------------------------------------------------------------------------
+
+schedule_app = typer.Typer(
+    name="schedule",
+    help="Continuous monitoring schedules|||지속 모니터링 스케줄",
+    no_args_is_help=True,
+)
+app.add_typer(schedule_app, name="schedule")
+
+
+def _run_scheduled_scan(target: str, profile: str) -> Optional[str]:
+    """Invoke `vxis scan` as subprocess; returns generated scan_id or None.
+
+    |||하위 프로세스로 vxis scan 실행. scan_id 반환.
+    """
+    import subprocess
+    import sys as _sys
+
+    try:
+        proc = subprocess.run(
+            [_sys.executable, "-m", "vxis.cli.main", "scan", target, "--profile", profile],
+            capture_output=True,
+            text=True,
+            timeout=60 * 60 * 4,
+        )
+        if proc.returncode != 0:
+            err_console.print(f"[red]Scheduled scan failed for {target}[/red]")
+            err_console.print(proc.stderr[-2000:])
+            return None
+        # Try to parse a scan id from stdout (best-effort)
+        for line in proc.stdout.splitlines():
+            if "scan_id" in line.lower() or "scan id" in line.lower():
+                console.print(f"[dim]{line}[/dim]")
+        return None
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[red]Scheduled scan exception:[/red] {exc}")
+        return None
+
+
+@schedule_app.command("add")
+def schedule_add(
+    target: str = typer.Argument(help="Target URL or domain"),
+    cron: str = typer.Option(..., "--cron", help="Cron expression e.g. '0 */6 * * *' or '@daily'"),
+    profile: str = typer.Option("standard", "--profile", "-p", help="Scan profile"),
+) -> None:
+    """Register a new scheduled scan|||새 예약 스캔 등록."""
+    from vxis.scheduler import ScheduleStore
+
+    store = ScheduleStore()
+    sched = store.add_schedule(target=target, cron_expr=cron, profile=profile)
+    console.print(
+        Panel(
+            f"[green]Schedule registered[/green]\n"
+            f"  ID:       [bold]{sched.id}[/bold]\n"
+            f"  Target:   {sched.target}\n"
+            f"  Cron:     {sched.cron_expr}\n"
+            f"  Profile:  {sched.profile}\n"
+            f"  Next run: {sched.next_run}",
+            title="vxis schedule add",
+            border_style="green",
+        )
+    )
+
+
+@schedule_app.command("list")
+def schedule_list() -> None:
+    """List all scheduled scans|||모든 예약 스캔 표시."""
+    from vxis.scheduler import ScheduleStore
+
+    store = ScheduleStore()
+    schedules = store.list_schedules()
+    if not schedules:
+        console.print("[yellow]No schedules registered.|||등록된 스케줄이 없습니다.[/yellow]")
+        return
+
+    table = Table(title="VXIS Schedules", header_style="bold cyan", border_style="cyan")
+    table.add_column("ID", style="bold")
+    table.add_column("Target")
+    table.add_column("Cron")
+    table.add_column("Profile")
+    table.add_column("Enabled")
+    table.add_column("Last Run")
+    table.add_column("Next Run")
+    for s in schedules:
+        table.add_row(
+            s.id,
+            s.target,
+            s.cron_expr,
+            s.profile,
+            "[green]✓[/green]" if s.enabled else "[red]✗[/red]",
+            s.last_run or "-",
+            s.next_run or "-",
+        )
+    console.print(table)
+
+
+@schedule_app.command("remove")
+def schedule_remove(schedule_id: str = typer.Argument(help="Schedule ID")) -> None:
+    """Remove a schedule|||스케줄 삭제."""
+    from vxis.scheduler import ScheduleStore
+
+    store = ScheduleStore()
+    if store.remove_schedule(schedule_id):
+        console.print(f"[green]Removed schedule {schedule_id}[/green]")
+    else:
+        err_console.print(f"[red]Schedule not found: {schedule_id}[/red]")
+        raise typer.Exit(code=1)
+
+
+@schedule_app.command("enable")
+def schedule_enable(schedule_id: str = typer.Argument(help="Schedule ID")) -> None:
+    """Enable a schedule|||스케줄 활성화."""
+    from vxis.scheduler import ScheduleStore
+
+    store = ScheduleStore()
+    if store.enable(schedule_id):
+        console.print(f"[green]Enabled {schedule_id}[/green]")
+    else:
+        raise typer.Exit(code=1)
+
+
+@schedule_app.command("disable")
+def schedule_disable(schedule_id: str = typer.Argument(help="Schedule ID")) -> None:
+    """Disable a schedule|||스케줄 비활성화."""
+    from vxis.scheduler import ScheduleStore
+
+    store = ScheduleStore()
+    if store.disable(schedule_id):
+        console.print(f"[yellow]Disabled {schedule_id}[/yellow]")
+    else:
+        raise typer.Exit(code=1)
+
+
+@schedule_app.command("run")
+def schedule_run(schedule_id: str = typer.Argument(help="Schedule ID to run now")) -> None:
+    """Manually trigger a scheduled scan|||예약 스캔 수동 실행."""
+    from vxis.scheduler import ScheduleStore
+
+    store = ScheduleStore()
+    sched = store.get(schedule_id)
+    if not sched:
+        err_console.print(f"[red]Schedule not found: {schedule_id}[/red]")
+        raise typer.Exit(code=1)
+
+    console.print(f"[cyan]Running schedule {sched.id} → {sched.target}[/cyan]")
+    _run_scheduled_scan(sched.target, sched.profile)
+    store.mark_ran(sched.id)
+    console.print(f"[green]Done. Next run: {store.get(sched.id).next_run}[/green]")
+
+
+@schedule_app.command("tick")
+def schedule_tick() -> None:
+    """Run all due schedules; intended for crontab|||만기된 스케줄 모두 실행 (crontab용)."""
+    from vxis.scheduler import ScheduleStore
+
+    store = ScheduleStore()
+    due = store.due_schedules()
+    if not due:
+        console.print("[dim]No due schedules.[/dim]")
+        return
+
+    for sched in due:
+        console.print(f"[cyan]Running due schedule {sched.id} → {sched.target}[/cyan]")
+        _run_scheduled_scan(sched.target, sched.profile)
+        store.mark_ran(sched.id)
+
+        # Diff against previous scan + regression notification
+        try:
+            asyncio.run(_diff_latest_two_for_target(sched.target))
+        except Exception as exc:  # noqa: BLE001
+            err_console.print(f"[yellow]Diff/notify skipped:[/yellow] {exc}")
+
+
+async def _diff_latest_two_for_target(target: str) -> None:
+    """Find the two most recent scans for target and diff them.
+
+    |||타겟의 최신 두 스캔을 찾아 diff 실행.
+    """
+    from sqlalchemy import select
+
+    from vxis.core.db import create_engine, get_session
+    from vxis.core.scan_diff import compare_scans
+    from vxis.models.db_models import ScanRecord
+
+    config = _get_config()
+    engine = create_engine(config.db_url)
+    async with get_session(engine) as session:
+        result = await session.execute(
+            select(ScanRecord)
+            .where(ScanRecord.target == target)
+            .order_by(ScanRecord.created_at.desc())
+            .limit(2)
+        )
+        scans = list(result.scalars().all())
+    if len(scans) < 2:
+        console.print("[dim]Not enough scans for diff yet.[/dim]")
+        return
+
+    new_scan, old_scan = scans[0], scans[1]
+    diff = await compare_scans(old_scan.id, new_scan.id, config.db_url)
+    console.print(
+        f"[bold]Diff {old_scan.id} → {new_scan.id}:[/bold] "
+        f"new={len(diff.new_findings)} resolved={len(diff.resolved_findings)} "
+        f"changed={len(diff.changed_findings)} unchanged={len(diff.unchanged_findings)}"
+    )
+
+    if diff.new_findings or diff.changed_findings:
+        console.print(
+            "[bold red]⚠ Regression detected!|||회귀 발견![/bold red]"
+        )
+        try:
+            from vxis.integrations import notify_regression  # type: ignore
+
+            notify_regression(target=target, diff=diff)
+        except Exception:
+            pass
+
+
+@schedule_app.command("install-cron")
+def schedule_install_cron(
+    interval_minutes: int = typer.Option(30, "--interval", "-i", help="Tick interval in minutes"),
+) -> None:
+    """Print a crontab line to install|||설치할 crontab 라인 출력."""
+    import sys as _sys
+
+    cwd = Path.cwd()
+    py = _sys.executable
+    line = (
+        f"*/{interval_minutes} * * * * cd {cwd} && {py} -m vxis.cli.main schedule tick "
+        f">> ~/.vxis/scheduler.log 2>&1  # vxis-scheduler"
+    )
+    console.print(
+        Panel(
+            f"[bold]Add this line to your crontab (`crontab -e`):[/bold]\n\n  {line}\n\n"
+            f"|||\n[bold]아래 라인을 crontab에 추가하세요 (`crontab -e`):[/bold]\n\n  {line}",
+            title="install-cron",
+            border_style="cyan",
+        )
+    )
+
+
+@app.command("retest")
+def retest_cmd(
+    scan_id: int = typer.Argument(help="Original scan ID to re-test"),
+    profile: str = typer.Option("standard", "--profile", "-p", help="Scan profile"),
+) -> None:
+    """Re-scan the same target as a previous scan and diff with it.
+
+    |||이전 스캔과 동일한 타겟을 재스캔하여 diff.
+    """
+
+    async def _retest() -> None:
+        from sqlalchemy import select
+
+        from vxis.core.db import create_engine, get_session
+        from vxis.core.scan_diff import compare_scans
+        from vxis.models.db_models import ScanRecord
+
+        config = _get_config()
+        engine = create_engine(config.db_url)
+        async with get_session(engine) as session:
+            result = await session.execute(
+                select(ScanRecord).where(ScanRecord.id == scan_id)
+            )
+            original = result.scalar_one_or_none()
+        if not original:
+            err_console.print(f"[red]Scan {scan_id} not found[/red]")
+            raise typer.Exit(code=1)
+
+        target = original.target
+        console.print(f"[cyan]Re-testing scan {scan_id} → {target}[/cyan]")
+        _run_scheduled_scan(target, profile)
+
+        # Find newest scan for that target (the one we just created)
+        async with get_session(engine) as session:
+            result = await session.execute(
+                select(ScanRecord)
+                .where(ScanRecord.target == target)
+                .order_by(ScanRecord.created_at.desc())
+                .limit(1)
+            )
+            new_scan = result.scalar_one_or_none()
+        if not new_scan or new_scan.id == scan_id:
+            err_console.print("[yellow]No new scan record found after retest[/yellow]")
+            return
+
+        diff = await compare_scans(scan_id, new_scan.id, config.db_url)
+        console.print(
+            Panel(
+                f"Original: {scan_id}\nNew: {new_scan.id}\n"
+                f"New findings:     {len(diff.new_findings)}\n"
+                f"Resolved:         {len(diff.resolved_findings)}\n"
+                f"Severity changed: {len(diff.changed_findings)}\n"
+                f"Unchanged:        {len(diff.unchanged_findings)}",
+                title="Retest Result|||재테스트 결과",
+                border_style="cyan",
+            )
+        )
+
+    try:
+        asyncio.run(_retest())
+    except typer.Exit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[red]Retest failed:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
 
 
 # ---------------------------------------------------------------------------

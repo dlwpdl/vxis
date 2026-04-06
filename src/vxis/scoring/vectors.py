@@ -590,6 +590,42 @@ WEB_VECTORS: tuple[AttackVector, ...] = (
         target_types=("web",), phase="Phase 3", max_depth=4,
         owasp_id="A06:2021",
     ),
+    # ── Business Logic (Multi-step) ──
+    AttackVector(
+        id="WEB-BIZ-001", category="business_logic",
+        name_en="Business Logic — Negative Value Injection",
+        name_ko="비즈니스 로직 — 음수 값 주입",
+        target_types=("web",), phase="Phase 5", max_depth=4,
+        owasp_id="A04:2021",
+    ),
+    AttackVector(
+        id="WEB-BIZ-002", category="business_logic",
+        name_en="Business Logic — State Transition Skip",
+        name_ko="비즈니스 로직 — 상태 전환 우회",
+        target_types=("web",), phase="Phase 5", max_depth=4,
+        owasp_id="A04:2021",
+    ),
+    AttackVector(
+        id="WEB-BIZ-003", category="business_logic",
+        name_en="Business Logic — Race Condition on Payment",
+        name_ko="비즈니스 로직 — 결제 경쟁 상태",
+        target_types=("web",), phase="Phase 5", max_depth=4,
+        owasp_id="A04:2021",
+    ),
+    AttackVector(
+        id="WEB-BIZ-004", category="business_logic",
+        name_en="Business Logic — Transaction Replay",
+        name_ko="비즈니스 로직 — 트랜잭션 재전송",
+        target_types=("web",), phase="Phase 5", max_depth=4,
+        owasp_id="A04:2021",
+    ),
+    AttackVector(
+        id="WEB-BIZ-005", category="business_logic",
+        name_en="Business Logic — Privilege Escalation via State",
+        name_ko="비즈니스 로직 — 상태 기반 권한 상승",
+        target_types=("web",), phase="Phase 5", max_depth=4,
+        owasp_id="A04:2021",
+    ),
 )
 
 
