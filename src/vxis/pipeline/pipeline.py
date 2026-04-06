@@ -3335,12 +3335,14 @@ class ScanPipeline:
     async def _phase4_cpr(self, ctx: ScanContext) -> None:
         """Phase 4: CPR — Hands/Eyes/X-Ray/Controller 연결."""
         try:
-            # Phase 4 대응 벡터: 인증, JWT, 세션, OAuth, 인프라 CVE
+            # Phase 4 대응 벡터: 인증, JWT, 세션, OAuth, 인프라 CVE, 암호화 취약점
             for vid in [
                 "WEB-AUTH-001", "WEB-AUTH-002", "WEB-AUTH-003", "WEB-AUTH-004",
                 "WEB-AUTH-005", "WEB-AUTH-006", "WEB-AUTH-007", "WEB-AUTH-008",
                 "WEB-AUTH-010",  # 매직 링크 인증 우회
                 "WEB-MISCONF-004", "WEB-CRYPTO-003",
+                "WEB-CRYPTO-002",  # Weak Hashing Algorithm (MD5/SHA1 for passwords)
+                "WEB-CRYPTO-004",  # Insecure Randomness — Predictable Tokens
                 "WEB-INFRA-006",  # F5 BIG-IP APM RCE (CVE-2025-53521)
             ]:
                 ctx.score_tracker.record_vector_attempt(vid)
@@ -3705,8 +3707,11 @@ class ScanPipeline:
     async def _phase11_mutation(self, ctx: ScanContext) -> None:
         """Phase 11: Chain Mutation — 대체 공격 경로 탐색."""
         try:
-            # Phase 11 대응 벡터: WebSocket, GraphQL
-            for vid in ["WEB-WSS-001", "WEB-API-003", "WEB-API-004"]:
+            # Phase 11 대응 벡터: WebSocket, GraphQL, Race Condition
+            for vid in [
+                "WEB-WSS-001", "WEB-API-003", "WEB-API-004",
+                "WEB-RACE-001",  # Race Condition — TOCTOU (Phase 10 미구현 대체 커버)
+            ]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
