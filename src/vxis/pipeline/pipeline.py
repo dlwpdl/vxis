@@ -390,89 +390,32 @@ class ScanPipeline:
         logger.info("=" * 70)
 
         # ══════════════════════════════════════════════════════
-        # STAGE 1: FOUNDATION (초기화)
+        # Phase 실행 — registry.WEB_PHASES 순서대로 (SSOT)
         # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 0: Foundation — Config & DB Init",
-                              self._phase0_foundation, ctx)
-        await self._run_phase("Phase 1: Director — Attack Graph Init",
-                              self._phase1_director, ctx)
+        from vxis.registry import WEB_PHASES, STAGE_NAMES
 
-        # ══════════════════════════════════════════════════════
-        # STAGE 2: RECON (정찰 — 타깃 접촉 + 정보 수집)
-        # Phase 4가 먼저: 크롤링 → tech_stack, endpoints, target_profile 생성
-        # Phase 2/3는 Phase 4 결과(tech_stack, profile)가 있어야 유효
-        # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 4: CPR — Hands/Eyes/X-Ray Connect",
-                              self._phase4_cpr, ctx)
-        await self._run_phase("Phase 15: Digital Twin Pre-Simulation",
-                              self._phase15_digital_twin, ctx)
-        await self._run_phase("Phase 13: Behavioral Biometrics (OSINT)",
-                              self._phase13_biometrics, ctx)
+        _prev_stage = ""
+        for phase_info in WEB_PHASES:
+            # Stage 변경 시 구분선
+            if phase_info.stage != _prev_stage:
+                _stage_label = STAGE_NAMES.get(phase_info.stage, phase_info.stage)
+                logger.info("\n  ── %s ──", _stage_label)
+                _prev_stage = phase_info.stage
 
-        # ══════════════════════════════════════════════════════
-        # STAGE 3: INTELLIGENCE (지능 분석 — tech_stack 기반)
-        # Phase 2(에이전트), 3(가설)는 target_profile 필요
-        # Phase 9(CVE Watch), 14(Forecast) → GH Actions가 담당 (파이프라인 외부)
-        # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch",
-                              self._phase2_agents, ctx)
-        await self._run_phase("Phase 3: Hypothesis Engine — Pattern Matching + Context Compression",
-                              self._phase3_hypothesis, ctx)
+            # Deferred Actions: report stage 진입 전에 실행
+            if phase_info.stage == "report" and ctx.deferred_actions and self.enable_deferred_approval:
+                await self._execute_deferred_actions(ctx)
 
-        # ══════════════════════════════════════════════════════
-        # STAGE 4: EXPLOITATION (공격 — 특수 벡터 + 하드웨어)
-        # Phase 5(특수 에이전트), 7(하드웨어)은 Phase 4 findings 기반
-        # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 5: Special Agents (IoT/VoIP/Web3)",
-                              self._phase5_special, ctx)
-        await self._run_phase("Phase 7: Hardware Agents (DMA/SS7/Cold Boot)",
-                              self._phase7_hardware, ctx)
+            phase_method = getattr(self, phase_info.method, None)
+            if phase_method is None:
+                logger.warning("  [SKIP] Phase %d method %s not found", phase_info.id, phase_info.method)
+                continue
 
-        # ══════════════════════════════════════════════════════
-        # STAGE 5: CHAIN ANALYSIS (체이닝 + 변이)
-        # Phase 8(체이닝)은 Phase 4+5+7의 모든 findings 필요
-        # Phase 11(변이)은 Phase 8의 chains 필요
-        # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 8: Cross-Protocol Synthesis",
-                              self._phase8_synthesis, ctx)
-        await self._run_phase("Phase 11: Chain Mutation — Alternative Attack Paths",
-                              self._phase11_mutation, ctx)
-
-        # ══════════════════════════════════════════════════════
-        # STAGE 3: 인젝션 승인 + 실행 (필수 — 무조건 컨펌 후 실행)
-        # ══════════════════════════════════════════════════════
-        if ctx.deferred_actions and self.enable_deferred_approval:
-            await self._execute_deferred_actions(ctx)
-
-        # ══════════════════════════════════════════════════════
-        # STAGE 4: 레포트
-        # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 6: Report Generation — NCC Group Style",
-                              self._phase6_report, ctx)
-
-        # ══════════════════════════════════════════════════════
-        # STAGE 6: 자가 분석 (필수) — 스코어링 직후 실행
-        # 이번 스캔 결과를 Brain이 분석 → Knowledge Store 업데이트
-        # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 12: Self-Evolving Agent — Coverage Gap Analysis",
-                              self._phase12_evolution, ctx)
-
-        # ══════════════════════════════════════════════════════
-        # STAGE 7: 성장루프 발동 (필수)
-        # 컴파일된 패턴 즉시 반영 → 다음 스캔부터 LLM 호출 감소
-        # GH Actions growth-loop.yml(매주)과 별개 — 스캔 직후 즉시 반영
-        # ══════════════════════════════════════════════════════
-        await self._run_phase("Phase 18: Collective Intelligence Update",
-                              self._phase18_collective, ctx)
-
-        # ══════════════════════════════════════════════════════
-        # GH Actions 담당 (파이프라인 외부):
-        #   cve-watch.yml   → CVE 모니터링 (매시간)
-        #   domain-intel.yml → Forecast + Industry Intel (매일)
-        #   upstream-watch.yml → 공급망 모니터링 (매주)
-        # 미래 구현 예정:
-        #   Phase 10 Red vs Blue, Phase 17 Outreach, Phase 19 Bug Bounty
-        # ══════════════════════════════════════════════════════
+            await self._run_phase(
+                f"Phase {phase_info.id}: {phase_info.name}",
+                phase_method,
+                ctx,
+            )
 
         # ══════════════════════════════════════════════════════
         # STAGE 5: 스코어링 (5-Dimension VXIS Score)
