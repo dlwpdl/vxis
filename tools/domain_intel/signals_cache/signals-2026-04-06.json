@@ -47,6 +47,25 @@
     }
   },
   {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] DPI bypass using eBPF sock_ops and fake TLS ClientHello injection",
+    "url": "https://github.com/boratanrikulu/gecit",
+    "description": "<p>Uses BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB to detect new TLS\nconnections, then injects a fake ClientHello with spoofed\nSNI and low TTL via raw socket before the real handshake.\nIncludes MSS clamping for ClientHello fragmentation and a\nbuilt-in DoH resolver.</p>\n",
+    "relevance_tags": [
+      "bypass",
+      "injection",
+      "tls"
+    ],
+    "score": 11.0,
+    "timestamp": "2026-04-05T09:25:45.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 11,
+      "comments": 0
+    }
+  },
+  {
     "source": "cisa_kev",
     "category": "exploit",
     "title": "[CISA KEV] CVE-2026-3502 — TrueConf Client",
@@ -113,25 +132,6 @@
       "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
       "due_date": "2026-04-02",
       "known_ransomware": "Unknown"
-    }
-  },
-  {
-    "source": "community_pulse",
-    "category": "discussion",
-    "title": "[Lobste.rs] DPI bypass using eBPF sock_ops and fake TLS ClientHello injection",
-    "url": "https://github.com/boratanrikulu/gecit",
-    "description": "<p>Uses BPF_SOCK_OPS_ACTIVE_ESTABLISHED_CB to detect new TLS\nconnections, then injects a fake ClientHello with spoofed\nSNI and low TTL via raw socket before the real handshake.\nIncludes MSS clamping for ClientHello fragmentation and a\nbuilt-in DoH resolver.</p>\n",
-    "relevance_tags": [
-      "bypass",
-      "injection",
-      "tls"
-    ],
-    "score": 9.0,
-    "timestamp": "2026-04-05T09:25:45.000-05:00",
-    "metadata": {
-      "source": "lobsters",
-      "score": 9,
-      "comments": 0
     }
   },
   {
@@ -506,6 +506,64 @@
     "timestamp": "2025-10-03T03:19:49Z",
     "metadata": {
       "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] AutoEG: Exploiting Known Third-Party Vulnerabilities in Black-Box Web Applications",
+    "url": "http://arxiv.org/abs/2604.00704v1",
+    "description": "Large-scale web applications are widely deployed with complex third-party components, inheriting security risks arising from component vulnerabilities. Security assessment is therefore required to determine whether such known vulnerabilities remain practically exploitable in real applications. Penetration testing is a widely adopted approach that validates exploitability by launching concrete attacks against known vulnerabilities in real-world black-box systems. However, existing approaches ofte",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-04-01T10:07:45Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Red-MIRROR: Agentic LLM-based Autonomous Penetration Testing with Reflective Verification and Knowledge-augmented Interaction",
+    "url": "http://arxiv.org/abs/2603.27127v1",
+    "description": "Web applications remain the dominant attack surface in cybersecurity, where vulnerabilities such as SQL injection, XSS, and business logic flaws continue to cause significant data breaches. While penetration testing is effective for identifying these weaknesses, traditional manual approaches are time-consuming and heavily dependent on scarce expert knowledge. Recent Large Language Models (LLM)-based multi-agent systems have shown promise in automating penetration testing, yet they still suffer f",
+    "relevance_tags": [
+      "injection",
+      "llm",
+      "xss"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-03-28T04:34:09Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] An Approach to Generate Attack Graphs with a Case Study on Siemens PCS7 Blueprint for Water Treatment Plants",
+    "url": "http://arxiv.org/abs/2603.24888v1",
+    "description": "Assessing the security posture of Industrial Control Systems (ICS) is critical for protecting essential infrastructure. However, the complexity and scale of these environments make it challenging to identify and prioritize potential attack paths. This paper introduces a semi-automated approach for generating attack graphs in ICS environments to visualize and analyze multi-step attack scenarios. Our methodology integrates network topology information with vulnerability data to construct a model o",
+    "relevance_tags": [
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-03-26T00:06:20Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Reasoning-Oriented Programming: Chaining Semantic Gadgets to Jailbreak Large Vision Language Models",
+    "url": "http://arxiv.org/abs/2603.09246v1",
+    "description": "Large Vision-Language Models (LVLMs) undergo safety alignment to suppress harmful content. However, current defenses predominantly target explicit malicious patterns in the input representation, often overlooking the vulnerabilities inherent in compositional reasoning. In this paper, we identify a systemic flaw where LVLMs can be induced to synthesize harmful logic from benign premises. We formalize this attack paradigm as \\textit{Reasoning-Oriented Programming}, drawing a structural analogy to",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-03-10T06:18:48Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
     }
   },
   {
