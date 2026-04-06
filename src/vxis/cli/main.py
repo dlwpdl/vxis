@@ -579,9 +579,10 @@ def plugins_cmd(
         meta = plugin.meta
         deps = ", ".join(meta.depends_on) if meta.depends_on else "—"
 
+        from vxis.registry import VERSION as _vxis_ver
         row: list[str] = [
             name,
-            meta.version,
+            _vxis_ver,
             meta.category,
             meta.tool_binary,
             deps,
