@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Phase Performance — VXIS{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex items-center gap-2 text-sm">
+  <a href="/" class="text-gray-500 hover:text-gray-300">Dashboard</a>
+  <span class="text-gray-600">/</span>
+  <span class="text-gray-100 font-medium">Phases</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div>
+    <h1 class="text-xl font-semibold text-white">Phase Performance</h1>
+    <p class="text-sm text-gray-500 mt-0.5">
+      Aggregate execution statistics per plugin/phase across all scans.
+    </p>
+  </div>
+
+  <div class="bg-surface rounded-lg border border-surface-border overflow-hidden">
+    {% if phase_rows %}
+    <table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-gray-500 bg-sidebar-bg">
+        <tr>
+          <th class="text-left px-5 py-3">Phase / Plugin</th>
+          <th class="text-right px-5 py-3">Runs</th>
+          <th class="text-right px-5 py-3">Avg Duration (s)</th>
+          <th class="text-right px-5 py-3">Failed</th>
+          <th class="text-right px-5 py-3">Failure Rate</th>
+          <th class="text-right px-5 py-3">Findings</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in phase_rows %}
+        <tr class="border-t border-surface-border hover:bg-sidebar-hover">
+          <td class="px-5 py-3 text-gray-100 font-medium">{{ row.name }}</td>
+          <td class="px-5 py-3 text-right text-gray-300">{{ row.runs }}</td>
+          <td class="px-5 py-3 text-right text-gray-300">{{ row.avg_seconds }}</td>
+          <td class="px-5 py-3 text-right text-gray-300">{{ row.failed }}</td>
+          <td class="px-5 py-3 text-right">
+            <span class="{% if row.fail_rate >= 25 %}text-red-400{% elif row.fail_rate >= 10 %}text-orange-400{% else %}text-green-400{% endif %}">
+              {{ row.fail_rate }}%
+            </span>
+          </td>
+          <td class="px-5 py-3 text-right text-cyan-400 font-semibold">{{ row.findings }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="px-5 py-10 text-center text-gray-500 text-sm">No tool run history available.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

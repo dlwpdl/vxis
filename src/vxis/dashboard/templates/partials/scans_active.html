@@ -1,0 +1,87 @@
+<div class="space-y-6">
+
+  <!-- Running scans -->
+  <div class="bg-surface rounded-lg border border-surface-border">
+    <div class="px-5 py-3 border-b border-surface-border flex items-center justify-between">
+      <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Running Scans</h2>
+      <span class="text-xs text-gray-500">{{ scan_rows|length }} active</span>
+    </div>
+    {% if scan_rows %}
+    <table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-gray-500">
+        <tr>
+          <th class="text-left px-5 py-2">ID</th>
+          <th class="text-left px-5 py-2">Target</th>
+          <th class="text-left px-5 py-2">Profile</th>
+          <th class="text-left px-5 py-2">Started</th>
+          <th class="text-left px-5 py-2 w-64">Phase Progress</th>
+          <th class="text-right px-5 py-2">Findings</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in scan_rows %}
+        <tr class="border-t border-surface-border hover:bg-sidebar-hover">
+          <td class="px-5 py-3 text-gray-400">
+            <a href="/scan/{{ row.scan.id }}" class="hover:text-cyan-400">#{{ row.scan.id }}</a>
+          </td>
+          <td class="px-5 py-3 text-gray-100 truncate max-w-xs">{{ row.scan.target }}</td>
+          <td class="px-5 py-3 text-gray-400">{{ row.scan.profile }}</td>
+          <td class="px-5 py-3 text-gray-500">{{ row.scan.started_at|fmtdt }}</td>
+          <td class="px-5 py-3">
+            <div class="flex items-center gap-2">
+              <div class="flex-1 h-2 bg-sidebar-bg rounded-full overflow-hidden">
+                <div class="h-full bg-cyan-500" style="width: {{ row.progress_pct }}%"></div>
+              </div>
+              <span class="text-xs text-gray-400 w-20 text-right">
+                {{ row.phases_completed }}/{{ row.total_phases }} ({{ row.progress_pct }}%)
+              </span>
+            </div>
+          </td>
+          <td class="px-5 py-3 text-right text-gray-100 font-semibold">{{ row.finding_count }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="px-5 py-10 text-center text-gray-500 text-sm">No scans currently running.</div>
+    {% endif %}
+  </div>
+
+  <!-- Recent findings -->
+  <div class="bg-surface rounded-lg border border-surface-border">
+    <div class="px-5 py-3 border-b border-surface-border">
+      <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Recent Findings</h2>
+    </div>
+    {% if recent_findings %}
+    <table class="w-full text-sm">
+      <thead class="text-xs uppercase tracking-wider text-gray-500">
+        <tr>
+          <th class="text-left px-5 py-2">Severity</th>
+          <th class="text-left px-5 py-2">Title</th>
+          <th class="text-left px-5 py-2">Target</th>
+          <th class="text-left px-5 py-2">Discovered</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in recent_findings %}
+        <tr class="border-t border-surface-border hover:bg-sidebar-hover">
+          <td class="px-5 py-2">
+            <span class="severity-badge {{ severity_colours.get(f.effective_severity, 'bg-gray-700 text-gray-200') }}">
+              {{ f.effective_severity }}
+            </span>
+          </td>
+          <td class="px-5 py-2 text-gray-100 truncate max-w-md">
+            <a href="/scan/{{ f.scan_id }}/finding/{{ f.id }}" class="hover:text-cyan-400">{{ f.title }}</a>
+          </td>
+          <td class="px-5 py-2 text-gray-400 truncate max-w-xs">{{ f.target }}</td>
+          <td class="px-5 py-2 text-gray-500">{{ f.discovered_at|fmtdt }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="px-5 py-10 text-center text-gray-500 text-sm">No findings yet.</div>
+    {% endif %}
+  </div>
+
+</div>

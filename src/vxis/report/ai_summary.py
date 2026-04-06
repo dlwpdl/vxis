@@ -123,6 +123,9 @@ async def generate_executive_summary(
     findings: list[Finding],
     client_name: str,
     api_key: str | None = None,
+    target: str | None = None,
+    vxis_score: float | None = None,
+    bilingual: bool = False,
 ) -> str:
     """Generate an executive summary for the security assessment.
 
@@ -145,7 +148,16 @@ async def generate_executive_summary(
         Executive summary text (plain text, suitable for HTML embedding).
     """
     if not api_key:
-        return _build_template_summary(findings, client_name)
+        en = _build_template_summary(findings, client_name)
+        if bilingual:
+            ko = (
+                f"VXIS Security가 {client_name} 환경에 대해 종합 보안 평가를 수행했습니다. "
+                f"총 {len(findings)}건의 발견 사항이 식별되었으며, OWASP/PTES/NIST SP 800-115 "
+                f"프레임워크에 따라 자동 스캔과 수동 검증을 결합하여 진행했습니다. "
+                f"심각도가 높은 항목부터 우선적으로 조치할 것을 권장합니다."
+            )
+            return f"{en}|||{ko}"
+        return en
 
     try:
         import anthropic  # type: ignore[import-untyped]
@@ -171,11 +183,19 @@ async def generate_executive_summary(
         f"{counts[s]} {s}" for s in _SEVERITY_ORDER if counts[s] > 0
     )
 
+    target_line = f"Target: {target}\n" if target else ""
+    score_line = f"VXIS Score: {vxis_score}\n" if vxis_score is not None else ""
+    bilingual_instr = (
+        "\n\nIMPORTANT: Output BOTH English and Korean versions separated by exactly '|||'. "
+        "Format: <English summary>|||<한국어 요약>. Both versions must be equally detailed (3-4 paragraphs each)."
+        if bilingual else ""
+    )
     prompt = (
         f"You are a senior penetration tester writing an executive summary for a "
         f"security assessment report. Write a professional, concise executive summary "
         f"(3-4 paragraphs) for the following assessment:\n\n"
         f"Client: {client_name}\n"
+        f"{target_line}{score_line}"
         f"Total findings: {len(findings)} ({counts_str})\n\n"
         f"Findings summary:\n{findings_digest}\n\n"
         f"The executive summary should:\n"
@@ -184,6 +204,7 @@ async def generate_executive_summary(
         f"3. Provide clear remediation prioritisation guidance\n"
         f"4. Use professional language suitable for C-suite readers\n\n"
         f"Do not use bullet points. Write in prose only."
+        f"{bilingual_instr}"
     )
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
@@ -198,4 +219,7 @@ async def generate_executive_summary(
         return content.text.strip()
 
     # Fallback if response format is unexpected
-    return _build_template_summary(findings, client_name)
+    fallback = _build_template_summary(findings, client_name)
+    if bilingual:
+        return f"{fallback}|||{fallback}"
+    return fallback

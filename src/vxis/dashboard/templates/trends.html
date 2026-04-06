@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Trends — VXIS{% endblock %}
+
+{% block breadcrumb %}
+<nav class="flex items-center gap-2 text-sm">
+  <a href="/" class="text-gray-500 hover:text-gray-300">Dashboard</a>
+  <span class="text-gray-600">/</span>
+  <span class="text-gray-100 font-medium">Trends</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  <div>
+    <h1 class="text-xl font-semibold text-white">Score Trends</h1>
+    <p class="text-sm text-gray-500 mt-0.5">
+      Per-target weighted-severity score across the most recent 10 scans (lower is better).
+    </p>
+  </div>
+
+  {% if target_series %}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      {% for series in target_series %}
+      <div class="bg-surface rounded-lg border border-surface-border p-5">
+        <div class="flex items-baseline justify-between mb-3">
+          <h2 class="text-sm font-semibold text-white truncate">{{ series.target }}</h2>
+          <span class="text-xs text-gray-500">{{ series.scan_count }} scans</span>
+        </div>
+        <div class="text-2xl font-bold text-cyan-400 mb-2">{{ series.latest_score }}</div>
+        {{ line_chart_svg(series.points)|safe }}
+      </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="bg-surface rounded-lg border border-surface-border px-5 py-10 text-center text-gray-500 text-sm">
+      No scan history available.
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

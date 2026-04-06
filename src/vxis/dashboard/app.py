@@ -814,6 +814,327 @@ async def scan_sse_events(request: Request, scan_id: str):
     )
 
 
+# ---------------------------------------------------------------------------
+# Live / Trends / Phases — read-only dashboards
+# ---------------------------------------------------------------------------
+
+# Severity weights used for time-series scoring fallback (no persisted vxis_score).
+_SEVERITY_WEIGHTS: dict[str, float] = {
+    "critical": 10.0,
+    "high": 7.0,
+    "medium": 4.0,
+    "low": 1.5,
+    "informational": 0.1,
+}
+
+
+def _risk_score(sev_counts: dict[str, int]) -> float:
+    """Weighted severity score (higher = worse). Used as VXIS-score fallback."""
+    return round(
+        sum(_SEVERITY_WEIGHTS.get(s, 0.0) * c for s, c in sev_counts.items()),
+        2,
+    )
+
+
+@app.get("/scans/active", response_class=HTMLResponse)
+async def scans_active(request: Request) -> HTMLResponse:
+    """Live scan status — running scans + recent findings (HTMX polling)."""
+    engine = _get_engine(request)
+
+    async with get_session(engine) as session:
+        running_result = await session.execute(
+            select(ScanRecord)
+            .where(ScanRecord.status == "running")
+            .order_by(ScanRecord.started_at.desc())
+        )
+        running_scans: list[ScanRecord] = list(running_result.scalars().all())
+
+        # Per-scan finding counts
+        scan_rows: list[dict] = []
+        for scan in running_scans:
+            count_stmt = select(func.count(FindingRecord.id)).where(
+                FindingRecord.scan_id == scan.id
+            )
+            f_count: int = (await session.execute(count_stmt)).scalar_one_or_none() or 0
+
+            cfg = scan.config_snapshot or {}
+            phases_completed = int(cfg.get("phases_completed", 0) or 0)
+            total_phases = int(cfg.get("total_phases", 0) or 0)
+            pct = (
+                round(100.0 * phases_completed / total_phases, 1)
+                if total_phases > 0
+                else 0.0
+            )
+            scan_rows.append(
+                {
+                    "scan": scan,
+                    "finding_count": f_count,
+                    "phases_completed": phases_completed,
+                    "total_phases": total_phases,
+                    "progress_pct": pct,
+                }
+            )
+
+        # Recent findings across all scans (last 20)
+        recent_result = await session.execute(
+            select(FindingRecord)
+            .order_by(FindingRecord.discovered_at.desc())
+            .limit(20)
+        )
+        recent_findings: list[FindingRecord] = list(recent_result.scalars().all())
+
+    return templates.TemplateResponse(
+        request,
+        "scans_active.html",
+        {
+            "scan_rows": scan_rows,
+            "recent_findings": recent_findings,
+        },
+    )
+
+
+@app.get("/scans/active/partial", response_class=HTMLResponse)
+async def scans_active_partial(request: Request) -> HTMLResponse:
+    """HTMX partial — refreshed every 5s by /scans/active page."""
+    engine = _get_engine(request)
+
+    async with get_session(engine) as session:
+        running_result = await session.execute(
+            select(ScanRecord)
+            .where(ScanRecord.status == "running")
+            .order_by(ScanRecord.started_at.desc())
+        )
+        running_scans: list[ScanRecord] = list(running_result.scalars().all())
+
+        scan_rows: list[dict] = []
+        for scan in running_scans:
+            count_stmt = select(func.count(FindingRecord.id)).where(
+                FindingRecord.scan_id == scan.id
+            )
+            f_count: int = (await session.execute(count_stmt)).scalar_one_or_none() or 0
+            cfg = scan.config_snapshot or {}
+            phases_completed = int(cfg.get("phases_completed", 0) or 0)
+            total_phases = int(cfg.get("total_phases", 0) or 0)
+            pct = (
+                round(100.0 * phases_completed / total_phases, 1)
+                if total_phases > 0
+                else 0.0
+            )
+            scan_rows.append(
+                {
+                    "scan": scan,
+                    "finding_count": f_count,
+                    "phases_completed": phases_completed,
+                    "total_phases": total_phases,
+                    "progress_pct": pct,
+                }
+            )
+
+        recent_result = await session.execute(
+            select(FindingRecord)
+            .order_by(FindingRecord.discovered_at.desc())
+            .limit(20)
+        )
+        recent_findings: list[FindingRecord] = list(recent_result.scalars().all())
+
+    return templates.TemplateResponse(
+        request,
+        "partials/scans_active.html",
+        {
+            "scan_rows": scan_rows,
+            "recent_findings": recent_findings,
+        },
+    )
+
+
+def _line_chart_svg(
+    points: list[tuple[str, float]],
+    width: int = 640,
+    height: int = 220,
+    stroke: str = "#22d3ee",
+) -> str:
+    """Render a minimal SVG line chart from (label, value) points."""
+    if not points:
+        return (
+            f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">'
+            f'<text x="{width/2}" y="{height/2}" text-anchor="middle" fill="#64748b" '
+            f'font-family="sans-serif" font-size="13">No data</text></svg>'
+        )
+
+    pad_l, pad_r, pad_t, pad_b = 40, 20, 20, 36
+    plot_w = width - pad_l - pad_r
+    plot_h = height - pad_t - pad_b
+
+    values = [v for _, v in points]
+    vmax = max(values) if values else 1.0
+    vmin = min(values) if values else 0.0
+    if vmax == vmin:
+        vmax = vmin + 1.0
+
+    n = len(points)
+    step = plot_w / max(n - 1, 1)
+
+    coords: list[tuple[float, float]] = []
+    for i, (_, v) in enumerate(points):
+        x = pad_l + i * step
+        y = pad_t + plot_h - ((v - vmin) / (vmax - vmin)) * plot_h
+        coords.append((x, y))
+
+    path = "M " + " L ".join(f"{x:.1f} {y:.1f}" for x, y in coords)
+
+    # Gridlines (3)
+    grid = ""
+    for i in range(4):
+        gy = pad_t + (plot_h * i / 3)
+        gv = vmax - (vmax - vmin) * i / 3
+        grid += (
+            f'<line x1="{pad_l}" y1="{gy:.1f}" x2="{pad_l + plot_w}" y2="{gy:.1f}" '
+            f'stroke="#1f2937" stroke-width="1"/>'
+            f'<text x="{pad_l - 6}" y="{gy + 3:.1f}" text-anchor="end" fill="#64748b" '
+            f'font-family="sans-serif" font-size="10">{gv:.1f}</text>'
+        )
+
+    # Points + labels (only every Nth label to avoid clutter)
+    label_every = max(1, n // 6)
+    dots = ""
+    labels = ""
+    for i, ((lab, _v), (x, y)) in enumerate(zip(points, coords)):
+        dots += f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{stroke}"/>'
+        if i % label_every == 0 or i == n - 1:
+            labels += (
+                f'<text x="{x:.1f}" y="{height - 10}" text-anchor="middle" '
+                f'fill="#94a3b8" font-family="sans-serif" font-size="10">{lab}</text>'
+            )
+
+    return (
+        f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" '
+        f'class="w-full h-auto">'
+        f'{grid}'
+        f'<path d="{path}" fill="none" stroke="{stroke}" stroke-width="2"/>'
+        f'{dots}{labels}'
+        f'</svg>'
+    )
+
+
+templates.env.globals["line_chart_svg"] = _line_chart_svg
+
+
+@app.get("/trends", response_class=HTMLResponse)
+async def trends_page(request: Request) -> HTMLResponse:
+    """Per-target VXIS-score (weighted-severity fallback) trend over last 10 scans."""
+    engine = _get_engine(request)
+
+    async with get_session(engine) as session:
+        scans_result = await session.execute(
+            select(ScanRecord).order_by(ScanRecord.started_at.desc())
+        )
+        all_scans: list[ScanRecord] = list(scans_result.scalars().all())
+
+        # Group by target, keep most recent 10 each (oldest-first for plotting)
+        per_target: dict[str, list[ScanRecord]] = {}
+        for scan in all_scans:
+            per_target.setdefault(scan.target, []).append(scan)
+
+        target_series: list[dict] = []
+        for target, scans in per_target.items():
+            recent = list(reversed(scans[:10]))  # oldest -> newest
+            points: list[tuple[str, float]] = []
+            for scan in recent:
+                sev_stmt = (
+                    select(FindingRecord.effective_severity, func.count(FindingRecord.id))
+                    .where(FindingRecord.scan_id == scan.id)
+                    .group_by(FindingRecord.effective_severity)
+                )
+                sev_rows = list((await session.execute(sev_stmt)).all())
+                sev_counts = {sev: cnt for sev, cnt in sev_rows}
+                score = _risk_score(sev_counts)
+                label = (
+                    scan.started_at.strftime("%m-%d")
+                    if scan.started_at
+                    else f"#{scan.id}"
+                )
+                points.append((label, score))
+
+            target_series.append(
+                {
+                    "target": target,
+                    "points": points,
+                    "scan_count": len(recent),
+                    "latest_score": points[-1][1] if points else 0.0,
+                }
+            )
+
+        target_series.sort(key=lambda d: d["latest_score"], reverse=True)
+
+    return templates.TemplateResponse(
+        request,
+        "trends.html",
+        {"target_series": target_series},
+    )
+
+
+@app.get("/phases", response_class=HTMLResponse)
+async def phases_page(request: Request) -> HTMLResponse:
+    """Per-phase performance — avg duration, failure rate, finding counts.
+
+    Uses ToolRunRecord (per-tool/per-plugin invocations) as the closest analogue
+    to "phases" since phases are not persisted as a separate table.
+    """
+    from vxis.models.db_models import ToolRunRecord
+
+    engine = _get_engine(request)
+
+    async with get_session(engine) as session:
+        rows_result = await session.execute(
+            select(
+                ToolRunRecord.plugin_name,
+                func.count(ToolRunRecord.id),
+                func.avg(ToolRunRecord.elapsed_seconds),
+                func.sum(
+                    case((ToolRunRecord.state == "failed", 1), else_=0)
+                ),
+                func.sum(
+                    case((ToolRunRecord.state == "timeout", 1), else_=0)
+                ),
+            ).group_by(ToolRunRecord.plugin_name)
+        )
+
+        finding_rows = await session.execute(
+            select(FindingRecord.source_plugin, func.count(FindingRecord.id)).group_by(
+                FindingRecord.source_plugin
+            )
+        )
+        findings_by_plugin: dict[str, int] = {
+            row[0]: row[1] for row in finding_rows.all()
+        }
+
+    phase_rows: list[dict] = []
+    for plugin, total, avg_elapsed, failed, timed_out in rows_result.all():
+        total = int(total or 0)
+        failed = int(failed or 0)
+        timed_out = int(timed_out or 0)
+        bad = failed + timed_out
+        fail_rate = round(100.0 * bad / total, 1) if total else 0.0
+        phase_rows.append(
+            {
+                "name": plugin,
+                "runs": total,
+                "avg_seconds": round(float(avg_elapsed or 0.0), 2),
+                "failed": bad,
+                "fail_rate": fail_rate,
+                "findings": findings_by_plugin.get(plugin, 0),
+            }
+        )
+
+    phase_rows.sort(key=lambda d: d["runs"], reverse=True)
+
+    return templates.TemplateResponse(
+        request,
+        "phases.html",
+        {"phase_rows": phase_rows},
+    )
+
+
 @app.get("/health")
 async def health() -> dict[str, str]:
     """Health check endpoint."""

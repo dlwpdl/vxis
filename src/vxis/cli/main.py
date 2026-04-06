@@ -600,6 +600,86 @@ def report(
     )
 
 
+@app.command()
+def attestation(
+    scan_id: str = typer.Argument(help="Scan ID to generate an attestation letter for"),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output file path (default: ./attestation_<scan_id>_<date>.docx)",
+    ),
+) -> None:
+    """Generate a formal attestation letter (DOCX) for a completed scan."""
+    from datetime import date
+
+    out_path = output or Path(f"attestation_{scan_id}_{date.today().isoformat()}.docx")
+
+    console.print(
+        f"[bold]Generating attestation[/bold] for scan [cyan]{scan_id}[/cyan] "
+        f"→ [underline]{out_path}[/underline]"
+    )
+
+    async def _generate() -> Path:
+        from sqlalchemy import select
+
+        from vxis.core.db import create_engine, get_session
+        from vxis.models.db_models import FindingRecord, ScanRecord
+        from vxis.models.finding import Finding
+        from vxis.report.attestation import AttestationGenerator
+        from vxis.report.generator import ReportData
+
+        config = _get_config()
+        db_url = config.db_url
+        if ":///" in db_url:
+            _pfx, _path = db_url.split("///", 1)
+            db_url = f"{_pfx}///{Path(_path).expanduser()}"
+        engine = create_engine(db_url)
+
+        async with get_session(engine) as session:
+            result = await session.execute(
+                select(ScanRecord).where(ScanRecord.id == int(scan_id))
+            )
+            scan = result.scalar_one_or_none()
+            if scan is None:
+                err_console.print(
+                    f"[bold red]Scan not found:[/bold red] {scan_id}"
+                )
+                raise typer.Exit(code=1)
+
+            findings_result = await session.execute(
+                select(FindingRecord).where(FindingRecord.scan_id == int(scan_id))
+            )
+            records: list[FindingRecord] = list(findings_result.scalars().all())
+
+        findings: list[Finding] = _convert_finding_records(records)
+
+        report_data = ReportData(
+            scan_id=str(scan_id),
+            client_name=scan.target,
+            target=scan.target,
+            scan_date=scan.started_at.strftime("%Y-%m-%d") if scan.started_at else str(date.today()),
+            findings=findings,
+        )
+
+        gen = AttestationGenerator()
+        generated = gen.generate(report_data, out_path)
+        await engine.dispose()
+        return generated
+
+    try:
+        result_path = asyncio.run(_generate())
+    except typer.Exit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        err_console.print(f"[bold red]Attestation generation failed:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    console.print(
+        f"[bold green]Attestation written to:[/bold green] [underline]{result_path}[/underline]"
+    )
+
+
 @app.command(name="plugins")
 def plugins_cmd(
     check: bool = typer.Option(

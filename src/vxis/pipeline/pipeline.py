@@ -3591,6 +3591,42 @@ class ScanPipeline:
         phases_str = ", ".join(ctx.phases_completed)
         deferred_str = f"{sum(1 for a in ctx.deferred_actions if a.approved)}/{len(ctx.deferred_actions)} approved"
 
+        # Hardcoded fallback summary (bilingual)
+        _fallback_en = (
+            f"VXIS ScanPipeline executed all applicable phases against {ctx.target}.\n"
+            f"Phases completed: {len(ctx.phases_completed)}\n"
+            f"Total: {len(ctx.findings)} findings (C:{c} H:{h} M:{m} L:{low} I:{i})\n"
+            f"Deferred actions: {deferred_str}\n"
+            f"Duration: {ctx.duration_seconds:.0f}s"
+        )
+        _fallback_ko = (
+            f"VXIS ScanPipeline이 {ctx.target} 대상으로 모든 해당 단계를 수행했습니다.\n"
+            f"완료된 단계: {len(ctx.phases_completed)}\n"
+            f"총 발견: {len(ctx.findings)}건 (C:{c} H:{h} M:{m} L:{low} I:{i})\n"
+            f"보류된 액션: {deferred_str}\n"
+            f"소요 시간: {ctx.duration_seconds:.0f}초"
+        )
+        exec_summary = f"{_fallback_en}|||{_fallback_ko}"
+
+        # AI-generated bilingual executive summary (LLM via ai_summary module)
+        try:
+            import os
+            from vxis.report.ai_summary import generate_executive_summary
+            _vxis_score = getattr(ctx, "vxis_score", None)
+            _api_key = os.environ.get("ANTHROPIC_API_KEY")
+            _ai_summary = await generate_executive_summary(
+                findings=ctx.findings,
+                client_name="VXIS Client",
+                api_key=_api_key,
+                target=ctx.target,
+                vxis_score=_vxis_score,
+                bilingual=True,
+            )
+            if _ai_summary and "|||" in _ai_summary:
+                exec_summary = _ai_summary
+        except Exception as _e:
+            logger.warning("ai_summary generation failed, using fallback: %s", _e)
+
         rd = ReportData(
             scan_id=ctx.scan_id,
             client_name="",  # 외부에서 설정
@@ -3599,13 +3635,7 @@ class ScanPipeline:
             findings=ctx.findings,
             company_name="VXIS Security",
             author="VXIS ScanPipeline",
-            executive_summary=(
-                f"VXIS ScanPipeline executed all applicable phases against {ctx.target}.\n"
-                f"Phases completed: {len(ctx.phases_completed)}\n"
-                f"Total: {len(ctx.findings)} findings (C:{c} H:{h} M:{m} L:{low} I:{i})\n"
-                f"Deferred actions: {deferred_str}\n"
-                f"Duration: {ctx.duration_seconds:.0f}s"
-            ),
+            executive_summary=exec_summary,
             methodology=f"Brain-First Pipeline. Phases: {phases_str}",
         )
 
