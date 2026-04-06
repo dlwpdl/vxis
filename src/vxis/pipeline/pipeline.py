@@ -34,15 +34,25 @@ Architecture (14 active phases):
 
 from __future__ import annotations
 
+import asyncio as _asyncio
 import json as _json
 import logging
+import os as _os
 import re as _re
+import threading as _threading
 import time
 from typing import Any, Callable, Awaitable
+
+import httpx as _httpx  # module-level (hot loop 최적화)
 
 from vxis.pipeline.context import ScanContext
 
 logger = logging.getLogger(__name__)
+
+# 파이프라인 전체에서 공유되는 lock — event callback, session init 보호
+_pipeline_event_lock = _threading.Lock()
+# Chain builder는 ctx.attack_chains 수정 → 병렬 phase 동시 호출 방지
+_chain_builder_lock = _threading.Lock()
 
 
 def _compress_findings_for_prompt(findings: list, max_items: int = 15) -> list[dict]:
@@ -340,12 +350,13 @@ class ScanPipeline:
         self._event_callback = event_callback
 
     def _emit(self, event_type: str, data: dict) -> None:
-        """이벤트 발생 — 등록된 callback에 전달."""
+        """이벤트 발생 — 등록된 callback에 전달 (thread-safe)."""
         if self._event_callback:
-            try:
-                self._event_callback(event_type, data)
-            except Exception:
-                pass
+            with _pipeline_event_lock:
+                try:
+                    self._event_callback(event_type, data)
+                except Exception:
+                    pass
 
     async def run(
         self,
@@ -434,7 +445,6 @@ class ScanPipeline:
         # 같은 parallel_group 숫자의 Phase는 asyncio.gather로 동시 실행
         # ══════════════════════════════════════════════════════
         from vxis.registry import WEB_PHASES, STAGE_NAMES
-        import asyncio as _aio
         from collections import defaultdict as _dd
 
         # parallel_group별로 Phase 그룹핑
@@ -443,7 +453,11 @@ class ScanPipeline:
             _groups[p.parallel_group].append(p)
 
         # LLM 동시성을 profile에 맞춰 설정
-        _profile = getattr(self.config, 'active_profile', 'standard') if self.config else 'standard'
+        _profile = (
+            getattr(self.config, 'active_profile', None) if self.config
+            else None
+        ) or _os.environ.get("VXIS_SCAN_PROFILE", "standard")
+        _os.environ["VXIS_SCAN_PROFILE"] = _profile  # 단일 소스 보장
         _llm_concurrent = {'stealth': 2, 'standard': 4, 'aggressive': 8}.get(_profile, 4)
         try:
             from vxis.agent.brain import AgentBrain as _ABrain3
@@ -451,12 +465,40 @@ class ScanPipeline:
         except Exception:
             pass
 
+        # ── DAG 실행: depends_on 검증 + critical failure 추적 ──
+        _completed_phases: set[int] = set()
+        _failed_phases: set[int] = set()
+        # Critical phase: 이것이 실패하면 dependent phase는 건너뛴다
+        _critical_phases = {4}  # P4 CPR — tech_stack, endpoints 제공
+        _abort_dependents = False
+
         _prev_stage = ""
         for group_id in sorted(_groups.keys()):
             group_phases = _groups[group_id]
 
+            # ── Dependency 검증 ──
+            _runnable_phases = []
+            for p in group_phases:
+                unmet = set(p.depends_on) - _completed_phases
+                if unmet:
+                    # 의존성 중 실패한 phase가 있으면 skip
+                    failed_deps = unmet & _failed_phases
+                    if failed_deps:
+                        logger.warning(
+                            "  [DEP-SKIP] Phase %d skipped — deps failed: %s",
+                            p.id, sorted(failed_deps),
+                        )
+                        _failed_phases.add(p.id)
+                        continue
+                    # 아직 미완료면 (순서 오류) — 그냥 실행 시도
+                    logger.debug("  [DEP-WARN] Phase %d deps not yet complete: %s", p.id, unmet)
+                _runnable_phases.append(p)
+
+            if not _runnable_phases:
+                continue
+
             # Stage 구분선 (첫 phase의 stage 기준)
-            first_stage = group_phases[0].stage
+            first_stage = _runnable_phases[0].stage
             if first_stage != _prev_stage:
                 _stage_label = STAGE_NAMES.get(first_stage, first_stage)
                 logger.info("\n  ── %s ──", _stage_label)
@@ -466,30 +508,45 @@ class ScanPipeline:
             if first_stage == "report" and ctx.deferred_actions and self.enable_deferred_approval:
                 await self._execute_deferred_actions(ctx)
 
-            # 이 그룹의 Phase들을 병렬 실행
-            if len(group_phases) == 1:
-                # 단일 Phase — 그냥 실행
-                p = group_phases[0]
+            # ── 이 그룹의 Phase들을 병렬 실행 ──
+            if len(_runnable_phases) == 1:
+                p = _runnable_phases[0]
                 method = getattr(self, p.method, None)
                 if method is None:
                     logger.warning("  [SKIP] Phase %d method %s not found", p.id, p.method)
+                    _failed_phases.add(p.id)
                     continue
-                await self._run_phase(f"Phase {p.id}: {p.name}", method, ctx)
+                try:
+                    await self._run_phase(f"Phase {p.id}: {p.name}", method, ctx)
+                    _completed_phases.add(p.id)
+                except Exception as exc:
+                    logger.warning("  [PHASE-FAIL] Phase %d: %s", p.id, exc)
+                    _failed_phases.add(p.id)
+                    if p.id in _critical_phases:
+                        logger.error("  [CRITICAL] Phase %d is critical — dependents will skip", p.id)
             else:
-                # 여러 Phase 병렬 — gather
+                # 여러 Phase 병렬 — gather (ZIP-safe)
                 logger.info("  [PARALLEL] Running %d phases: %s",
-                            len(group_phases), ", ".join(f"P{p.id}" for p in group_phases))
+                            len(_runnable_phases), ", ".join(f"P{p.id}" for p in _runnable_phases))
                 _coros = []
-                for p in group_phases:
+                _phase_refs = []  # ZIP-safe: 인덱스 추적
+                for p in _runnable_phases:
                     method = getattr(self, p.method, None)
                     if method is None:
                         logger.warning("  [SKIP] Phase %d method %s not found", p.id, p.method)
+                        _failed_phases.add(p.id)
                         continue
                     _coros.append(self._run_phase(f"Phase {p.id}: {p.name}", method, ctx))
-                _results = await _aio.gather(*_coros, return_exceptions=True)
-                for p, res in zip(group_phases, _results):
+                    _phase_refs.append(p)
+                _results = await _asyncio.gather(*_coros, return_exceptions=True)
+                for p, res in zip(_phase_refs, _results):
                     if isinstance(res, Exception):
                         logger.warning("  [PARALLEL-FAIL] Phase %d: %s", p.id, res)
+                        _failed_phases.add(p.id)
+                        if p.id in _critical_phases:
+                            logger.error("  [CRITICAL] Phase %d is critical — dependents will skip", p.id)
+                    else:
+                        _completed_phases.add(p.id)
 
         # ══════════════════════════════════════════════════════
         # STAGE 5: 스코어링 (5-Dimension VXIS Score)
@@ -577,8 +634,10 @@ class ScanPipeline:
             logger.debug("  %s traceback:", name, exc_info=True)
 
         await self._execute_brain_decisions(name, ctx)
-        self._build_chains_and_mark_tp(ctx, name)
-        self._escalate_chain_findings(ctx)
+        # 체인 조작은 병렬 Phase 간 race condition 방지를 위해 lock
+        with _chain_builder_lock:
+            self._build_chains_and_mark_tp(ctx, name)
+            self._escalate_chain_findings(ctx)
 
         elapsed = (time.monotonic() - t0) * 1000
         new_findings = len(ctx.findings) - pre_count
@@ -637,11 +696,17 @@ class ScanPipeline:
 
         # AgentBrain: Phase 벡터를 최대 8개 단위로 분할해서 LLM 호출
         # (JSON 응답 길이 초과 방지)
+        # Sync LLM 호출을 executor로 오프로드 → 병렬 Phase 간 이벤트 루프 blocking 방지
+        # + Brain semaphore 적용 → 동시 LLM 호출 수 제한
         if isinstance(self.brain, AgentBrain):
             BATCH_SIZE = 8
+            _brain_sem = self.brain._get_semaphore()
             for i in range(0, len(phase_vectors), BATCH_SIZE):
                 chunk = phase_vectors[i:i + BATCH_SIZE]
-                batch = self._consult_agent_brain_batch(ctx, chunk, phase_name)
+                async with _brain_sem:
+                    batch = await _asyncio.to_thread(
+                        self._consult_agent_brain_batch, ctx, chunk, phase_name,
+                    )
                 for vec_id, decision in batch.items():
                     ctx._brain_decisions[vec_id] = decision
                     attempt_str = "ATTEMPT" if decision.get("attempt") else "SKIP"
@@ -1031,18 +1096,25 @@ class ScanPipeline:
             print(f"  {phase_key}: Brain attacking {len(active_decisions)} vectors...", flush=True)
 
         # Hands(SessionManager) 획득 — ctx에 이미 인증된 세션이 있으면 재사용
+        # 병렬 Phase가 동시에 초기화하려 할 때 double-check asyncio lock으로 방지
         try:
             from vxis.interaction.hands import SessionManager
-            if hasattr(ctx, "_brain_session_mgr") and ctx._brain_session_mgr is not None:
-                mgr = ctx._brain_session_mgr
-                session = ctx._brain_session
-            else:
-                mgr = SessionManager()
-                session = await mgr.get_session(ctx.target)
-                # 타겟 자동 인증 시도 (DVWA 등 벤치마크 앱)
-                session = await self._auto_authenticate(ctx, session, mgr)
-                ctx._brain_session_mgr = mgr
-                ctx._brain_session = session
+
+            # lazy asyncio.Lock 초기화
+            if not hasattr(ctx, "_brain_session_lock") or ctx._brain_session_lock is None:
+                ctx._brain_session_lock = _asyncio.Lock()
+
+            async with ctx._brain_session_lock:
+                if hasattr(ctx, "_brain_session_mgr") and ctx._brain_session_mgr is not None:
+                    mgr = ctx._brain_session_mgr
+                    session = ctx._brain_session
+                else:
+                    mgr = SessionManager()
+                    session = await mgr.get_session(ctx.target)
+                    # 타겟 자동 인증 시도 (DVWA 등 벤치마크 앱)
+                    session = await self._auto_authenticate(ctx, session, mgr)
+                    ctx._brain_session_mgr = mgr
+                    ctx._brain_session = session
         except Exception as exc:
             logger.warning("  [BRAIN-EXEC] Hands unavailable: %s", exc)
             return
@@ -1282,6 +1354,9 @@ class ScanPipeline:
 
         # 세션은 닫지 않음 — 다음 Phase에서 재사용
 
+    # 스캔 전체에서 체이닝 재귀로 인한 LLM 호출 상한 (무한 폭증 방지)
+    MAX_CHAIN_LLM_CALLS: int = 50
+
     async def _chain_from_finding(
         self,
         ctx: ScanContext,
@@ -1294,14 +1369,18 @@ class ScanPipeline:
         """Finding 확인 즉시 Brain-first 체이닝 follow-up 실행.
 
         Brain-First 원칙: finding 하나로 멈추지 않는다.
-        각 finding 타입별로 다음 단계를 즉시 시도한다:
-        - SQLi → credential extraction (UNION SELECT) → admin login
-        - XSS → stored XSS escalation → session steal probe
-        - IDOR → enumerate adjacent IDs → extract admin data
-        - CSRF → combine with session to escalate → account takeover path
-        - 기본 → 동일 엔드포인트에서 인증 우회 시도
+        각 finding 타입별로 다음 단계를 즉시 시도한다.
+
+        LLM 예산 보호: 재귀 × 병렬 phase로 인한 LLM 호출 폭증 방지.
         """
         from vxis.scoring.tracker import AttackChain, ChainStep
+
+        # 예산 체크 — ctx에 카운터 저장
+        _chain_count = getattr(ctx, "_chain_llm_count", 0)
+        if _chain_count >= self.MAX_CHAIN_LLM_CALLS:
+            logger.debug("  [CHAIN-BUDGET] Max chain LLM calls reached (%d)", _chain_count)
+            return
+        ctx._chain_llm_count = _chain_count + 1
 
         ftype = getattr(finding, "finding_type", "")
         fid = getattr(finding, "id", "")
@@ -3129,8 +3208,16 @@ class ScanPipeline:
         # ... (여기에 brain_scan.py의 PROBE 로직이 들어감)
         # → 추후 Phase 2 에이전트로 이관
 
-        await ctrl.stop()
-        await mgr.close_all()
+        # Cleanup — 리소스 누수 방지 (예외 시에도 실행하려면 phase body 전체를 try로 감싸야 하나
+        # 이는 indent 변경이 필요 — 대신 try/except로 cleanup만 보호)
+        try:
+            await ctrl.stop()
+        except Exception:
+            logger.debug("  ctrl.stop() failed (ignored)", exc_info=True)
+        try:
+            await mgr.close_all()
+        except Exception:
+            logger.debug("  mgr.close_all() failed (ignored)", exc_info=True)
 
         try:
             ctx.score_tracker.record_phase_complete("Phase 4: CPR — Hands/Eyes/X-Ray Connect")

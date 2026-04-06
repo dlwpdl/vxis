@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -98,6 +100,7 @@ class ScanContext:
     def __post_init__(self) -> None:
         """ScoreTracker를 target_type에 맞게 초기화한다."""
         object.__setattr__(self, "score_tracker", ScoreTracker(target_type=self.target_type))
+        object.__setattr__(self, "_lock", threading.Lock())
 
     # findings 무제한 증가 방지 — 메모리 상한
     MAX_FINDINGS: int = 500
@@ -106,32 +109,33 @@ class ScanContext:
     def add_finding(self, **kwargs: Any) -> Finding:
         """Finding 추가 (메모리 상한 적용)."""
         from vxis.models.finding import Finding as F
-        self.finding_counter += 1
-        kwargs.setdefault("id", f"VXIS-{self.finding_counter:03d}")
-        kwargs.setdefault("scan_id", self.scan_id)
-        kwargs.setdefault("source_plugin", "vxis-pipeline")
-        f = F(**kwargs)
-        self.findings.append(f)
+        with self._lock:
+            self.finding_counter += 1
+            kwargs.setdefault("id", f"VXIS-{self.finding_counter:03d}")
+            kwargs.setdefault("scan_id", self.scan_id)
+            kwargs.setdefault("source_plugin", "vxis-pipeline")
+            f = F(**kwargs)
+            self.findings.append(f)
 
-        # 메모리 상한 초과 → 오래된 informational/low부터 제거
-        if len(self.findings) > self.MAX_FINDINGS:
-            from vxis.models.finding import Severity
-            # informational 우선 제거, 그 다음 low, 그 다음 오래된 순
-            removable_idx = [
-                i for i, fnd in enumerate(self.findings)
-                if fnd.severity == Severity.informational
-            ] or [
-                i for i, fnd in enumerate(self.findings)
-                if fnd.severity == Severity.low
-            ]
-            if removable_idx:
-                del self.findings[removable_idx[0]]
-            else:
-                # 오래된 것 제거 (첫 번째)
-                del self.findings[0]
-            logger.debug("[MEMORY] findings cap hit (%d), evicted old finding", self.MAX_FINDINGS)
-        logger.info("[%s] %s: %s", f.severity.value.upper(), f.id, f.title.split("|||")[0])
-        return f
+            # 메모리 상한 초과 → 오래된 informational/low부터 제거
+            if len(self.findings) > self.MAX_FINDINGS:
+                from vxis.models.finding import Severity
+                # informational 우선 제거, 그 다음 low, 그 다음 오래된 순
+                removable_idx = [
+                    i for i, fnd in enumerate(self.findings)
+                    if fnd.severity == Severity.informational
+                ] or [
+                    i for i, fnd in enumerate(self.findings)
+                    if fnd.severity == Severity.low
+                ]
+                if removable_idx:
+                    del self.findings[removable_idx[0]]
+                else:
+                    # 오래된 것 제거 (첫 번째)
+                    del self.findings[0]
+                logger.debug("[MEMORY] findings cap hit (%d), evicted old finding", self.MAX_FINDINGS)
+            logger.info("[%s] %s: %s", f.severity.value.upper(), f.id, f.title.split("|||")[0])
+            return f
 
     def defer_action(
         self,
@@ -161,15 +165,16 @@ class ScanContext:
 
     def log_phase(self, phase_name: str, duration_ms: float = 0, findings_count: int = 0, notes: str = "") -> None:
         """Phase 실행 기록."""
-        self.phases_completed.append(phase_name)
-        self.phase_logs.append({
-            "phase": phase_name,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "duration_ms": duration_ms,
-            "findings_count": findings_count,
-            "notes": notes,
-        })
-        logger.info("[PHASE DONE] %s — %d findings, %s", phase_name, findings_count, notes[:80])
+        with self._lock:
+            self.phases_completed.append(phase_name)
+            self.phase_logs.append({
+                "phase": phase_name,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "duration_ms": duration_ms,
+                "findings_count": findings_count,
+                "notes": notes,
+            })
+            logger.info("[PHASE DONE] %s — %d findings, %s", phase_name, findings_count, notes[:80])
 
     @property
     def duration_seconds(self) -> float:
@@ -193,7 +198,9 @@ class ScanContext:
             "vectors_found": sorted(self.score_tracker.vectors_found),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        path.write_text(json.dumps(checkpoint, indent=2, ensure_ascii=False))
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(checkpoint, indent=2, ensure_ascii=False))
+        os.replace(tmp, path)
         logger.info("[CHECKPOINT] Saved to %s (%d phases, %d findings)",
                     path, len(self.phases_completed), self.finding_counter)
         return path

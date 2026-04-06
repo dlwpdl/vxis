@@ -65,15 +65,15 @@ WEB_PHASES: list[PhaseInfo] = [
     PhaseInfo(11, "Chain Mutation — Alternative Attack Paths",  "체인 변이 — 대체 공격 경로",
               "chain", "_phase11_mutation", depends_on=(8,), parallel_group=7),
 
-    # ── Group 8: Report (모든 findings + chains 필요) ──
-    PhaseInfo(6,  "Report Generation — NCC Group Style",       "리포트 생성 — NCC Group 스타일",
-              "report", "_phase6_report", depends_on=(11,), parallel_group=8),
-
-    # ── Group 9: Learning (리포트 이후 병렬) ──
+    # ── Group 8: Learning (리포트 이전 병렬) ──
     PhaseInfo(12, "Self-Evolving Agent — Coverage Gap Analysis", "자가 진화 — 커버리지 갭 분석",
-              "learning", "_phase12_evolution", depends_on=(6,), parallel_group=9),
+              "learning", "_phase12_evolution", depends_on=(11,), parallel_group=8),
     PhaseInfo(18, "Collective Intelligence Update",             "집단 지능 업데이트",
-              "learning", "_phase18_collective", depends_on=(6,), parallel_group=9),
+              "learning", "_phase18_collective", depends_on=(11,), parallel_group=8),
+
+    # ── Group 9: Report (모든 findings + chains + learning 결과 포함) ──
+    PhaseInfo(6,  "Report Generation — NCC Group Style",       "리포트 생성 — NCC Group 스타일",
+              "report", "_phase6_report", depends_on=(12, 18), parallel_group=9),
 ]
 
 # GH Actions 담당 (파이프라인 외부)

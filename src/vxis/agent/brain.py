@@ -24,6 +24,7 @@ import json
 import logging
 import os
 import re as _re
+import threading
 import urllib.request
 import urllib.error
 from dataclasses import dataclass, field
@@ -516,22 +517,27 @@ class AgentBrain:
 
     # 클래스 레벨 semaphore — 전체 프로세스에서 동시 LLM 호출 수 제한
     # asyncio 이벤트 루프 필요 시 lazy init
-    _llm_semaphore: "asyncio.Semaphore | None" = None
+    _llm_semaphores: "dict[int, asyncio.Semaphore]" = {}
     _llm_max_concurrent: int = 4
 
     @classmethod
     def _get_semaphore(cls) -> "asyncio.Semaphore":
-        """lazy init — 첫 호출 시 현재 이벤트 루프에서 semaphore 생성."""
+        """이벤트 루프별 semaphore — 루프 id로 캐싱하여 cross-loop 오류 방지."""
         import asyncio as _aio
-        if cls._llm_semaphore is None:
-            cls._llm_semaphore = _aio.Semaphore(cls._llm_max_concurrent)
-        return cls._llm_semaphore
+        try:
+            loop = _aio.get_running_loop()
+        except RuntimeError:
+            loop = _aio.get_event_loop()
+        loop_id = id(loop)
+        if loop_id not in cls._llm_semaphores:
+            cls._llm_semaphores[loop_id] = _aio.Semaphore(cls._llm_max_concurrent)
+        return cls._llm_semaphores[loop_id]
 
     @classmethod
     def set_max_concurrent(cls, n: int) -> None:
         """LLM 동시 호출 상한 설정 (profile에 따라)."""
         cls._llm_max_concurrent = max(1, n)
-        cls._llm_semaphore = None  # reset → 다음 호출 시 새로 생성
+        cls._llm_semaphores.clear()  # reset → 다음 호출 시 새로 생성
 
     def __init__(
         self,
@@ -548,6 +554,7 @@ class AgentBrain:
         self.max_steps = max_steps
         self.steps: list[AgentStep] = []
         self.is_done = False
+        self._state_lock = threading.Lock()
         self._provider = provider or os.environ.get("UPSTREAM_LLM_PROVIDER", "together")
         self._model = model or os.environ.get("UPSTREAM_LLM_MODEL", "")
         self._step_count = 0
@@ -663,11 +670,11 @@ class AgentBrain:
 
         기존 think()를 대체하며, 컴파일된 패턴이 있으면 LLM 호출을 건너뛴다.
         """
-        if self.is_done or self._step_count >= self.max_steps:
-            self.is_done = True
-            return []
-
-        self._step_count += 1
+        with self._state_lock:
+            if self.is_done or self._step_count >= self.max_steps:
+                self.is_done = True
+                return []
+            self._step_count += 1
 
         # ── Step 1: RECALL — 컴파일된 패턴 매칭 (LLM 호출 없이) ──
         compiled_actions = self._try_compiled_patterns(observation)
@@ -698,7 +705,8 @@ class AgentBrain:
         response = self._call_llm_with_fallback(system, user_prompt)
         if response is None:
             logger.warning("모든 LLM 호출 실패 at step %d", self._step_count)
-            self.is_done = True
+            with self._state_lock:
+                self.is_done = True
             return []
 
         actions = self._parse_response(response)
@@ -710,7 +718,8 @@ class AgentBrain:
 
         # Check for DONE
         if any(a.tool == "DONE" for a in actions):
-            self.is_done = True
+            with self._state_lock:
+                self.is_done = True
             actions = [a for a in actions if a.tool == "DONE"]
 
         self._record_step(observation, actions)
@@ -923,7 +932,8 @@ class AgentBrain:
             # 남은 스텝이 적으면 종료
             remaining = self.max_steps - self._step_count
             if remaining <= 2:
-                self.is_done = True
+                with self._state_lock:
+                    self.is_done = True
 
     # ── Phase 3: Enriched Context ────────────────────────────────
 
