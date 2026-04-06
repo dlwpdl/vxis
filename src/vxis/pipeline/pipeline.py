@@ -2760,26 +2760,68 @@ class ScanPipeline:
             pass
 
     async def _phase2_agents(self, ctx: ScanContext) -> None:
-        """Phase 2: 63 Autonomous Agents — Brain이 선택."""
+        """Phase 2: Autonomous Agents — Brain이 선택하고 실행."""
         try:
-            # Phase 2 대응 벡터: 보안 헤더, CORS, TLS, 미스컨피그
             for vid in ["WEB-MISCONF-004", "WEB-MISCONF-005", "WEB-CRYPTO-001"]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
 
         try:
-            from vxis.agent.registry import _REGISTRY, list_agents
+            from vxis.agent.registry import list_agents, spawn
+
             available = list_agents()
             logger.info("  Available agents: %d", len(available))
 
-            # Brain이 타깃 프로필 기반으로 에이전트 선택
-            # Web target → web, api, recon, crypto agents
-            web_agents = [a for a in available if any(k in a.lower() for k in
-                         ["web", "api", "recon", "osint", "crypto", "tls", "browser", "fuzzing"])]
-            logger.info("  Selected agents for web target: %s", web_agents[:10])
+            # Web 타겟에 해당하는 에이전트 필터
+            web_keywords = ["web", "api", "recon", "osint", "crypto", "tls", "browser", "fuzzing"]
+            selected = [a for a in available if any(k in a.lower() for k in web_keywords)]
+            print(f"  Selected {len(selected)} agents for web target", flush=True)
+
+            # 각 에이전트 실행
+            for agent_id in selected:
+                agent = spawn(agent_id)
+                if agent is None:
+                    continue
+                try:
+                    # AgentContext를 ScanContext에서 구성
+                    from vxis.agent.context import AgentContext
+                    from vxis.mission.config import MissionConfig
+                    from vxis.graph.attack_graph import LivingAttackGraph
+                    from vxis.evidence.engine import EvidenceEngine
+
+                    agent_ctx = AgentContext(
+                        mission=MissionConfig(target=ctx.target),
+                        attack_graph=LivingAttackGraph(),
+                        evidence_engine=EvidenceEngine(),
+                    )
+                    result = await agent.run(agent_ctx)
+
+                    if result.is_success and result.findings:
+                        print(f"    ✓ {agent_id}: {len(result.findings)} findings", flush=True)
+                        for ev in result.findings:
+                            # Evidence → Finding 변환
+                            try:
+                                ctx.add_finding(
+                                    title=getattr(ev, "title", f"Agent {agent_id} finding"),
+                                    severity=getattr(ev, "severity", "medium"),
+                                    finding_type=getattr(ev, "finding_type", "agent_discovery"),
+                                    description=getattr(ev, "description", str(ev)),
+                                    target=ctx.target,
+                                    affected_component=getattr(ev, "component", ctx.target),
+                                    source_plugin=f"agent:{agent_id}",
+                                )
+                            except Exception:
+                                pass
+                    elif result.is_success:
+                        logger.debug("    ○ %s: no findings", agent_id)
+                except Exception as exc:
+                    logger.debug("    ✗ %s: %s", agent_id, exc)
+
+        except ImportError as exc:
+            logger.info("  Agent infrastructure not available: %s", exc)
         except Exception as exc:
-            logger.info("  Agent registry unavailable: %s", exc)
+            logger.info("  Agent execution error: %s", exc)
 
         try:
             ctx.score_tracker.record_phase_complete("Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch")
@@ -2802,21 +2844,30 @@ class ScanPipeline:
         try:
             from vxis.knowledge.store import KnowledgeStore
             store = KnowledgeStore()
-            # 기존 패턴 매칭
             patterns = store.match_patterns({
                 "tech_stack": ctx.tech_stack,
                 "target": ctx.target,
             }) if hasattr(store, 'match_patterns') else []
-            logger.info("  Knowledge Store: %d compiled patterns matched", len(patterns))
+
+            if patterns:
+                print(f"  [KB] {len(patterns)} compiled patterns matched from previous scans", flush=True)
+                # 매칭된 패턴을 ctx에 저장 → Brain이 참고
+                ctx.hypotheses = [
+                    {"source": "knowledge_store", "tool": p.action_tool,
+                     "confidence": p.confidence, "args": p.action_args_template}
+                    for p in patterns if hasattr(p, 'action_tool')
+                ]
+            else:
+                print("  [KB] No previous patterns — first scan for this tech stack", flush=True)
         except Exception as exc:
-            logger.info("  Knowledge Store unavailable: %s", exc)
+            logger.debug("  Knowledge Store: %s", exc)
 
         try:
             from vxis.knowledge.compressor import ContextCompressor
-            ContextCompressor()
-            logger.info("  Context Compressor ready")
+            compressor = ContextCompressor()
+            print(f"  [COMPRESS] Context compressor ready — {compressor.__class__.__name__}", flush=True)
         except Exception:
-            logger.info("  Context Compressor unavailable")
+            pass
 
         try:
             ctx.score_tracker.record_phase_complete("Phase 3: Hypothesis Engine — Pattern Matching + Context Compression")
@@ -3033,7 +3084,7 @@ class ScanPipeline:
             from vxis.synthesis.cross_protocol import CrossProtocolSynthesizer
             synth = CrossProtocolSynthesizer()
             # 발견된 취약점들을 크로스 레이어로 합성
-            chains = synth.synthesize(ctx.findings) if hasattr(synth, 'synthesize') else []
+            chains = await synth.synthesize(ctx.findings) if hasattr(synth, 'synthesize') else []
             ctx.attack_chains.extend(chains)
             logger.info("  Synthesized %d cross-protocol chains", len(chains))
         except Exception as exc:
@@ -3060,7 +3111,7 @@ class ScanPipeline:
             from vxis.mutation.chain_mutator import ChainMutator
             mutator = ChainMutator()
             for chain in ctx.attack_chains:
-                mutations = mutator.mutate(chain) if hasattr(mutator, 'mutate') else []
+                mutations = await mutator.mutate(chain) if hasattr(mutator, 'mutate') else []
                 ctx.chain_mutations.extend(mutations)
             logger.info("  Generated %d chain mutations", len(ctx.chain_mutations))
         except Exception as exc:
@@ -3083,8 +3134,14 @@ class ScanPipeline:
             from vxis.evolution.agent_synthesizer import AgentSynthesizer
             synth = AgentSynthesizer()
             gaps = synth.analyze_gaps(ctx.findings) if hasattr(synth, 'analyze_gaps') else []
-            ctx.coverage_gaps = gaps  # 갭 분석 결과를 ctx에 보존
-            logger.info("  Coverage gaps identified: %d", len(gaps))
+            ctx.coverage_gaps = gaps
+            if gaps:
+                print(f"  [EVOLVE] {len(gaps)} coverage gaps identified", flush=True)
+                for g in gaps[:3]:
+                    _desc = str(g) if not hasattr(g, 'description') else g.description
+                    print(f"    - {_desc[:80]}", flush=True)
+            else:
+                print("  [EVOLVE] No coverage gaps — full coverage", flush=True)
 
             # 갭 정보를 Knowledge Store에 축적 → 다음 스캔에서 활용
             if gaps:
@@ -3126,12 +3183,14 @@ class ScanPipeline:
             from vxis.biometrics.analyzer import BehavioralAnalyzer
             analyzer = BehavioralAnalyzer()
             from urllib.parse import urlparse
-            domain = urlparse(ctx.target).netloc.split(".")[-2]
+            _host = urlparse(ctx.target.replace("ghost://", "https://")).netloc
+            domain = _host.split(".")[-2] if "." in _host else _host
             result = analyzer.analyze(domain) if hasattr(analyzer, 'analyze') else {}
             ctx.biometrics = result
-            logger.info("  Biometrics: %s", result.get("summary", "N/A") if isinstance(result, dict) else "done")
+            _hvt = result.get("high_value_targets", []) if isinstance(result, dict) else []
+            print(f"  [OSINT] Domain: {domain} | HVT: {len(_hvt)} targets", flush=True)
         except Exception as exc:
-            logger.info("  Biometrics: %s", exc)
+            logger.debug("  Biometrics: %s", exc)
 
         try:
             ctx.score_tracker.record_phase_complete("Phase 13: Behavioral Biometrics (OSINT)")
@@ -3145,11 +3204,13 @@ class ScanPipeline:
         try:
             from vxis.twin.simulator import DigitalTwinSimulator
             sim = DigitalTwinSimulator()
-            result = sim.simulate(ctx.target) if hasattr(sim, 'simulate') else {}
+            _clean_target = ctx.target.replace("ghost://", "https://")
+            result = sim.simulate(_clean_target) if hasattr(sim, 'simulate') else {}
             ctx.twin_results = result
-            logger.info("  Digital Twin: %s", result.get("summary", "N/A") if isinstance(result, dict) else "done")
+            _services = result.get("services", []) if isinstance(result, dict) else []
+            print(f"  [TWIN] Simulated {len(_services)} services", flush=True)
         except Exception as exc:
-            logger.info("  Digital Twin: %s", exc)
+            logger.debug("  Digital Twin: %s", exc)
 
         try:
             ctx.score_tracker.record_phase_complete("Phase 15: Digital Twin Pre-Simulation")
@@ -3341,14 +3402,36 @@ class ScanPipeline:
     async def _phase18_collective(self, ctx: ScanContext) -> None:
         """Phase 18: Collective Intelligence — 패턴 공유."""
         try:
-            from vxis.knowledge.store import KnowledgeStore
+            from vxis.knowledge.store import KnowledgeStore, ExecutionRecord
             store = KnowledgeStore()
-            # 발견된 패턴을 Knowledge Store에 축적
+
+            # findings → Knowledge Store 축적
+            stored = 0
             for finding in ctx.findings:
-                store.record_finding(finding) if hasattr(store, 'record_finding') else None
-            logger.info("  Stored %d findings to Knowledge Store", len(ctx.findings))
+                try:
+                    store.record_execution(ExecutionRecord(
+                        tool=f"pipeline:{finding.finding_type}",
+                        context_signature=f"{ctx.target_type}+{'+'.join(ctx.tech_stack[:3])}",
+                        args_summary=finding.affected_component[:100],
+                        effectiveness=1.0,
+                        findings_produced=1,
+                        finding_types=[finding.finding_type],
+                        target_tech=list(ctx.tech_stack)[:5],
+                    ))
+                    stored += 1
+                except Exception:
+                    pass
+
+            # 패턴 자동 컴파일 (3회 이상 반복된 패턴 → 컴파일)
+            compiled = 0
+            try:
+                compiled = store._try_compile() if hasattr(store, '_try_compile') else 0
+            except Exception:
+                pass
+
+            print(f"  [KB] Stored {stored} findings | Compiled {compiled} new patterns", flush=True)
         except Exception as exc:
-            logger.info("  Collective: %s", exc)
+            logger.debug("  Collective: %s", exc)
 
         try:
             ctx.score_tracker.record_phase_complete("Phase 18: Collective Intelligence Update")

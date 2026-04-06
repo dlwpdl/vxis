@@ -268,6 +268,18 @@ def _convert_finding_records(records) -> list:
 @app.command()
 def scan(
     target: str = typer.Argument(help="Target URL or domain"),
+    profile: str = typer.Option(
+        "standard",
+        "--profile",
+        "-p",
+        help="Scan profile: stealth | standard | aggressive",
+    ),
+    ghost: bool = typer.Option(
+        False,
+        "--ghost",
+        "-g",
+        help="Ghost mode — 프록시 로테이션 + UA 위장 + 타이밍 지연",
+    ),
     output: Optional[Path] = typer.Option(
         None,
         "--output",
@@ -315,8 +327,12 @@ def scan(
     param_table = Table.grid(padding=(0, 2))
     param_table.add_column(style="bold", no_wrap=True)
     param_table.add_column()
+    _profile_styles = {"stealth": "yellow", "standard": "green", "aggressive": "red"}
+    _pstyle = _profile_styles.get(profile, "white")
     param_table.add_row("Target:", f"[cyan]{target}[/cyan]")
+    param_table.add_row("Profile:", f"[{_pstyle}]{profile}[/{_pstyle}]")
     param_table.add_row("Brain:", "[yellow]Claude Code (Interactive)[/yellow]" if interactive else "[green]AgentBrain (LLM API)[/green]")
+    param_table.add_row("Ghost:", "[magenta]ON[/magenta]" if ghost else "[dim]OFF[/dim]")
     param_table.add_row("Version:", f"v{VERSION}")
     if resume:
         param_table.add_row("Resume:", f"[yellow]{resume}[/yellow]")
@@ -332,9 +348,24 @@ def scan(
             from vxis.agent.brain import AgentBrain
             brain = AgentBrain()
 
-        pipeline = ScanPipeline(brain=brain)
+        # Config에 profile + ghost 반영
+        config = None
+        try:
+            from vxis.config.schema import VXISConfig
+            config = VXISConfig()
+            config.active_profile = profile
+            if ghost:
+                import os
+                os.environ.setdefault("VXIS_GHOST", "1")
+        except Exception:
+            pass
+
+        # Ghost mode: ghost:// prefix로 활성화
+        _target = f"ghost://{target}" if ghost and not target.startswith("ghost://") else target
+
+        pipeline = ScanPipeline(brain=brain, config=config)
         ctx = await pipeline.run(
-            target=target,
+            target=_target,
             resume_from=resume,
         )
         return ctx
