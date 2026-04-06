@@ -340,9 +340,10 @@ jobs:
                   subprocess.run(["git", "config", "user.email", "vxis-growth@users.noreply.github.com"], check=False)
                   subprocess.run(["git", "add", "src/"], check=False)
                   msg = (
-                      f"feat(growth): improve {weakest_dim} +{score_delta:.1f}pt "
+                      f"feat(growth): auto-merge {weakest_dim} +{score_delta:.1f}pt "
                       f"[iter {iteration}]\n\n"
-                      f"Autonomous growth loop — dimension: {_DIM_KO.get(weakest_dim, weakest_dim)}"
+                      f"Autonomous growth loop — verified ≥{MIN_IMPROVEMENT}pt improvement\n"
+                      f"Dimension: {_DIM_KO.get(weakest_dim, weakest_dim)}"
                   )
                   result = subprocess.run(
                       ["git", "commit", "-m", msg],
@@ -458,8 +459,8 @@ jobs:
                           verify_score = verify_result.get("total", 0.0)
                           verify_delta = verify_score - current_best
 
-                          if verify_delta >= MIN_IMPROVEMENT / 2:
-                              print(f"  [KEEP] +{verify_delta:.1f}점 개선 확인 → 커밋")
+                          if verify_delta >= MIN_IMPROVEMENT:
+                              print(f"  [KEEP] +{verify_delta:.1f}점 개선 확인 (≥{MIN_IMPROVEMENT}) → main 자동 머지")
                               commit_improvement(weakest_dim, iteration, verify_delta)
                               iter_log["action"] = f"improved_{weakest_dim}"
                               iter_log["code_improved"] = True
