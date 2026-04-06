@@ -42,13 +42,18 @@ class ScanLiveDisplay:
         self.ghost = ghost
         self.version = version
 
-        self.phases: list[dict] = []  # [{id, name, status, duration, findings}]
+        self.phases: list[dict] = []
         self.current_phase: str | None = None
-        self.attack_feed: deque = deque(maxlen=8)  # recent 8 attacks
-        self.hit_feed: deque = deque(maxlen=5)     # recent 5 hits
+        self.current_vector: str | None = None
+        self.current_reasoning: str = ""
+        self.attack_feed: deque = deque(maxlen=6)
+        self.hit_feed: deque = deque(maxlen=4)
+        self.chains: dict[str, dict] = {}  # chain_id → {origin, steps, current_level}
+        self.current_chain: str | None = None
         self.findings_count = {"critical": 0, "high": 0, "medium": 0, "low": 0, "informational": 0}
         self.total_findings = 0
         self.total_attacks = 0
+        self.total_chains = 0
         self.start_time = time.monotonic()
         self.score: dict | None = None
         self.last_error: str | None = None
@@ -100,20 +105,61 @@ class ScanLiveDisplay:
             vector = data.get("vector_id", "?")
             method = data.get("method", "?")
             endpoint = data.get("endpoint", "?")
-            _ep = endpoint[-40:] if len(endpoint) > 40 else endpoint
+            _ep = endpoint[-38:] if len(endpoint) > 38 else endpoint
             self.attack_feed.append(f"[dim]▶[/dim] [cyan]{vector:<18}[/cyan] [yellow]{method:<5}[/yellow] {_ep}")
             self.total_attacks += 1
+            self.current_vector = vector
 
         elif event_type == "hit":
             vector = data.get("vector_id", "?")
             level = data.get("level")
             conf = data.get("confidence", "")
-            hint = data.get("hint", "")[:40]
+            hint = data.get("hint", "")[:35]
             level_str = f"L{level}" if level else ""
-            hit_line = f"[bold red]!! HIT[/bold red] [cyan]{vector}[/cyan] {level_str} [{conf}]"
+            hit_line = f"[bold red]!![/bold red] [cyan]{vector}[/cyan] {level_str} [{conf}]"
             if hint:
                 hit_line += f" → [dim]{hint}[/dim]"
             self.hit_feed.append(hit_line)
+
+        elif event_type == "brain_thinking":
+            phase = data.get("phase", "?")
+            count = data.get("vector_count", 0)
+            vectors = data.get("vectors", [])
+            # 첫 벡터의 reasoning을 표시
+            if vectors:
+                first = vectors[0]
+                self.current_vector = first.get("id", "")
+                self.current_reasoning = first.get("reasoning", "")[:80]
+
+        elif event_type == "chain_start":
+            chain_id = data.get("chain_id", "?")
+            ftype = data.get("finding_type", "?")
+            endpoint = data.get("endpoint", "?")[-30:]
+            vector = data.get("vector_id", "?")
+            self.chains[chain_id] = {
+                "origin_type": ftype,
+                "origin_endpoint": endpoint,
+                "origin_vector": vector,
+                "steps": [],
+                "max_level": 1,
+            }
+            self.current_chain = chain_id
+            self.total_chains += 1
+
+        elif event_type == "chain_step":
+            chain_id = data.get("chain_id", "?")
+            if chain_id in self.chains:
+                step = {
+                    "vector": data.get("vector_id", "?"),
+                    "endpoint": data.get("endpoint", "?")[-30:],
+                    "level": data.get("level", 0),
+                    "reasoning": data.get("reasoning", "")[:60],
+                }
+                self.chains[chain_id]["steps"].append(step)
+                self.chains[chain_id]["max_level"] = max(
+                    self.chains[chain_id]["max_level"],
+                    step["level"],
+                )
 
         elif event_type == "score":
             self.score = data
@@ -176,6 +222,23 @@ class ScanLiveDisplay:
             border_style="blue",
         )
 
+    def _render_brain_thinking(self) -> Panel:
+        """현재 Brain이 무엇을 시도 중인지 표시."""
+        if self.current_vector or self.current_reasoning:
+            content_parts = []
+            if self.current_vector:
+                content_parts.append(f"[bold cyan]Vector:[/bold cyan] {self.current_vector}")
+            if self.current_reasoning:
+                content_parts.append(f"[bold]Reasoning:[/bold] [italic]{self.current_reasoning}[/italic]")
+            content = "\n".join(content_parts)
+        else:
+            content = "[dim]Brain analyzing target...[/dim]"
+        return Panel(
+            content,
+            title="[bold magenta]🧠 Brain Thinking[/bold magenta]",
+            border_style="magenta",
+        )
+
     def _render_attack_feed(self) -> Panel:
         lines = list(self.attack_feed) if self.attack_feed else ["[dim]waiting for attacks...[/dim]"]
         content = "\n".join(lines)
@@ -183,6 +246,39 @@ class ScanLiveDisplay:
             content,
             title=f"[bold]Live Attacks[/bold] [dim](total: {self.total_attacks})[/dim]",
             border_style="yellow",
+        )
+
+    def _render_chains(self) -> Panel:
+        """공격 체인 진행 상황 — 각 체인의 단계를 트리 형태로."""
+        if not self.chains:
+            return Panel(
+                "[dim]No chains yet — chains build when findings are exploited[/dim]",
+                title=f"[bold]🔗 Attack Chains[/bold] [dim]({self.total_chains})[/dim]",
+                border_style="blue",
+            )
+
+        # 최근 2개 체인만 표시
+        recent_chains = list(self.chains.items())[-2:]
+        lines = []
+        for chain_id, chain in recent_chains:
+            origin = chain["origin_type"][:15]
+            ep = chain["origin_endpoint"]
+            max_lvl = chain["max_level"]
+            level_color = {4: "bold red", 3: "red", 2: "yellow", 1: "white"}.get(max_lvl, "dim")
+            lines.append(f"[{level_color}]◉[/{level_color}] [cyan]{origin}[/cyan] [dim]{ep}[/dim] [bold]L{max_lvl}[/bold]")
+            for i, step in enumerate(chain["steps"][:3]):
+                prefix = "└─" if i == len(chain["steps"]) - 1 else "├─"
+                lvl_c = {4: "bold red", 3: "red", 2: "yellow", 1: "white"}.get(step["level"], "dim")
+                lines.append(f"  {prefix} [{lvl_c}]L{step['level']}[/{lvl_c}] [cyan]{step['vector'][:14]}[/cyan] [dim]{step['endpoint']}[/dim]")
+                if step.get("reasoning"):
+                    lines.append(f"      [italic dim]{step['reasoning'][:50]}[/italic dim]")
+            if len(chain["steps"]) > 3:
+                lines.append(f"  [dim]... +{len(chain['steps']) - 3} more steps[/dim]")
+        content = "\n".join(lines) if lines else "[dim]building chains...[/dim]"
+        return Panel(
+            content,
+            title=f"[bold]🔗 Attack Chains[/bold] [dim]({self.total_chains})[/dim]",
+            border_style="blue",
         )
 
     def _render_hits(self) -> Panel:
@@ -240,11 +336,18 @@ class ScanLiveDisplay:
             Layout(self._render_footer(), size=3, name="footer"),
         )
         layout["main"].split_row(
-            Layout(self._render_phases(), name="phases"),
-            Layout(name="right"),
+            Layout(self._render_phases(), name="phases", ratio=2),
+            Layout(name="center", ratio=3),
+            Layout(name="right", ratio=2),
         )
-        layout["right"].split(
+        # Center column: Brain thinking + Attack feed + Chains
+        layout["center"].split(
+            Layout(self._render_brain_thinking(), size=5, name="thinking"),
             Layout(self._render_attack_feed(), name="attacks"),
+            Layout(self._render_chains(), name="chains"),
+        )
+        # Right column: Hits + Findings
+        layout["right"].split(
             Layout(self._render_hits(), name="hits"),
             Layout(self._render_findings(), size=11, name="findings"),
         )

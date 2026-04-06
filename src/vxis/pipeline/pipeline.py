@@ -965,7 +965,14 @@ class ScanPipeline:
             print(f"  {phase_key}: 0 vectors to attack", flush=True)
             return
 
-        print(f"  {phase_key}: Brain attacking {len(active_decisions)} vectors...", flush=True)
+        self._emit("brain_thinking", {
+            "phase": phase_key,
+            "vector_count": len(active_decisions),
+            "vectors": [{"id": vid, "reasoning": d.get("reasoning", "")[:100]}
+                        for vid, d in list(active_decisions.items())[:5]],
+        })
+        if not self._event_callback:
+            print(f"  {phase_key}: Brain attacking {len(active_decisions)} vectors...", flush=True)
 
         # Hands(SessionManager) 획득 — ctx에 이미 인증된 세션이 있으면 재사용
         try:
@@ -1255,7 +1262,15 @@ class ScanPipeline:
             final_impact="Escalated access via chained exploit|||체이닝 익스플로잇을 통한 권한 상승",
         )
 
-        print(f"      >> CHAIN starting from {ftype} on {endpoint[-45:]}", flush=True)
+        self._emit("chain_start", {
+            "finding_type": ftype,
+            "finding_id": fid,
+            "endpoint": endpoint,
+            "chain_id": chain_id,
+            "vector_id": vector_id,
+        })
+        if not self._event_callback:
+            print(f"      >> CHAIN starting from {ftype} on {endpoint[-45:]}", flush=True)
 
         # Step 1: 최초 finding을 체인의 첫 단계로 등록
         chain.steps.append(ChainStep(
@@ -1322,7 +1337,16 @@ class ScanPipeline:
                                             description_en=_rsn[:120],
                                             description_ko=_rsn[:120],
                                         ))
-                                        print(f"      >> CHAIN L{_lvl} hit: {_vid} on {_ep[-40:]}", flush=True)
+                                        self._emit("chain_step", {
+                                            "chain_id": chain_id,
+                                            "vector_id": _vid,
+                                            "endpoint": _ep,
+                                            "level": _lvl,
+                                            "reasoning": _rsn[:80],
+                                            "step_index": len(chain.steps),
+                                        })
+                                        if not self._event_callback:
+                                            print(f"      >> CHAIN L{_lvl} hit: {_vid} on {_ep[-40:]}", flush=True)
                                         # 재귀 체이닝 — 새 finding에서 다시 체인 (max depth 3)
                                         if _depth < 3:
                                             await self._chain_from_finding(
