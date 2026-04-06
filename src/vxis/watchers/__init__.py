@@ -1,4 +1,4 @@
-"""VXIS Watchers — 11개 24/7 실시간 위협 감시 데몬.
+"""VXIS Watchers — 24/7 실시간 위협 감시 데몬.
 
 워처 목록:
     1. dark_web_intel      — 다크웹 인텔리전스 (IntelX, Paste, GitHub)
@@ -10,6 +10,7 @@
     7. infra_drift         — 인프라 변화 (포트/DNS/헤더)
     8. brand_impersonation — 브랜드 사칭 (유사 도메인)
     9. threat_actor        — 위협 행위자 (MITRE ATT&CK, CISA KEV)
+   10. threat_news         — 보안 뉴스 피드 (Security Affairs, Bleeping, Hacker News 등 9곳)
 """
 
 # BaseWatcher 기반 워처 자동 등록 — 임포트 시 @register_watcher 데코레이터 실행
@@ -22,3 +23,4 @@ from . import supply_chain  # noqa: F401
 from . import infra_drift  # noqa: F401
 from . import brand_impersonation  # noqa: F401
 from . import threat_actor  # noqa: F401
+from . import threat_news  # noqa: F401
