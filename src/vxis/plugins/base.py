@@ -55,6 +55,35 @@ class BasePlugin(ABC):
         """Check if the tool binary is available on the system."""
         return shutil.which(self.meta.tool_binary) is not None
 
+    def detect_version(self) -> str:
+        """Detect installed tool version at runtime.
+
+        Tries `tool --version`, `tool -v`, `tool version` and extracts
+        the first version-like string (e.g. 1.2.3).
+        Returns "—" if not installed or detection fails.
+        """
+        import re
+        import subprocess
+
+        binary = self.meta.tool_binary
+        if not shutil.which(binary):
+            return "—"
+
+        for flag in ["--version", "-v", "version", "-V"]:
+            try:
+                result = subprocess.run(
+                    [binary, flag],
+                    capture_output=True, text=True, timeout=5,
+                )
+                output = (result.stdout + result.stderr).strip()
+                # 버전 패턴: 1.2.3, v1.2.3, 1.2.3-beta 등
+                match = re.search(r"v?(\d+\.\d+[\.\d]*[-\w]*)", output)
+                if match:
+                    return match.group(1)
+            except Exception:
+                continue
+        return "?"
+
     def get_timeout(self, scan_profile: str) -> int:
         """Get timeout adjusted for scan profile."""
         multipliers = {
