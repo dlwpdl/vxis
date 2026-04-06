@@ -109,6 +109,9 @@ def discover_plugins(
                 continue
 
             if plugin_name in registry:
+                # 같은 클래스가 __init__.py re-export로 중복 발견된 경우 → 무시
+                if type(registry[plugin_name]) is cls:
+                    continue
                 logger.warning(
                     "Duplicate plugin name '%s' (new: %s, existing: %s). "
                     "Overwriting with the most recently discovered class.",
