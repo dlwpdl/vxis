@@ -2826,9 +2826,8 @@ class ScanPipeline:
             pass
 
         try:
-            from vxis.agent.agents import get_agent_registry
-            registry = get_agent_registry()
-            available = list(registry.keys()) if isinstance(registry, dict) else []
+            from vxis.agent.registry import _REGISTRY, list_agents
+            available = list_agents()
             logger.info("  Available agents: %d", len(available))
 
             # Brain이 타깃 프로필 기반으로 에이전트 선택
@@ -3130,7 +3129,7 @@ class ScanPipeline:
             pass
 
     async def _phase12_evolution(self, ctx: ScanContext) -> None:
-        """Phase 12: Self-Evolving — 커버리지 갭 분석."""
+        """Phase 12: Self-Evolving — 커버리지 갭 분석 + Knowledge Store에 결과 축적."""
         try:
             # Phase 12 대응 벡터: Rate Limiting
             ctx.score_tracker.record_vector_attempt("WEB-API-002")
@@ -3141,7 +3140,28 @@ class ScanPipeline:
             from vxis.evolution.agent_synthesizer import AgentSynthesizer
             synth = AgentSynthesizer()
             gaps = synth.analyze_gaps(ctx.findings) if hasattr(synth, 'analyze_gaps') else []
+            ctx.coverage_gaps = gaps  # 갭 분석 결과를 ctx에 보존
             logger.info("  Coverage gaps identified: %d", len(gaps))
+
+            # 갭 정보를 Knowledge Store에 축적 → 다음 스캔에서 활용
+            if gaps:
+                try:
+                    from vxis.knowledge.store import KnowledgeStore, ExecutionRecord
+                    store = KnowledgeStore()
+                    for gap in gaps:
+                        gap_desc = str(gap) if not hasattr(gap, 'description') else gap.description
+                        store.record_execution(ExecutionRecord(
+                            tool="evolution_gap_analysis",
+                            context_signature=f"gap+{ctx.target_type or 'web'}",
+                            args_summary=gap_desc[:200],
+                            effectiveness=0.0,  # 갭 = 효과 없던 영역
+                            findings_produced=0,
+                            finding_types=[],
+                            target_tech=list(ctx.tech_stack)[:5],
+                        ))
+                    logger.info("  Stored %d gaps to Knowledge Store", len(gaps))
+                except Exception as store_exc:
+                    logger.debug("  Knowledge Store gap storage: %s", store_exc)
         except Exception as exc:
             logger.info("  Self-Evolution: %s", exc)
 

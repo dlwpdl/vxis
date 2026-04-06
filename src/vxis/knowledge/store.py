@@ -355,6 +355,44 @@ class KnowledgeStore:
                 self._save()
                 return
 
+    # ── Finding Recording ────────────────────────────────────────
+
+    def record_finding(self, finding: Any) -> None:
+        """취약점 Finding을 ExecutionRecord로 변환하여 지식 축적.
+
+        Finding의 source_plugin, finding_type, severity 등을
+        KnowledgeStore의 패턴 컴파일 시스템에 태운다.
+        다음 스캔 시 동일 tech_stack에서 효과적인 도구/벡터를 추천 가능.
+        """
+        # Finding → ExecutionRecord 변환
+        source = getattr(finding, "source_plugin", "unknown")
+        ftype = getattr(finding, "finding_type", "vulnerability")
+        severity = getattr(finding, "severity", None)
+        sev_str = severity.value if hasattr(severity, "value") else str(severity or "")
+        target = getattr(finding, "target", "")
+        component = getattr(finding, "affected_component", "")
+
+        # effectiveness: severity 기반 (critical=1.0, high=0.8, medium=0.5, low=0.3, info=0.1)
+        sev_score = {
+            "critical": 1.0, "high": 0.8, "medium": 0.5,
+            "low": 0.3, "informational": 0.1,
+        }.get(sev_str, 0.3)
+
+        # context_signature: target의 tech_stack 또는 component 기반
+        ctx_parts = [p for p in [source, component, ftype] if p]
+        context_sig = "+".join(ctx_parts) if ctx_parts else source
+
+        record = ExecutionRecord(
+            tool=source,
+            context_signature=context_sig,
+            args_summary=f"{ftype}:{sev_str}",
+            effectiveness=sev_score,
+            findings_produced=1,
+            finding_types=[ftype],
+            target_tech=[component] if component else [],
+        )
+        self.record_execution(record)
+
     # ── Correlation Learning ─────────────────────────────────────
 
     def _learn_correlation(self, record: ExecutionRecord) -> None:
