@@ -86,6 +86,83 @@ def _app_callback(ctx: typer.Context) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Help — 전체 사용법 가이드
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def help() -> None:
+    """VXIS 전체 사용법 가이드 — 스캔, 리포트, 타겟, 벤치마크."""
+    _print_banner()
+
+    from rich.markdown import Markdown
+
+    guide = """
+## 스캔
+
+```bash
+# 벤치마크 스캔 (스코어링 + HTML 리포트 자동 생성)
+python tools/growth_loop_runner.py --targets mutillidae --iterations 1
+
+# 여러 타겟
+python tools/growth_loop_runner.py --targets dvwa,juice-shop,webgoat --iterations 1
+
+# 시간 제한 (KST 06시까지 반복)
+python tools/growth_loop_runner.py --targets dvwa --until 06:00
+
+# CLI 직접 스캔
+vxis scan http://localhost:8081
+vxis agent-scan http://localhost:8081   # AI 자율 풀오토
+```
+
+## 리포트
+
+```bash
+vxis report <SCAN_ID> -o reports/output.html
+```
+
+## 타겟 앱 (Docker)
+
+```bash
+docker run -d --name dvwa -p 8081:80 vulnerables/web-dvwa
+docker run -d --name juice-shop -p 3000:3000 bkimminich/juice-shop
+docker run -d --name webgoat -p 8888:8080 webgoat/webgoat
+docker run -d --name mutillidae -p 8082:80 citizenstig/nowasp
+docker run -d --name bwapp -p 8083:80 raesene/bwapp
+docker run -d --name dvga -p 5013:5013 dolevf/dvga
+# NodeGoat (MongoDB 필요)
+docker start nodegoat-mongo && docker start vxis-nodegoat
+```
+
+## 등록된 벤치마크 타겟
+
+| 이름 | 포트 | 특화 |
+|------|------|------|
+| dvwa | 8081 | OWASP Top 10 기본 |
+| juice-shop | 3000 | 현대적 웹앱 |
+| webgoat | 8888 | 학습용 취약점 |
+| nodegoat | 4000 | Node.js 취약점 |
+| mutillidae | 8082 | OWASP Top 10 풀커버 |
+| bwapp | 8083 | 100+ 취약점 |
+| dvga | 5013 | GraphQL 특화 |
+| crapi | 8025 | API 보안 (compose 필요) |
+
+## 기타 명령어
+
+```bash
+vxis plugins          # 플러그인 목록
+vxis setup            # 도구 설치 현황
+vxis diff <ID1> <ID2> # 두 스캔 비교
+vxis trend '*'        # 전체 타겟 점수 추이
+vxis dashboard        # 웹 대시보드
+vxis kb               # 취약점 지식베이스
+vxis version          # 버전 정보
+```
+"""
+    console.print(Markdown(guide))
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
