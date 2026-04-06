@@ -194,6 +194,111 @@ _scan_store: dict[str, dict[str, Any]] = {}
 
 
 # ---------------------------------------------------------------------------
+# MCP Progress Notification — 실시간 스캔 진행 피드백
+#
+# MCP 프로토콜의 notifications/progress를 사용하여 스캔 중간 상태를 전달.
+# claude.ai / Claude Code 모두 이 notification을 수신하여 유저에게 표시.
+# ---------------------------------------------------------------------------
+
+def _emit_progress(progress_token: str, progress: float, total: float, message: str) -> None:
+    """MCP notifications/progress를 stdout으로 전송 (JSON-RPC notification, id 없음)."""
+    notification = {
+        "jsonrpc": "2.0",
+        "method": "notifications/progress",
+        "params": {
+            "progressToken": progress_token,
+            "progress": progress,
+            "total": total,
+            "message": message,
+        },
+    }
+    try:
+        sys.stdout.write(json.dumps(notification, default=str) + "\n")
+        sys.stdout.flush()
+    except Exception:
+        pass  # stdout 오류 시 progress는 무시 (스캔은 계속)
+
+
+class MCPProgressEmitter:
+    """ScanEventBus 이벤트 → MCP progress notification 변환기.
+
+    ScanEventBus.on_any()로 등록하여, 이벤트 발생 시 자동으로
+    MCP progress notification을 stdout으로 전송.
+    """
+
+    def __init__(self, progress_token: str, total_phases: int = 14) -> None:
+        self._token = progress_token
+        self._total = total_phases
+        self._completed = 0
+        self._findings = 0
+        self._severity_counts: dict[str, int] = {
+            "critical": 0, "high": 0, "medium": 0, "low": 0, "informational": 0,
+        }
+        self._current_phase = ""
+        self._running_plugins: list[str] = []
+
+    async def handle_event(self, event: Any) -> None:
+        """ScanEventBus 이벤트 수신 → progress notification 전송."""
+        from vxis.core.events import (
+            EventType, NodeEvent, ToolFindingEvent,
+            PipelineEvent, ScanLifecycleEvent,
+        )
+
+        message = ""
+
+        if isinstance(event, ScanLifecycleEvent):
+            if event.event_type == EventType.SCAN_STARTED:
+                message = f"🔍 Scan started: {event.target} ({event.profile})"
+            elif event.event_type == EventType.SCAN_COMPLETED:
+                self._completed = self._total
+                message = (
+                    f"✅ Scan complete: {self._findings} findings "
+                    f"(C:{self._severity_counts['critical']} "
+                    f"H:{self._severity_counts['high']} "
+                    f"M:{self._severity_counts['medium']} "
+                    f"L:{self._severity_counts['low']})"
+                )
+            elif event.event_type == EventType.SCAN_FAILED:
+                message = f"❌ Scan failed: {event.error}"
+
+        elif isinstance(event, NodeEvent):
+            if event.event_type == EventType.NODE_STARTED:
+                self._running_plugins.append(event.plugin_name)
+                message = f"▶ {event.plugin_name} started"
+            elif event.event_type == EventType.NODE_COMPLETED:
+                self._completed += 1
+                if event.plugin_name in self._running_plugins:
+                    self._running_plugins.remove(event.plugin_name)
+                message = (
+                    f"✓ {event.plugin_name} done "
+                    f"({event.finding_count} findings, {event.elapsed_seconds:.1f}s)"
+                )
+            elif event.event_type == EventType.NODE_FAILED:
+                if event.plugin_name in self._running_plugins:
+                    self._running_plugins.remove(event.plugin_name)
+                message = f"✗ {event.plugin_name} failed: {event.error[:80]}"
+
+        elif isinstance(event, ToolFindingEvent):
+            self._findings += 1
+            sev = event.severity.lower()
+            if sev in self._severity_counts:
+                self._severity_counts[sev] += 1
+            message = f"🎯 [{event.severity.upper()}] {event.title}"
+
+        elif isinstance(event, PipelineEvent):
+            self._current_phase = event.stage
+            message = f"📋 {event.stage}: {event.detail}"
+
+        if message:
+            status = (
+                f"[{self._completed}/{self._total}] "
+                f"Findings: {self._findings} | "
+                f"{message}"
+            )
+            _emit_progress(self._token, self._completed, self._total, status)
+
+
+# ---------------------------------------------------------------------------
 # Tool handlers
 # ---------------------------------------------------------------------------
 
@@ -210,18 +315,29 @@ async def _handle_vxis_scan(args: dict[str, Any]) -> dict[str, Any]:
     # Map scan_type to tier (zero_touch = recon-only tier 1)
     tier = 1 if scan_type in ("zero_touch", "passive") else 2
 
+    # Progress notification 초기화
+    progress_token = f"scan-{target}-{datetime.now(timezone.utc).strftime('%H%M%S')}"
+    _emit_progress(progress_token, 0, 14, f"🔍 Starting scan: {target} ({profile})")
+
     try:
         from vxis.config.schema import VXISConfig
         from vxis.core.orchestrator import ScanOrchestrator
 
         config = VXISConfig()
         orchestrator = ScanOrchestrator(config)
+
+        # Event bus에 MCP progress emitter 연결
+        progress_emitter = MCPProgressEmitter(progress_token)
+        if hasattr(orchestrator, 'event_bus') and orchestrator.event_bus is not None:
+            orchestrator.event_bus.on_any(progress_emitter.handle_event)
+
         result = await orchestrator.run_scan(
             target=target,
             profile=profile,
             tier=tier,
         )
     except Exception as exc:
+        _emit_progress(progress_token, 0, 14, f"❌ Scan failed: {exc}")
         raise RuntimeError(f"Scan failed: {exc}") from exc
 
     # Cache findings for vxis_results
@@ -519,14 +635,25 @@ async def _handle_vxis_agent_scan(args: dict[str, Any]) -> dict[str, Any]:
     if max_steps < 1 or max_steps > 50:
         raise ValueError("'max_steps' must be between 1 and 50.")
 
+    # Progress notification 초기화
+    progress_token = f"agent-{target}-{datetime.now(timezone.utc).strftime('%H%M%S')}"
+    _emit_progress(progress_token, 0, max_steps, f"🤖 Agent scan started: {target}")
+
     try:
         from vxis.config.schema import VXISConfig
         from vxis.agent.executor import AgentExecutor
 
         config = VXISConfig()
         executor = AgentExecutor(config=config, max_steps=max_steps)
+
+        # Agent executor에 progress callback 연결
+        if hasattr(executor, 'event_bus') and executor.event_bus is not None:
+            emitter = MCPProgressEmitter(progress_token, total_phases=max_steps)
+            executor.event_bus.on_any(emitter.handle_event)
+
         result = await executor.run(target=target, profile=profile)
     except Exception as exc:
+        _emit_progress(progress_token, 0, max_steps, f"❌ Agent scan failed: {exc}")
         raise RuntimeError(f"Agent scan failed: {exc}") from exc
 
     serialised_findings = [_serialise_finding(f) for f in result.findings]
@@ -651,6 +778,7 @@ async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 "protocolVersion": MCP_VERSION,
                 "capabilities": {
                     "tools": {"listChanged": False},
+                    "notifications": {"progress": True},
                 },
                 "serverInfo": {
                     "name": SERVER_NAME,
