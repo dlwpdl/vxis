@@ -299,13 +299,23 @@ class ScanPipeline:
         config: Any | None = None,
         enable_deferred_approval: bool = True,
         approval_callback: Callable[[list], Awaitable[list[bool]]] | None = None,
+        event_callback: Callable[[str, dict], None] | None = None,
     ) -> None:
         self.brain = brain
         self.config = config
         self.enable_deferred_approval = enable_deferred_approval
-        # approval_callback: deferred actions 리스트를 받아서 bool 리스트 반환
-        # None이면 stdout/stdin으로 대화형 승인
         self._approval_callback = approval_callback
+        # event_callback: (event_type, data) 수신. CLI Rich Live 등 subscribe 용도.
+        # Events: phase_start, phase_end, attack, hit, brain_thinking, error, score
+        self._event_callback = event_callback
+
+    def _emit(self, event_type: str, data: dict) -> None:
+        """이벤트 발생 — 등록된 callback에 전달."""
+        if self._event_callback:
+            try:
+                self._event_callback(event_type, data)
+            except Exception:
+                pass
 
     async def run(
         self,
@@ -425,8 +435,21 @@ class ScanPipeline:
             engine = ScoringEngine(ctx.target_type)
             vxis_score = engine.calculate(ctx.score_tracker, ctx.findings, scan_id=ctx.scan_id)
             ctx.vxis_score = vxis_score
-            print(vxis_score.summary_text(), flush=True)
+            self._emit("score", {
+                "total": vxis_score.total,
+                "grade": vxis_score.grade,
+                "dimensions": {
+                    "vector_coverage": vxis_score.vector_coverage.score,
+                    "exploitation_reach": vxis_score.exploitation_reach.score,
+                    "chain_intelligence": vxis_score.chain_intelligence.score,
+                    "finding_precision": vxis_score.finding_precision.score,
+                    "completeness": vxis_score.completeness.score,
+                },
+            })
+            if not self._event_callback:
+                print(vxis_score.summary_text(), flush=True)
         except Exception as exc:
+            self._emit("error", {"stage": "scoring", "error": str(exc)})
             logger.warning("  Scoring failed: %s", exc)
 
         # ══════════════════════════════════════════════════════
@@ -463,42 +486,55 @@ class ScanPipeline:
         """
         # Resume 모드: 이미 완료된 Phase는 건너뛰기
         if name in ctx.phases_completed:
-            print(f"\n┌─ {name}\n└─ skipped (checkpoint)", flush=True)
+            self._emit("phase_skip", {"name": name})
+            if not self._event_callback:
+                print(f"\n┌─ {name}\n└─ skipped (checkpoint)", flush=True)
             return
 
-        print(f"\n┌─ {name}", flush=True)
+        self._emit("phase_start", {"name": name})
+        if not self._event_callback:
+            print(f"\n┌─ {name}", flush=True)
+
         t0 = time.monotonic()
         pre_count = len(ctx.findings)
+        phase_failed = False
+        error_msg = ""
 
-        # FileBasedBrain일 때: Phase에 속한 벡터별 Brain 호출
         await self._consult_brain_for_phase_vectors(name, ctx)
 
         try:
             await func(ctx)
         except Exception as exc:
+            phase_failed = True
+            error_msg = str(exc)[:200]
+            self._emit("phase_error", {"name": name, "error": error_msg})
             logger.warning("  %s failed: %s (continuing)", name, exc)
 
-        # Brain decisions → 실제 Hands 공격 실행 (FileBasedBrain 전용)
         await self._execute_brain_decisions(name, ctx)
-
-        # 체인 구축 + TP 마킹 + evidence — 모든 Brain 타입에서 실행
         self._build_chains_and_mark_tp(ctx, name)
-
-        # Exploitation level escalation — 체인에 속한 findings 레벨 상승
         self._escalate_chain_findings(ctx)
 
         elapsed = (time.monotonic() - t0) * 1000
         new_findings = len(ctx.findings) - pre_count
         ctx.log_phase(name, duration_ms=elapsed, findings_count=new_findings)
 
-        status = f"  +{new_findings} findings" if new_findings else "  no new findings"
-        print(f"└─ done ({elapsed/1000:.1f}s){status}", flush=True)
+        self._emit("phase_end", {
+            "name": name,
+            "duration_s": elapsed / 1000,
+            "new_findings": new_findings,
+            "total_findings": len(ctx.findings),
+            "failed": phase_failed,
+            "error": error_msg,
+        })
 
-        # Phase 완료 후 체크포인트 저장
+        if not self._event_callback:
+            status = f"  +{new_findings} findings" if new_findings else "  no new findings"
+            print(f"└─ done ({elapsed/1000:.1f}s){status}", flush=True)
+
         try:
             ctx.save_checkpoint()
         except Exception:
-            pass  # 체크포인트 저장 실패해도 스캔 계속
+            pass
 
     async def _consult_brain_for_phase_vectors(
         self,
@@ -967,7 +1003,14 @@ class ScanPipeline:
                 # 벡터별 실시간 출력
                 _ep_short = endpoint[-45:] if len(endpoint) > 45 else endpoint
                 _json_flag = " [JSON]" if target_spec.get("json_body") else ""
-                print(f"    ▶ {vector_id:18s} {method:4s} {_ep_short}{_json_flag}", flush=True)
+                self._emit("attack", {
+                    "vector_id": vector_id,
+                    "method": method,
+                    "endpoint": endpoint,
+                    "json_body": bool(target_spec.get("json_body")),
+                })
+                if not self._event_callback:
+                    print(f"    ▶ {vector_id:18s} {method:4s} {_ep_short}{_json_flag}", flush=True)
 
                 if not payloads:
                     payloads = [""]  # 빈 페이로드라도 엔드포인트 접근 시도
@@ -1121,14 +1164,29 @@ class ScanPipeline:
                                 )
                                 _brain_level = _interp.get("level", 2)
                                 _hint = _interp.get("escalation_hint", "")[:55]
-                                print(f"      !! HIT  {vector_id} L{_brain_level} [{_interp.get('confidence','?')}]"
-                                      + (f" → {_hint}" if _hint else ""), flush=True)
+                                self._emit("hit", {
+                                    "vector_id": vector_id,
+                                    "endpoint": endpoint,
+                                    "level": _brain_level,
+                                    "confidence": _interp.get("confidence", "?"),
+                                    "hint": _hint,
+                                    "finding_id": new_finding.id if new_finding else None,
+                                })
+                                if not self._event_callback:
+                                    print(f"      !! HIT  {vector_id} L{_brain_level} [{_interp.get('confidence','?')}]"
+                                          + (f" → {_hint}" if _hint else ""), flush=True)
                                 try:
                                     ctx.score_tracker.escalate_level(new_finding.id, _brain_level)
                                 except Exception:
                                     pass
                             else:
-                                print(f"      !! HIT  {vector_id} on {endpoint[-40:]}", flush=True)
+                                self._emit("hit", {
+                                    "vector_id": vector_id,
+                                    "endpoint": endpoint,
+                                    "level": None,
+                                })
+                                if not self._event_callback:
+                                    print(f"      !! HIT  {vector_id} on {endpoint[-40:]}", flush=True)
 
                             # result 기록
                             self.brain.record_result(

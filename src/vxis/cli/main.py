@@ -311,34 +311,66 @@ def scan(
     --interactive: Claude Code가 Brain (stdin/stdout JSON 프로토콜)
     --resume: 이전 스캔의 체크포인트에서 재개
     """
-    log_level = logging.DEBUG if verbose else logging.INFO
+    log_level = logging.DEBUG if verbose else logging.WARNING  # Live TUI 간섭 방지
     if interactive:
         logging.basicConfig(stream=sys.stderr, level=log_level,
                             format="%(asctime)s [%(name)s] %(message)s", datefmt="%H:%M:%S")
     else:
-        logging.basicConfig(level=log_level,
-                            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
+        logging.basicConfig(
+            stream=sys.stderr,  # logger는 stderr로 → Live TUI 간섭 없음
+            level=log_level,
+            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%H:%M:%S",
+        )
 
     _print_banner()
 
-    from vxis.registry import VERSION
+    from vxis.registry import VERSION, WEB_PHASES
+    from vxis.cli.preflight import run_preflight
+    from vxis.cli.scan_display import ScanLiveDisplay
 
-    # Display scan parameters
-    param_table = Table.grid(padding=(0, 2))
-    param_table.add_column(style="bold", no_wrap=True)
-    param_table.add_column()
-    _profile_styles = {"stealth": "yellow", "standard": "green", "aggressive": "red"}
-    _pstyle = _profile_styles.get(profile, "white")
-    param_table.add_row("Target:", f"[cyan]{target}[/cyan]")
-    param_table.add_row("Profile:", f"[{_pstyle}]{profile}[/{_pstyle}]")
-    param_table.add_row("Brain:", "[yellow]Claude Code (Interactive)[/yellow]" if interactive else "[green]AgentBrain (LLM API)[/green]")
-    param_table.add_row("Ghost:", "[magenta]ON[/magenta]" if ghost else "[dim]OFF[/dim]")
-    param_table.add_row("Version:", f"v{VERSION}")
-    if resume:
-        param_table.add_row("Resume:", f"[yellow]{resume}[/yellow]")
-    console.print(Panel(param_table, title="VXIS Scan", border_style="cyan"))
+    # ── Pre-flight checks ──────────────────────────────────
+    console.print("[dim]Running pre-flight checks...[/dim]")
+    pf = run_preflight(target, ghost=ghost)
+
+    pf_table = Table.grid(padding=(0, 2))
+    pf_table.add_column(style="bold", no_wrap=True)
+    pf_table.add_column()
+    _t_status = f"[green]✓ {pf.target_latency_ms:.0f}ms[/green]" if pf.target_reachable else "[red]✗ unreachable[/red]"
+    pf_table.add_row("Target:", f"[cyan]{target}[/cyan] {_t_status}")
+    _b_status = f"[green]✓ {pf.brain_backend}[/green]" if pf.brain_ready else "[red]✗ no Brain[/red]"
+    pf_table.add_row("Brain:", _b_status)
+    _d_status = "[green]✓ available[/green]" if pf.docker_available else "[yellow]⚠ not available[/yellow]"
+    pf_table.add_row("Docker:", _d_status)
+    _g_status = "[green]✓ set[/green]" if pf.github_token else "[yellow]⚠ not set[/yellow]"
+    pf_table.add_row("GitHub Token:", _g_status)
+    if ghost:
+        _p_status = f"[green]✓ {pf.proxy_pool_size} proxies[/green]" if pf.proxy_pool_size else "[yellow]⚠ empty pool (UA only)[/yellow]"
+        pf_table.add_row("Proxy Pool:", _p_status)
+
+    console.print(Panel(pf_table, title="Pre-flight", border_style="cyan"))
+
+    if pf.warnings:
+        for w in pf.warnings:
+            console.print(f"  [yellow]⚠ {w}[/yellow]")
+
+    if pf.errors:
+        for e in pf.errors:
+            err_console.print(f"  [red]✗ {e}[/red]")
+
+    if not pf.can_scan:
+        err_console.print("\n[bold red]Pre-flight failed. Fix errors above and retry.[/bold red]")
+        raise typer.Exit(code=2)
+
+    # ── Live display 준비 ───────────────────────────────────
+    brain_label = "Claude Code" if interactive else pf.brain_backend
+    display = ScanLiveDisplay(console, target, profile, brain_label, ghost, VERSION)
+    display.init_phases(WEB_PHASES)
+
+    ctx = None
 
     async def _run():
+        nonlocal ctx
         from vxis.pipeline.pipeline import ScanPipeline
 
         if interactive:
@@ -348,7 +380,7 @@ def scan(
             from vxis.agent.brain import AgentBrain
             brain = AgentBrain()
 
-        # Config에 profile + ghost 반영
+        # Config
         config = None
         try:
             from vxis.config.schema import VXISConfig
@@ -360,77 +392,124 @@ def scan(
         except Exception:
             pass
 
-        # Ghost mode: ghost:// prefix로 활성화
         _target = f"ghost://{target}" if ghost and not target.startswith("ghost://") else target
 
-        pipeline = ScanPipeline(brain=brain, config=config)
-        ctx = await pipeline.run(
-            target=_target,
-            resume_from=resume,
-        )
-        return ctx
+        # Live refresh 루프 — pipeline 진행 중 주기적 refresh
+        import asyncio as _aio
+
+        async def _refresh_loop():
+            while True:
+                display.refresh()
+                await _aio.sleep(0.25)
+
+        pipeline = ScanPipeline(brain=brain, config=config, event_callback=display.handle_event)
+
+        refresh_task = _aio.create_task(_refresh_loop())
+        try:
+            ctx = await pipeline.run(target=_target, resume_from=resume)
+        finally:
+            refresh_task.cancel()
+            try:
+                await refresh_task
+            except _aio.CancelledError:
+                pass
+
+        # findings severity 카운팅
+        for f in ctx.findings:
+            sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+            display.findings_count[sev] = display.findings_count.get(sev, 0) + 1
+        display.total_findings = len(ctx.findings)
+        display.refresh()
 
     try:
-        ctx = asyncio.run(_run())
+        with display:
+            asyncio.run(_run())
     except KeyboardInterrupt:
         console.print("\n[yellow]Scan interrupted by user[/yellow]")
         raise typer.Exit(code=130)
     except Exception as exc:
-        err_console.print(f"[bold red]Scan failed:[/bold red] {exc}")
+        err_console.print(f"\n[bold red]Scan failed:[/bold red] {exc}")
         if verbose:
             console.print_exception()
         raise typer.Exit(code=1) from exc
 
-    # --- Results summary ---
-    from vxis.models.finding import Severity
+    if ctx is None:
+        err_console.print("[bold red]Scan produced no context[/bold red]")
+        raise typer.Exit(code=1)
+
+    # --- Final Results (Live display 종료 후) ---
+    console.print()  # spacing after live display
+
     severity_order = ["critical", "high", "medium", "low", "informational"]
     severity_styles = {
         "critical": "bold red", "high": "red", "medium": "yellow",
         "low": "blue", "informational": "dim",
     }
 
-    summary_table = Table(
-        title=f"Scan Results — {ctx.scan_id}",
-        show_header=True, header_style="bold", border_style="green",
-    )
-    summary_table.add_column("Severity", style="bold", no_wrap=True)
-    summary_table.add_column("Count", justify="right")
-
-    for sev in severity_order:
-        count = sum(1 for f in ctx.findings if f.severity.value == sev)
-        style = severity_styles.get(sev, "")
-        summary_table.add_row(f"[{style}]{sev.capitalize()}[/{style}]", f"[{style}]{count}[/{style}]")
-
-    console.print(summary_table)
-
-    # Findings detail
+    # Findings detail table
     if ctx.findings:
-        finding_table = Table(title="Findings", show_header=True, header_style="bold dim")
-        finding_table.add_column("ID", no_wrap=True)
-        finding_table.add_column("Severity", no_wrap=True)
-        finding_table.add_column("Title", max_width=60)
-        finding_table.add_column("Component", max_width=30)
+        finding_table = Table(
+            title=f"[bold]Findings — {ctx.scan_id}[/bold]",
+            show_header=True, header_style="bold",
+            border_style="green",
+        )
+        finding_table.add_column("ID", no_wrap=True, width=12)
+        finding_table.add_column("Severity", no_wrap=True, width=10)
+        finding_table.add_column("Title", max_width=55)
+        finding_table.add_column("Component", max_width=30, style="dim")
 
         for f in ctx.findings:
-            sev = f.severity.value.upper()
-            style = severity_styles.get(f.severity.value, "")
-            title = f.title.split("|||")[0][:60]
+            sev_val = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+            sev = sev_val.upper()
+            style = severity_styles.get(sev_val, "")
+            title = f.title.split("|||")[0][:55]
             finding_table.add_row(f.id, f"[{style}]{sev}[/{style}]", title, f.affected_component[:30])
 
         console.print(finding_table)
+    else:
+        console.print(Panel(
+            "[yellow]No findings discovered.[/yellow]\n"
+            "[dim]This could mean: target is well-secured, scan was limited, "
+            "or pre-flight issues prevented full execution.[/dim]",
+            title="No Findings",
+            border_style="yellow",
+        ))
 
     # Score
     vxis_score = getattr(ctx, "vxis_score", None)
     if vxis_score:
-        console.print(f"\n[bold]VXIS Score:[/bold] [cyan]{vxis_score.total:.1f}/1000[/cyan] [{vxis_score.grade}]")
+        score_color = "green" if vxis_score.total >= 700 else ("yellow" if vxis_score.total >= 400 else "red")
+        console.print(
+            f"\n[bold]VXIS Score:[/bold] "
+            f"[{score_color}]{vxis_score.total:.1f}/1000[/{score_color}] "
+            f"[bold]{vxis_score.grade}[/bold]"
+        )
 
-    # Duration
-    console.print(
-        f"\n[bold green]Scan completed[/bold green] in "
-        f"[cyan]{ctx.duration_seconds:.1f}s[/cyan]  |  "
-        f"[bold]{len(ctx.findings)}[/bold] finding(s)  |  "
-        f"{len(ctx.phases_completed)} phases completed"
-    )
+    # Summary line
+    phase_failed = sum(1 for p in display.phases if p["status"] == "failed")
+    summary_parts = [
+        f"[bold green]Scan completed[/bold green]",
+        f"[cyan]{ctx.duration_seconds:.1f}s[/cyan]",
+        f"[bold]{len(ctx.findings)}[/bold] finding(s)",
+        f"{len([p for p in display.phases if p['status'] == 'done'])}/{len(display.phases)} phases",
+    ]
+    if phase_failed:
+        summary_parts.append(f"[red]{phase_failed} failed[/red]")
+    console.print("  |  ".join(summary_parts))
+
+    # Report path (Phase 6이 리포트 생성했으면)
+    if ctx.findings:
+        from urllib.parse import urlparse as _up
+        _safe = _up(target.replace("ghost://", "")).netloc.replace(".", "_") or target.replace("/", "_")
+        _report_path = Path(f"reports/VXIS_Pipeline_{_safe}.html")
+        if _report_path.exists():
+            console.print(f"[dim]Report:[/dim] [underline]{_report_path}[/underline]")
+
+    # Exit code:
+    # 0 = success with findings OR clean target (all phases OK)
+    # 3 = scan completed but some phases failed (degraded)
+    if phase_failed:
+        raise typer.Exit(code=3)
 
 
 @app.command()
