@@ -66,18 +66,27 @@ def check_target_reachable(target: str, timeout: float = 5.0) -> tuple[bool, flo
 def check_brain(interactive: bool = False) -> tuple[str, bool]:
     """Brain 백엔드 상태 체크.
 
-    interactive=True (vxis scan --interactive): InteractiveBrain → claude -p
-    interactive=False (기본): AgentBrain → UPSTREAM_LLM_PROVIDER/MODEL (env-driven)
+    interactive=True (vxis scan --interactive): InteractiveBrain → claude -p (JSON 프로토콜)
+    interactive=False (기본): AgentBrain — 우선순위:
+        1. claude -p subprocess (brain.py:1521 — VXIS_BRAIN=api 가 아니면 항상 시도)
+        2. API key 기반 LLM (TOGETHER/ANTHROPIC/OPENAI/GOOGLE)
     """
     if interactive:
         if shutil.which("claude") is not None:
             return "claude-code", True
         return "claude-code (binary missing)", False
 
-    # AgentBrain path — show the actual provider/model that will run
+    # AgentBrain path — match brain._call_llm() priority order
+    use_api_only = os.environ.get("VXIS_BRAIN", "").lower() == "api"
+
+    # Tier 0: claude -p subprocess (default unless VXIS_BRAIN=api)
+    if not use_api_only and shutil.which("claude") is not None:
+        model = os.environ.get("VXIS_BRAIN_MODEL", "claude-opus-4-6")
+        return f"claude -p ({model})", True
+
+    # Tier 1: API key fallback
     provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "together")
     model = os.environ.get("UPSTREAM_LLM_MODEL", "")
-
     api_key_envs = {
         "anthropic": "ANTHROPIC_API_KEY",
         "together":  "TOGETHER_API_KEY",
@@ -87,7 +96,6 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
     key_env = api_key_envs.get(provider)
     has_key = bool(os.environ.get(key_env)) if key_env else False
 
-    # Fallback: any provider that has a key
     if not has_key:
         for prov, env in api_key_envs.items():
             if os.environ.get(env):
@@ -96,9 +104,9 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
                 break
 
     if not has_key:
-        return "none", False
+        return "none (no claude binary, no API key)", False
 
-    label = f"{provider}" + (f"/{model}" if model else "")
+    label = f"api:{provider}" + (f"/{model}" if model else "")
     return label, True
 
 
