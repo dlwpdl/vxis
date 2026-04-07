@@ -477,8 +477,8 @@ def scan(
             and any(h in _t_lower for h in _BENCHMARK_HOSTS)
         )
 
-        async def _injection_gate(summary: dict) -> bool:
-            """Live TUI를 잠시 멈추고 사용자 y/N 대화."""
+        async def _injection_gate(summary: dict) -> str:
+            """Live TUI를 잠시 멈추고 3-way 선택: full / readonly / deny."""
             # Live 정지
             try:
                 if display._live is not None:
@@ -494,22 +494,28 @@ def scan(
                 f"Frameworks: {', '.join(summary.get('frameworks') or []) or '(none)'}\n"
                 f"Phases to run: {summary.get('phase_count')} "
                 f"(SQLi/XSS/RCE/SSRF/Path/Cmd 등)\n\n"
-                f"[yellow]This will send active attack payloads to the target.\n"
-                f"Only proceed if you OWN this target or have written authorization.[/yellow]",
+                f"[bold]Choose mode:[/bold]\n"
+                f"  [green]R[/green] = [green]read-only[/green] (GET/HEAD probes only; POST/PUT/DELETE go to deferred queue)\n"
+                f"  [yellow]F[/yellow] = [yellow]full[/yellow] (all HTTP methods auto-execute — may MUTATE DATA)\n"
+                f"  [red]N[/red] = [red]deny[/red] (skip injection entirely, recon-only)\n\n"
+                f"[dim]Default is R (safest). F on customer products can DELETE/MODIFY real data.[/dim]",
                 title="VXIS Safety Gate",
                 border_style="red",
             ))
             try:
-                answer = input("Proceed with injection? (yes/N): ").strip().lower()
+                answer = input("Mode? [R]eadonly / [F]ull / [N]o (default R): ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 answer = ""
-            approved = answer in ("y", "yes")
 
-            console.print(
-                f"[{'green' if approved else 'red'}]"
-                f"{'✅ APPROVED — proceeding' if approved else '❌ DENIED — recon-only'}"
-                f"[/]"
-            )
+            if answer in ("f", "full", "yes", "y"):
+                mode = "full"
+                console.print("[yellow]⚠ FULL mode — all methods will auto-execute[/yellow]")
+            elif answer in ("n", "no", "deny"):
+                mode = "deny"
+                console.print("[red]❌ DENIED — recon-only[/red]")
+            else:
+                mode = "readonly"
+                console.print("[green]✅ READ-ONLY mode — GET/HEAD only; mutations deferred to end-of-scan approval[/green]")
             console.print()
 
             # Live 재시작
@@ -517,13 +523,76 @@ def scan(
                 display.__enter__()
             except Exception:
                 pass
-            return approved
+            return mode
+
+        async def _deferred_approval(actions: list) -> list[bool]:
+            """Per-action y/N prompt for data-mutating operations.
+
+            Pauses the Live TUI, shows each queued action with risk level,
+            method, URL and payload, and returns a list of booleans aligned
+            with the input list.
+            """
+            try:
+                if display._live is not None:
+                    display._live.stop()
+            except Exception:
+                pass
+
+            console.print()
+            console.print(Panel.fit(
+                f"[bold yellow]⚠ DATA-MUTATING ACTIONS — PER-ACTION APPROVAL[/bold yellow]\n\n"
+                f"Brain queued [cyan]{len(actions)}[/cyan] requests that would "
+                f"mutate data (POST/PUT/PATCH/DELETE).\n"
+                f"You will be asked to approve each one individually.\n\n"
+                f"[dim]Press Enter (or n) to DENY — safe default.[/dim]",
+                title="Deferred Action Approval",
+                border_style="yellow",
+            ))
+
+            approvals: list[bool] = []
+            for action in actions:
+                risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(action.risk, "⚪")
+                console.print(
+                    f"\n  {risk_icon} [bold]#{action.id}[/bold] "
+                    f"[{action.risk.upper()}] "
+                    f"[cyan]{action.method}[/cyan] "
+                    f"{action.url}"
+                )
+                console.print(f"     [dim]{action.description_en[:140]}[/dim]")
+                if action.data:
+                    import json as _j
+                    data_preview = _j.dumps(action.data, ensure_ascii=False)[:200]
+                    console.print(f"     [dim]data:[/dim] {data_preview}")
+
+                try:
+                    answer = input("     Approve? (y/N): ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    answer = ""
+                ok = answer in ("y", "yes")
+                approvals.append(ok)
+                console.print(
+                    f"     [{'green' if ok else 'red'}]"
+                    f"{'✅ APPROVED' if ok else '❌ DENIED'}[/]"
+                )
+
+            _apv = sum(approvals)
+            console.print(
+                f"\n[bold]Summary:[/bold] {_apv}/{len(actions)} approved, "
+                f"{len(actions) - _apv} denied\n"
+            )
+
+            try:
+                display.__enter__()
+            except Exception:
+                pass
+            return approvals
 
         pipeline = ScanPipeline(
             brain=brain,
             config=config,
             event_callback=display.handle_event,
             injection_approval_callback=_injection_gate,
+            approval_callback=_deferred_approval,
             auto_approve_injection=_is_benchmark,
         )
 

@@ -736,7 +736,14 @@ class ScanPipeline:
         # exploitation/chain stage 전체 skip.
         self._injection_approval_callback = injection_approval_callback
         self._auto_approve_injection = auto_approve_injection
-        self._injection_approved: bool | None = None  # tri-state: None=not asked
+        # Injection mode (safer semantics than a plain bool):
+        #   None       — gate not yet asked
+        #   "full"     — all methods auto-execute (aggressive)
+        #   "readonly" — only GET/HEAD auto-execute, mutations queue to deferred
+        #   "deny"     — no injection at all
+        self._injection_mode: str | None = None
+        # Legacy alias so existing checks (if any) still work:
+        self._injection_approved: bool | None = None
 
     def _emit(self, event_type: str, data: dict) -> None:
         """이벤트 발생 — 등록된 callback에 전달 (thread-safe)."""
@@ -774,18 +781,57 @@ class ScanPipeline:
         category = (getattr(vector, "category", "") or "").lower()
         return category in cls._INJECTION_CATEGORIES
 
+    @staticmethod
+    def _is_safe_auth_probe(endpoint: str, method: str, target_spec: dict) -> bool:
+        """True if a POST is a harmless login probe that doesn't mutate data.
+
+        Used in readonly injection mode to allow `POST /login` style probes
+        (which only create short-lived sessions if successful) while still
+        deferring `POST /register`, `POST /api/users`, `PUT /profile`, etc.
+
+        Conservative whitelist — we only unlock methods+paths that are
+        known-idempotent (login attempts, token refresh, logout).
+        """
+        if method not in ("POST",):
+            return False
+        ep = (endpoint or "").lower()
+        # Paths that are safe to probe because they either return a session
+        # cookie (login) or invalidate one (logout) — no persistent mutation
+        safe_path_tokens = (
+            "/login", "/signin", "/sign-in", "/auth/login", "/oauth/token",
+            "/logout", "/signout", "/sign-out", "/session",
+            "/token", "/refresh", "/_stcore",
+        )
+        if not any(tok in ep for tok in safe_path_tokens):
+            return False
+        # Paths that look like mutation even if they contain a safe token
+        mutation_tokens = (
+            "/register", "/signup", "/sign-up", "/create", "/delete",
+            "/update", "/modify", "/admin", "/users/new", "/profile",
+        )
+        if any(tok in ep for tok in mutation_tokens):
+            return False
+        return True
+
     async def _request_injection_approval(self, ctx: ScanContext) -> bool:
         """인젝션 단계 진입 전 사용자 승인 게이트.
 
-        Returns True if injection may proceed, False if it must be skipped.
-        Decision is cached on self._injection_approved so the gate only fires once.
-        """
-        if self._injection_approved is not None:
-            return self._injection_approved
+        Three-way decision stored on self._injection_mode:
+          "full"     → all HTTP methods run automatically (aggressive)
+          "readonly" → GET/HEAD execute; POST/PUT/PATCH/DELETE queue as
+                       DeferredAction and ask per-action at report stage
+          "deny"     → no injection at all
 
-        # 명시적 auto-approve (CLI --allow-inject) → 통과
+        Returns True if ANY injection can proceed (full or readonly), False
+        only when the user chose deny.
+        """
+        if self._injection_mode is not None:
+            return self._injection_mode != "deny"
+
+        # 명시적 auto-approve (CLI --allow-inject or benchmark target) → full
         if self._auto_approve_injection:
-            logger.warning("[INJECTION-GATE] auto_approve_injection=True — bypassing approval")
+            logger.warning("[INJECTION-GATE] auto_approve_injection=True — mode=full")
+            self._injection_mode = "full"
             self._injection_approved = True
             return True
 
@@ -814,13 +860,21 @@ class ScanPipeline:
 
         self._emit("injection_approval_request", summary)
 
-        approved = False
+        mode: str = "deny"
         if self._injection_approval_callback is not None:
             try:
-                approved = bool(await self._injection_approval_callback(summary))
+                raw = await self._injection_approval_callback(summary)
+                # Accept either a bool (legacy) or a string ("full"/"readonly"/"deny")
+                if isinstance(raw, str):
+                    mode = raw.strip().lower()
+                    if mode not in ("full", "readonly", "deny"):
+                        mode = "readonly" if raw else "deny"
+                else:
+                    # Legacy bool: True → readonly (safer than full), False → deny
+                    mode = "readonly" if bool(raw) else "deny"
             except Exception as exc:
                 logger.error("[INJECTION-GATE] callback raised: %s — denying for safety", exc)
-                approved = False
+                mode = "deny"
         else:
             # No callback wired — REFUSE by default. Safety first.
             logger.error(
@@ -828,19 +882,25 @@ class ScanPipeline:
                 "Refusing injection on %s. Pass --allow-inject if you are authorized.",
                 ctx.target,
             )
-            approved = False
+            mode = "deny"
 
-        self._injection_approved = approved
-        self._emit("injection_approval_result", {"approved": approved})
+        self._injection_mode = mode
+        self._injection_approved = (mode != "deny")
+        self._emit("injection_approval_result", {"mode": mode, "approved": self._injection_approved})
 
-        if approved:
-            logger.warning("[INJECTION-GATE] ✅ APPROVED — proceeding with injection phases")
+        if mode == "full":
+            logger.warning("[INJECTION-GATE] ✅ APPROVED (mode=full) — all methods auto-execute")
+        elif mode == "readonly":
+            logger.warning(
+                "[INJECTION-GATE] ✅ APPROVED (mode=readonly) — GET/HEAD only, "
+                "mutations will queue to deferred approval at report stage"
+            )
         else:
             logger.warning(
                 "[INJECTION-GATE] ❌ DENIED — skipping all exploitation/chain phases. "
                 "Recon-only report will be produced."
             )
-        return approved
+        return self._injection_approved
 
     async def run(
         self,
@@ -1997,6 +2057,59 @@ class ScanPipeline:
                 param = target_spec.get("param", "")
                 payloads = target_spec.get("payloads", [])
                 note = target_spec.get("note", "")
+
+                # ── SAFETY: readonly mode defers data-mutating methods ──
+                # When injection_mode == "readonly" (the default when the user
+                # approves injection), intercept non-idempotent HTTP methods
+                # and queue them as DeferredAction instead of sending. The
+                # deferred queue is reviewed per-action at report stage.
+                _READONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
+                _injection_mode = getattr(self, "_injection_mode", None) or "readonly"
+                if (
+                    _injection_mode == "readonly"
+                    and method not in _READONLY_METHODS
+                    and not self._is_safe_auth_probe(endpoint, method, target_spec)
+                ):
+                    # Queue for deferred per-action approval
+                    for _p in (payloads or [""])[:5]:
+                        try:
+                            full_url = (
+                                endpoint if endpoint.startswith("http")
+                                else f"{ctx.target.rstrip('/')}{endpoint if endpoint.startswith('/') else '/' + endpoint}"
+                            )
+                            body_data: dict = {}
+                            if target_spec.get("json_body"):
+                                body_data = dict(target_spec.get("json_body") or {})
+                            elif param:
+                                body_data = {param: _p}
+                            risk = "high" if method in ("DELETE", "PUT", "PATCH") else "medium"
+                            ctx.queue_deferred_action(
+                                phase=phase_name,
+                                description_en=(
+                                    f"Brain requested {method} {endpoint} "
+                                    f"[{vector_id}] — {(reasoning or note)[:120]}"
+                                ),
+                                description_ko=(
+                                    f"Brain이 요청한 {method} {endpoint} "
+                                    f"[{vector_id}] — {(reasoning or note)[:120]}"
+                                ),
+                                method=method,
+                                url=full_url,
+                                data=body_data,
+                                risk=risk,
+                            )
+                        except Exception as _qex:
+                            logger.debug("  [DEFER] queue failed: %s", _qex)
+                    logger.info(
+                        "  [READONLY] %s %s %s — queued for deferred approval (mode=readonly)",
+                        vector_id, method, endpoint,
+                    )
+                    self._emit("deferred_queued", {
+                        "vector_id": vector_id,
+                        "method": method,
+                        "endpoint": endpoint,
+                    })
+                    continue  # skip execution — deferred queue will handle it
 
                 # 벡터별 실시간 출력
                 _ep_short = endpoint[-45:] if len(endpoint) > 45 else endpoint
