@@ -503,10 +503,16 @@ class TargetSession:
                 data = self.csrf.inject_into_data(data)
 
         # 적응형 타임아웃: 연속 타임아웃 시 서버가 느린 거 → 타임아웃 증가
-        if self._consecutive_timeouts >= 2 and self._effective_timeout < self._base_timeout * 3:
-            self._effective_timeout = min(self._effective_timeout * 1.5, self._base_timeout * 3)
-            self._client.timeout = httpx.Timeout(self._effective_timeout)
-            logger.info("  [ADAPTIVE] Slow target detected — timeout → %.0fs", self._effective_timeout)
+        # 상한 1.5x (base=30 → max=45). 이전엔 3x=90이라 time-based SQLi
+        # 한 번이 전체 스캔을 마비시켰음. 45초 넘어가면 그 엔드포인트가
+        # 진짜 죽은 거니 Pipeline executor가 다음 벡터로 넘어가게 둔다.
+        _ADAPTIVE_CAP = 1.5
+        if self._consecutive_timeouts >= 2 and self._effective_timeout < self._base_timeout * _ADAPTIVE_CAP:
+            new_timeout = min(self._effective_timeout * 1.5, self._base_timeout * _ADAPTIVE_CAP)
+            if new_timeout > self._effective_timeout:
+                self._effective_timeout = new_timeout
+                self._client.timeout = httpx.Timeout(self._effective_timeout)
+                logger.info("  [ADAPTIVE] Slow target detected — timeout → %.0fs", self._effective_timeout)
 
         try:
             resp = await self._client.request(
