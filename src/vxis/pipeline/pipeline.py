@@ -4095,7 +4095,10 @@ class ScanPipeline:
     async def _phase2_agents(self, ctx: ScanContext) -> None:
         """Phase 2: Autonomous Agents — Brain이 선택하고 실행."""
         try:
-            for vid in ["WEB-MISCONF-004", "WEB-MISCONF-005", "WEB-CRYPTO-001"]:
+            for vid in [
+                "WEB-MISCONF-004", "WEB-MISCONF-005", "WEB-CRYPTO-001",
+                "WEB-API-006",  # gRPC — Reflection Service Exposed | gRPC Reflection 서비스 노출
+            ]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
             pass
@@ -4169,6 +4172,7 @@ class ScanPipeline:
                 "WEB-MISCONF-001", "WEB-MISCONF-002", "WEB-MISCONF-003",
                 "WEB-INFRA-005", "WEB-AC-005",
                 "WEB-SUPPLY-001", "WEB-SUPPLY-002",  # 의존성/CI-CD 공급망 공격
+                "WEB-INJECT-023",  # CSP Bypass — Script-src Nonce Leak | CSP 우회 — Nonce 유출
             ]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
@@ -4215,7 +4219,12 @@ class ScanPipeline:
                 "WEB-AUTH-001", "WEB-AUTH-002", "WEB-AUTH-003", "WEB-AUTH-004",
                 "WEB-AUTH-005", "WEB-AUTH-006", "WEB-AUTH-007", "WEB-AUTH-008",
                 "WEB-AUTH-010",  # 매직 링크 인증 우회
+                "WEB-AUTH-011",  # SAML — Assertion Signing Bypass | SAML 서명 우회
+                "WEB-AUTH-012",  # SAML — Replay Attack | SAML 리플레이 공격
+                "WEB-AUTH-013",  # OAuth — State Parameter Missing (CSRF) | OAuth State 누락
                 "WEB-MISCONF-004", "WEB-CRYPTO-003",
+                "WEB-CRYPTO-002",  # Weak Hashing Algorithm (MD5/SHA1) | 약한 해싱 알고리즘
+                "WEB-CRYPTO-004",  # Insecure Randomness — Predictable Tokens | 예측 가능한 토큰
                 "WEB-INFRA-006",  # F5 BIG-IP APM RCE (CVE-2025-53521)
             ]:
                 ctx.score_tracker.record_vector_attempt(vid)
@@ -4389,6 +4398,10 @@ class ScanPipeline:
                 "WEB-INJECT-019",  # Laravel Livewire RCE (CVE-2025-54068)
                 "WEB-INJECT-020",  # CMS Code Injection (Craft CMS CVE-2025-32432)
                 "WEB-INJECT-021",  # LLM Prompt Injection
+                "WEB-INJECT-022",  # Prototype Pollution — JSON Merge | 프로토타입 오염 — JSON Merge
+                "WEB-INJECT-024",  # Cache Poisoning — Web Cache Deception | 캐시 오염 — 웹 캐시 기만
+                "WEB-API-007",     # gRPC — Method Enumeration + Injection | gRPC 메서드 열거 + 인젝션
+                "WEB-RACE-001",    # Race Condition — TOCTOU | 경쟁 조건 — TOCTOU
             ]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
@@ -4539,6 +4552,8 @@ class ScanPipeline:
             for vid in [
                 "WEB-AC-001", "WEB-AC-002", "WEB-AC-003", "WEB-AC-004",
                 "WEB-API-001", "WEB-API-005",
+                "WEB-API-008",  # BOPLA — Broken Object Property Level Auth | 객체 속성 수준 인증 손상
+                "WEB-API-009",  # BFLA — Broken Function Level Auth | 기능 수준 인증 손상
             ]:
                 ctx.score_tracker.record_vector_attempt(vid)
         except Exception:
