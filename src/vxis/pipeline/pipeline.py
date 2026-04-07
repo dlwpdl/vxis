@@ -620,6 +620,45 @@ class ScanPipeline:
 
     # ── Phase runner ──────────────────────────────────────────
 
+    @staticmethod
+    def _lookup_phase_guide(phase_name: str):
+        """Lookup new PhaseGuide from src/vxis/phases/ by phase name.
+
+        Example: "Phase 4: CPR — Hands/Eyes/X-Ray Connect" → PhaseGuide for P4_cpr
+        Returns None if guide not found (safe fallback).
+        """
+        try:
+            from vxis.phases.registry import PHASE_REGISTRY
+            # Extract "Phase N" prefix
+            import re as _re
+            m = _re.match(r"Phase\s+(\d+)", phase_name)
+            if not m:
+                return None
+            phase_num = m.group(1)
+            # Try common suffixes: P4_cpr, P0_foundation, etc.
+            candidates = [
+                f"P{phase_num}_foundation",
+                f"P{phase_num}_director",
+                f"P{phase_num}_agents",
+                f"P{phase_num}_hypothesis",
+                f"P{phase_num}_cpr",
+                f"P{phase_num}_special",
+                f"P{phase_num}_report",
+                f"P{phase_num}_hardware",
+                f"P{phase_num}_synthesis",
+                f"P{phase_num}_mutation",
+                f"P{phase_num}_evolution",
+                f"P{phase_num}_biometrics",
+                f"P{phase_num}_digital_twin",
+                f"P{phase_num}_collective",
+            ]
+            for guide_id in candidates:
+                if guide_id in PHASE_REGISTRY:
+                    return PHASE_REGISTRY[guide_id]
+            return None
+        except Exception:
+            return None
+
     async def _run_phase(
         self,
         name: str,
@@ -638,9 +677,35 @@ class ScanPipeline:
                 print(f"\n┌─ {name}\n└─ skipped (checkpoint)", flush=True)
             return
 
-        self._emit("phase_start", {"name": name})
+        # ── Lookup new PhaseGuide for enriched metadata ──
+        guide = self._lookup_phase_guide(name)
+        guide_data: dict[str, Any] = {}
+        if guide is not None:
+            guide_data = {
+                "id": guide.id,
+                "name_ko": guide.name_ko,
+                "objective_en": guide.objective_en,
+                "objective_ko": guide.objective_ko,
+                "strategic_advice_en": guide.strategic_advice_en,
+                "strategic_advice_ko": guide.strategic_advice_ko,
+                "crown_hint_ko": guide.crown_hint_ko,
+                "recommended_primitives": list(guide.recommended_primitives),
+                "dead_end_criteria": [
+                    {"id": c.id, "description_ko": c.description_ko}
+                    for c in guide.dead_end_criteria
+                ],
+            }
+            # Store on ctx for report generator + TUI access
+            if not hasattr(ctx, "phase_guides"):
+                ctx.phase_guides = {}
+            ctx.phase_guides[guide.id] = guide_data
+
+        self._emit("phase_start", {"name": name, "guide": guide_data})
         if not self._event_callback:
             print(f"\n┌─ {name}", flush=True)
+            if guide_data:
+                print(f"│  [GUIDE] {guide_data.get('name_ko', '')}", flush=True)
+                print(f"│  [목표] {guide_data.get('objective_ko', '')[:80]}", flush=True)
 
         t0 = time.monotonic()
         pre_count = len(ctx.findings)

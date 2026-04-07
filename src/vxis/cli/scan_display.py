@@ -46,6 +46,8 @@ class ScanLiveDisplay:
         self.current_phase: str | None = None
         self.current_vector: str | None = None
         self.current_reasoning: str = ""
+        self.current_objective: str = ""       # Phase guide objective_ko
+        self.current_crown_hint: str = ""      # Phase guide crown_hint_ko
         self.attack_feed: deque = deque(maxlen=6)
         self.hit_feed: deque = deque(maxlen=4)
         self.chains: dict[str, dict] = {}  # chain_id → {origin, steps, current_level}
@@ -76,6 +78,11 @@ class ScanLiveDisplay:
         """Pipeline이 emit한 event 처리."""
         if event_type == "phase_start":
             self.current_phase = data["name"]
+            # Store guide info for TUI display
+            guide = data.get("guide", {})
+            if guide:
+                self.current_objective = guide.get("objective_ko", "")[:100]
+                self.current_crown_hint = guide.get("crown_hint_ko", "")[:80]
             for p in self.phases:
                 if p["name"] in data["name"]:
                     p["status"] = "running"
@@ -223,16 +230,26 @@ class ScanLiveDisplay:
         )
 
     def _render_brain_thinking(self) -> Panel:
-        """현재 Brain이 무엇을 시도 중인지 표시."""
-        if self.current_vector or self.current_reasoning:
-            content_parts = []
-            if self.current_vector:
-                content_parts.append(f"[bold cyan]Vector:[/bold cyan] {self.current_vector}")
-            if self.current_reasoning:
-                content_parts.append(f"[bold]Reasoning:[/bold] [italic]{self.current_reasoning}[/italic]")
-            content = "\n".join(content_parts)
-        else:
+        """현재 Brain이 무엇을 시도 중인지 + Phase Guide 힌트 표시."""
+        content_parts = []
+
+        # Phase Guide 정보 (새로 통합됨)
+        if self.current_objective:
+            content_parts.append(f"[bold yellow]🎯 목표:[/bold yellow] [italic]{self.current_objective}[/italic]")
+        if self.current_crown_hint:
+            content_parts.append(f"[bold red]👑 크라운:[/bold red] [dim italic]{self.current_crown_hint}[/dim italic]")
+
+        # Brain runtime 정보
+        if self.current_vector:
+            content_parts.append(f"[bold cyan]Vector:[/bold cyan] {self.current_vector}")
+        if self.current_reasoning:
+            content_parts.append(f"[bold]Reasoning:[/bold] [italic]{self.current_reasoning}[/italic]")
+
+        if not content_parts:
             content = "[dim]Brain analyzing target...[/dim]"
+        else:
+            content = "\n".join(content_parts)
+
         return Panel(
             content,
             title="[bold magenta]🧠 Brain Thinking[/bold magenta]",
@@ -342,7 +359,7 @@ class ScanLiveDisplay:
         )
         # Center column: Brain thinking + Attack feed + Chains
         layout["center"].split(
-            Layout(self._render_brain_thinking(), size=5, name="thinking"),
+            Layout(self._render_brain_thinking(), size=9, name="thinking"),
             Layout(self._render_attack_feed(), name="attacks"),
             Layout(self._render_chains(), name="chains"),
         )

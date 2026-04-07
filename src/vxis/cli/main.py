@@ -1952,6 +1952,283 @@ def retest_cmd(
 
 
 # ---------------------------------------------------------------------------
+# News / Growth Layer sub-commands — Self-Growth Intelligence review
+# ---------------------------------------------------------------------------
+
+news_app = typer.Typer(
+    help="Self-Growth Intelligence proposals — review, approve, reject",
+    no_args_is_help=True,
+)
+app.add_typer(news_app, name="news")
+
+
+def _load_proposals_from_dir(directory: Path) -> list[dict]:
+    """Load all proposal JSON files from a directory."""
+    if not directory.exists():
+        return []
+    import json as _json
+    proposals = []
+    for path in sorted(directory.glob("*.json")):
+        try:
+            data = _json.loads(path.read_text())
+            proposals.append(data)
+        except Exception:
+            continue
+    return proposals
+
+
+@news_app.command("pending")
+def news_pending(
+    risk: Optional[str] = typer.Option(None, "--risk", help="Filter by risk: low/medium/high/critical"),
+    limit: int = typer.Option(20, "--limit", "-n", help="Max proposals to show"),
+) -> None:
+    """List proposals waiting for review."""
+    from pathlib import Path as _P
+    pending_dir = _P(".vxis/signals/pending")
+    proposals = _load_proposals_from_dir(pending_dir)
+
+    if risk:
+        proposals = [p for p in proposals if p.get("risk") == risk]
+
+    if not proposals:
+        console.print("[yellow]No pending proposals[/yellow]")
+        return
+
+    table = Table(title=f"Pending Proposals ({len(proposals)})", show_header=True)
+    table.add_column("ID", no_wrap=True, width=24)
+    table.add_column("Type", width=18)
+    table.add_column("Risk", width=8)
+    table.add_column("Conf", justify="right", width=6)
+    table.add_column("Source", width=16)
+    table.add_column("Rationale", max_width=40)
+
+    risk_style = {"low": "green", "medium": "yellow", "high": "red", "critical": "bold red"}
+
+    for p in proposals[:limit]:
+        rid = p.get("proposal_id", "")[:22]
+        ctype = p.get("change_type", "")[:18]
+        risk_val = p.get("risk", "?")
+        style = risk_style.get(risk_val, "")
+        conf = p.get("confidence", 0)
+        source = p.get("source_url", "")[:14]
+        rat = p.get("rationale_en", "")[:38]
+        table.add_row(
+            rid, ctype, f"[{style}]{risk_val}[/{style}]",
+            f"{conf:.2f}", source, rat,
+        )
+
+    console.print(table)
+
+
+@news_app.command("show")
+def news_show(
+    proposal_id: str = typer.Argument(..., help="Proposal ID to display"),
+) -> None:
+    """Show full details of a proposal."""
+    from pathlib import Path as _P
+    import json as _json
+    for subdir in ("pending", "applied", "rejected", "auto_applied"):
+        path = _P(f".vxis/signals/{subdir}") / f"{proposal_id}.json"
+        if path.exists():
+            data = _json.loads(path.read_text())
+            console.print(Panel(
+                f"[bold]Proposal ID:[/bold] {data.get('proposal_id')}\n"
+                f"[bold]Status:[/bold] {data.get('status', subdir)}\n"
+                f"[bold]Change Type:[/bold] {data.get('change_type')}\n"
+                f"[bold]Risk:[/bold] {data.get('risk')}\n"
+                f"[bold]Confidence:[/bold] {data.get('confidence', 0):.2f}\n"
+                f"[bold]Target File:[/bold] {data.get('target_file')}\n"
+                f"[bold]Source:[/bold] {data.get('source_url')}\n"
+                f"\n[bold cyan]Rationale (EN):[/bold cyan]\n{data.get('rationale_en', '')}\n"
+                f"\n[bold cyan]Rationale (KO):[/bold cyan]\n{data.get('rationale_ko', '')}\n"
+                f"\n[bold cyan]Change Data:[/bold cyan]\n{_json.dumps(data.get('change_data', {}), indent=2, ensure_ascii=False)}",
+                title=f"Proposal: {proposal_id}",
+                border_style="cyan",
+            ))
+            return
+    err_console.print(f"[red]Proposal not found:[/red] {proposal_id}")
+    raise typer.Exit(code=1)
+
+
+@news_app.command("approve")
+def news_approve(
+    proposal_id: str = typer.Argument(..., help="Proposal ID to approve"),
+) -> None:
+    """Approve a pending proposal (moves to applied/).
+
+    Note: actual code modification still requires dry_run=false in growth_bootstrap.toml.
+    This command moves the proposal out of pending review queue.
+    """
+    from pathlib import Path as _P
+    import json as _json
+    import shutil
+    from datetime import datetime, timezone
+
+    pending_path = _P(".vxis/signals/pending") / f"{proposal_id}.json"
+    if not pending_path.exists():
+        err_console.print(f"[red]Not in pending queue:[/red] {proposal_id}")
+        raise typer.Exit(code=1)
+
+    applied_dir = _P(".vxis/signals/applied")
+    applied_dir.mkdir(parents=True, exist_ok=True)
+
+    data = _json.loads(pending_path.read_text())
+    data["status"] = "applied"
+    data["applied_at"] = datetime.now(timezone.utc).isoformat()
+
+    applied_path = applied_dir / f"{proposal_id}.json"
+    applied_path.write_text(_json.dumps(data, ensure_ascii=False, indent=2))
+    pending_path.unlink()
+
+    # Log to changelog
+    try:
+        from vxis.growth.changelog import ChangeLog
+        log = ChangeLog()
+        log.record("proposal_approved_manually", {
+            "proposal_id": proposal_id,
+            "change_type": data.get("change_type"),
+        })
+    except Exception:
+        pass
+
+    console.print(f"[green]✓ Approved:[/green] {proposal_id}")
+    console.print(f"  Moved to: {applied_path}")
+    console.print("[dim]Note: real code modification requires dry_run=false in configs/growth_bootstrap.toml[/dim]")
+
+
+@news_app.command("reject")
+def news_reject(
+    proposal_id: str = typer.Argument(..., help="Proposal ID to reject"),
+    reason: Optional[str] = typer.Option("", "--reason", "-r", help="Rejection reason"),
+) -> None:
+    """Reject a pending proposal (moves to rejected/)."""
+    from pathlib import Path as _P
+    import json as _json
+    from datetime import datetime, timezone
+
+    pending_path = _P(".vxis/signals/pending") / f"{proposal_id}.json"
+    if not pending_path.exists():
+        err_console.print(f"[red]Not in pending queue:[/red] {proposal_id}")
+        raise typer.Exit(code=1)
+
+    rejected_dir = _P(".vxis/signals/rejected")
+    rejected_dir.mkdir(parents=True, exist_ok=True)
+
+    data = _json.loads(pending_path.read_text())
+    data["status"] = "rejected"
+    data["rejected_at"] = datetime.now(timezone.utc).isoformat()
+    data["rejection_reason"] = reason
+
+    rejected_path = rejected_dir / f"{proposal_id}.json"
+    rejected_path.write_text(_json.dumps(data, ensure_ascii=False, indent=2))
+    pending_path.unlink()
+
+    try:
+        from vxis.growth.changelog import ChangeLog
+        log = ChangeLog()
+        log.record("proposal_rejected_manually", {
+            "proposal_id": proposal_id,
+            "reason": reason,
+        })
+    except Exception:
+        pass
+
+    console.print(f"[yellow]✗ Rejected:[/yellow] {proposal_id}")
+    if reason:
+        console.print(f"  Reason: {reason}")
+
+
+@news_app.command("rollback")
+def news_rollback(
+    proposal_id: str = typer.Argument(..., help="Proposal ID to rollback"),
+    reason: Optional[str] = typer.Option("manual", "--reason", "-r"),
+) -> None:
+    """Rollback a previously applied proposal."""
+    try:
+        from vxis.growth.rollback import rollback_proposal
+        success = rollback_proposal(proposal_id, reason=reason)
+        if success:
+            console.print(f"[green]✓ Rolled back:[/green] {proposal_id}")
+        else:
+            err_console.print(f"[red]Rollback failed:[/red] {proposal_id} not found in applied/")
+            raise typer.Exit(code=1)
+    except Exception as exc:
+        err_console.print(f"[red]Rollback error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@news_app.command("digest")
+def news_digest(
+    days: int = typer.Option(7, "--days", "-d", help="Days to summarize"),
+) -> None:
+    """Show growth activity summary for the last N days."""
+    try:
+        from vxis.growth.changelog import ChangeLog
+        log = ChangeLog()
+        summary = log.summary(days=days)
+    except Exception as exc:
+        err_console.print(f"[red]Digest error:[/red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    table = Table(title=f"Growth Activity — Last {days} days", show_header=True)
+    table.add_column("Event Type", style="bold")
+    table.add_column("Count", justify="right")
+
+    for event_type, count in sorted(summary.get("by_type", {}).items()):
+        table.add_row(event_type, str(count))
+
+    console.print(table)
+    console.print(f"[dim]Total events: {summary.get('total_events', 0)}[/dim]")
+    console.print(f"[dim]Since: {summary.get('since', '')}[/dim]")
+
+
+@news_app.command("stats")
+def news_stats() -> None:
+    """Show current state of Self-Growth pipeline (inbox/pending/applied counts)."""
+    from pathlib import Path as _P
+
+    stats_table = Table(title="Self-Growth Pipeline State", show_header=True)
+    stats_table.add_column("Directory", style="bold")
+    stats_table.add_column("Count", justify="right")
+    stats_table.add_column("Path", style="dim")
+
+    dirs = [
+        ("Inbox (raw signals)", ".vxis/signals/inbox"),
+        ("Pending (review)",    ".vxis/signals/pending"),
+        ("Applied",             ".vxis/signals/applied"),
+        ("Rejected",            ".vxis/signals/rejected"),
+        ("Extraction cache",    ".vxis/cache/extractions"),
+    ]
+
+    for label, path_str in dirs:
+        path = _P(path_str)
+        if path.exists():
+            count = len(list(path.glob("*")))
+        else:
+            count = 0
+        stats_table.add_row(label, str(count), path_str)
+
+    console.print(stats_table)
+
+    # Load and show bootstrap config
+    try:
+        from vxis.growth.config import load_bootstrap_config
+        cfg = load_bootstrap_config()
+        console.print()
+        console.print(Panel(
+            f"[bold]Dry-run:[/bold] {cfg['apply']['dry_run']}\n"
+            f"[bold]Trust threshold:[/bold] {cfg['filtering']['trust_threshold_for_llm']}\n"
+            f"[bold]Auto-apply threshold:[/bold] {cfg['apply']['auto_apply_threshold']}\n"
+            f"[bold]Monthly LLM cap:[/bold] ${cfg['budget']['max_monthly_llm_usd']}\n"
+            f"[bold]Signal analyze interval:[/bold] {cfg['polling']['signal_analyze_interval_hours']}h",
+            title="Bootstrap Config",
+            border_style="cyan",
+        ))
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
