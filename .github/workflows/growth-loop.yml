@@ -11,6 +11,10 @@ on:
     paths:
       - 'src/vxis/**'
 
+  # Growth Layer가 signal-analyze 후 auto-applied 변경을 검증하려 호출
+  repository_dispatch:
+    types: [growth-loop-validate]
+
   workflow_dispatch:
     inputs:
       score_target:
@@ -573,4 +577,33 @@ jobs:
               --title "Growth Loop: $(date -u +%Y-%m-%d) — ${FINAL_SCORE}/1000 [${STOP_REASON}]" \
               --body "$BODY" \
               --label "growth-loop,benchmark" 2>/dev/null || true
+          fi
+
+      # Rollback signal-driven changes if regression detected
+      - name: Rollback on regression (signal-driven changes)
+        if: always() && github.event_name == 'repository_dispatch'
+        env:
+          PYTHONPATH: src
+        run: |
+          STOP_REASON="${{ steps.growth.outputs.stop_reason }}"
+          if [ "$STOP_REASON" = "regression" ] || [ "$STOP_REASON" = "stagnation" ]; then
+            echo "Regression detected — rolling back recent signal-driven proposals"
+            python - <<'PYEOF'
+          from vxis.growth.rollback import rollback_since
+          from datetime import datetime, timezone, timedelta
+          # Rollback last 24h worth of auto-applied proposals
+          cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+          count = rollback_since(cutoff)
+          print(f"Rolled back {count} proposals (cutoff: {cutoff})")
+          PYEOF
+            git config user.name "vxis-growth[bot]"
+            git config user.email "vxis-growth@users.noreply.github.com"
+            git add .vxis/signals/ 2>/dev/null || true
+            if ! git diff --staged --quiet 2>/dev/null; then
+              git commit -m "chore(growth): rollback signal-driven changes (regression detected)" || true
+              git pull --rebase origin main || true
+              git push || true
+            fi
+          else
+            echo "No regression — signal-driven changes retained"
           fi

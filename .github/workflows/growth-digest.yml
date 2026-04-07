@@ -1,0 +1,95 @@
+name: Growth Weekly Digest
+
+on:
+  schedule:
+    # Sunday 18:00 UTC — weekly growth summary
+    - cron: "0 18 * * 0"
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  digest:
+    name: Generate weekly growth digest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install VXIS
+        run: |
+          pip install -e . 2>/dev/null || true
+          echo "PYTHONPATH=src" >> $GITHUB_ENV
+
+      - name: Generate digest
+        id: digest
+        run: |
+          python - <<'PYEOF'
+          from vxis.growth.digest import generate_weekly_digest
+          path = generate_weekly_digest()
+          print(f"Digest written to: {path}")
+          with open("_digest_path.txt", "w") as f:
+              f.write(str(path))
+          PYEOF
+
+      - name: Commit digest
+        if: always()
+        run: |
+          git config user.name "vxis-growth[bot]"
+          git config user.email "vxis-growth@users.noreply.github.com"
+          git add docs/growth-digests/ 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "docs(growth): weekly digest $(date -u +%Y-%m-%d)"
+            for i in 1 2 3; do
+              git fetch origin main
+              if git rebase origin/main; then
+                git push && break
+              else
+                git rebase --abort || true
+              fi
+              sleep 5
+            done
+          fi
+
+      - name: Send Telegram notification
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python - <<'PYEOF'
+          import os, urllib.request, urllib.parse
+          from pathlib import Path
+          digest_path = Path("_digest_path.txt")
+          if not digest_path.exists():
+              exit(0)
+          md_path = Path(digest_path.read_text().strip())
+          if not md_path.exists():
+              exit(0)
+          content = md_path.read_text(encoding="utf-8")[:3500]
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+          if not token or not chat_id:
+              exit(0)
+          url = f"https://api.telegram.org/bot{token}/sendMessage"
+          data = urllib.parse.urlencode({
+              "chat_id": chat_id,
+              "text": content,
+              "parse_mode": "Markdown",
+          }).encode()
+          try:
+              urllib.request.urlopen(url, data=data, timeout=10)
+              print("digest sent")
+          except Exception as e:
+              print(f"telegram failed: {e}")
+          PYEOF

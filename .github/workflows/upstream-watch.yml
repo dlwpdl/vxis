@@ -103,3 +103,27 @@ jobs:
               --body-file "$ISSUE_FILE" \
               --label "upstream-watch,triage"
           fi
+
+      # Growth Layer integration: export latest digest to signals/inbox
+      - name: Export to signal inbox
+        if: always()
+        run: |
+          python - <<'PYEOF'
+          from pathlib import Path
+          from datetime import datetime, timezone
+          digests = sorted(Path("tools/upstream_watch/digests").glob("*.md"), reverse=True)
+          if digests:
+              latest = digests[0]
+              inbox = Path(".vxis/signals/inbox")
+              inbox.mkdir(parents=True, exist_ok=True)
+              out = inbox / f"upstream-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')}.md"
+              out.write_text(latest.read_text(encoding="utf-8"))
+              print(f"Exported {latest.name} to {out}")
+          PYEOF
+          git config user.name "vxis-growth[bot]" || true
+          git config user.email "vxis-growth@users.noreply.github.com" || true
+          git add .vxis/signals/inbox/ 2>/dev/null || true
+          if ! git diff --staged --quiet 2>/dev/null; then
+            git commit -m "chore(signals): upstream-watch batch $(date -u +%Y-%m-%d)" || true
+            git push || true
+          fi

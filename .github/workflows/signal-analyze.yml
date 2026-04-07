@@ -1,0 +1,156 @@
+name: Signal Analyze
+
+on:
+  schedule:
+    # Bootstrap mode: twice daily at 00:00 and 12:00 UTC (reduced from every 2h)
+    - cron: "0 0,12 * * *"
+  workflow_dispatch:
+    inputs:
+      force_apply:
+        description: "Force apply proposals (override dry-run)"
+        required: false
+        default: "false"
+        type: string
+  repository_dispatch:
+    types: [manual-analyze]
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  analyze:
+    name: LLM analysis + proposal generation
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install VXIS
+        run: |
+          pip install -e . 2>/dev/null || true
+          echo "PYTHONPATH=src" >> $GITHUB_ENV
+
+      - name: Run analysis + proposal generation
+        id: analyze
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
+          VXIS_BRAIN_MODE: api
+        run: |
+          python - <<'PYEOF'
+          import json
+          from pathlib import Path
+          from vxis.growth.ingest import INBOX_DIR
+          from vxis.growth.schemas import RawSignal, SignalSource
+          from vxis.growth.analyze import analyze_batch
+          from vxis.growth.apply import generate_proposals, apply_proposals
+
+          # Load recent signals from inbox (last 3 batches)
+          if not INBOX_DIR.exists():
+              print("No inbox directory yet")
+              exit(0)
+
+          inbox_files = sorted(INBOX_DIR.glob("ingest-*.jsonl"))
+          signals = []
+          for f in inbox_files[-3:]:
+              try:
+                  with f.open() as fh:
+                      for line in fh:
+                          try:
+                              data = json.loads(line)
+                              src = SignalSource(**data["source"])
+                              data["source"] = src
+                              signals.append(RawSignal(**data))
+                          except Exception as e:
+                              print(f"skip malformed: {e}")
+              except Exception:
+                  continue
+
+          print(f"Loaded {len(signals)} signals")
+          if not signals:
+              print("No signals to analyze")
+              with open("_analyze_result.json", "w") as f:
+                  json.dump({"total": 0, "auto_applied": 0, "pending_review": 0, "dry_run": True}, f)
+              exit(0)
+
+          # Analyze (dry-run by default in bootstrap config)
+          intels = analyze_batch(signals[:20])
+          print(f"Extracted {len(intels)} intelligence records")
+
+          # Generate proposals
+          all_proposals = []
+          for intel in intels:
+              all_proposals.extend(generate_proposals(intel))
+          print(f"Generated {len(all_proposals)} proposals")
+
+          # Apply (dry-run stores in pending/)
+          result = apply_proposals(all_proposals)
+          print(f"Applied: {result}")
+
+          with open("_analyze_result.json", "w") as f:
+              json.dump(result, f)
+          PYEOF
+
+      - name: Commit proposals + changelog
+        if: always()
+        run: |
+          git config user.name "vxis-growth[bot]"
+          git config user.email "vxis-growth@users.noreply.github.com"
+          git add .vxis/ 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(growth): analyze batch $(date -u +%Y-%m-%dT%H:%M)"
+            for i in 1 2 3; do
+              git fetch origin main
+              if git rebase origin/main; then
+                git push && break
+              else
+                git rebase --abort || true
+              fi
+              sleep 5
+            done
+          fi
+
+      - name: Send Telegram digest
+        if: always()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -f _analyze_result.json ]; then
+            python - <<'PYEOF'
+          import json, os, urllib.request, urllib.parse
+          try:
+              result = json.load(open("_analyze_result.json"))
+          except Exception:
+              exit(0)
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+          if not token or not chat_id:
+              exit(0)
+          msg = (
+              f"🌱 VXIS Signal Analyze\n"
+              f"Total proposals: {result.get('total', 0)}\n"
+              f"Auto-applied: {result.get('auto_applied', 0)}\n"
+              f"Pending review: {result.get('pending_review', 0)}\n"
+              f"Dry-run: {result.get('dry_run', True)}"
+          )
+          url = f"https://api.telegram.org/bot{token}/sendMessage"
+          data = urllib.parse.urlencode({"chat_id": chat_id, "text": msg}).encode()
+          try:
+              urllib.request.urlopen(url, data=data, timeout=10)
+              print("telegram sent")
+          except Exception as e:
+              print(f"telegram failed: {e}")
+          PYEOF
+          fi

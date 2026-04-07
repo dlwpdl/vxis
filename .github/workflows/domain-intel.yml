@@ -2,16 +2,9 @@ name: Domain Intelligence
 
 on:
   schedule:
-    # 매일 00:00 UTC (09:00 KST)
-    - cron: "0 0 * * *"
-    # 매주 월요일 01:00 UTC (10:00 KST) — weekly 모드
-    - cron: "0 1 * * 1"
-    # 매월 1일 02:00 UTC (11:00 KST) — monthly 롤업
-    - cron: "0 2 1 * *"
-    # 분기 (1/4/7/10월 1일) 03:00 UTC — quarterly 롤업
-    - cron: "0 3 1 1,4,7,10 *"
-    # 매년 1월 1일 04:00 UTC — yearly 롤업
-    - cron: "0 4 1 1 *"
+    # Bootstrap mode: weekly only (reduced from daily + weekly + monthly + ...)
+    # Full vision schedule restored once revenue arrives
+    - cron: "0 1 * * 1"  # Monday 01:00 UTC (10:00 KST) — weekly batch
 
   workflow_dispatch:
     inputs:
@@ -107,4 +100,30 @@ jobs:
             git commit -m "chore: domain intelligence $MODE report $(date -u +%Y-%m-%d)"
             git pull --rebase origin main
             git push
+          fi
+
+      # Growth Layer integration: export digest to signals/inbox
+      - name: Export to signal inbox
+        if: always()
+        run: |
+          python - <<'PYEOF'
+          from pathlib import Path
+          from datetime import datetime, timezone
+          digests_dir = Path("tools/domain_intel/digests")
+          if not digests_dir.exists():
+              print("No domain-intel digests directory")
+              exit(0)
+          digests = sorted(digests_dir.glob("*.md"), reverse=True)
+          if digests:
+              latest = digests[0]
+              inbox = Path(".vxis/signals/inbox")
+              inbox.mkdir(parents=True, exist_ok=True)
+              out = inbox / f"domain-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')}.md"
+              out.write_text(latest.read_text(encoding="utf-8"))
+              print(f"Exported {latest.name} to {out}")
+          PYEOF
+          git add .vxis/signals/inbox/ 2>/dev/null || true
+          if ! git diff --staged --quiet 2>/dev/null; then
+            git commit -m "chore(signals): domain-intel batch $(date -u +%Y-%m-%d)" || true
+            git push || true
           fi

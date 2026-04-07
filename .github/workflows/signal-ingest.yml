@@ -1,0 +1,65 @@
+name: Signal Ingest
+
+on:
+  schedule:
+    # Bootstrap mode: every 6 hours (reduced from hourly in full vision)
+    - cron: "0 */6 * * *"
+  workflow_run:
+    workflows: ["CVE Watch", "Upstream Watch", "Domain Intelligence"]
+    types: [completed]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: write
+
+jobs:
+  ingest:
+    name: Unify signals from all sources
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install VXIS
+        run: |
+          pip install -e . 2>/dev/null || true
+          echo "PYTHONPATH=src" >> $GITHUB_ENV
+
+      - name: Run ingest
+        id: ingest
+        run: |
+          python - <<'PYEOF'
+          from vxis.growth.ingest import ingest_all
+          count = ingest_all()
+          print(f"Ingested {count} unique signals")
+          with open("_ingest_count.txt", "w") as f:
+              f.write(str(count))
+          PYEOF
+
+      - name: Commit signals
+        if: always()
+        run: |
+          git config user.name "vxis-growth[bot]"
+          git config user.email "vxis-growth@users.noreply.github.com"
+          git add .vxis/signals/inbox/ 2>/dev/null || true
+          if ! git diff --staged --quiet; then
+            git commit -m "chore(signals): ingest batch $(date -u +%Y-%m-%dT%H:%M)"
+            for i in 1 2 3; do
+              git fetch origin main
+              if git rebase origin/main; then
+                git push && break
+              else
+                git rebase --abort || true
+              fi
+              sleep 5
+            done
+          fi
