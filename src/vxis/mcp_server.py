@@ -1,852 +1,651 @@
-"""VXIS MCP Server — AI 에이전트가 VXIS를 도구로 사용할 수 있게 하는 MCP 서버.
+"""VXIS MCP Server — Brain-First primitive exposure.
 
-Claude, GPT, Copilot 등의 AI가 VXIS에 연결하여:
-1. 보안 스캔 시작
-2. 스캔 결과 조회
-3. 리포트 생성
-4. 플러그인 상태 확인
+External Brains (Claude Code Opus, etc.) connect via MCP JSON-RPC and call
+VXIS primitives as tools. This server is **LLM-free**: it only dispatches to
+pure primitive functions, Phase Registry lookups, and Scope Enforcement. The
+reasoning lives in the external Brain.
 
-Protocol: JSON-RPC 2.0 over stdio (MCP spec compliant)
+Tool groups:
+    sense_*    — HTTP/browser/traffic observation (sensing primitives)
+    pattern_*  — regex-based vuln pattern detection
+    kb_*       — knowledge base / CVE / WAF bypass lookups
+    session_*  — authenticated session lifecycle
+    ghost_*    — anonymity layer control
+    chain_*    — attack chain graph algorithms
+    output_*   — finding storage, scoring, report generation
+    phase_*    — Phase Registry lookup (strategic guides)
+    scope_*    — Scope & PII enforcement
+
+Transport: JSON-RPC 2.0 over stdio (MCP 2024-11-05).
 
 Usage:
     python -m vxis.mcp_server
-    # or via entry point:
-    vxis-mcp
-
-Claude Code integration:
     claude mcp add vxis python -m vxis.mcp_server
 """
 
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import sys
 import traceback
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+from dataclasses import asdict, is_dataclass
+from typing import Any, Awaitable, Callable
 
-# Silence all library-level log output so it does not pollute the stdio channel.
-# The MCP protocol communicates exclusively over stdout; any stray text breaks it.
+# Silence library logs — stdout belongs to JSON-RPC.
 logging.disable(logging.CRITICAL)
 
 # ---------------------------------------------------------------------------
-# MCP Protocol constants
+# Protocol constants
 # ---------------------------------------------------------------------------
 
 MCP_VERSION = "2024-11-05"
 SERVER_NAME = "vxis"
-SERVER_VERSION = "0.1.0"
+SERVER_VERSION = "0.2.0"
 
-# JSON-RPC error codes (JSON-RPC 2.0 spec)
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
 
+
 # ---------------------------------------------------------------------------
-# Tool definitions (MCP tools/list schema)
+# Lazy primitive imports — fail softly so a broken submodule doesn't kill MCP
 # ---------------------------------------------------------------------------
+
+def _lazy(path: str) -> Callable[..., Any]:
+    """Return a function that imports and calls `path` on demand."""
+
+    async def _call(**kwargs: Any) -> Any:
+        mod_name, fn_name = path.rsplit(".", 1)
+        mod = __import__(mod_name, fromlist=[fn_name])
+        fn = getattr(mod, fn_name)
+        result = fn(**kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
+    return _call
+
+
+# ---------------------------------------------------------------------------
+# Tool specifications
+#
+# Each entry: (name, description, input_schema, handler)
+# handler is an async callable that takes kwargs from the JSON-RPC arguments.
+# ---------------------------------------------------------------------------
+
+def _s(**props: Any) -> dict[str, Any]:
+    """Shorthand: build a JSONSchema object with properties & optional required."""
+    required = [k for k, v in props.items() if v.pop("_req", False)]
+    schema: dict[str, Any] = {"type": "object", "properties": props}
+    if required:
+        schema["required"] = required
+    return schema
+
+
+def _p(
+    type_: str,
+    description: str,
+    *,
+    required: bool = False,
+    default: Any = None,
+    enum: list[Any] | None = None,
+) -> dict[str, Any]:
+    spec: dict[str, Any] = {"type": type_, "description": description, "_req": required}
+    if default is not None:
+        spec["default"] = default
+    if enum is not None:
+        spec["enum"] = enum
+    return spec
+
+
+TOOLS_SPEC: list[tuple[str, str, dict[str, Any], Callable[..., Awaitable[Any]]]] = [
+    # ---- sensing ----
+    (
+        "sense_crawl",
+        "Crawl a target and return discovered endpoints, forms, links, and tech stack. No LLM.",
+        _s(
+            target=_p("string", "Base URL of the target", required=True),
+            depth=_p("integer", "Max link-follow depth 1-5", default=3),
+            stealth_level=_p("integer", "1=fast, 5=very slow", default=3),
+        ),
+        _lazy("vxis.primitives.sensing.primitive_crawl"),
+    ),
+    (
+        "sense_probe",
+        "Send a single HTTP request via an existing session and return raw response (status/headers/body/timing).",
+        _s(
+            session_id=_p("string", "Session id from sense_crawl or session_create", required=True),
+            method=_p("string", "HTTP verb", required=True),
+            url=_p("string", "Absolute URL or path", required=True),
+            headers=_p("object", "Optional extra headers"),
+            body=_p("object", "Optional JSON body"),
+            stealth_level=_p("integer", "1-5", default=3),
+        ),
+        _lazy("vxis.primitives.sensing.primitive_probe"),
+    ),
+    (
+        "sense_fingerprint",
+        "Fingerprint server/tech of a target URL.",
+        _s(target=_p("string", "Target URL", required=True)),
+        _lazy("vxis.primitives.sensing.primitive_fingerprint"),
+    ),
+    (
+        "sense_subdomain_enum",
+        "Enumerate subdomains for a root domain.",
+        _s(domain=_p("string", "Root domain, e.g. example.com", required=True)),
+        _lazy("vxis.primitives.sensing.primitive_subdomain_enum"),
+    ),
+    (
+        "sense_screenshot",
+        "Capture a rendered screenshot of a URL. Returns file path.",
+        _s(
+            url=_p("string", "URL to render", required=True),
+            viewport=_p("string", "WxH viewport", default="1920x1080"),
+        ),
+        _lazy("vxis.primitives.sensing.primitive_screenshot"),
+    ),
+    (
+        "sense_xray_start",
+        "Start a passive traffic interception session (X-Ray). Returns session id.",
+        _s(target=_p("string", "Target base URL", required=True)),
+        _lazy("vxis.primitives.sensing.primitive_xray_start"),
+    ),
+    (
+        "sense_xray_flows",
+        "Retrieve captured flows from an X-Ray session.",
+        _s(
+            session_id=_p("string", "X-Ray session id", required=True),
+            filter=_p("string", "Filter expression", default=""),
+        ),
+        _lazy("vxis.primitives.sensing.primitive_xray_flows"),
+    ),
+    # ---- patterns ----
+    (
+        "pattern_detect_sql",
+        "Regex-based SQL injection detector. Returns {detected, confidence, evidence}.",
+        _s(
+            response_body=_p("string", "Response body text", required=True),
+            status=_p("integer", "HTTP status code", required=True),
+        ),
+        _lazy("vxis.primitives.patterns.detect_sql_injection"),
+    ),
+    (
+        "pattern_detect_xss",
+        "Reflected XSS detector.",
+        _s(
+            response_body=_p("string", "Response body", required=True),
+            payload=_p("string", "Injected payload", required=True),
+        ),
+        _lazy("vxis.primitives.patterns.detect_xss_reflection"),
+    ),
+    (
+        "pattern_detect_path_traversal",
+        "Path traversal detector.",
+        _s(response_body=_p("string", "Response body", required=True)),
+        _lazy("vxis.primitives.patterns.detect_path_traversal"),
+    ),
+    (
+        "pattern_detect_ssrf",
+        "SSRF detector (status + timing heuristic).",
+        _s(
+            response_body=_p("string", "Response body", required=True),
+            status=_p("integer", "HTTP status", required=True),
+            timing_ms=_p("integer", "Request timing in ms", required=True),
+        ),
+        _lazy("vxis.primitives.patterns.detect_ssrf"),
+    ),
+    (
+        "pattern_detect_waf",
+        "WAF fingerprint detector. Returns {waf_type, confidence}.",
+        _s(
+            response_body=_p("string", "Response body", required=True),
+            status=_p("integer", "HTTP status", required=True),
+            headers=_p("object", "Response headers", required=True),
+        ),
+        _lazy("vxis.primitives.patterns.detect_waf"),
+    ),
+    (
+        "pattern_extract_secrets",
+        "Extract API keys / tokens / JWTs from arbitrary text.",
+        _s(text=_p("string", "Text to scan", required=True)),
+        _lazy("vxis.primitives.patterns.extract_secrets"),
+    ),
+    (
+        "pattern_parse_forms",
+        "Parse HTML forms from a page.",
+        _s(html_text=_p("string", "HTML content", required=True)),
+        _lazy("vxis.primitives.patterns.parse_forms"),
+    ),
+    (
+        "pattern_parse_openapi",
+        "Parse an OpenAPI / Swagger spec.",
+        _s(spec_text=_p("string", "OpenAPI JSON or YAML", required=True)),
+        _lazy("vxis.primitives.patterns.parse_openapi"),
+    ),
+    # ---- knowledge ----
+    (
+        "kb_query",
+        "Query the vector/vuln knowledge base by tech stack.",
+        _s(
+            tech_stack=_p("array", "List of tech stack tokens", required=True),
+            vuln_type=_p("string", "Optional vuln type filter", default=""),
+        ),
+        _lazy("vxis.primitives.knowledge.query_kb"),
+    ),
+    (
+        "kb_list_vectors",
+        "List available attack vectors, optionally filtered by category/phase.",
+        _s(
+            category=_p("string", "Category filter", default=""),
+            phase=_p("string", "Phase filter", default=""),
+        ),
+        _lazy("vxis.primitives.knowledge.list_vectors"),
+    ),
+    (
+        "kb_get_vector_payloads",
+        "Get payloads registered for a specific attack vector id.",
+        _s(vector_id=_p("string", "Attack vector id", required=True)),
+        _lazy("vxis.primitives.knowledge.get_vector_payloads"),
+    ),
+    (
+        "kb_cve_lookup",
+        "Look up CVEs for a product (+optional version).",
+        _s(
+            product=_p("string", "Product name", required=True),
+            version=_p("string", "Version", default=""),
+        ),
+        _lazy("vxis.primitives.knowledge.cve_lookup"),
+    ),
+    (
+        "kb_waf_bypass",
+        "Return WAF bypass variants of a payload for a given WAF type (269 variants across 8 WAFs).",
+        _s(
+            original_payload=_p("string", "Original payload", required=True),
+            waf_type=_p("string", "WAF type (cloudflare, akamai, aws, ...)", required=True),
+        ),
+        _lazy("vxis.primitives.knowledge.get_waf_bypass_variants"),
+    ),
+    # ---- session ----
+    (
+        "session_create",
+        "Create a new authenticated session for a target.",
+        _s(
+            target=_p("string", "Target base URL", required=True),
+            auth_type=_p("string", "Auth type", default="none"),
+            credentials=_p("object", "Auth credentials dict"),
+        ),
+        _lazy("vxis.primitives.session.session_create"),
+    ),
+    (
+        "session_get",
+        "Get an existing session id for a target.",
+        _s(target=_p("string", "Target URL", required=True)),
+        _lazy("vxis.primitives.session.session_get"),
+    ),
+    (
+        "session_list",
+        "List all active sessions.",
+        _s(),
+        _lazy("vxis.primitives.session.session_list"),
+    ),
+    (
+        "session_close",
+        "Close a session.",
+        _s(session_id=_p("string", "Session id", required=True)),
+        _lazy("vxis.primitives.session.session_close"),
+    ),
+    # ---- ghost ----
+    (
+        "ghost_activate",
+        "Activate Ghost Layer anonymization (mandatory for non-P0 phases).",
+        _s(profile=_p("string", "Ghost profile", default="standard")),
+        _lazy("vxis.primitives.ghost.ghost_activate"),
+    ),
+    (
+        "ghost_verify",
+        "Verify Ghost Layer is active and IP is anonymized.",
+        _s(),
+        _lazy("vxis.primitives.ghost.ghost_verify"),
+    ),
+    (
+        "ghost_status",
+        "Return current Ghost Layer status.",
+        _s(),
+        _lazy("vxis.primitives.ghost.ghost_status"),
+    ),
+    # ---- chain ----
+    (
+        "chain_graph",
+        "Build a chain graph from findings (pure graph algorithm, no LLM).",
+        _s(findings=_p("array", "List of finding dicts", required=True)),
+        _lazy("vxis.primitives.chain.chain_graph_from_findings"),
+    ),
+    (
+        "chain_score",
+        "Score an attack chain.",
+        _s(chain=_p("array", "Ordered list of finding dicts", required=True)),
+        _lazy("vxis.primitives.chain.chain_score"),
+    ),
+    (
+        "chain_link",
+        "Record a manual chain link between two findings.",
+        _s(
+            from_finding_id=_p("string", "Source finding id", required=True),
+            to_finding_id=_p("string", "Target finding id", required=True),
+            reasoning=_p("string", "Why the link", required=True),
+        ),
+        _lazy("vxis.primitives.chain.chain_link"),
+    ),
+    # ---- output ----
+    (
+        "output_finding_add",
+        "Persist a finding for a scan. Returns finding id.",
+        _s(
+            scan_id=_p("string", "Scan id", required=True),
+            finding_data=_p("object", "Finding dict", required=True),
+        ),
+        _lazy("vxis.primitives.output.finding_add"),
+    ),
+    (
+        "output_finding_list",
+        "List findings for a scan.",
+        _s(
+            scan_id=_p("string", "Scan id", required=True),
+            min_severity=_p("string", "Minimum severity", default="informational"),
+        ),
+        _lazy("vxis.primitives.output.finding_list"),
+    ),
+    (
+        "output_score",
+        "Compute score for a scan's findings.",
+        _s(scan_id=_p("string", "Scan id", required=True)),
+        _lazy("vxis.primitives.output.score_compute"),
+    ),
+    (
+        "output_report",
+        "Generate NCC-style HTML report for a scan. Returns file path.",
+        _s(
+            scan_id=_p("string", "Scan id", required=True),
+            template=_p("string", "Report template", default="ncc_group"),
+        ),
+        _lazy("vxis.primitives.output.report_generate"),
+    ),
+]
+
+
+# ---------------------------------------------------------------------------
+# Non-primitive tools — phase registry & scope enforcement
+# ---------------------------------------------------------------------------
+
+async def _tool_phase_list(**_: Any) -> Any:
+    from vxis.phases.registry import EXECUTION_ORDER, PHASE_REGISTRY
+
+    out = []
+    for pid in EXECUTION_ORDER:
+        g = PHASE_REGISTRY.get(pid)
+        if g is None:
+            continue
+        out.append(
+            {
+                "id": g.id,
+                "name_en": g.name_en,
+                "name_ko": g.name_ko,
+                "parallel_group": g.parallel_group,
+                "depends_on": list(g.depends_on),
+            }
+        )
+    return {"phases": out, "total": len(out)}
+
+
+async def _tool_phase_get(phase_id: str) -> Any:
+    from vxis.phases.registry import PHASE_REGISTRY
+
+    g = PHASE_REGISTRY.get(phase_id)
+    if g is None:
+        raise ValueError(f"Unknown phase id: {phase_id}")
+    return {
+        "id": g.id,
+        "name_en": g.name_en,
+        "name_ko": g.name_ko,
+        "objective_en": g.objective_en,
+        "objective_ko": g.objective_ko,
+        "strategic_advice_en": g.strategic_advice_en,
+        "strategic_advice_ko": g.strategic_advice_ko,
+        "crown_hint_en": getattr(g, "crown_hint_en", ""),
+        "crown_hint_ko": getattr(g, "crown_hint_ko", ""),
+        "recommended_primitives": list(g.recommended_primitives),
+        "dead_end_criteria": [
+            {
+                "id": c.id,
+                "description_en": c.description_en,
+                "description_ko": c.description_ko,
+            }
+            for c in g.dead_end_criteria
+        ],
+        "parallel_group": g.parallel_group,
+        "depends_on": list(g.depends_on),
+    }
+
+
+async def _tool_phase_validate(**_: Any) -> Any:
+    from vxis.phases.registry import validate_dependencies
+
+    issues = validate_dependencies()
+    return {"valid": not issues, "issues": issues}
+
+
+async def _tool_scope_check_url(url: str, action: str = "read") -> Any:
+    from vxis.scope import ScopeEnforcer, load_scope
+
+    scope = load_scope()
+    enforcer = ScopeEnforcer(scope)
+    result = enforcer.check_url(url, action=action)
+    return _to_dict(result)
+
+
+async def _tool_scope_check_action(action: str, target: str = "") -> Any:
+    from vxis.scope import ScopeEnforcer, load_scope
+
+    scope = load_scope()
+    enforcer = ScopeEnforcer(scope)
+    result = enforcer.check_action(action, target=target)
+    return _to_dict(result)
+
+
+async def _tool_scope_check_pii(text: str) -> Any:
+    from vxis.scope import PIIDetector
+
+    detection = PIIDetector().scan(text)
+    return {
+        "contains_pii": detection.found,
+        "types": list(detection.types),
+        "matches": detection.matches,
+    }
+
+
+async def _tool_scope_redact(text: str) -> Any:
+    from vxis.scope import PIIDetector
+
+    detection = PIIDetector().scan(text)
+    return {
+        "redacted": detection.redacted_text,
+        "contains_pii": detection.found,
+        "types": list(detection.types),
+    }
+
+
+NON_PRIMITIVE_TOOLS: list[tuple[str, str, dict[str, Any], Callable[..., Awaitable[Any]]]] = [
+    (
+        "phase_list",
+        "List all Phase Guides in execution order (Brain-First strategic playbook).",
+        _s(),
+        _tool_phase_list,
+    ),
+    (
+        "phase_get",
+        "Fetch the full strategic guide for a Phase id (objective, advice, primitives, dead-end criteria).",
+        _s(phase_id=_p("string", "Phase id e.g. P4_cpr", required=True)),
+        _tool_phase_get,
+    ),
+    (
+        "phase_validate",
+        "Validate Phase Registry dependency graph.",
+        _s(),
+        _tool_phase_validate,
+    ),
+    (
+        "scope_check_url",
+        "Check whether a URL is in-scope for an action.",
+        _s(
+            url=_p("string", "URL to check", required=True),
+            action=_p("string", "Action (read/probe/inject)", default="read"),
+        ),
+        _tool_scope_check_url,
+    ),
+    (
+        "scope_check_action",
+        "Check whether an action is permitted by the current scope policy.",
+        _s(
+            action=_p("string", "Action name", required=True),
+            target=_p("string", "Optional target", default=""),
+        ),
+        _tool_scope_check_action,
+    ),
+    (
+        "scope_check_pii",
+        "Detect PII in arbitrary text (emails, SSNs, credit cards, JWTs, ...).",
+        _s(text=_p("string", "Text to scan", required=True)),
+        _tool_scope_check_pii,
+    ),
+    (
+        "scope_redact",
+        "Redact detected PII from text.",
+        _s(text=_p("string", "Text to redact", required=True)),
+        _tool_scope_redact,
+    ),
+]
+
+
+ALL_TOOLS = TOOLS_SPEC + NON_PRIMITIVE_TOOLS
+
+
+# ---------------------------------------------------------------------------
+# Build tools/list payload & dispatch table
+# ---------------------------------------------------------------------------
+
+def _clean_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Strip internal `_req` markers before publishing."""
+    cleaned: dict[str, Any] = {"type": schema.get("type", "object")}
+    props = {}
+    for name, spec in schema.get("properties", {}).items():
+        props[name] = {k: v for k, v in spec.items() if k != "_req"}
+    cleaned["properties"] = props
+    if "required" in schema:
+        cleaned["required"] = schema["required"]
+    return cleaned
+
 
 TOOLS: list[dict[str, Any]] = [
     {
-        "name": "vxis_scan",
-        "description": (
-            "Start a VXIS security scan against a target. "
-            "Runs the full plugin pipeline (recon, vuln scan, enrichment) "
-            "and returns a summary with scan_id and findings count."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "target": {
-                    "type": "string",
-                    "description": "Scan target: domain, IP address, or CIDR range (e.g. example.com, 10.0.0.1, 192.168.1.0/24)",
-                },
-                "scan_type": {
-                    "type": "string",
-                    "enum": ["zero_touch", "external", "internal", "code", "cloud", "full"],
-                    "description": "Type of scan to perform. Defaults to 'external'.",
-                    "default": "external",
-                },
-                "profile": {
-                    "type": "string",
-                    "enum": ["passive", "stealth", "standard", "aggressive"],
-                    "description": "Scan intensity profile. Defaults to 'standard'.",
-                    "default": "standard",
-                },
-            },
-            "required": ["target"],
-        },
-    },
-    {
-        "name": "vxis_results",
-        "description": (
-            "Retrieve detailed findings from a completed scan. "
-            "Returns a list of security findings with severity, title, description, "
-            "CVE IDs, remediation guidance, and source plugin."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "scan_id": {
-                    "type": "string",
-                    "description": "The scan_id returned by vxis_scan.",
-                },
-                "min_severity": {
-                    "type": "string",
-                    "enum": ["informational", "low", "medium", "high", "critical"],
-                    "description": "Filter to only return findings at or above this severity. Defaults to 'informational' (all).",
-                    "default": "informational",
-                },
-            },
-            "required": ["scan_id"],
-        },
-    },
-    {
-        "name": "vxis_report",
-        "description": (
-            "Generate a professional security assessment report from a completed scan. "
-            "Produces an HTML or DOCX report file and returns the file path."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "scan_id": {
-                    "type": "string",
-                    "description": "The scan_id returned by vxis_scan.",
-                },
-                "format": {
-                    "type": "string",
-                    "enum": ["html", "docx"],
-                    "description": "Output format. Defaults to 'html'.",
-                    "default": "html",
-                },
-                "client_name": {
-                    "type": "string",
-                    "description": "Client/organisation name to display in the report header.",
-                    "default": "VXIS Assessment",
-                },
-            },
-            "required": ["scan_id"],
-        },
-    },
-    {
-        "name": "vxis_plugins",
-        "description": (
-            "List all available VXIS security plugins with their category "
-            "and availability status (whether the required binary is installed)."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "category": {
-                    "type": "string",
-                    "description": "Optional filter by category (e.g. 'recon', 'vuln', 'secret'). Returns all categories if omitted.",
-                },
-            },
-        },
-    },
-    {
-        "name": "vxis_agent_scan",
-        "description": (
-            "Launch an AI-driven autonomous security scan using the VXIS Master Agent. "
-            "The agent autonomously decides which tools to run, interprets results, "
-            "and iterates to maximise finding coverage. More thorough than vxis_scan "
-            "but takes longer. Returns findings and a step-by-step execution log."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "target": {
-                    "type": "string",
-                    "description": "Scan target: domain, IP address, or CIDR range.",
-                },
-                "max_steps": {
-                    "type": "integer",
-                    "description": "Maximum reasoning steps the agent may take. Higher = more thorough but slower. Defaults to 15.",
-                    "default": 15,
-                    "minimum": 1,
-                    "maximum": 50,
-                },
-                "profile": {
-                    "type": "string",
-                    "enum": ["passive", "stealth", "standard", "aggressive"],
-                    "description": "Scan intensity profile. Defaults to 'standard'.",
-                    "default": "standard",
-                },
-            },
-            "required": ["target"],
-        },
-    },
+        "name": name,
+        "description": description,
+        "inputSchema": _clean_schema(schema),
+    }
+    for (name, description, schema, _handler) in ALL_TOOLS
 ]
 
-# ---------------------------------------------------------------------------
-# In-memory scan result store
-# Scans triggered via MCP are kept here for subsequent vxis_results calls.
-# In a production deployment this would delegate to the VXIS database.
-# ---------------------------------------------------------------------------
-
-_scan_store: dict[str, dict[str, Any]] = {}
+_HANDLERS: dict[str, Callable[..., Awaitable[Any]]] = {
+    name: handler for (name, _d, _s2, handler) in ALL_TOOLS
+}
 
 
-# ---------------------------------------------------------------------------
-# MCP Progress Notification — 실시간 스캔 진행 피드백
-#
-# MCP 프로토콜의 notifications/progress를 사용하여 스캔 중간 상태를 전달.
-# claude.ai / Claude Code 모두 이 notification을 수신하여 유저에게 표시.
-# ---------------------------------------------------------------------------
-
-def _emit_progress(progress_token: str, progress: float, total: float, message: str) -> None:
-    """MCP notifications/progress를 stdout으로 전송 (JSON-RPC notification, id 없음)."""
-    notification = {
-        "jsonrpc": "2.0",
-        "method": "notifications/progress",
-        "params": {
-            "progressToken": progress_token,
-            "progress": progress,
-            "total": total,
-            "message": message,
-        },
-    }
-    try:
-        sys.stdout.write(json.dumps(notification, default=str) + "\n")
-        sys.stdout.flush()
-    except Exception:
-        pass  # stdout 오류 시 progress는 무시 (스캔은 계속)
-
-
-class MCPProgressEmitter:
-    """ScanEventBus 이벤트 → MCP progress notification 변환기.
-
-    ScanEventBus.on_any()로 등록하여, 이벤트 발생 시 자동으로
-    MCP progress notification을 stdout으로 전송.
-    """
-
-    def __init__(self, progress_token: str, total_phases: int = 14) -> None:
-        self._token = progress_token
-        self._total = total_phases
-        self._completed = 0
-        self._findings = 0
-        self._severity_counts: dict[str, int] = {
-            "critical": 0, "high": 0, "medium": 0, "low": 0, "informational": 0,
-        }
-        self._current_phase = ""
-        self._running_plugins: list[str] = []
-
-    async def handle_event(self, event: Any) -> None:
-        """ScanEventBus 이벤트 수신 → progress notification 전송."""
-        from vxis.core.events import (
-            EventType, NodeEvent, ToolFindingEvent,
-            PipelineEvent, ScanLifecycleEvent,
-        )
-
-        message = ""
-
-        if isinstance(event, ScanLifecycleEvent):
-            if event.event_type == EventType.SCAN_STARTED:
-                message = f"🔍 Scan started: {event.target} ({event.profile})"
-            elif event.event_type == EventType.SCAN_COMPLETED:
-                self._completed = self._total
-                message = (
-                    f"✅ Scan complete: {self._findings} findings "
-                    f"(C:{self._severity_counts['critical']} "
-                    f"H:{self._severity_counts['high']} "
-                    f"M:{self._severity_counts['medium']} "
-                    f"L:{self._severity_counts['low']})"
-                )
-            elif event.event_type == EventType.SCAN_FAILED:
-                message = f"❌ Scan failed: {event.error}"
-
-        elif isinstance(event, NodeEvent):
-            if event.event_type == EventType.NODE_STARTED:
-                self._running_plugins.append(event.plugin_name)
-                message = f"▶ {event.plugin_name} started"
-            elif event.event_type == EventType.NODE_COMPLETED:
-                self._completed += 1
-                if event.plugin_name in self._running_plugins:
-                    self._running_plugins.remove(event.plugin_name)
-                message = (
-                    f"✓ {event.plugin_name} done "
-                    f"({event.finding_count} findings, {event.elapsed_seconds:.1f}s)"
-                )
-            elif event.event_type == EventType.NODE_FAILED:
-                if event.plugin_name in self._running_plugins:
-                    self._running_plugins.remove(event.plugin_name)
-                message = f"✗ {event.plugin_name} failed: {event.error[:80]}"
-
-        elif isinstance(event, ToolFindingEvent):
-            self._findings += 1
-            sev = event.severity.lower()
-            if sev in self._severity_counts:
-                self._severity_counts[sev] += 1
-            message = f"🎯 [{event.severity.upper()}] {event.title}"
-
-        elif isinstance(event, PipelineEvent):
-            self._current_phase = event.stage
-            message = f"📋 {event.stage}: {event.detail}"
-
-        if message:
-            status = (
-                f"[{self._completed}/{self._total}] "
-                f"Findings: {self._findings} | "
-                f"{message}"
-            )
-            _emit_progress(self._token, self._completed, self._total, status)
-
-
-# ---------------------------------------------------------------------------
-# Tool handlers
-# ---------------------------------------------------------------------------
-
-
-async def _handle_vxis_scan(args: dict[str, Any]) -> dict[str, Any]:
-    """Execute vxis_scan tool: run ScanOrchestrator and return a summary."""
-    target: str = args.get("target", "").strip()
-    if not target:
-        raise ValueError("'target' is required and must not be empty.")
-
-    profile: str = args.get("profile", "standard")
-    scan_type: str = args.get("scan_type", "external")
-
-    # Map scan_type to tier (zero_touch = recon-only tier 1)
-    tier = 1 if scan_type in ("zero_touch", "passive") else 2
-
-    # Progress notification 초기화
-    progress_token = f"scan-{target}-{datetime.now(timezone.utc).strftime('%H%M%S')}"
-    _emit_progress(progress_token, 0, 14, f"🔍 Starting scan: {target} ({profile})")
-
-    try:
-        from vxis.config.schema import VXISConfig
-        from vxis.core.orchestrator import ScanOrchestrator
-
-        config = VXISConfig()
-        orchestrator = ScanOrchestrator(config)
-
-        # Event bus에 MCP progress emitter 연결
-        progress_emitter = MCPProgressEmitter(progress_token)
-        if hasattr(orchestrator, 'event_bus') and orchestrator.event_bus is not None:
-            orchestrator.event_bus.on_any(progress_emitter.handle_event)
-
-        result = await orchestrator.run_scan(
-            target=target,
-            profile=profile,
-            tier=tier,
-        )
-    except Exception as exc:
-        _emit_progress(progress_token, 0, 14, f"❌ Scan failed: {exc}")
-        raise RuntimeError(f"Scan failed: {exc}") from exc
-
-    # Cache findings for vxis_results
-    _scan_store[result.scan_id] = {
-        "scan_id": result.scan_id,
-        "target": result.target,
-        "profile": result.profile,
-        "findings": [_serialise_finding(f) for f in result.findings],
-        "tool_runs": result.tool_runs,
-        "errors": result.errors,
-        "started_at": result.started_at.isoformat(),
-        "finished_at": result.finished_at.isoformat(),
-        "duration_seconds": result.duration_seconds,
-        "severity_counts": result.severity_counts,
-    }
-
-    severity_counts = result.severity_counts
-    return {
-        "scan_id": result.scan_id,
-        "target": result.target,
-        "profile": profile,
-        "scan_type": scan_type,
-        "total_findings": len(result.findings),
-        "severity_counts": severity_counts,
-        "duration_seconds": round(result.duration_seconds, 1),
-        "errors": len(result.errors),
-        "summary": (
-            f"Scan of {target} completed in {result.duration_seconds:.0f}s. "
-            f"Found {len(result.findings)} findings "
-            f"(critical={severity_counts.get('critical', 0)}, "
-            f"high={severity_counts.get('high', 0)}, "
-            f"medium={severity_counts.get('medium', 0)}, "
-            f"low={severity_counts.get('low', 0)})."
-        ),
-    }
-
-
-async def _handle_vxis_results(args: dict[str, Any]) -> dict[str, Any]:
-    """Execute vxis_results tool: return findings for a scan_id."""
-    scan_id: str = args.get("scan_id", "").strip()
-    if not scan_id:
-        raise ValueError("'scan_id' is required.")
-
-    min_severity: str = args.get("min_severity", "informational")
-
-    _severity_order = ["informational", "low", "medium", "high", "critical"]
-    if min_severity not in _severity_order:
-        raise ValueError(
-            f"'min_severity' must be one of: {', '.join(_severity_order)}"
-        )
-    min_weight = _severity_order.index(min_severity)
-
-    # Check in-memory store first (scans triggered in this session)
-    cached = _scan_store.get(scan_id)
-    if cached is not None:
-        findings = cached["findings"]
-        filtered = [
-            f for f in findings
-            if _severity_order.index(f.get("severity", "informational")) >= min_weight
-        ]
-        return {
-            "scan_id": scan_id,
-            "target": cached["target"],
-            "total_findings": len(filtered),
-            "findings": filtered,
-        }
-
-    # Fall back to database query
-    try:
-        from vxis.config.schema import VXISConfig
-        from vxis.core.db import create_engine, init_db, get_session
-        from vxis.models.db_models import ScanRecord, FindingRecord
-        from sqlalchemy import select
-
-        config = VXISConfig()
-        db_url = config.db_url
-        if ":///" in db_url:
-            prefix, path = db_url.split("///", 1)
-            db_url = f"{prefix}///{Path(path).expanduser()}"
-
-        engine = create_engine(db_url)
-        await init_db(engine)
-
-        async with get_session(engine) as session:
-            # Locate the scan by UUID stored in config_snapshot
-            stmt = select(ScanRecord)
-            scans = (await session.execute(stmt)).scalars().all()
-            matching_scan = next(
-                (
-                    s for s in scans
-                    if isinstance(s.config_snapshot, dict)
-                    and s.config_snapshot.get("scan_id") == scan_id
-                ),
-                None,
-            )
-
-            if matching_scan is None:
-                raise ValueError(f"scan_id '{scan_id}' not found in database.")
-
-            findings_stmt = select(FindingRecord).where(
-                FindingRecord.scan_id == matching_scan.id
-            )
-            finding_records = (await session.execute(findings_stmt)).scalars().all()
-
-        findings: list[dict[str, Any]] = []
-        for rec in finding_records:
-            sev = rec.effective_severity or rec.severity or "informational"
-            if _severity_order.index(sev) < min_weight:
-                continue
-            findings.append({
-                "title": rec.title,
-                "severity": sev,
-                "description": rec.description or "",
-                "target": rec.target or "",
-                "port": rec.port,
-                "protocol": rec.protocol or "",
-                "affected_component": rec.affected_component or "",
-                "cve_ids": rec.cve_ids or [],
-                "cwe_ids": rec.cwe_ids or [],
-                "cvss_score": rec.cvss_score,
-                "remediation": rec.remediation or "",
-                "source_plugin": rec.source_plugin or "",
-                "confidence": rec.confidence,
-                "discovered_at": (
-                    rec.discovered_at.isoformat()
-                    if rec.discovered_at
-                    else None
-                ),
-            })
-
-        return {
-            "scan_id": scan_id,
-            "target": matching_scan.target,
-            "total_findings": len(findings),
-            "findings": findings,
-        }
-
-    except ValueError:
-        raise
-    except Exception as exc:
-        raise RuntimeError(f"Failed to retrieve results: {exc}") from exc
-
-
-async def _handle_vxis_report(args: dict[str, Any]) -> dict[str, Any]:
-    """Execute vxis_report tool: generate HTML or DOCX report."""
-    scan_id: str = args.get("scan_id", "").strip()
-    if not scan_id:
-        raise ValueError("'scan_id' is required.")
-
-    fmt: str = args.get("format", "html").lower()
-    if fmt not in ("html", "docx"):
-        raise ValueError("'format' must be 'html' or 'docx'.")
-
-    client_name: str = args.get("client_name", "VXIS Assessment")
-
-    # Resolve findings for the scan_id
-    results = await _handle_vxis_results({"scan_id": scan_id})
-
-    target: str = results.get("target", "unknown")
-
-    # Reconstruct Finding objects for the report generator
-    try:
-        from vxis.models.finding import Finding, Severity, FindingStatus
-        from vxis.report.generator import ReportData, ReportGenerator
-        from vxis.config.schema import VXISConfig
-    except ImportError as exc:
-        raise RuntimeError(f"VXIS report dependencies not available: {exc}") from exc
-
-    findings: list[Finding] = []
-    for raw in results.get("findings", []):
+def _to_dict(obj: Any) -> Any:
+    """Best-effort JSON serialisation for dataclass / pydantic / plain objects."""
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if isinstance(obj, dict):
+        return {k: _to_dict(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_to_dict(v) for v in obj]
+    if is_dataclass(obj):
+        return _to_dict(asdict(obj))
+    if hasattr(obj, "model_dump"):  # pydantic v2
+        return obj.model_dump()
+    if hasattr(obj, "dict"):  # pydantic v1
         try:
-            sev_str = raw.get("severity", "informational")
-            try:
-                sev = Severity(sev_str)
-            except ValueError:
-                sev = Severity.informational
-
-            finding = Finding(
-                title=raw.get("title", "Unnamed Finding"),
-                description=raw.get("description", ""),
-                severity=sev,
-                finding_type=raw.get("finding_type", "vulnerability"),
-                target=raw.get("target", target),
-                port=raw.get("port"),
-                protocol=raw.get("protocol"),
-                affected_component=raw.get("affected_component"),
-                cve_ids=raw.get("cve_ids") or [],
-                cwe_ids=raw.get("cwe_ids") or [],
-                remediation=raw.get("remediation"),
-                source_plugin=raw.get("source_plugin", "vxis"),
-                confidence=raw.get("confidence", 0.8),
-            )
-            findings.append(finding)
+            return obj.dict()
         except Exception:
-            # Skip malformed findings rather than aborting the whole report
-            continue
-
-    scan_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    report_data = ReportData(
-        scan_id=scan_id,
-        client_name=client_name,
-        target=target,
-        scan_date=scan_date,
-        findings=findings,
-    )
-
-    config = VXISConfig()
-    output_dir = config.data_dir / "reports"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_filename = f"vxis_report_{scan_id[:8]}_{scan_date}.{fmt}"
-    output_path = output_dir / output_filename
-
-    generator = ReportGenerator()
-
-    if fmt == "html":
-        generated_path = generator.generate_html_file(report_data, output_path)
-    else:
-        # DOCX export — requires optional python-docx dependency
-        try:
-            from vxis.report.docx_export import DocxExporter
-
-            exporter = DocxExporter()
-            generated_path = exporter.export(report_data, output_path)
-        except ImportError:
-            raise RuntimeError(
-                "DOCX export requires the 'export' optional dependency: "
-                "pip install 'vxis[export]'"
-            )
-
-    return {
-        "scan_id": scan_id,
-        "format": fmt,
-        "report_path": str(generated_path),
-        "finding_count": len(findings),
-        "message": (
-            f"Report generated successfully: {generated_path.name} "
-            f"({len(findings)} findings)"
-        ),
-    }
-
-
-async def _handle_vxis_plugins(args: dict[str, Any]) -> dict[str, Any]:
-    """Execute vxis_plugins tool: list available plugins with status."""
-    category_filter: str | None = args.get("category")
-
-    try:
-        from vxis.plugins.registry import discover_plugins
-
-        registry = discover_plugins()
-    except Exception as exc:
-        raise RuntimeError(f"Failed to discover plugins: {exc}") from exc
-
-    plugins: list[dict[str, Any]] = []
-    for name, plugin in sorted(registry.items()):
-        meta = plugin.meta
-
-        plugin_category = getattr(meta, "category", "unknown")
-        if category_filter and plugin_category.lower() != category_filter.lower():
-            continue
-
-        available = plugin.validate_environment()
-        plugins.append({
-            "name": name,
-            "category": plugin_category,
-            "description": getattr(meta, "description", ""),
-            "tier": getattr(meta, "tier", 1),
-            "available": available,
-            "tags": list(getattr(meta, "tags", [])),
-        })
-
-    available_count = sum(1 for p in plugins if p["available"])
-
-    return {
-        "total": len(plugins),
-        "available": available_count,
-        "unavailable": len(plugins) - available_count,
-        "plugins": plugins,
-        "summary": (
-            f"{available_count}/{len(plugins)} plugins available"
-            + (f" (category: {category_filter})" if category_filter else "")
-        ),
-    }
-
-
-async def _handle_vxis_agent_scan(args: dict[str, Any]) -> dict[str, Any]:
-    """Execute vxis_agent_scan tool: run autonomous AI-driven pentest."""
-    target: str = args.get("target", "").strip()
-    if not target:
-        raise ValueError("'target' is required and must not be empty.")
-
-    max_steps: int = int(args.get("max_steps", 15))
-    profile: str = args.get("profile", "standard")
-
-    if max_steps < 1 or max_steps > 50:
-        raise ValueError("'max_steps' must be between 1 and 50.")
-
-    # Progress notification 초기화
-    progress_token = f"agent-{target}-{datetime.now(timezone.utc).strftime('%H%M%S')}"
-    _emit_progress(progress_token, 0, max_steps, f"🤖 Agent scan started: {target}")
-
-    try:
-        from vxis.config.schema import VXISConfig
-        from vxis.agent.executor import AgentExecutor
-
-        config = VXISConfig()
-        executor = AgentExecutor(config=config, max_steps=max_steps)
-
-        # Agent executor에 progress callback 연결
-        if hasattr(executor, 'event_bus') and executor.event_bus is not None:
-            emitter = MCPProgressEmitter(progress_token, total_phases=max_steps)
-            executor.event_bus.on_any(emitter.handle_event)
-
-        result = await executor.run(target=target, profile=profile)
-    except Exception as exc:
-        _emit_progress(progress_token, 0, max_steps, f"❌ Agent scan failed: {exc}")
-        raise RuntimeError(f"Agent scan failed: {exc}") from exc
-
-    serialised_findings = [_serialise_finding(f) for f in result.findings]
-
-    # Cache in store with a synthetic scan_id derived from target + timestamp
-    import hashlib
-    synthetic_id = hashlib.sha256(
-        f"{target}-{result.duration_seconds}".encode()
-    ).hexdigest()[:36]
-
-    _scan_store[synthetic_id] = {
-        "scan_id": synthetic_id,
-        "target": target,
-        "profile": profile,
-        "findings": serialised_findings,
-        "tool_runs": [],
-        "errors": [],
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "finished_at": datetime.now(timezone.utc).isoformat(),
-        "duration_seconds": result.duration_seconds,
-        "severity_counts": _count_severities(serialised_findings),
-    }
-
-    severity_counts = _count_severities(serialised_findings)
-
-    return {
-        "scan_id": synthetic_id,
-        "target": target,
-        "profile": profile,
-        "steps_taken": result.steps_taken,
-        "total_findings": len(result.findings),
-        "severity_counts": severity_counts,
-        "duration_seconds": round(result.duration_seconds, 1),
-        "execution_log": result.execution_log,
-        "findings": serialised_findings,
-        "summary": (
-            f"Agent scan of {target} completed in {result.duration_seconds:.0f}s "
-            f"over {result.steps_taken} steps. "
-            f"Found {len(result.findings)} findings "
-            f"(critical={severity_counts.get('critical', 0)}, "
-            f"high={severity_counts.get('high', 0)}, "
-            f"medium={severity_counts.get('medium', 0)}, "
-            f"low={severity_counts.get('low', 0)})."
-        ),
-    }
-
-
-# ---------------------------------------------------------------------------
-# Helper utilities
-# ---------------------------------------------------------------------------
-
-
-def _serialise_finding(finding: Any) -> dict[str, Any]:
-    """Convert a Finding domain object to a plain JSON-serialisable dict."""
-    return {
-        "title": finding.title,
-        "severity": finding.effective_severity.value,
-        "description": finding.description or "",
-        "target": finding.target or "",
-        "port": finding.port,
-        "protocol": finding.protocol or "",
-        "affected_component": finding.affected_component or "",
-        "cve_ids": list(finding.cve_ids or []),
-        "cwe_ids": list(finding.cwe_ids or []),
-        "cvss_score": finding.cvss.base_score if finding.cvss else None,
-        "remediation": finding.remediation or "",
-        "source_plugin": finding.source_plugin or "",
-        "confidence": finding.confidence,
-        "finding_type": finding.finding_type or "vulnerability",
-        "discovered_at": (
-            finding.discovered_at.isoformat()
-            if finding.discovered_at
-            else None
-        ),
-    }
-
-
-def _count_severities(findings: list[dict[str, Any]]) -> dict[str, int]:
-    """Count findings by severity level, returning all five buckets."""
-    counts: dict[str, int] = {
-        "critical": 0,
-        "high": 0,
-        "medium": 0,
-        "low": 0,
-        "informational": 0,
-    }
-    for f in findings:
-        sev = f.get("severity", "informational")
-        counts[sev] = counts.get(sev, 0) + 1
-    return counts
+            pass
+    if hasattr(obj, "__dict__"):
+        return {k: _to_dict(v) for k, v in obj.__dict__.items() if not k.startswith("_")}
+    return str(obj)
 
 
 # ---------------------------------------------------------------------------
 # JSON-RPC dispatcher
 # ---------------------------------------------------------------------------
 
-# Map tool names to their async handler coroutines
-_TOOL_HANDLERS = {
-    "vxis_scan": _handle_vxis_scan,
-    "vxis_results": _handle_vxis_results,
-    "vxis_report": _handle_vxis_report,
-    "vxis_plugins": _handle_vxis_plugins,
-    "vxis_agent_scan": _handle_vxis_agent_scan,
-}
-
-
 async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
-    """Dispatch a single JSON-RPC request and return the response dict.
-
-    Returns None for JSON-RPC notifications (requests without an 'id'),
-    which must not receive a response per the spec.
-    """
     req_id = request.get("id")
     method: str = request.get("method", "")
 
-    # --- initialize ---
     if method == "initialize":
         return {
             "jsonrpc": "2.0",
             "id": req_id,
             "result": {
                 "protocolVersion": MCP_VERSION,
-                "capabilities": {
-                    "tools": {"listChanged": False},
-                    "notifications": {"progress": True},
-                },
-                "serverInfo": {
-                    "name": SERVER_NAME,
-                    "version": SERVER_VERSION,
-                },
+                "capabilities": {"tools": {"listChanged": False}},
+                "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
             },
         }
 
-    # --- notifications/initialized (no response required) ---
     if method == "notifications/initialized":
         return None
 
-    # --- tools/list ---
     if method == "tools/list":
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {"tools": TOOLS},
-        }
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}}
 
-    # --- tools/call ---
     if method == "tools/call":
         params: dict[str, Any] = request.get("params", {})
         tool_name: str = params.get("name", "")
         tool_args: dict[str, Any] = params.get("arguments") or {}
 
-        handler = _TOOL_HANDLERS.get(tool_name)
+        handler = _HANDLERS.get(tool_name)
         if handler is None:
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "error": {
                     "code": METHOD_NOT_FOUND,
-                    "message": (
-                        f"Unknown tool '{tool_name}'. "
-                        f"Available tools: {', '.join(_TOOL_HANDLERS)}"
-                    ),
+                    "message": f"Unknown tool '{tool_name}'. Available: {', '.join(sorted(_HANDLERS))}",
                 },
             }
 
         try:
-            result_data = await handler(tool_args)
+            result_data = await handler(**tool_args)
+            payload = _to_dict(result_data)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
                     "content": [
-                        {
-                            "type": "text",
-                            "text": json.dumps(result_data, indent=2, default=str),
-                        }
+                        {"type": "text", "text": json.dumps(payload, indent=2, default=str)}
                     ],
                     "isError": False,
                 },
             }
         except (ValueError, TypeError) as exc:
-            # Caller errors — surface as tool-level error content (not JSON-RPC error)
-            # This allows the LLM to see the message and self-correct.
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"Input error: {exc}",
-                        }
-                    ],
+                    "content": [{"type": "text", "text": f"Input error: {exc}"}],
                     "isError": True,
                 },
             }
@@ -856,36 +655,21 @@ async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": f"Tool execution error: {exc}\n\n{tb}",
-                        }
-                    ],
+                    "content": [{"type": "text", "text": f"Tool execution error: {exc}\n\n{tb}"}],
                     "isError": True,
                 },
             }
 
-    # --- ping ---
     if method == "ping":
-        return {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "result": {},
-        }
+        return {"jsonrpc": "2.0", "id": req_id, "result": {}}
 
-    # --- unknown method ---
     if req_id is None:
-        # Notification — silently ignore unknown methods
         return None
 
     return {
         "jsonrpc": "2.0",
         "id": req_id,
-        "error": {
-            "code": METHOD_NOT_FOUND,
-            "message": f"Method '{method}' not found.",
-        },
+        "error": {"code": METHOD_NOT_FOUND, "message": f"Method '{method}' not found."},
     }
 
 
@@ -893,29 +677,17 @@ async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
 # Stdio transport loop
 # ---------------------------------------------------------------------------
 
-
 def _write_response(response: dict[str, Any]) -> None:
-    """Serialise *response* to a single JSON line on stdout."""
     sys.stdout.write(json.dumps(response, default=str) + "\n")
     sys.stdout.flush()
 
 
 def _write_error(req_id: Any, code: int, message: str) -> None:
-    """Write a JSON-RPC error response to stdout."""
-    _write_response(
-        {
-            "jsonrpc": "2.0",
-            "id": req_id,
-            "error": {"code": code, "message": message},
-        }
-    )
+    _write_response({"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}})
 
 
 async def _async_main() -> None:
-    """Async main loop: read JSON-RPC lines from stdin, write responses to stdout."""
     loop = asyncio.get_event_loop()
-
-    # Use a ThreadPoolExecutor-backed reader so we do not block the event loop
     reader = asyncio.StreamReader()
     protocol = asyncio.StreamReaderProtocol(reader)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
@@ -927,7 +699,6 @@ async def _async_main() -> None:
             break
 
         if not raw_line:
-            # EOF — client disconnected
             break
 
         line = raw_line.decode("utf-8", errors="replace").strip()
@@ -940,12 +711,10 @@ async def _async_main() -> None:
             if not isinstance(request, dict):
                 _write_error(None, INVALID_REQUEST, "Request must be a JSON object.")
                 continue
-
             req_id = request.get("id")
             response = await handle_request(request)
             if response is not None:
                 _write_response(response)
-
         except json.JSONDecodeError as exc:
             _write_error(req_id, PARSE_ERROR, f"Parse error: {exc}")
         except Exception as exc:
@@ -953,12 +722,7 @@ async def _async_main() -> None:
 
 
 def main() -> None:
-    """Entry point for the VXIS MCP server.
-
-    Starts the asyncio event loop and runs the stdio JSON-RPC transport.
-    Designed to be called by the ``vxis-mcp`` console script entry point
-    or directly via ``python -m vxis.mcp_server``.
-    """
+    """Entry point: ``python -m vxis.mcp_server`` or ``vxis-mcp``."""
     try:
         asyncio.run(_async_main())
     except KeyboardInterrupt:
