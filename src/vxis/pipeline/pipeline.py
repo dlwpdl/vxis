@@ -4210,11 +4210,15 @@ class ScanPipeline:
     async def _phase4_cpr(self, ctx: ScanContext) -> None:
         """Phase 4: CPR — Hands/Eyes/X-Ray/Controller 연결."""
         try:
-            # Phase 4 대응 벡터: 인증, JWT, 세션, OAuth, 인프라 CVE
+            # Phase 4 대응 벡터: 인증, JWT, 세션, SAML, OAuth, 인프라 CVE
+            # Phase 4 vectors: auth, JWT, session, SAML, OAuth, infra CVE
             for vid in [
                 "WEB-AUTH-001", "WEB-AUTH-002", "WEB-AUTH-003", "WEB-AUTH-004",
                 "WEB-AUTH-005", "WEB-AUTH-006", "WEB-AUTH-007", "WEB-AUTH-008",
-                "WEB-AUTH-010",  # 매직 링크 인증 우회
+                "WEB-AUTH-010",  # 매직 링크 인증 우회 | Magic link auth bypass
+                "WEB-AUTH-011",  # SAML 서명 우회 | SAML assertion signing bypass
+                "WEB-AUTH-012",  # SAML 리플레이 공격 | SAML replay attack
+                "WEB-AUTH-013",  # OAuth State 파라미터 누락 (CSRF) | OAuth state param missing (CSRF)
                 "WEB-MISCONF-004", "WEB-CRYPTO-003",
                 "WEB-INFRA-006",  # F5 BIG-IP APM RCE (CVE-2025-53521)
             ]:
