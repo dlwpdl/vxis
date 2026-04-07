@@ -66,25 +66,19 @@ def check_target_reachable(target: str, timeout: float = 5.0) -> tuple[bool, flo
 def check_brain(interactive: bool = False) -> tuple[str, bool]:
     """Brain 백엔드 상태 체크.
 
-    interactive=True (vxis scan --interactive): InteractiveBrain → claude -p (JSON 프로토콜)
-    interactive=False (기본): AgentBrain — 우선순위:
-        1. claude -p subprocess (brain.py:1521 — VXIS_BRAIN=api 가 아니면 항상 시도)
-        2. API key 기반 LLM (TOGETHER/ANTHROPIC/OPENAI/GOOGLE)
+    Architecture:
+        interactive=True   → InteractiveBrain (claude -p JSON bridge)
+        interactive=False  → AgentBrain (LLM API only — no claude -p)
+
+    For Claude Code as Brain, use either `vxis scan --interactive` or
+    register the MCP server: `claude mcp add vxis python -m vxis.mcp_server`.
     """
     if interactive:
         if shutil.which("claude") is not None:
             return "claude-code", True
         return "claude-code (binary missing)", False
 
-    # AgentBrain path — match brain._call_llm() priority order
-    use_api_only = os.environ.get("VXIS_BRAIN", "").lower() == "api"
-
-    # Tier 0: claude -p subprocess (default unless VXIS_BRAIN=api)
-    if not use_api_only and shutil.which("claude") is not None:
-        model = os.environ.get("VXIS_BRAIN_MODEL", "claude-opus-4-6")
-        return f"claude -p ({model})", True
-
-    # Tier 1: API key fallback
+    # AgentBrain path — API key required
     provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "together")
     model = os.environ.get("UPSTREAM_LLM_MODEL", "")
     api_key_envs = {
@@ -104,7 +98,7 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
                 break
 
     if not has_key:
-        return "none (no claude binary, no API key)", False
+        return "none (no API key — set TOGETHER_API_KEY or use --interactive)", False
 
     label = f"api:{provider}" + (f"/{model}" if model else "")
     return label, True

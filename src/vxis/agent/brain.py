@@ -1516,14 +1516,19 @@ class AgentBrain:
         return None
 
     def _call_llm(self, system_prompt: str, user_prompt: str) -> str | None:
-        """Call LLM — claude -p 우선, 실패 시 API fallback."""
+        """Call LLM — API only.
 
-        # ── Tier 0: claude -p (현재 Claude Code 세션 직접 사용) ──
-        if os.environ.get("VXIS_BRAIN", "").lower() != "api":
-            response = self._call_claude_subprocess(system_prompt, user_prompt)
-            if response:
-                return response
+        ARCHITECTURE: AgentBrain is the CLI path and uses LLM API exclusively.
+        Claude Code as Brain belongs to a SEPARATE path (MCP server or
+        --interactive InteractiveBrain). Mixing them here causes:
+          - Double-brain waste when called from inside a Claude Code session
+          - Confusing preflight (binary present != AgentBrain can use it)
+          - Hidden coupling to a binary that may be on a different account
 
+        If you want claude as Brain, use:
+          - `vxis scan --interactive` (legacy JSON bridge)
+          - `claude mcp add vxis python -m vxis.mcp_server` (modern MCP)
+        """
         try:
             from tools.upstream_watch.llm import chat
             response = chat(system_prompt=system_prompt, user_prompt=user_prompt, max_tokens=2000)
