@@ -1,0 +1,37 @@
+# VXIS Growth Layer — Bootstrap Mode Configuration
+# Purpose: implement everything, run conservatively until revenue unlocks full vision
+
+[budget]
+max_monthly_llm_usd = 15.0
+max_daily_llm_calls = 100
+
+[polling]
+# Reduced frequencies for cost-conscious operation
+cve_watch_interval_hours = 6
+threat_news_interval_hours = 4
+signal_analyze_interval_hours = 12
+signal_ingest_interval_hours = 6
+
+[filtering]
+regex_prefilter_enabled = true
+trust_threshold_for_llm = 0.8
+batch_size = 20
+
+[apply]
+# DRY-RUN MODE — first 30 days, nothing auto-applies to code
+# Proposals are stored in .vxis/signals/pending/ for manual review
+dry_run = true
+auto_apply_threshold = 0.9
+require_benchmark_validation = true
+
+[tiers]
+# LLM routing priority: zero-cost first
+primary = "claude_code"      # claude -p subprocess (free via subscription)
+fallback = "ollama"           # local model (free if GPU available)
+cheap_api = "together"        # $0.14-0.27 per 1M tokens
+critical_only = "sonnet"      # $3 per 1M tokens — high-stakes only
+synthesis_only = "opus"       # $15 per 1M tokens — P8 Synthesis only
+
+[cache]
+extraction_ttl_days = 30
+cache_dir = ".vxis/cache/extractions"
