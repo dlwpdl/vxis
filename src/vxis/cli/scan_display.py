@@ -371,7 +371,22 @@ class ScanLiveDisplay:
         return layout
 
     def __enter__(self):
-        self._live = Live(self._render(), console=self.console, refresh_per_second=4, screen=False)
+        # Proxy renderable: Rich Live calls __rich_console__ on every refresh tick,
+        # so passing this proxy makes _render() re-evaluate live (elapsed time,
+        # phase status, feeds) instead of freezing the initial snapshot.
+        display = self
+
+        class _LiveProxy:
+            def __rich_console__(self, console, options):  # noqa: D401
+                yield display._render()
+
+        self._live = Live(
+            _LiveProxy(),
+            console=self.console,
+            refresh_per_second=4,
+            screen=False,
+            transient=False,
+        )
         self._live.start()
         return self
 
