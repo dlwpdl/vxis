@@ -331,6 +331,12 @@ def scan(
         "-v",
         help="Enable verbose (DEBUG) logging",
     ),
+    allow_inject: bool = typer.Option(
+        False,
+        "--allow-inject",
+        help="Skip the interactive approval gate and auto-approve injection. "
+             "ONLY use on targets you own / are explicitly authorized to test.",
+    ),
 ) -> None:
     """Run a Brain-First security scan against the target.
 
@@ -461,7 +467,65 @@ def scan(
                 display.refresh()
                 await _aio.sleep(0.25)
 
-        pipeline = ScanPipeline(brain=brain, config=config, event_callback=display.handle_event)
+        # ── Injection approval gate: 알려진 벤치마크 자동 통과, 그 외 사용자 승인 필수 ──
+        _BENCHMARK_PORTS = {"8081", "3000", "8888", "8082", "8083", "5013", "4000"}
+        _BENCHMARK_HOSTS = {"localhost", "127.0.0.1"}
+        _t_lower = target.lower()
+        _is_benchmark = (
+            allow_inject  # 명시적 우회 — 책임은 사용자
+            or any(f":{port}" in _t_lower for port in _BENCHMARK_PORTS)
+            and any(h in _t_lower for h in _BENCHMARK_HOSTS)
+        )
+
+        async def _injection_gate(summary: dict) -> bool:
+            """Live TUI를 잠시 멈추고 사용자 y/N 대화."""
+            # Live 정지
+            try:
+                if display._live is not None:
+                    display._live.stop()
+            except Exception:
+                pass
+
+            console.print()
+            console.print(Panel.fit(
+                f"[bold red]⚠ INJECTION APPROVAL REQUIRED[/bold red]\n\n"
+                f"Target: [cyan]{summary.get('target')}[/cyan]\n"
+                f"Title:  {summary.get('title') or '(none)'}\n"
+                f"Frameworks: {', '.join(summary.get('frameworks') or []) or '(none)'}\n"
+                f"Phases to run: {summary.get('phase_count')} "
+                f"(SQLi/XSS/RCE/SSRF/Path/Cmd 등)\n\n"
+                f"[yellow]This will send active attack payloads to the target.\n"
+                f"Only proceed if you OWN this target or have written authorization.[/yellow]",
+                title="VXIS Safety Gate",
+                border_style="red",
+            ))
+            try:
+                answer = input("Proceed with injection? (yes/N): ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                answer = ""
+            approved = answer in ("y", "yes")
+
+            console.print(
+                f"[{'green' if approved else 'red'}]"
+                f"{'✅ APPROVED — proceeding' if approved else '❌ DENIED — recon-only'}"
+                f"[/]"
+            )
+            console.print()
+
+            # Live 재시작
+            try:
+                display.__enter__()
+            except Exception:
+                pass
+            return approved
+
+        pipeline = ScanPipeline(
+            brain=brain,
+            config=config,
+            event_callback=display.handle_event,
+            injection_approval_callback=_injection_gate,
+            auto_approve_injection=_is_benchmark,
+        )
 
         refresh_task = _aio.create_task(_refresh_loop())
         try:

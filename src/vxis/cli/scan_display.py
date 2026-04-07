@@ -98,6 +98,12 @@ class ScanLiveDisplay:
                     break
             self.current_phase = None
             self.total_findings = data.get("total_findings", self.total_findings)
+            # Severity 카운트 누계 갱신 (pipeline이 매 phase_end마다 보냄)
+            sev_counts = data.get("severity_counts")
+            if sev_counts:
+                for k in self.findings_count:
+                    if k in sev_counts:
+                        self.findings_count[k] = sev_counts[k]
 
         elif event_type == "phase_skip":
             for p in self.phases:

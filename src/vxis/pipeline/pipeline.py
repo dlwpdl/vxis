@@ -325,6 +325,155 @@ def _normalize_endpoint(endpoint: str, base_url: str) -> str:
     return endpoint
 
 
+def _fetch_landing_context(target: str, timeout: float = 5.0) -> dict:
+    """Fetch the landing page and extract observable signals for the Brain.
+
+    Returns a dict with: title, h1, forms_count, login_form_present,
+    framework_hints, websocket_used, body_preview, links_sample, status,
+    server, content_type. All best-effort — never raises.
+    """
+    out: dict[str, Any] = {
+        "title": "",
+        "h1": "",
+        "forms_count": 0,
+        "login_form_present": False,
+        "framework_hints": [],
+        "websocket_used": False,
+        "body_preview": "",
+        "links_sample": [],
+        "status": 0,
+        "server": "",
+        "content_type": "",
+        "error": "",
+    }
+    try:
+        with _httpx.Client(follow_redirects=True, timeout=timeout, verify=False) as client:
+            r = client.get(target)
+        out["status"] = r.status_code
+        out["server"] = r.headers.get("server", "")
+        out["content_type"] = r.headers.get("content-type", "")
+        body = r.text or ""
+    except Exception as exc:
+        out["error"] = str(exc)[:200]
+        return out
+
+    body_lower = body.lower()
+
+    # Title / H1
+    m = _re.search(r"<title[^>]*>([^<]{1,200})</title>", body, _re.IGNORECASE)
+    if m:
+        out["title"] = m.group(1).strip()
+    m = _re.search(r"<h1[^>]*>([^<]{1,200})</h1>", body, _re.IGNORECASE)
+    if m:
+        out["h1"] = _re.sub(r"\s+", " ", m.group(1)).strip()
+
+    # Forms
+    forms = _re.findall(r"<form\b[^>]*>", body, _re.IGNORECASE)
+    out["forms_count"] = len(forms)
+    out["login_form_present"] = bool(
+        _re.search(r'type=["\']password["\']', body, _re.IGNORECASE)
+        or _re.search(r"\b(login|sign[-_ ]?in|log[-_ ]?in)\b", body_lower)
+    )
+
+    # Framework / app fingerprints (visible-only, no header magic)
+    hints: list[str] = []
+    fingerprint_map = {
+        "Streamlit":      ["streamlit", "stApp", "data-testid=\"st"],
+        "Next.js":        ["__next", "/_next/static"],
+        "React":          ["react-dom", "data-reactroot", "react.production"],
+        "Vue":            ["vue.global", "data-v-"],
+        "Angular":        ["ng-version", "ng-app"],
+        "Django":         ["csrfmiddlewaretoken", "/static/admin/"],
+        "Flask":          ["werkzeug", "flask"],
+        "Laravel":        ["laravel_session", "X-CSRF-TOKEN"],
+        "WordPress":      ["wp-content", "wp-includes"],
+        "Drupal":         ["drupal-settings-json", "/sites/default/"],
+        "Spring":         ["jsessionid", "spring"],
+        "ASP.NET":        ["__viewstate", "asp.net"],
+        "Gradio":         ["gradio", "/gradio_api/"],
+        "Jupyter":        ["jupyter", "tornado"],
+        "FastAPI":        ["fastapi", "/openapi.json"],
+        "GraphQL":        ["graphql", "/graphiql"],
+    }
+    for name, patterns in fingerprint_map.items():
+        if any(p.lower() in body_lower for p in patterns):
+            hints.append(name)
+    if "tornado" in (out["server"] or "").lower():
+        hints.append("Tornado")
+    out["framework_hints"] = hints
+
+    # WebSocket usage
+    out["websocket_used"] = bool(
+        "websocket" in body_lower or "ws://" in body_lower or "wss://" in body_lower
+    )
+
+    # Body preview — strip tags, collapse whitespace, cap 600 chars
+    text = _re.sub(r"<script[\s\S]*?</script>", " ", body, flags=_re.IGNORECASE)
+    text = _re.sub(r"<style[\s\S]*?</style>", " ", text, flags=_re.IGNORECASE)
+    text = _re.sub(r"<[^>]+>", " ", text)
+    text = _re.sub(r"\s+", " ", text).strip()
+    out["body_preview"] = text[:600]
+
+    # Links sample
+    links = _re.findall(r'href=["\']([^"\']{1,200})["\']', body, _re.IGNORECASE)
+    seen: set[str] = set()
+    sample: list[str] = []
+    for ln in links:
+        if ln in seen or ln.startswith(("javascript:", "mailto:", "#")):
+            continue
+        seen.add(ln)
+        sample.append(ln)
+        if len(sample) >= 12:
+            break
+    out["links_sample"] = sample
+
+    return out
+
+
+def _normalize_brain_decisions(
+    raw: dict, vectors: list, target: str
+) -> dict[str, dict]:
+    """Convert Brain output to executor-friendly decisions with priority caps.
+
+    GUARANTEES coverage: every vector gets at least 1 payload (no skipping).
+    Priority controls *how many* payloads run, not *whether* they run.
+
+    high   → up to 5 payloads
+    medium → up to 3 payloads
+    low    → exactly 1 payload (sanity probe)
+    """
+    PRIORITY_CAPS = {"high": 5, "medium": 3, "low": 1}
+    decisions: dict[str, dict] = {}
+    for vec in vectors:
+        d = raw.get(vec.id, {}) if isinstance(raw, dict) else {}
+        priority = str(d.get("priority", "medium")).lower()
+        if priority not in PRIORITY_CAPS:
+            priority = "medium"
+        cap = PRIORITY_CAPS[priority]
+
+        payloads = d.get("payloads") or []
+        if not isinstance(payloads, list):
+            payloads = [str(payloads)]
+        # Coverage guarantee: at least one probe
+        if not payloads:
+            payloads = [""]
+        payloads = payloads[:cap]
+
+        decisions[vec.id] = {
+            "attempt": True,  # NEVER skip — Brain only re-prioritizes
+            "reasoning": d.get("reasoning", "")[:200],
+            "priority": priority,
+            "targets": [{
+                "endpoint": d.get("endpoint", target),
+                "method": d.get("method", "GET"),
+                "param": d.get("param", ""),
+                "payloads": payloads,
+                "json_body": d.get("json_body"),
+            }],
+        }
+    return decisions
+
+
 class ScanPipeline:
     """Brain-First 통합 파이프라인.
 
@@ -340,6 +489,8 @@ class ScanPipeline:
         enable_deferred_approval: bool = True,
         approval_callback: Callable[[list], Awaitable[list[bool]]] | None = None,
         event_callback: Callable[[str, dict], None] | None = None,
+        injection_approval_callback: Callable[[dict], Awaitable[bool]] | None = None,
+        auto_approve_injection: bool = False,
     ) -> None:
         self.brain = brain
         self.config = config
@@ -348,6 +499,14 @@ class ScanPipeline:
         # event_callback: (event_type, data) 수신. CLI Rich Live 등 subscribe 용도.
         # Events: phase_start, phase_end, attack, hit, brain_thinking, error, score
         self._event_callback = event_callback
+        # ── Injection approval gate ────────────────────────────
+        # 인젝션(SQLi/XSS/RCE 등) 단계 시작 전 사용자 승인 필수.
+        # auto_approve_injection=True 일 때만 통과 (CLI --allow-inject 명시 또는
+        # 알려진 벤치마크 타겟). 그 외 모든 경우 callback 호출 → y/N → 거부 시
+        # exploitation/chain stage 전체 skip.
+        self._injection_approval_callback = injection_approval_callback
+        self._auto_approve_injection = auto_approve_injection
+        self._injection_approved: bool | None = None  # tri-state: None=not asked
 
     def _emit(self, event_type: str, data: dict) -> None:
         """이벤트 발생 — 등록된 callback에 전달 (thread-safe)."""
@@ -357,6 +516,74 @@ class ScanPipeline:
                     self._event_callback(event_type, data)
                 except Exception:
                     pass
+
+    async def _request_injection_approval(self, ctx: ScanContext) -> bool:
+        """인젝션 단계 진입 전 사용자 승인 게이트.
+
+        Returns True if injection may proceed, False if it must be skipped.
+        Decision is cached on self._injection_approved so the gate only fires once.
+        """
+        if self._injection_approved is not None:
+            return self._injection_approved
+
+        # 명시적 auto-approve (CLI --allow-inject) → 통과
+        if self._auto_approve_injection:
+            logger.warning("[INJECTION-GATE] auto_approve_injection=True — bypassing approval")
+            self._injection_approved = True
+            return True
+
+        # 승인 콜백 빌드 — landing recon + 예정 벡터 요약
+        try:
+            landing = _fetch_landing_context(ctx.target)
+        except Exception:
+            landing = {}
+
+        from vxis.registry import WEB_PHASES
+        injection_phases = [p for p in WEB_PHASES if p.stage in ("exploitation", "chain")]
+
+        summary = {
+            "target": ctx.target,
+            "scan_id": ctx.scan_id,
+            "frameworks": landing.get("framework_hints", []),
+            "title": landing.get("title", ""),
+            "status": landing.get("status", 0),
+            "injection_phases": [
+                {"id": p.id, "name": p.name, "stage": p.stage}
+                for p in injection_phases
+            ],
+            "phase_count": len(injection_phases),
+            "ghost_active": getattr(ctx, "ghost_active", False),
+        }
+
+        self._emit("injection_approval_request", summary)
+
+        approved = False
+        if self._injection_approval_callback is not None:
+            try:
+                approved = bool(await self._injection_approval_callback(summary))
+            except Exception as exc:
+                logger.error("[INJECTION-GATE] callback raised: %s — denying for safety", exc)
+                approved = False
+        else:
+            # No callback wired — REFUSE by default. Safety first.
+            logger.error(
+                "[INJECTION-GATE] No approval callback registered. "
+                "Refusing injection on %s. Pass --allow-inject if you are authorized.",
+                ctx.target,
+            )
+            approved = False
+
+        self._injection_approved = approved
+        self._emit("injection_approval_result", {"approved": approved})
+
+        if approved:
+            logger.warning("[INJECTION-GATE] ✅ APPROVED — proceeding with injection phases")
+        else:
+            logger.warning(
+                "[INJECTION-GATE] ❌ DENIED — skipping all exploitation/chain phases. "
+                "Recon-only report will be produced."
+            )
+        return approved
 
     async def run(
         self,
@@ -502,6 +729,18 @@ class ScanPipeline:
                 _stage_label = STAGE_NAMES.get(first_stage, first_stage)
                 logger.info("\n  ── %s ──", _stage_label)
                 _prev_stage = first_stage
+
+            # ── Injection approval gate ──────────────────────────
+            # exploitation/chain stage 진입 직전에 한 번 사용자 승인 받기.
+            # 거부되면 해당 stage 그룹 전체 skip → 다음 group으로 (report 까지).
+            if first_stage in ("exploitation", "chain"):
+                _approved = await self._request_injection_approval(ctx)
+                if not _approved:
+                    for _p in _runnable_phases:
+                        logger.info("  [SKIP-INJECTION] Phase %d %s — user denied approval", _p.id, _p.name)
+                        self._emit("phase_skip", {"name": f"Phase {_p.id}: {_p.name}"})
+                        _failed_phases.add(_p.id)
+                    continue  # 다음 parallel_group으로
 
             # Deferred Actions: report stage 진입 전에 실행
             if first_stage == "report" and ctx.deferred_actions and self.enable_deferred_approval:
@@ -734,11 +973,19 @@ class ScanPipeline:
         new_findings = len(ctx.findings) - pre_count
         ctx.log_phase(name, duration_ms=elapsed, findings_count=new_findings)
 
+        # Severity 카운트 누계 — TUI 실시간 표시용
+        _sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "informational": 0}
+        for _f in ctx.findings:
+            _s = _f.severity.value if hasattr(_f.severity, "value") else str(_f.severity)
+            if _s in _sev_counts:
+                _sev_counts[_s] += 1
+
         self._emit("phase_end", {
             "name": name,
             "duration_s": elapsed / 1000,
             "new_findings": new_findings,
             "total_findings": len(ctx.findings),
+            "severity_counts": _sev_counts,
             "failed": phase_failed,
             "error": error_msg,
         })
@@ -936,6 +1183,15 @@ class ScanPipeline:
             app_name = "Unknown web application"
             app_specific = []
 
+        # ── Live landing-page recon for unknown / non-benchmark targets ──
+        # Brain MUST see what's actually on the target. Without this, the LLM
+        # hallucinates attacks against features that don't exist.
+        landing_ctx: dict = {}
+        if app_name == "Unknown web application":
+            landing_ctx = _fetch_landing_context(target_base)
+            if landing_ctx.get("framework_hints"):
+                app_name = "Unknown — observed: " + ", ".join(landing_ctx["framework_hints"])
+
         app_specific_urls = [target_base + p if p.startswith("/") else p for p in app_specific]
         # 우선순위: Phase 4 크롤 결과 → 벤치마크 하드코딩 → base URL
         effective_endpoints = live_urls[:20] or app_specific_urls[:20] or [target_base]
@@ -1001,18 +1257,32 @@ class ScanPipeline:
             )
         else:
             system_prompt = (
-                "You are an expert penetration tester AI Brain for VXIS, an automated security scanner. "
-                f"Target is {app_name}, a KNOWN INTENTIONALLY VULNERABLE benchmark app. "
-                "ALL attack vectors WILL be attempted — provide the best attack parameters for each. "
-                "SQL injection: use ' OR 1=1--, UNION SELECT payloads. "
-                "XSS: use <script>alert(1)</script> variants. "
-                "Path traversal: use ../../../etc/passwd variants. "
-                "Command injection: use ; ls, && id, | whoami. "
-                "If endpoint unknown, use the base target URL.\n\n"
+                "You are an expert penetration tester AI Brain for VXIS. "
+                "You will receive observed evidence about the target (title, "
+                "framework, forms, body preview). Use it to PRIORITIZE which "
+                "attack vectors are most likely to succeed on THIS target.\n\n"
+                "CRITICAL: You MUST NOT skip vectors. Coverage is mandatory. "
+                "Instead, assign a priority to each vector:\n"
+                "  - 'high'   → vector clearly applies (3-5 tailored payloads)\n"
+                "  - 'medium' → uncertain but plausible (2-3 payloads)\n"
+                "  - 'low'    → unlikely on this target (1 sanity probe — still required)\n\n"
+                "Examples of priority calls:\n"
+                "  - Streamlit/Gradio app with no login form → auth_bypass vectors = LOW\n"
+                "  - REST API with /openapi.json → BOLA, mass_assignment = HIGH\n"
+                "  - WordPress admin visible → wp_* vectors = HIGH\n"
+                "  - Static site, no forms → SQLi/XSS = LOW (but still 1 probe)\n\n"
+                "Payload guidance:\n"
+                "  - SQL injection: ' OR 1=1--, UNION SELECT, time-based\n"
+                "  - XSS: <script>alert(1)</script> + framework-specific bypasses\n"
+                "  - Path traversal: ../../../etc/passwd variants\n"
+                "  - Command injection: ; ls, && id, | whoami\n\n"
                 "OUTPUT RULE: Your ENTIRE response must be a single raw JSON object. "
-                "No text before {. No text after }. No markdown (no ```). No explanation. "
-                "Schema per vector_id key: {\"endpoint\": str, \"method\": \"GET\"|\"POST\", "
-                "\"param\": str, \"payloads\": [str, ...], \"reasoning\": str}"
+                "No text before {. No text after }. No markdown. No explanation.\n"
+                "Schema per vector_id key:\n"
+                "  {\"priority\": \"high\"|\"medium\"|\"low\", "
+                "\"endpoint\": str, \"method\": \"GET\"|\"POST\", "
+                "\"param\": str, \"payloads\": [str, ...], "
+                "\"reasoning\": \"why this priority for THIS target\"}"
             )
 
         # Vector→Endpoint 매핑 힌트 생성
@@ -1031,16 +1301,40 @@ class ScanPipeline:
                 f"  {vid}: {path}" for vid, path in _hints.items()
             ) + "\n"
 
+        # ── Live observation block (only when we actually fetched it) ──
+        observation_block = ""
+        if landing_ctx and landing_ctx.get("status"):
+            observation_block = (
+                "\n=== LIVE OBSERVATION (GET / on target) ===\n"
+                f"HTTP {landing_ctx.get('status')} | "
+                f"server={landing_ctx.get('server') or '?'} | "
+                f"content-type={landing_ctx.get('content_type') or '?'}\n"
+                f"title: {landing_ctx.get('title') or '(none)'}\n"
+                f"h1: {landing_ctx.get('h1') or '(none)'}\n"
+                f"frameworks_detected: {landing_ctx.get('framework_hints') or '(none)'}\n"
+                f"forms_count: {landing_ctx.get('forms_count')} | "
+                f"login_form_present: {landing_ctx.get('login_form_present')} | "
+                f"websocket_used: {landing_ctx.get('websocket_used')}\n"
+                f"links_sample: {landing_ctx.get('links_sample') or '(none)'}\n"
+                f"body_preview: {(landing_ctx.get('body_preview') or '(empty)')[:500]}\n"
+                "=== END OBSERVATION ===\n"
+                "Use the observation above to assign realistic priorities.\n"
+            )
+        elif landing_ctx and landing_ctx.get("error"):
+            observation_block = f"\n[Observation failed: {landing_ctx['error']}]\n"
+
         user_prompt = (
             f"Target app: {app_name} at {ctx.target}\n"
+            + observation_block
             + (f"\n{api_spec_context}\n" if api_spec_context else f"Known vulnerable paths: {app_specific_urls[:20]}\n")
             + f"Discovered endpoints: {effective_endpoints[:15]}\n"
             + _vec_endpoint_hints
             + f"Tech stack: {tech_stack or ['web', 'http']}\n"
             f"Previous findings: {prev_findings}\n"
             f"Phase: {phase_name}\n\n"
-            f"Provide attack parameters for ALL these vectors.\n"
-            + ("Use the API spec above to target real endpoints.\n" if api_spec_context else "Use the known vulnerable paths for this specific app.\n")
+            f"For EVERY vector below, output an entry with priority + payloads.\n"
+            "Coverage is mandatory — even 'low' priority vectors must include exactly 1 probe payload.\n"
+            + ("Use the API spec above to target real endpoints.\n" if api_spec_context else "")
             + f"Vectors:\n{vec_list}\n\n"
             "Output ONLY the raw JSON object. Every vector_id must be a key. Zero additional text."
         )
@@ -1100,25 +1394,20 @@ class ScanPipeline:
 
             raw = _parse_llm_json(response)
 
-            # 모든 벡터 attempt=True 고정 — LLM은 파라미터만 결정
+            # 모든 벡터 attempt=True 고정 — Brain은 priority + payload만 결정
+            normalized = _normalize_brain_decisions(raw, remaining_vectors, ctx.target)
             decisions: dict[str, dict] = dict(kb_decisions)
-            for vec in remaining_vectors:
-                vid = vec.id
-                d = raw.get(vid, {})
-                decisions[vid] = {
-                    "attempt": True,
-                    "reasoning": d.get("reasoning", "LLM attack params"),
-                    "targets": [{
-                        "endpoint": d.get("endpoint", ctx.target),
-                        "method": d.get("method", "GET"),
-                        "param": d.get("param", ""),
-                        "payloads": d.get("payloads", [""]),
-                        "json_body": d.get("json_body"),  # REST API JSON body 공격
-                    }],
-                }
+            decisions.update(normalized)
 
-            logger.info("  [LLM-BRAIN] Phase %s: %d/%d vectors (all attempt, %d from KB)",
-                        phase_name, len(decisions), len(phase_vectors), len(kb_decisions))
+            # Priority 분포 로깅
+            _pri_count = {"high": 0, "medium": 0, "low": 0}
+            for d in normalized.values():
+                _pri_count[d.get("priority", "medium")] += 1
+            logger.info(
+                "  [LLM-BRAIN] Phase %s: %d/%d vectors (KB=%d) | priority H=%d M=%d L=%d",
+                phase_name, len(decisions), len(phase_vectors), len(kb_decisions),
+                _pri_count["high"], _pri_count["medium"], _pri_count["low"],
+            )
 
             # ── Knowledge Store: LLM 결정 기록 ──
             if kb_store is not None:
