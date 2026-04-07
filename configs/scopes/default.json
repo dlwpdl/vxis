@@ -1,0 +1,46 @@
+{
+  "scan_id": "",
+  "target": "",
+  "in_scope_domains": [],
+  "out_of_scope": [],
+  "path_rules": {
+    "allow": ["/*"],
+    "deny": []
+  },
+  "http_methods": {
+    "allow": ["GET", "POST", "PUT", "PATCH"],
+    "deny": ["DELETE"]
+  },
+  "data_sensitivity": {
+    "pii_read": "detect_and_redact",
+    "pii_exfil": "forbidden",
+    "financial_data": "forbidden",
+    "credentials": "detect_only",
+    "phi": "forbidden",
+    "max_records_per_query": 10
+  },
+  "account_rules": {
+    "create_test_accounts": "approval_required",
+    "use_real_user_credentials": "forbidden",
+    "credential_stuffing": "forbidden"
+  },
+  "destructive_actions": {
+    "database_writes": "approval_required",
+    "file_uploads": "approval_required",
+    "file_deletions": "forbidden",
+    "email_sending": "forbidden",
+    "sms_sending": "forbidden"
+  },
+  "time_window": {
+    "allowed_hours": "00:00-23:59",
+    "timezone": "UTC"
+  },
+  "rate_limits": {
+    "max_rps": 10,
+    "max_concurrent": 5,
+    "max_total_requests": 100000
+  },
+  "audit": {
+    "log_all_requests": true
+  }
+}
