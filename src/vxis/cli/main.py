@@ -339,17 +339,44 @@ def scan(
     --interactive: Claude Code가 Brain (stdin/stdout JSON 프로토콜)
     --resume: 이전 스캔의 체크포인트에서 재개
     """
-    log_level = logging.DEBUG if verbose else logging.WARNING  # Live TUI 간섭 방지
+    # Logging policy: TUI(non-interactive)는 로그를 파일로 보냄 → Live 간섭 0
+    # interactive 모드는 stdin/stdout이 JSON 프로토콜이라 stderr로 보내야 함
+    log_level = logging.DEBUG if verbose else logging.INFO
+    log_path: Optional[Path] = None
+
     if interactive:
-        logging.basicConfig(stream=sys.stderr, level=log_level,
-                            format="%(asctime)s [%(name)s] %(message)s", datefmt="%H:%M:%S")
-    else:
         logging.basicConfig(
-            stream=sys.stderr,  # logger는 stderr로 → Live TUI 간섭 없음
+            stream=sys.stderr,
             level=log_level,
-            format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            format="%(asctime)s [%(name)s] %(message)s",
             datefmt="%H:%M:%S",
         )
+    else:
+        # Route ALL logs to file so Rich Live TUI is never interrupted
+        from datetime import datetime as _dt
+        log_dir = Path("logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"scan_{_dt.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+        # Reset any previous handlers (re-runs in same session)
+        root_logger = logging.getLogger()
+        for h in list(root_logger.handlers):
+            root_logger.removeHandler(h)
+
+        file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+        file_handler.setLevel(log_level)
+        file_handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+                datefmt="%H:%M:%S",
+            )
+        )
+        root_logger.addHandler(file_handler)
+        root_logger.setLevel(log_level)
+        # Silence noisy library loggers from polluting the file too much
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
+        logging.getLogger("urllib3").setLevel(logging.WARNING)
 
     _print_banner()
 
@@ -359,7 +386,7 @@ def scan(
 
     # ── Pre-flight checks ──────────────────────────────────
     console.print("[dim]Running pre-flight checks...[/dim]")
-    pf = run_preflight(target, ghost=ghost)
+    pf = run_preflight(target, ghost=ghost, interactive=interactive)
 
     pf_table = Table.grid(padding=(0, 2))
     pf_table.add_column(style="bold", no_wrap=True)
@@ -375,6 +402,8 @@ def scan(
     if ghost:
         _p_status = f"[green]✓ {pf.proxy_pool_size} proxies[/green]" if pf.proxy_pool_size else "[yellow]⚠ empty pool (UA only)[/yellow]"
         pf_table.add_row("Proxy Pool:", _p_status)
+    if log_path is not None:
+        pf_table.add_row("Logs:", f"[dim]{log_path}[/dim] (tail -f to follow)")
 
     console.print(Panel(pf_table, title="Pre-flight", border_style="cyan"))
 

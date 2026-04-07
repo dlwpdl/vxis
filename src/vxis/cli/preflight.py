@@ -63,28 +63,43 @@ def check_target_reachable(target: str, timeout: float = 5.0) -> tuple[bool, flo
             return False, 0.0
 
 
-def check_brain() -> tuple[str, bool]:
-    """Brain 백엔드 상태 체크 — claude -p 또는 API 키."""
-    # Tier 0: claude -p CLI 존재?
-    if shutil.which("claude") is not None:
-        try:
-            # Quick test — 실제 호출하진 않음, binary 존재만 확인
+def check_brain(interactive: bool = False) -> tuple[str, bool]:
+    """Brain 백엔드 상태 체크.
+
+    interactive=True (vxis scan --interactive): InteractiveBrain → claude -p
+    interactive=False (기본): AgentBrain → UPSTREAM_LLM_PROVIDER/MODEL (env-driven)
+    """
+    if interactive:
+        if shutil.which("claude") is not None:
             return "claude-code", True
-        except Exception:
-            pass
+        return "claude-code (binary missing)", False
 
-    # Tier 1-4: API 키 확인
-    api_keys = {
-        "ANTHROPIC_API_KEY": "anthropic",
-        "TOGETHER_API_KEY": "together",
-        "OPENAI_API_KEY": "openai",
-        "GOOGLE_API_KEY": "gemini",
+    # AgentBrain path — show the actual provider/model that will run
+    provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "together")
+    model = os.environ.get("UPSTREAM_LLM_MODEL", "")
+
+    api_key_envs = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "together":  "TOGETHER_API_KEY",
+        "openai":    "OPENAI_API_KEY",
+        "gemini":    "GOOGLE_API_KEY",
     }
-    for env, provider in api_keys.items():
-        if os.environ.get(env):
-            return f"api:{provider}", True
+    key_env = api_key_envs.get(provider)
+    has_key = bool(os.environ.get(key_env)) if key_env else False
 
-    return "none", False
+    # Fallback: any provider that has a key
+    if not has_key:
+        for prov, env in api_key_envs.items():
+            if os.environ.get(env):
+                provider = prov
+                has_key = True
+                break
+
+    if not has_key:
+        return "none", False
+
+    label = f"{provider}" + (f"/{model}" if model else "")
+    return label, True
 
 
 def check_docker() -> bool:
@@ -114,7 +129,7 @@ def check_proxy_pool() -> int:
     return len([p for p in pool.split(",") if p.strip()])
 
 
-def run_preflight(target: str, ghost: bool = False) -> PreflightResult:
+def run_preflight(target: str, ghost: bool = False, interactive: bool = False) -> PreflightResult:
     """전체 pre-flight 체크 실행."""
     result = PreflightResult()
 
@@ -124,7 +139,7 @@ def run_preflight(target: str, ghost: bool = False) -> PreflightResult:
         result.errors.append(f"Target unreachable: {target}")
 
     # 2. Brain 백엔드
-    result.brain_backend, result.brain_ready = check_brain()
+    result.brain_backend, result.brain_ready = check_brain(interactive=interactive)
     if not result.brain_ready:
         result.errors.append(
             "No Brain backend available. Install 'claude' CLI or set "
