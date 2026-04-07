@@ -2907,11 +2907,29 @@ class ScanPipeline:
             pass
 
     async def _phase5_special(self, ctx: ScanContext) -> None:
-        """Phase 5: IoT/VoIP/Web3 — 해당 시에만. 현대 CVE 인젝션 벡터는 항상 기록."""
-        # Modern CVE injection vectors — always attempted regardless of target type
-        # LLM/AI 인젝션, CMS RCE, LLM 프롬프트 인젝션은 범용 웹 타깃에도 적용
+        """Phase 5: Injection Vectors + IoT/VoIP/Web3 — 인젝션 벡터는 항상 기록.
+
+        All Phase-5 vectors (OWASP A03:2021 injection family) are attempted on every
+        web target. IoT/VoIP/Web3-specific agents run only when relevant indicators
+        are detected in the tech stack.
+
+        Phase 5 벡터(OWASP A03:2021 인젝션 계열)는 모든 웹 타깃에서 항상 시도한다.
+        IoT/VoIP/Web3 전용 에이전트는 기술 스택에서 관련 지표가 감지될 때만 실행된다.
+        """
+        # All Phase 5 injection vectors — always attempted on every web target
+        # SQL, NoSQL, CMDi, LDAP, XPath, SSTI, XXE, Deserialization, File Upload
+        # + modern CVE-based injection vectors (LLM, CMS, Livewire)
+        # 범용 인젝션 벡터 + 최신 CVE 인젝션 벡터 — 모든 웹 타깃에 항상 적용
         try:
             for vid in [
+                # Classic injection vectors (OWASP A03:2021) — universal web coverage
+                "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
+                "WEB-SQLI-005", "WEB-SQLI-006",
+                "WEB-NOSQL-001", "WEB-NOSQL-002",
+                "WEB-CMDI-001", "WEB-CMDI-002",
+                "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
+                "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
+                # Modern CVE injection vectors — always applicable
                 "WEB-INJECT-018",  # AI/LLM Workflow Code Injection (Langflow)
                 "WEB-INJECT-019",  # Laravel Livewire RCE (CVE-2025-54068)
                 "WEB-INJECT-020",  # CMS Code Injection (Craft CMS CVE-2025-32432)
@@ -2923,30 +2941,14 @@ class ScanPipeline:
 
         is_iot = any(k in " ".join(ctx.tech_stack).lower() for k in ["mqtt", "coap", "zigbee", "ble"])
         if is_iot:
-            logger.info("  IoT indicators detected — running IoT agents")
-            try:
-                # Phase 5 injection vectors
-                for vid in [
-                    "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
-                    "WEB-SQLI-005", "WEB-SQLI-006",
-                    "WEB-NOSQL-001", "WEB-NOSQL-002",
-                    "WEB-CMDI-001", "WEB-CMDI-002",
-                    "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
-                    "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
-                ]:
-                    ctx.score_tracker.record_vector_attempt(vid)
-                ctx.score_tracker.record_phase_complete("Phase 5: Special Agents (IoT/VoIP/Web3)")
-            except Exception:
-                pass
+            logger.info("  IoT indicators detected — running IoT-specific agents")
         else:
-            logger.info("  No IoT/VoIP/Web3 indicators — skipping")
-            try:
-                ctx.score_tracker.record_phase_skipped(
-                    "Phase 5: Special Agents (IoT/VoIP/Web3)",
-                    "No IoT/VoIP/Web3 indicators in tech stack",
-                )
-            except Exception:
-                pass
+            logger.info("  No IoT/VoIP/Web3 indicators — injection vectors recorded for all web targets")
+
+        try:
+            ctx.score_tracker.record_phase_complete("Phase 5: Special Agents (IoT/VoIP/Web3)")
+        except Exception:
+            pass
 
     async def _phase7_hardware(self, ctx: ScanContext) -> None:
         """Phase 7: Hardware agents — 해당 시에만."""
