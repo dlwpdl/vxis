@@ -1161,6 +1161,425 @@ Add to the 10-day roadmap:
 - **Cross-source correlation**: "Same CVE mentioned in 3 sources → high confidence"
 - **Proactive research**: When trending topic detected, auto-query NVD/GitHub for related
 
+## Long-term Vision: Quantum AI Pentesting
+
+### The North Star
+
+VXIS is not a pentest tool. VXIS is an **autonomous security intelligence organism**
+that absorbs the world's collective security research, understands it through LLM
+reasoning, implements it as executable code, and continuously evolves through a
+compound feedback loop.
+
+The analogy: **Quantum Trading, but for pentesting.**
+
+Quant trading firms (Renaissance, Two Sigma, Citadel) dominate markets not because
+their individual quants are smarter than academics — they dominate because their
+system ingests every data source in real-time, applies AI to find patterns humans
+cannot see, executes at machine speed, and learns from every trade. No single
+human can compete with the integrated feedback loop.
+
+VXIS applies the same architecture to offensive security:
+
+- **Ingest**: Every CVE, every paper, every conference talk, every HackerOne
+  writeup, every bug bounty disclosure, every GitHub PoC, every dark web leak,
+  every Twitter infosec thread
+- **Understand**: LLM Brain extracts TTPs, techniques, payloads, and maps them
+  to VXIS phase structure
+- **Implement**: Generate new AttackVectors, update PhaseGuides, expand WAF
+  bypass DB, enrich Knowledge Store
+- **Execute**: Phase-based autonomous pentests with Dead End semantics
+- **Learn**: Track which techniques work on which targets, compound the
+  advantage
+- **Repeat**: 24/7, every improvement makes the next improvement faster
+
+### The Knowledge Arbitrage Principle
+
+The user does not need to personally understand every new research paper. The
+AI understands it. The user orchestrates direction; the AI absorbs and executes.
+
+When Project Zero publishes a new kernel exploit technique, VXIS reads it and
+applies it to clients. When Trail of Bits releases a smart contract audit
+methodology, VXIS incorporates it. When a HackerOne hunter publishes a
+writeup on novel IDOR chains, VXIS learns the pattern.
+
+**The user is the orchestra conductor. The world's security researchers are
+the orchestra. VXIS is the conductor's AI-powered baton.**
+
+### Compound Loop Mathematics
+
+The critical insight: this creates a **non-linear growth curve**.
+
+```
+Linear tool (competitors):
+  Month 1:   100 vectors
+  Month 6:   150 vectors  (+50)
+  Month 12:  200 vectors  (+50)
+  → Year 1: +100
+
+Compound tool (VXIS):
+  Month 1:   100 vectors, 0 KB patterns
+  Month 3:   130 vectors, 50 KB patterns  (KB accelerates vector discovery)
+  Month 6:   200 vectors, 300 KB patterns (KB generates KB)
+  Month 12:  500 vectors, 2000 KB patterns
+  Month 18:  1500 vectors, 10000 KB patterns
+  → Year 1: +400, Year 2: +1000
+```
+
+Each finding becomes:
+1. A vector candidate
+2. A KB pattern
+3. A new chaining possibility
+4. Context that helps understand the next article
+
+This positive feedback loop does not exist in static tools. The first 30 days
+show minimal difference. By month 6, competitors cannot catch up.
+
+### Sponge Evolution (4 Stages)
+
+The current Self-Growth Layer is Stage 1. The full vision progresses through:
+
+**Stage 1: Passive Polling** (current 18-day plan)
+- RSS feed monitoring, CVE polling, scheduled ingestion
+- Limitation: must wait for news to break
+- Cost: low (hourly polling)
+
+**Stage 2: Active Discovery**
+- Brain searches autonomously ("find recent WAF bypass techniques")
+- GitHub Code Search API for PoC discovery
+- arXiv cs.CR paper crawler
+- Conference slide PDF scraping (DEF CON, Black Hat, HITCON)
+- Cost: medium (LLM-driven search queries)
+
+**Stage 3: Semantic Synthesis**
+- Cross-source pattern detection across multiple sources
+- "Cloudflare bypass A + Akamai bypass B + AWS WAF bypass C" → extract common
+  principle → generalized technique
+- Requires LLM reasoning across heterogeneous sources
+- Cost: higher (multi-shot LLM context building)
+
+**Stage 4: Self-Directed Research**
+- Brain identifies its own weaknesses and directs research
+- "We are weak on Rust apps → prioritize Rust vulnerability research"
+- "Average chain length is 2 steps → find 3+ step chaining techniques"
+- Brain acts like a PhD student generating its own research questions
+- Cost: high (sustained LLM reasoning cycles)
+
+### Revenue Feedback Loop
+
+VXIS growth is bounded by compute budget. Compute budget is bounded by revenue.
+The moment VXIS produces value, the loop becomes self-sustaining.
+
+```
+┌──────────────────────────────────────┐
+│ 1. MVP: Current VXIS → first paid    │
+│    scan or bug bounty automation     │
+└───────────────┬──────────────────────┘
+                │
+                ▼
+┌──────────────────────────────────────┐
+│ 2. Revenue → expanded compute budget │
+│    - More LLM calls per day           │
+│    - Faster polling intervals         │
+│    - More benchmark targets           │
+│    - More signal sources              │
+└───────────────┬──────────────────────┘
+                │
+                ▼
+┌──────────────────────────────────────┐
+│ 3. More learning → stronger VXIS     │
+│    Signal analyze 2h → 30min → 5min  │
+└───────────────┬──────────────────────┘
+                │
+                ▼
+┌──────────────────────────────────────┐
+│ 4. Stronger VXIS → premium pricing   │
+│    Critical finding rate ↑            │
+│    Client trust ↑                     │
+│    Report quality ↑                   │
+└───────────────┬──────────────────────┘
+                │
+                └── loop back to 1 (compounding)
+```
+
+Bootstrap paths (in priority order for cost-conscious launch):
+1. **Bug bounty automation** on public HackerOne/Bugcrowd programs
+2. **Pentest-as-a-Service subscription** for SMB clients
+3. **Threat Intelligence Feed** — sell enriched KB as a data product
+4. **Research arbitrage** — discover novel vulns faster than researchers,
+   publish first, build reputation
+
+### Timing Window
+
+- LLM capability threshold reached: **2024** (GPT-4, Claude 3.5)
+- MCP standardization: **late 2024**
+- Security research volume: highest ever in 2026
+- Big Tech internal tools: **2-3 years away**
+
+**The window is 12-18 months.** Ship during this window or watch someone else
+do it.
+
+### Why Competitors Will Not Catch Up
+
+They could build similar tools. They will not, because:
+
+- Short-term ROI is invisible (first 3 months produce no visible advantage)
+- Infrastructure investment is high
+- Effectiveness measurement is hard
+- Compound loops are counterintuitive (linear thinking dominates industry)
+- Regulatory risk (autonomous offensive tools face scrutiny)
+
+**Difficulty is the moat.** The same properties that make this hard to build
+also make it hard to replicate.
+
+---
+
+## Cost-Conscious Bootstrap Mode
+
+### The Problem
+
+The long-term vision is expensive at full scale. But VXIS has **zero budget**
+right now. The vision must be **achievable on a shoestring** until revenue
+arrives.
+
+### Core Principle
+
+**Implement everything. Run conservatively.**
+
+The architecture (Self-Growth Layer, primitives, workflows) should be built
+completely so that scaling up is a **configuration change**, not a rewrite.
+But initial runtime configuration should be **extremely frugal**:
+
+- Use free LLM tiers wherever possible
+- Reduce polling frequencies drastically
+- Cache aggressively
+- Defer expensive analysis
+- Prefer regex/rule-based filtering before LLM calls
+
+### LLM Tier Routing (Zero → Cheap → Premium)
+
+Brain routes each request to the cheapest sufficient tier:
+
+**Tier 0: Claude Code subscription (`claude -p`) — $0 marginal cost**
+- Used for all strategic reasoning when VXIS runs inside Claude Code
+- Highest quality, no per-token cost
+- Already implemented in `brain.py` via `_call_claude_subprocess()`
+- **This is the primary Brain for development and manual operation**
+
+**Tier 1: Ollama local (qwen2.5-coder:14b or deepseek-coder:14b) — $0 marginal cost**
+- Free, runs on local GPU (if available) or CPU (slow but free)
+- Used for bulk classification, regex-like tasks, simple extraction
+- No API key needed
+- Already supported in `brain.py` via Ollama provider
+
+**Tier 2: Together.ai / DeepSeek cheap models — ~$0.14-0.27 per 1M tokens**
+- Used for medium-complexity extraction when Tier 0/1 unavailable
+- Models: `deepseek-chat`, `moonshotai/Kimi-K2.5`
+- Budget: capped at $5/month during bootstrap
+
+**Tier 3: Claude Sonnet — ~$3 per 1M tokens**
+- Used only for critical tasks: high-risk upgrade proposals, report enrichment
+- Budget: capped at $10/month during bootstrap
+- Never used for routine polling analysis
+
+**Tier 4: Claude Opus — ~$15 per 1M tokens**
+- Reserved exclusively for Phase 8 Synthesis (chain building, highest value)
+- Used < 10 times per month during bootstrap
+
+### Bootstrap Polling Schedule
+
+Reduced frequencies compared to full vision:
+
+| Workflow | Full Vision | **Bootstrap Mode** | Rationale |
+|----------|-------------|--------------------|-----------|
+| `cve-watch.yml` | hourly | **every 6h** | CVE arrival rate is low, 6h still timely |
+| `upstream-watch.yml` | weekly | **weekly** | unchanged (already cheap) |
+| `domain-intel.yml` | daily | **weekly** | cost-heavy, batch weekly |
+| `ThreatNewsWatcher` | 30min | **every 4h** | RSS fetch cheap but analysis expensive |
+| `signal-ingest.yml` | hourly | **every 6h** | aggregation only, after sources |
+| `signal-analyze.yml` | every 2h | **every 12h** | LLM-heavy, batch processing |
+| `growth-loop.yml` | weekly | **weekly** | benchmark expensive, keep weekly |
+| `growth-digest.yml` | weekly | **weekly** | unchanged |
+
+Result: Only **2 LLM-heavy runs per day** (signal-analyze at 00:00 and 12:00 UTC)
+instead of 12. Total API cost stays under $5/month in bootstrap mode.
+
+### Cost Optimization Techniques
+
+**1. Aggressive caching**
+- SHA256 hash of each signal → cache key
+- Same article never analyzed twice
+- Cached proposals valid for 30 days
+- `.vxis/cache/extractions/<hash>.json`
+- Saves ~80% of re-analysis cost
+
+**2. Regex-first pre-filtering**
+- Before ANY LLM call, run regex filters on the raw article:
+  - Contains CVE-YYYY-NNNN pattern? → relevant
+  - Contains threat actor name (APT, Lazarus, etc.)? → relevant
+  - Contains technology keywords matching agent_memory? → relevant
+  - Otherwise: **skip LLM entirely** (just log and move on)
+- Reduces LLM call volume by ~70%
+
+**3. Trust threshold gating**
+- Only sources with `trust_score >= 0.8` get full LLM analysis
+- Lower-trust sources (< 0.5) get regex extraction only
+- Unknown sources get zero processing until manually trusted
+
+**4. Batch processing**
+- Collect signals for 12 hours
+- Process all at once in a single LLM session (1 context, many articles)
+- Single system prompt + N user turns = much cheaper than N independent calls
+- Saves system prompt tokens across batch
+
+**5. Pre-computed WAF bypass DB**
+- Already implemented (269 variants in `waf_bypass_db.json`)
+- Zero LLM cost for WAF evasion (rule-based lookup)
+- Extension only happens when a truly novel bypass is published
+
+**6. Selective Phase Guide updates**
+- Only update `strategic_advice` fields (append-only, low LLM cost)
+- Skip full Phase Guide rewrites unless >5 signals converge on same topic
+- Batch multiple signal proposals for the same phase into one update
+
+**7. Benchmark budget**
+- Growth Loop benchmarks run **weekly** (Sunday), not per-change
+- Accumulate all week's changes, validate in single benchmark run
+- Rollback at batch granularity (the entire week rolls back on regression)
+
+**8. Revenue-gated auto-apply**
+- Until first revenue: **all changes require manual approval** (dry-run mode)
+- Claude Code reviews proposals during normal dev session
+- After first revenue: enable auto-apply for trust ≥ 0.9 + low-risk
+
+**9. Use existing infrastructure**
+- Reuse CVE Watch / Upstream Watch / Domain Intel results (already paid for)
+- Don't re-fetch data that's already in `.vxis/cache/` or existing digests
+- GitHub Actions free tier: 2000 minutes/month — sufficient for bootstrap
+
+**10. Defer Stage 2-4 indefinitely**
+- Active Discovery, Semantic Synthesis, Self-Directed Research require budget
+- Build the architecture to support them, but **do not activate** until revenue
+- This keeps monthly compute cost near zero
+
+### Estimated Bootstrap Cost
+
+With all optimizations active:
+
+| Component | Monthly Cost |
+|-----------|--------------|
+| Claude API (Sonnet — critical tasks only) | $5-10 |
+| Together.ai (extraction fallback) | $2-5 |
+| GitHub Actions (free tier) | $0 |
+| Ollama (local, if GPU available) | $0 |
+| Claude Code subscription (already paid) | $0 incremental |
+| Telegram Bot API (notifications) | $0 |
+| **Total monthly runtime** | **$7-15** |
+
+Compare to full vision at $350-4000/month. Bootstrap mode is ~95% cheaper
+while still proving the compound growth pattern.
+
+### Upgrade Path to Full Vision
+
+Once revenue exceeds $500/month:
+1. Unlock hourly polling (cve-watch, threat-news)
+2. Unlock `signal-analyze` every 2h
+3. Increase Claude Sonnet budget to $100/month
+4. Activate Stage 2: Active Discovery (arXiv crawler, GitHub code search)
+
+Once revenue exceeds $5000/month:
+1. Full real-time streaming mode
+2. Stage 3: Semantic Synthesis across sources
+3. Claude Opus for strategic synthesis
+4. Distributed workers for parallel scanning
+
+Once revenue exceeds $20000/month:
+1. Stage 4: Self-Directed Research
+2. Dedicated compute cluster
+3. Multi-region ingestion
+4. Custom model fine-tuning on VXIS proprietary data
+
+### Dry-Run Mode (First 30 Days)
+
+During the first 30 days of operation, Self-Growth Layer runs in **dry-run mode**:
+
+- Signals are ingested and analyzed
+- Proposals are generated and stored in `.vxis/signals/proposals/`
+- **Nothing is auto-applied** — all changes logged as "would apply"
+- Human (user or Claude Code in dev session) reviews proposals weekly
+- Manually approves or rejects
+- After 30 days of clean operation → enable selective auto-apply
+
+This builds trust gradually and catches hallucinations before they affect code.
+
+### Bootstrap Mode Configuration
+
+Implementation requires a single config file:
+
+```
+# configs/growth_bootstrap.toml
+
+[budget]
+max_monthly_llm_usd = 15.0
+max_daily_llm_calls = 100
+
+[polling]
+cve_watch_interval_hours = 6
+threat_news_interval_hours = 4
+signal_analyze_interval_hours = 12
+signal_ingest_interval_hours = 6
+
+[filtering]
+regex_prefilter_enabled = true
+trust_threshold_for_llm = 0.8
+batch_size = 20
+
+[apply]
+dry_run = true            # flip to false after 30 days
+auto_apply_threshold = 0.9
+require_benchmark_validation = true
+
+[tiers]
+primary = "claude_code"   # claude -p subprocess
+fallback = "ollama"       # local, free
+cheap_api = "together"    # $0.14-0.27/1M
+critical_only = "sonnet"  # $3/1M
+synthesis_only = "opus"   # $15/1M
+```
+
+Workflow files read this config and skip expensive operations when budgets are
+exhausted. Simple toggle to upgrade when revenue arrives.
+
+### Summary: Bootstrap → Revenue → Full Vision
+
+```
+Month 0-3:  Bootstrap Mode ($15/mo)
+  - Architecture complete
+  - Dry-run ingestion
+  - Manual approval workflow
+  - Build trust in Self-Growth Layer
+  - Goal: prove compound growth with minimal cost
+
+Month 3-6:  First Revenue (bug bounty / pilot client)
+  - Unlock hourly polling
+  - Enable selective auto-apply
+  - Expand signal sources
+
+Month 6-12: Revenue Acceleration
+  - Stage 2 Active Discovery activated
+  - More benchmark targets
+  - Premium LLM tier for chaining
+
+Month 12+:  Full Vision Mode
+  - Real-time streaming
+  - Stage 3-4 active
+  - Self-sustaining compound loop
+```
+
+The architecture committed in the 18-day plan supports all stages. Only
+configuration changes gate the progression. No rewrites required.
+
+---
+
 ## Summary
 
 This plan transforms VXIS into a true AI-native pentesting platform. The key innovations:
@@ -1177,9 +1596,18 @@ This plan transforms VXIS into a true AI-native pentesting platform. The key inn
 10. **Profile system unifies stealth + parallelism** — 5 levels from aggressive to stealth_3
 11. **Self-Growth Intelligence Layer** — CVE Watch / Upstream Watch / Domain Intel / Threat News RSS → auto-upgrade code + KB + phase guides, with benchmark validation and auto-rollback
 12. **Existing GitHub Actions become the growth nervous system** — no rewrite, extended to feed signal pipeline
+13. **Quantum AI Pentesting long-term vision** — knowledge arbitrage loop where world's security research is continuously absorbed, understood, and implemented autonomously
+14. **Cost-Conscious Bootstrap Mode** — architecture complete, runtime frugal ($7-15/month) until revenue activates full vision
 
-Total implementation effort: **18 days** for production-ready state (10 days MCP architecture + 8 days self-growth).
+Total implementation effort: **18 days** for production-ready architecture. Bootstrap mode active from day 1; full vision activated progressively as revenue unlocks it.
 
 ---
 
-**Next step**: Start Day 1 — Phase Registry foundation (`src/vxis/phases/base.py` + 14 guide files).
+**Implementation status as of commit:**
+- ✅ Stream A: Phase Registry + 14 guides (committed)
+- ✅ Stream B: Scope Enforcement (committed)
+- ✅ Stream C: Primitives Module (committed)
+- ⏸️ Stream D: Growth Layer (pending — cost-conscious implementation)
+- ⏸️ Stream E: GitHub Actions (pending — bootstrap polling schedule)
+
+**Next step**: Implement Stream D (`src/vxis/growth/`) with bootstrap-mode configuration hooks, then Stream E (workflow files with reduced polling).
