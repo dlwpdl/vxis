@@ -185,11 +185,29 @@ def _filter_bilingual(text: str) -> str:
     If no separator, returns the text as-is (shown in both languages).
     Line breaks within each part are preserved as <br>.
     Content is HTML-escaped to prevent XSS from payload strings in findings.
+
+    Defensive handling: if the input contains >1 '|||' (caller bug — usually
+    from interpolating a bilingual title into a single-language paragraph),
+    treat the *first* separator as the canonical EN/KO split and strip any
+    remaining '|||' from both sides so the rendered text is clean.
     """
     from markupsafe import escape
 
+    if not text:
+        return ""
+
     if "|||" in text:
-        en, ko = text.split("|||", 1)
+        parts = text.split("|||")
+        # Common case: exactly one separator → clean split
+        if len(parts) == 2:
+            en, ko = parts
+        else:
+            # Nested separators — split at the first occurrence and collapse
+            # the rest into KO (stripping any stray '|||' from each side).
+            en = parts[0]
+            ko = "|||".join(parts[1:])
+            en = en.replace("|||", " ")
+            ko = ko.replace("|||", " ")
         en_html = str(escape(en.strip())).replace("\n", "<br>")
         ko_html = str(escape(ko.strip())).replace("\n", "<br>")
         return f'<span class="en">{en_html}</span><span class="ko">{ko_html}</span>'
