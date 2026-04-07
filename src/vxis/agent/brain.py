@@ -654,6 +654,7 @@ class AgentBrain:
         if os.environ.get("LLM_API_KEY") and not os.environ.get("OPENAI_API_KEY"):
             os.environ["OPENAI_API_KEY"] = os.environ["LLM_API_KEY"]
         if os.environ.get("OPENAI_API_KEY"):
+            chain.append({"provider": "openai", "model": "gpt-5.4-mini"})
             chain.append({"provider": "openai", "model": "gpt-5.4"})
             chain.append({"provider": "openai", "model": "gpt-4o"})
             chain.append({"provider": "openai", "model": "gpt-4o-mini"})
@@ -1240,9 +1241,16 @@ class AgentBrain:
             if not url or not api_key:
                 return None
 
+        # gpt-5.x / o1 / o3 reasoning models reject `max_tokens`.
+        token_param = "max_tokens"
+        if provider == "openai" and (
+            model.startswith("gpt-5") or model.startswith("o1") or model.startswith("o3")
+        ):
+            token_param = "max_completion_tokens"
+
         payload = json.dumps({
             "model": model,
-            "max_tokens": 2000,
+            token_param: 2000,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -1263,6 +1271,13 @@ class AgentBrain:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
             return data["choices"][0]["message"]["content"]
+        except urllib.error.HTTPError as exc:
+            try:
+                err_body = exc.read().decode("utf-8", errors="replace")[:400]
+            except Exception:
+                err_body = ""
+            logger.warning("LLM call failed (%s/%s): HTTP %d %s", provider, model, exc.code, err_body)
+            return None
         except Exception as exc:
             logger.warning("LLM call failed (%s/%s): %s", provider, model, exc)
             return None
@@ -1539,7 +1554,7 @@ class AgentBrain:
         # Fallback: direct urllib call — 프로바이더별 올바른 키 사용
         _PROVIDER_KEYS = {
             "together": ("TOGETHER_API_KEY", "https://api.together.xyz/v1/chat/completions", "moonshotai/Kimi-K2.5"),
-            "openai": ("OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions", "gpt-4o-mini"),
+            "openai": ("OPENAI_API_KEY", "https://api.openai.com/v1/chat/completions", "gpt-5.4-mini"),
             "deepseek": ("DEEPSEEK_API_KEY", "https://api.deepseek.com/v1/chat/completions", "deepseek-chat"),
         }
 
@@ -1573,9 +1588,17 @@ class AgentBrain:
 
         model = self._model or default_model
 
+        # gpt-5.x family + o1/o3 reasoning models require max_completion_tokens
+        # (max_tokens is rejected as Unsupported parameter).
+        token_param = "max_tokens"
+        if provider == "openai" and (
+            model.startswith("gpt-5") or model.startswith("o1") or model.startswith("o3")
+        ):
+            token_param = "max_completion_tokens"
+
         payload = json.dumps({
             "model": model,
-            "max_tokens": 2000,
+            token_param: 2000,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
