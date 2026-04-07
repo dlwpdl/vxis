@@ -430,6 +430,115 @@ def _fetch_landing_context(target: str, timeout: float = 5.0) -> dict:
     return out
 
 
+async def _capture_phase_observation(target: str) -> dict:
+    """Capture rendered-DOM observation via Eyes (Playwright) for Brain input.
+
+    Falls back to a raw HTTP GET when Playwright isn't available so the
+    Brain still receives *something* to ground its decisions.
+
+    Returns dict with: source, screenshot_path, rendered_text, dom_size,
+    title, h1, forms, links, frameworks, ws_used, error.
+    """
+    out: dict[str, Any] = {
+        "source": "none",
+        "screenshot_path": "",
+        "rendered_text": "",
+        "dom_size": 0,
+        "title": "",
+        "h1": "",
+        "forms": [],
+        "links": [],
+        "frameworks": [],
+        "ws_used": False,
+        "error": "",
+    }
+
+    # Tier 1 — Eyes (Playwright) for full JS rendering
+    try:
+        from vxis.interaction.eyes import is_available as eyes_available
+        from vxis.interaction.eyes import BrowserEngine
+    except Exception as exc:
+        eyes_available = lambda: False  # noqa
+        BrowserEngine = None  # type: ignore
+        out["error"] = f"eyes import failed: {exc}"
+
+    if BrowserEngine is not None and eyes_available():
+        browser = None
+        try:
+            browser = BrowserEngine()
+            await browser.start()
+            page = await browser.new_page()
+            snap = await page.navigate(target, wait_until="domcontentloaded", timeout=15000)
+
+            out["title"] = (snap.title or "")[:200]
+            out["dom_size"] = len(snap.html or "")
+            out["rendered_text"] = (snap.text_content or "")[:1500]
+            out["forms"] = [
+                {
+                    "action": f.get("action", ""),
+                    "method": f.get("method", "GET"),
+                    "inputs": [
+                        {"name": i.get("name", ""), "type": i.get("type", "")}
+                        for i in (f.get("inputs") or [])[:8]
+                    ],
+                }
+                for f in (snap.forms or [])[:10]
+            ]
+            out["links"] = [str(l) for l in (snap.links or [])[:20]]
+
+            # H1 via evaluate
+            try:
+                h1 = await page._page.evaluate(  # noqa: SLF001
+                    "() => { const el = document.querySelector('h1'); return el ? el.innerText : ''; }"
+                )
+                out["h1"] = (h1 or "")[:200]
+            except Exception:
+                pass
+
+            # Screenshot
+            from pathlib import Path as _P
+            shot_dir = _P("reports/screenshots")
+            shot_dir.mkdir(parents=True, exist_ok=True)
+            from datetime import datetime as _dt
+            shot_path = shot_dir / f"observation_{_dt.now().strftime('%H%M%S_%f')}.png"
+            try:
+                await page.screenshot(path=str(shot_path), full_page=True)
+                out["screenshot_path"] = str(shot_path)
+            except Exception:
+                pass
+
+            # WS / framework hints from rendered text + html
+            haystack = (out["rendered_text"] + " " + (snap.html or "")[:5000]).lower()
+            for fw in ("streamlit", "gradio", "next.js", "react", "vue", "angular", "svelte", "django", "flask"):
+                if fw in haystack:
+                    out["frameworks"].append(fw)
+            out["ws_used"] = "websocket" in haystack or "ws://" in haystack or "wss://" in haystack
+
+            await page.close()
+            out["source"] = "eyes"
+        except Exception as exc:
+            out["error"] = f"eyes capture failed: {str(exc)[:200]}"
+        finally:
+            if browser is not None:
+                try:
+                    await browser.stop()
+                except Exception:
+                    pass
+
+    # Tier 2 — Hands fallback
+    if out["source"] == "none":
+        landing = _fetch_landing_context(target)
+        out["source"] = "hands"
+        out["title"] = landing.get("title", "")
+        out["h1"] = landing.get("h1", "")
+        out["rendered_text"] = landing.get("body_preview", "")
+        out["frameworks"] = landing.get("framework_hints", [])
+        out["ws_used"] = landing.get("websocket_used", False)
+        out["links"] = landing.get("links_sample", [])
+
+    return out
+
+
 def _normalize_brain_decisions(
     raw: dict, vectors: list, target: str
 ) -> dict[str, dict]:
@@ -516,6 +625,21 @@ class ScanPipeline:
                     self._event_callback(event_type, data)
                 except Exception:
                     pass
+
+    # Vector categories that send active attack payloads. Any vector in
+    # these categories MUST go through the injection approval gate, even
+    # if the registry mistakenly maps it to a recon-stage phase.
+    _INJECTION_CATEGORIES: frozenset[str] = frozenset({
+        "auth", "injection", "xss", "ssrf", "access_control",
+        "business_logic", "logic", "crypto", "infrastructure",
+        "supply_chain", "binary", "platform",
+    })
+
+    @classmethod
+    def is_injection_vector(cls, vector: Any) -> bool:
+        """Check whether a vector represents an active attack (needs approval)."""
+        category = (getattr(vector, "category", "") or "").lower()
+        return category in cls._INJECTION_CATEGORIES
 
     async def _request_injection_approval(self, ctx: ScanContext) -> bool:
         """인젝션 단계 진입 전 사용자 승인 게이트.
@@ -730,17 +854,41 @@ class ScanPipeline:
                 logger.info("\n  ── %s ──", _stage_label)
                 _prev_stage = first_stage
 
-            # ── Injection approval gate ──────────────────────────
-            # exploitation/chain stage 진입 직전에 한 번 사용자 승인 받기.
-            # 거부되면 해당 stage 그룹 전체 skip → 다음 group으로 (report 까지).
-            if first_stage in ("exploitation", "chain"):
+            # ── Injection approval gate (category-based, defense-in-depth) ──
+            # The gate fires for ANY phase whose vectors include an injection
+            # category, regardless of stage. This catches registry mistakes
+            # like AUTH vectors mapped to a recon stage.
+            try:
+                from vxis.scoring.vectors import WEB_VECTORS
+                _phase_keys = {f"Phase {p.id}" for p in _runnable_phases}
+                _phase_vectors = [v for v in WEB_VECTORS if v.phase in _phase_keys]
+                _injection_vectors = [v for v in _phase_vectors if self.is_injection_vector(v)]
+            except Exception:
+                _injection_vectors = []
+
+            if _injection_vectors:
                 _approved = await self._request_injection_approval(ctx)
                 if not _approved:
                     for _p in _runnable_phases:
-                        logger.info("  [SKIP-INJECTION] Phase %d %s — user denied approval", _p.id, _p.name)
-                        self._emit("phase_skip", {"name": f"Phase {_p.id}: {_p.name}"})
-                        _failed_phases.add(_p.id)
-                    continue  # 다음 parallel_group으로
+                        # Skip phases that contain ANY injection vector
+                        _phase_inj = [
+                            v for v in _phase_vectors
+                            if v.phase == f"Phase {_p.id}" and self.is_injection_vector(v)
+                        ]
+                        if _phase_inj:
+                            logger.info(
+                                "  [SKIP-INJECTION] Phase %d %s — user denied (%d injection vectors)",
+                                _p.id, _p.name, len(_phase_inj),
+                            )
+                            self._emit("phase_skip", {"name": f"Phase {_p.id}: {_p.name}"})
+                            _failed_phases.add(_p.id)
+                    # Re-build runnable list to drop skipped phases
+                    _runnable_phases = [
+                        p for p in _runnable_phases
+                        if p.id not in _failed_phases
+                    ]
+                    if not _runnable_phases:
+                        continue  # 이 group 전부 skip → 다음 group으로
 
             # Deferred Actions: report stage 진입 전에 실행
             if first_stage == "report" and ctx.deferred_actions and self.enable_deferred_approval:
@@ -1032,6 +1180,32 @@ class ScanPipeline:
         if not hasattr(ctx, "_brain_decisions"):
             ctx._brain_decisions = {}
 
+        # ── Eyes capture: Brain이 phase 시작 시 실제 페이지를 보게 한다 ──
+        # 같은 phase 안에서 batch가 여러 번이어도 한 번만 캡처 (캐시)
+        if not hasattr(ctx, "_phase_observations"):
+            ctx._phase_observations = {}
+        if phase_key not in ctx._phase_observations:
+            try:
+                obs = await _capture_phase_observation(ctx.target)
+                ctx._phase_observations[phase_key] = obs
+                logger.info(
+                    "  [EYES-OBS] %s: source=%s frameworks=%s forms=%d links=%d "
+                    "title=%r dom=%dB",
+                    phase_key, obs.get("source"), obs.get("frameworks"),
+                    len(obs.get("forms") or []), len(obs.get("links") or []),
+                    (obs.get("title") or "")[:50], obs.get("dom_size", 0),
+                )
+                self._emit("eyes_observation", {
+                    "phase": phase_key,
+                    "source": obs.get("source"),
+                    "title": obs.get("title"),
+                    "frameworks": obs.get("frameworks"),
+                    "screenshot": obs.get("screenshot_path"),
+                })
+            except Exception as exc:
+                logger.warning("  [EYES-OBS] capture failed: %s", exc)
+                ctx._phase_observations[phase_key] = {}
+
         # AgentBrain: Phase 벡터를 최대 8개 단위로 분할해서 LLM 호출
         # (JSON 응답 길이 초과 방지)
         # Sync LLM 호출을 executor로 오프로드 → 병렬 Phase 간 이벤트 루프 blocking 방지
@@ -1301,31 +1475,93 @@ class ScanPipeline:
                 f"  {vid}: {path}" for vid, path in _hints.items()
             ) + "\n"
 
-        # ── Live observation block (only when we actually fetched it) ──
+        # ── Phase observation: Eyes-rendered DOM (preferred) or Hands fallback ──
+        phase_obs = {}
+        try:
+            _po_map = getattr(ctx, "_phase_observations", {}) or {}
+            import re as _re_local
+            _m = _re_local.match(r"(Phase \d+)", phase_name)
+            if _m:
+                phase_obs = _po_map.get(_m.group(1), {}) or {}
+        except Exception:
+            pass
+
         observation_block = ""
-        if landing_ctx and landing_ctx.get("status"):
+        if phase_obs and phase_obs.get("source") in ("eyes", "hands"):
+            forms_summary = ""
+            for f in (phase_obs.get("forms") or [])[:5]:
+                inputs = ",".join(
+                    f"{i.get('name','?')}:{i.get('type','?')}"
+                    for i in (f.get("inputs") or [])[:6]
+                )
+                forms_summary += f"\n    - {f.get('method','GET')} {f.get('action','/')} [{inputs}]"
+            if not forms_summary:
+                forms_summary = " (none)"
+
             observation_block = (
-                "\n=== LIVE OBSERVATION (GET / on target) ===\n"
-                f"HTTP {landing_ctx.get('status')} | "
-                f"server={landing_ctx.get('server') or '?'} | "
-                f"content-type={landing_ctx.get('content_type') or '?'}\n"
+                "\n=== LIVE OBSERVATION (Eyes/Playwright rendered) ===\n"
+                f"source: {phase_obs.get('source')}"
+                + (f" [screenshot: {phase_obs.get('screenshot_path')}]" if phase_obs.get('screenshot_path') else "")
+                + "\n"
+                f"title: {phase_obs.get('title') or '(none)'}\n"
+                f"h1: {phase_obs.get('h1') or '(none)'}\n"
+                f"frameworks: {phase_obs.get('frameworks') or '(none detected)'}\n"
+                f"forms ({len(phase_obs.get('forms') or [])}):{forms_summary}\n"
+                f"links_sample: {(phase_obs.get('links') or [])[:15]}\n"
+                f"dom_size: {phase_obs.get('dom_size', 0)} bytes\n"
+                f"rendered_text (post-JS):\n  {(phase_obs.get('rendered_text') or '(empty)')[:800]}\n"
+                "=== END OBSERVATION ===\n"
+                "GROUND your priority decisions in what you ACTUALLY see above.\n"
+                "If the rendered page has no login form → auth vectors = LOW.\n"
+                "If you see a search box → injection vectors = HIGH on that param.\n"
+                "If the framework is Streamlit/Gradio → most HTTP injection vectors = LOW (WS-based).\n"
+            )
+        elif landing_ctx and landing_ctx.get("status"):
+            # Backward-compat fallback: legacy landing_ctx path
+            observation_block = (
+                "\n=== LIVE OBSERVATION (Hands GET / fallback) ===\n"
+                f"HTTP {landing_ctx.get('status')} server={landing_ctx.get('server') or '?'}\n"
                 f"title: {landing_ctx.get('title') or '(none)'}\n"
-                f"h1: {landing_ctx.get('h1') or '(none)'}\n"
-                f"frameworks_detected: {landing_ctx.get('framework_hints') or '(none)'}\n"
-                f"forms_count: {landing_ctx.get('forms_count')} | "
-                f"login_form_present: {landing_ctx.get('login_form_present')} | "
-                f"websocket_used: {landing_ctx.get('websocket_used')}\n"
-                f"links_sample: {landing_ctx.get('links_sample') or '(none)'}\n"
+                f"frameworks: {landing_ctx.get('framework_hints') or '(none)'}\n"
+                f"forms_count: {landing_ctx.get('forms_count')} login_form: {landing_ctx.get('login_form_present')}\n"
                 f"body_preview: {(landing_ctx.get('body_preview') or '(empty)')[:500]}\n"
                 "=== END OBSERVATION ===\n"
-                "Use the observation above to assign realistic priorities.\n"
             )
-        elif landing_ctx and landing_ctx.get("error"):
-            observation_block = f"\n[Observation failed: {landing_ctx['error']}]\n"
+
+        # ── Phase guide injection: strategic playbook from Stream A ──
+        guide_block = ""
+        try:
+            from vxis.phases.registry import PHASE_REGISTRY
+            import re as _re_g
+            _m = _re_g.match(r"Phase (\d+)", phase_name)
+            if _m:
+                _pnum = _m.group(1)
+                _guide = None
+                for _gid, _g in PHASE_REGISTRY.items():
+                    if _gid.startswith(f"P{_pnum}_"):
+                        _guide = _g
+                        break
+                if _guide is not None:
+                    _dec = "\n".join(
+                        f"  - {c.id}: {c.description_en}"
+                        for c in (_guide.dead_end_criteria or [])[:5]
+                    )
+                    guide_block = (
+                        "\n=== PHASE STRATEGIC GUIDE ===\n"
+                        f"Objective: {_guide.objective_en}\n"
+                        f"Strategy: {_guide.strategic_advice_en[:400]}\n"
+                        f"Crown hint: {getattr(_guide, 'crown_hint_en', '') or '(none)'}\n"
+                        f"Recommended primitives: {list(_guide.recommended_primitives)[:8]}\n"
+                        f"Dead-end criteria (skip if these are true):\n{_dec or '  (none)'}\n"
+                        "=== END GUIDE ===\n"
+                    )
+        except Exception:
+            pass
 
         user_prompt = (
             f"Target app: {app_name} at {ctx.target}\n"
             + observation_block
+            + guide_block
             + (f"\n{api_spec_context}\n" if api_spec_context else f"Known vulnerable paths: {app_specific_urls[:20]}\n")
             + f"Discovered endpoints: {effective_endpoints[:15]}\n"
             + _vec_endpoint_hints

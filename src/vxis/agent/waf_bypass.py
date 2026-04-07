@@ -83,35 +83,71 @@ class WAFBypassEngine:
     # ------------------------------------------------------------------ #
     # Detection
     # ------------------------------------------------------------------ #
+    # Servers that are NOT WAFs — generic 403/401 from these is just a
+    # protocol/permission denial, not a WAF block. Whitelisting them prevents
+    # the bypass loop from burning LLM credits on Streamlit/Tornado/Werkzeug
+    # responses.
+    _NON_WAF_SERVERS = (
+        "tornadoserver", "werkzeug", "gunicorn", "uvicorn", "hypercorn",
+        "waitress", "wsgiserver", "rocket", "puma", "thin", "webrick",
+        "node.js", "bun", "deno", "kestrel", "lighttpd",
+        "uwsgi", "daphne", "twisted",
+    )
+
     def _detect_waf(
         self,
         response_body: str,
         response_status: int,
         headers: Optional[dict[str, str]] = None,
     ) -> Optional[str]:
-        """Return WAF name string if a WAF block is detected, else None."""
+        """Return WAF name string if a WAF block is detected, else None.
+
+        Conservative — false positives waste LLM credits on bypass loops.
+        We only flag a WAF when we have STRONG evidence: explicit header,
+        known WAF Server value, or a real WAF challenge page. Generic 403
+        from a known app server is NOT a WAF block.
+        """
         body_lower = (response_body or "").lower()
+        body_len = len(body_lower)
         hdrs = {k.lower(): str(v).lower() for k, v in (headers or {}).items()}
 
-        # Header signatures
+        # Header signatures — strongest signal
         for key in _WAF_HEADER_KEYS:
             if key in hdrs:
                 return f"header:{key}"
 
         server = hdrs.get("server", "")
+
+        # Known non-WAF app servers — never flag as WAF
+        if any(nw in server for nw in self._NON_WAF_SERVERS):
+            return None
+
+        # Known WAF Server header values
         for value in _WAF_SERVER_VALUES:
             if value in server:
                 if response_status in (401, 403, 406, 419, 429, 451, 503):
                     return f"server:{value}"
 
-        # Status + body marker
-        if response_status in (403, 406, 419, 429, 451, 503):
+        # Status + body marker — but only when body is substantial AND
+        # contains a STRONG WAF marker (not just the word "forbidden").
+        # A 69-byte "Forbidden" page from Tornado is not a WAF.
+        if response_status in (403, 406, 419, 429, 451, 503) and body_len >= 200:
             for marker in _WAF_BODY_MARKERS:
                 if marker in body_lower:
+                    # Skip overly generic markers that vanilla error pages also use
+                    if marker in ("forbidden", "blocked", "access denied", "waf"):
+                        # Require a SECOND signal for these vague markers
+                        second_signal = any(
+                            other in body_lower
+                            for other in (
+                                "ray id", "incident id", "request id",
+                                "challenge", "captcha", "mod_security",
+                                "sucuri", "cloudflare", "imperva", "akamai",
+                            )
+                        )
+                        if not second_signal:
+                            continue
                     return f"body:{marker}"
-            # 403 alone with short body is a likely block too
-            if response_status == 403 and len(body_lower) < 2000:
-                return "status:403"
 
         # Cloudflare/CloudFront challenge pages always indicate WAF
         if "cf-chl" in body_lower or "challenge-platform" in body_lower:

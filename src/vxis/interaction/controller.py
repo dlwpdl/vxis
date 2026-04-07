@@ -196,23 +196,38 @@ class InteractionResult:
 
 # Intent → 추천 모드 매핑
 _INTENT_MODE_MAP: dict[InteractionIntent, InteractionMode] = {
-    InteractionIntent.EXPLORE: InteractionMode.HANDS_ONLY,
-    InteractionIntent.LOGIN: InteractionMode.HANDS_ONLY,
-    InteractionIntent.FORM_SUBMIT: InteractionMode.HANDS_ONLY,
-    InteractionIntent.API_CALL: InteractionMode.HANDS_ONLY,
-    InteractionIntent.FILE_UPLOAD: InteractionMode.HANDS_ONLY,
-    InteractionIntent.CRAWL: InteractionMode.HANDS_ONLY,
+    # Brain-First: visual context is mandatory whenever Eyes is available.
+    # Hands-only is the fallback when no browser engine is installed.
+    InteractionIntent.EXPLORE: InteractionMode.EYES_ONLY,
+    InteractionIntent.LOGIN: InteractionMode.EYES_ONLY,
+    InteractionIntent.FORM_SUBMIT: InteractionMode.EYES_ONLY,
+    InteractionIntent.CRAWL: InteractionMode.EYES_ONLY,
+    InteractionIntent.API_CALL: InteractionMode.HANDS_ONLY,  # raw API call → Hands faster
+    InteractionIntent.FILE_UPLOAD: InteractionMode.EYES_ONLY,
     InteractionIntent.FUZZ: InteractionMode.HANDS_XRAY,
-    InteractionIntent.EXPLOIT_CHAIN: InteractionMode.HANDS_XRAY,
+    InteractionIntent.EXPLOIT_CHAIN: InteractionMode.EYES_XRAY,
     InteractionIntent.TOKEN_ANALYSIS: InteractionMode.HANDS_XRAY,
     InteractionIntent.JS_ANALYSIS: InteractionMode.EYES_ONLY,
     InteractionIntent.SCREENSHOT: InteractionMode.EYES_ONLY,
 }
 
-# SPA 프레임워크 감지 시 자동 Eyes 업그레이드
+# Frameworks that REQUIRE a real browser to render meaningful content.
+# Raw HTTP only sees a tiny loader page (<1KB) for these — useless to the Brain.
 _SPA_INDICATORS = [
+    # Classic SPAs
     "react", "angular", "vue", "next.js", "nuxt", "svelte", "ember",
     "backbone", "polymer", "__NEXT_DATA__", "ng-app", "v-app",
+    # Python data-app frameworks (Streamlit/Gradio/Dash/Panel/Solara)
+    "streamlit", "stApp", "gradio", "/gradio_api/", "dash-renderer",
+    "panel", "bokeh", "solara",
+    # Interactive notebooks
+    "jupyter", "voila",
+    # Server-side frameworks that often serve JS-heavy UIs
+    "tornadoserver",  # Streamlit/Bokeh/Jupyter all use Tornado
+    # Modern meta-frameworks
+    "remix", "solidjs", "qwik", "astro", "fresh",
+    # Mobile-first web (PWA hints)
+    "service-worker", "workbox",
 ]
 
 
@@ -225,11 +240,18 @@ def _select_mode(
     """상황에 맞는 최적의 인터랙션 모드 선택."""
     base_mode = _INTENT_MODE_MAP.get(intent, InteractionMode.HANDS_ONLY)
 
-    # SPA 앱이면 Eyes로 업그레이드
+    # SPA / JS-heavy app detection: tech_stack + server header + body sample
     tech_stack = target_profile.get("tech_stack", [])
-    is_spa = any(
-        indicator in " ".join(tech_stack).lower()
-        for indicator in _SPA_INDICATORS
+    server_hdr = (target_profile.get("server", "") or "").lower()
+    body_sample = (target_profile.get("body_sample", "") or "").lower()
+    framework_hints = [
+        h.lower() for h in target_profile.get("framework_hints", []) or []
+    ]
+
+    haystack = " ".join(tech_stack).lower() + " " + server_hdr + " " + body_sample
+    is_spa = (
+        any(ind in haystack for ind in _SPA_INDICATORS)
+        or any(ind in " ".join(framework_hints) for ind in _SPA_INDICATORS)
     )
 
     if is_spa and eyes_available:
