@@ -626,18 +626,30 @@ class ScanPipeline:
                 except Exception:
                     pass
 
-    # Vector categories that send active attack payloads. Any vector in
-    # these categories MUST go through the injection approval gate, even
-    # if the registry mistakenly maps it to a recon-stage phase.
+    # Vector categories that send ACTIVE attack payloads (must be gated).
+    # Excludes passive categories like infrastructure (CVE matching),
+    # crypto (cipher inspection), misconfig (header check), supply_chain
+    # (dependency scan), binary (binary analysis), platform (passive enum).
+    # Those passive categories run during recon and produce findings
+    # without sending exploit payloads.
     _INJECTION_CATEGORIES: frozenset[str] = frozenset({
-        "auth", "injection", "xss", "ssrf", "access_control",
-        "business_logic", "logic", "crypto", "infrastructure",
-        "supply_chain", "binary", "platform",
+        "auth",            # brute force, default creds, JWT tampering
+        "injection",       # SQLi, command, LDAP, XPath, NoSQL
+        "xss",             # reflected/stored/DOM payloads
+        "ssrf",            # outbound payload
+        "access_control",  # BOLA, IDOR, privilege escalation tests
+        "business_logic",  # workflow abuse with payloads
+        "logic",           # same
     })
 
     @classmethod
     def is_injection_vector(cls, vector: Any) -> bool:
-        """Check whether a vector represents an active attack (needs approval)."""
+        """Check whether a vector represents an active attack (needs approval).
+
+        Returns True only for vectors that send exploit payloads. Passive
+        checks (header inspection, CVE matching, fingerprinting) return
+        False so recon can proceed even when injection is denied.
+        """
         category = (getattr(vector, "category", "") or "").lower()
         return category in cls._INJECTION_CATEGORIES
 
@@ -869,26 +881,26 @@ class ScanPipeline:
             if _injection_vectors:
                 _approved = await self._request_injection_approval(ctx)
                 if not _approved:
-                    for _p in _runnable_phases:
-                        # Skip phases that contain ANY injection vector
-                        _phase_inj = [
-                            v for v in _phase_vectors
-                            if v.phase == f"Phase {_p.id}" and self.is_injection_vector(v)
-                        ]
-                        if _phase_inj:
-                            logger.info(
-                                "  [SKIP-INJECTION] Phase %d %s — user denied (%d injection vectors)",
-                                _p.id, _p.name, len(_phase_inj),
-                            )
-                            self._emit("phase_skip", {"name": f"Phase {_p.id}: {_p.name}"})
-                            _failed_phases.add(_p.id)
-                    # Re-build runnable list to drop skipped phases
-                    _runnable_phases = [
-                        p for p in _runnable_phases
-                        if p.id not in _failed_phases
-                    ]
-                    if not _runnable_phases:
-                        continue  # 이 group 전부 skip → 다음 group으로
+                    # Mark injection-only vectors to be skipped at execution
+                    # time. The phase still runs (so passive checks like header
+                    # inspection, fingerprinting and recon happen) but
+                    # _execute_brain_decisions filters out injection vectors.
+                    if not hasattr(ctx, "_denied_injection_vectors"):
+                        ctx._denied_injection_vectors = set()
+                    for v in _injection_vectors:
+                        ctx._denied_injection_vectors.add(v.id)
+                    logger.warning(
+                        "  [INJECTION-DENIED] %d active vectors will be skipped this group: %s",
+                        len(_injection_vectors),
+                        sorted({v.category for v in _injection_vectors}),
+                    )
+                    self._emit("injection_filtered", {
+                        "count": len(_injection_vectors),
+                        "vector_ids": [v.id for v in _injection_vectors][:20],
+                    })
+                    # Phases continue to run for their passive workload.
+                    # The _execute_brain_decisions filter (added below) drops
+                    # any vector ID present in ctx._denied_injection_vectors.
 
             # Deferred Actions: report stage 진입 전에 실행
             if first_stage == "report" and ctx.deferred_actions and self.enable_deferred_approval:
@@ -1170,7 +1182,18 @@ class ScanPipeline:
         except ImportError:
             return
 
+        # Drop denied injection vectors before LLM consultation — saves
+        # tokens and prevents the Brain from spending budget on attacks
+        # the user already declined.
+        denied_set = getattr(ctx, "_denied_injection_vectors", set()) or set()
+        if denied_set:
+            phase_vectors = [v for v in phase_vectors if v.id not in denied_set]
+
         if not phase_vectors:
+            logger.info(
+                "  [BRAIN] %s: all vectors denied or absent — skipping consultation",
+                phase_key,
+            )
             return
 
         logger.info("  [BRAIN] Consulting Brain for %d vectors in %s",
@@ -1768,10 +1791,25 @@ class ScanPipeline:
         except ImportError:
             return
 
+        # Filter out denied injection vectors (user said N at the gate)
+        denied = getattr(ctx, "_denied_injection_vectors", set()) or set()
+
         active_decisions = {
             vid: d for vid, d in decisions.items()
-            if vid in phase_vector_ids and d.get("attempt", False)
+            if vid in phase_vector_ids
+            and d.get("attempt", False)
+            and vid not in denied
         }
+        if denied:
+            _filtered_count = sum(
+                1 for vid in decisions
+                if vid in phase_vector_ids and vid in denied
+            )
+            if _filtered_count:
+                logger.info(
+                    "  [INJECTION-DENIED] %s: %d active vectors filtered out",
+                    phase_key, _filtered_count,
+                )
 
         if not active_decisions:
             print(f"  {phase_key}: 0 vectors to attack", flush=True)
