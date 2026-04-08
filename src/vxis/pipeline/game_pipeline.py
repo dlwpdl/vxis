@@ -257,7 +257,7 @@ class GamePipeline:
         # ── Mobile Cross-Reference Advisory ──────────────────────────
         try:
             if ctx.game_type == "mobile":
-                ctx.score_tracker.record_vector_attempt("GAME-MOBILE-XREF-001")
+                ctx.score_tracker.record_vector_attempt("GAME-CLIENT-002")
                 ctx.add_game_finding(
                     category="mobile",
                     issue=(
@@ -829,7 +829,7 @@ class GamePipeline:
         """Phase 4 sub: 리플레이 공격 — nonce/시퀀스 번호 없이 중요 요청 재전송 가능 여부 테스트."""
         from vxis.interaction.hands import SessionManager
 
-        ctx.score_tracker.record_vector_attempt("GAME-PROTO-REPLAY-001")
+        ctx.score_tracker.record_vector_attempt("GAME-PROTO-002")
 
         # 리플레이 공격에 취약할 가능성이 높은 엔드포인트
         replay_candidate_keywords = [
@@ -1114,7 +1114,7 @@ class GamePipeline:
 
     async def _phase5_gm_command_injection(self, ctx: GameScanContext, session: Any) -> None:
         """Phase 5 sub: GM/어드민 엔드포인트 프로브 + 채팅 GM 커맨드 인젝션 테스트."""
-        ctx.score_tracker.record_vector_attempt("GAME-LOGIC-GM-001")
+        ctx.score_tracker.record_vector_attempt("GAME-LOGIC-005")
 
         # ── 1. GM/어드민/디버그 엔드포인트 열거 ──
         gm_probe_paths = [
@@ -1735,7 +1735,7 @@ class GamePipeline:
         from vxis.interaction.hands import SessionManager
         import json as json_lib
 
-        ctx.score_tracker.record_vector_attempt("GAME-LOGIC-TIME-001")
+        ctx.score_tracker.record_vector_attempt("GAME-LOGIC-003")
 
         # 시간 기반 콘텐츠 엔드포인트 식별
         time_sensitive_keywords = [
@@ -1871,7 +1871,7 @@ class GamePipeline:
         from vxis.interaction.hands import SessionManager
         import json as json_lib
 
-        ctx.score_tracker.record_vector_attempt("GAME-LOGIC-GACHA-001")
+        ctx.score_tracker.record_vector_attempt("GAME-LOGIC-004")
 
         # 가챠 관련 엔드포인트 식별
         gacha_keywords = [
@@ -1998,7 +1998,7 @@ class GamePipeline:
         from vxis.interaction.hands import SessionManager
         import json as json_lib
 
-        ctx.score_tracker.record_vector_attempt("GAME-ECON-TRADE-001")
+        ctx.score_tracker.record_vector_attempt("GAME-ECON-004")
 
         # 선물/거래 관련 엔드포인트
         gift_keywords = ["gift", "send", "transfer", "trade", "give"]
@@ -2427,7 +2427,7 @@ class GamePipeline:
         import configparser
         from pathlib import Path
 
-        ctx.score_tracker.record_vector_attempt("GAME-CLIENT-SAVE-001")
+        ctx.score_tracker.record_vector_attempt("GAME-CLIENT-003")
 
         if not ctx.client_binary:
             logger.info("  Save file analysis: no client binary path — skipping")
@@ -2643,7 +2643,7 @@ class GamePipeline:
         """Phase 10 sub: 클라우드 세이브 엔드포인트 탐지 + 무결성 검증 여부 테스트."""
         from vxis.interaction.hands import SessionManager
 
-        ctx.score_tracker.record_vector_attempt("GAME-CLIENT-CLOUD-001")
+        ctx.score_tracker.record_vector_attempt("GAME-DRM-002")
 
         # 클라우드 세이브 관련 엔드포인트 패턴
         cloud_save_paths = [
