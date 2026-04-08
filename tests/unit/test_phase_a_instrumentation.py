@@ -104,3 +104,104 @@ def test_get_llm_call_count_is_module_level() -> None:
 
     reset_llm_call_count()
     assert get_llm_call_count() == 0
+
+
+# ── Task 1.5b: Unified brain_decision_count across all backends ──
+
+
+def test_brain_decision_count_increments_on_agent_brain_think() -> None:
+    from vxis.agent import brain as brain_mod
+    from vxis.agent.brain import AgentBrain, AgentObservation
+
+    brain_mod.reset_brain_decision_count()
+    assert brain_mod.get_brain_decision_count() == 0
+
+    b = AgentBrain(max_steps=10)
+    # Force LLM fallback to return None so think() exits after counter increment
+    # without making any network call. Also bypass compiled-pattern shortcut.
+    b._try_compiled_patterns = lambda obs: []  # type: ignore[assignment]
+    b._call_llm_with_fallback = lambda system, user: None  # type: ignore[assignment]
+
+    obs = AgentObservation(target="http://example.test")
+    b.think(obs)
+    assert brain_mod.get_brain_decision_count() == 1
+
+    # think() set is_done=True after None fallback; reset to call again
+    b.is_done = False
+    b.think(obs)
+    b.is_done = False
+    b.think(obs)
+    assert brain_mod.get_brain_decision_count() == 3
+
+
+def test_brain_decision_count_increments_on_interactive_brain_think() -> None:
+    import io
+    from vxis.agent import brain as brain_mod
+    from vxis.agent.brain import AgentObservation
+    from vxis.agent.brain_interactive import InteractiveBrain
+
+    brain_mod.reset_brain_decision_count()
+
+    stdin = io.StringIO('{"actions": [{"tool": "DONE", "reasoning": "done"}]}\n')
+    stdout = io.StringIO()
+    b = InteractiveBrain(max_steps=10, input_stream=stdin, output_stream=stdout)
+
+    obs = AgentObservation(target="http://example.test")
+    b.think(obs)
+    assert brain_mod.get_brain_decision_count() == 1
+
+
+def test_brain_decision_count_increments_on_file_based_brain_think(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from vxis.agent import brain as brain_mod
+    from vxis.agent.brain import AgentObservation
+    from vxis.agent.brain_filebased import FileBasedBrain
+
+    brain_mod.reset_brain_decision_count()
+
+    b = FileBasedBrain(brain_dir=str(tmp_path))
+    # Stub out file I/O + decision wait so think() returns quickly
+    b._wait_for_decision = lambda: {"vector_id": "v1", "attempt": False, "actions": []}  # type: ignore[assignment]
+    b._parse_decision = lambda d: []  # type: ignore[assignment]
+
+    obs = AgentObservation(target="http://example.test")
+    b.think(obs)
+    assert brain_mod.get_brain_decision_count() == 1
+
+
+def test_brain_decision_count_does_not_increment_on_early_return() -> None:
+    from vxis.agent import brain as brain_mod
+    from vxis.agent.brain import AgentBrain, AgentObservation
+
+    brain_mod.reset_brain_decision_count()
+
+    b = AgentBrain(max_steps=10)
+    b.is_done = True
+
+    obs = AgentObservation(target="http://example.test")
+    result = b.think(obs)
+    assert result == []
+    assert brain_mod.get_brain_decision_count() == 0
+
+
+def test_brain_decision_count_and_llm_count_are_independent() -> None:
+    from vxis.agent import brain as brain_mod
+
+    brain_mod.reset_brain_decision_count()
+    brain_mod.reset_llm_call_count()
+
+    brain_mod._increment_brain_decision_count()
+    brain_mod._increment_brain_decision_count()
+    brain_mod._increment_llm_call_count()
+
+    assert brain_mod.get_brain_decision_count() == 2
+    assert brain_mod.get_llm_call_count() == 1
+
+    brain_mod.reset_llm_call_count()
+    assert brain_mod.get_brain_decision_count() == 2
+    assert brain_mod.get_llm_call_count() == 0
+
+    brain_mod.reset_brain_decision_count()
+    brain_mod._increment_llm_call_count()
+    brain_mod._increment_llm_call_count()
+    assert brain_mod.get_brain_decision_count() == 0
+    assert brain_mod.get_llm_call_count() == 2

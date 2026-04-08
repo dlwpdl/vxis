@@ -28,7 +28,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from vxis.agent.brain import AgentAction, AgentObservation, AgentStep
+from vxis.agent.brain import (
+    AgentAction,
+    AgentObservation,
+    AgentStep,
+    _increment_brain_decision_count,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +119,7 @@ class FileBasedBrain:
         if self.is_done:
             return []
         self._step_count += 1
+        _increment_brain_decision_count()
         obs_data = self._serialize_observation(observation)
         # 락 획득 — 동시 파이프라인 인스턴스가 같은 파일을 덮어쓰지 않도록
         self._acquire_lock()

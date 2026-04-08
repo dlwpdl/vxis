@@ -68,6 +68,33 @@ def _increment_llm_call_count() -> None:
         _LLM_CALL_COUNT += 1
 
 
+# ── Benchmark instrumentation: unified brain decision counter ──
+# Incremented once per `think()` entry (after early-return checks) across ALL
+# Brain backends (AgentBrain API path + InteractiveBrain + FileBasedBrain).
+# Apples-to-apples metric for Task 14 comparison independent of backend.
+# Process-global, not per-scan.
+_BRAIN_DECISION_COUNT: int = 0
+_BRAIN_DECISION_LOCK = threading.Lock()
+
+
+def get_brain_decision_count() -> int:
+    """Return total number of Brain think() decisions since process start."""
+    return _BRAIN_DECISION_COUNT
+
+
+def reset_brain_decision_count() -> None:
+    """Reset counter to zero (test hook)."""
+    global _BRAIN_DECISION_COUNT
+    with _BRAIN_DECISION_LOCK:
+        _BRAIN_DECISION_COUNT = 0
+
+
+def _increment_brain_decision_count() -> None:
+    global _BRAIN_DECISION_COUNT
+    with _BRAIN_DECISION_LOCK:
+        _BRAIN_DECISION_COUNT += 1
+
+
 def _parse_llm_json(response: str) -> Any:
     """LLM 응답에서 JSON을 안정적으로 파싱 (dict or list).
 
@@ -709,6 +736,7 @@ class AgentBrain:
                 self.is_done = True
                 return []
             self._step_count += 1
+        _increment_brain_decision_count()
 
         # ── Step 1: RECALL — 컴파일된 패턴 매칭 (LLM 호출 없이) ──
         compiled_actions = self._try_compiled_patterns(observation)
