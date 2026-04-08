@@ -41,6 +41,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── Benchmark instrumentation: authoritative LLM invocation counter ──
+# Incremented once per `_call_llm_direct` entry (the single choke point for
+# all provider paths in AgentBrain). Used by Task 1 baseline + Task 14
+# post-migration comparison. Does NOT affect dispatch — claude-first routing
+# stays untouched.
+_LLM_CALL_COUNT: int = 0
+_LLM_CALL_COUNT_LOCK = threading.Lock()
+
+
+def get_llm_call_count() -> int:
+    """Return total number of LLM provider invocations since process start."""
+    return _LLM_CALL_COUNT
+
+
+def reset_llm_call_count() -> None:
+    """Reset counter to zero (test hook)."""
+    global _LLM_CALL_COUNT
+    with _LLM_CALL_COUNT_LOCK:
+        _LLM_CALL_COUNT = 0
+
+
+def _increment_llm_call_count() -> None:
+    global _LLM_CALL_COUNT
+    with _LLM_CALL_COUNT_LOCK:
+        _LLM_CALL_COUNT += 1
+
+
 def _parse_llm_json(response: str) -> Any:
     """LLM 응답에서 JSON을 안정적으로 파싱 (dict or list).
 
@@ -1223,6 +1250,10 @@ class AgentBrain:
         image_path: str = "",
     ) -> str | None:
         """특정 provider/model을 지정하여 LLM 호출."""
+        # Authoritative LLM invocation counter — incremented per request
+        # (regardless of success/failure of the response). Single choke point
+        # for all provider paths from AgentBrain.
+        _increment_llm_call_count()
         provider = provider or self._provider
         model = model or self._model
 

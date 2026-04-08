@@ -690,6 +690,19 @@ def scan(
         summary_parts.append(f"[red]{phase_failed} failed[/red]")
     console.print("  |  ".join(summary_parts))
 
+    # ── Benchmark instrumentation summary (grep-parseable) ──
+    # Task 1 baseline capture and Task 14 post-migration gate parse this line.
+    try:
+        from vxis.agent.brain import get_llm_call_count as _get_llm_calls
+        _llm_calls = _get_llm_calls()
+    except Exception:
+        _llm_calls = 0
+    _peak_bytes = getattr(ctx, "peak_context_bytes", 0)
+    console.print(
+        f"[dim]VXIS_BENCHMARK peak_context_bytes={_peak_bytes} "
+        f"llm_call_count={_llm_calls} findings_count={len(ctx.findings)}[/dim]"
+    )
+
     # Report path (Phase 6이 리포트 생성했으면)
     if ctx.findings:
         from urllib.parse import urlparse as _up
