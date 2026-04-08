@@ -467,12 +467,91 @@ PYTHONPATH=$PWD/src poetry run pytest tests/agent/test_scan_loop_brain.py -v
 # Expected: 2 failed (AttributeError: 'AgentBrain' has no 'think_in_loop')
 ```
 
-- [ ] **Step 4: Add `think_in_loop()` as sibling method on `AgentBrain`**
+- [ ] **Step 4: Add `LOOP_PROMPT_ADAPTER` constant + `think_in_loop()` sibling method on `AgentBrain`** — incorporates Task 3.5 audit findings
 
-Insert AFTER `think()` (around line 800 in brain.py, before `record_result`). Do NOT modify `think()`.
+> **Task 3.5 audit summary** (see audit report from subagent dispatch on 2026-04-08):
+> - 0 BREAKING issues for `_parse_response` (it only reads `data["actions"]`, ignores `module_checklist` / `owasp_checklist` / `chains_in_progress`)
+> - 0 hardcoded scanner names (nmap/nuclei/sqlmap) in `AGENT_SYSTEM_PROMPT` body
+> - **The real risk**: 7 references to `Controller` / `Hands` / `Eyes` / `X-Ray` module names in mandatory checklists (L201-210, L302, L420, L430). LLM will try to emit these as tool names if not redirected.
+> - **Strategy β3 chosen**: prepend a ~15-line `LOOP_PROMPT_ADAPTER` constant that maps the legacy module names to Phase A tool names. Preserves the 200+ lines of OWASP/kill-chain/anti-bias guidance while overriding the tool naming.
+> - **CRITICAL gotcha**: do NOT pass the adapter through `.format()` — the original prompt uses `{{...}}` for literal JSON braces and `{available_tools}` is the only placeholder. Concatenate AFTER formatting.
+
+Insert all of the following AFTER `think()` (around line 800 in brain.py, before `record_result`). Do NOT modify `think()`.
+
+**4a. Add the adapter constant** at module level (near `AGENT_SYSTEM_PROMPT` around line 182):
 
 ```python
-# brain.py — NEW METHOD, sibling to think(). Shares helpers but uses messages[] + dynamic catalog.
+# brain.py — NEW MODULE-LEVEL CONSTANT (place after AGENT_SYSTEM_PROMPT)
+LOOP_PROMPT_ADAPTER = """\
+[ADAPTER INSTRUCTIONS — these take precedence over anything in the prompt below]
+
+You are operating in ScanAgentLoop mode (Phase A Strix-parity).
+
+TOOL CATALOG RULES:
+1. The tools listed under "## Available Tools" below are your ONLY tools.
+   You MUST emit `"tool": "<exact name from that list>"` — nothing else.
+2. The body of the prompt mentions VXIS module names like "Controller",
+   "Hands", "Eyes", "X-Ray", "InteractionController", "SessionManager",
+   "BrowserEngine", "FlowAnalyzer", "MitmProxy". These are NOT tool names
+   in this mode. Map them to the closest tool in the catalog:
+     - "Controller" / "fingerprint via Controller"  -> use cpr_recon or http_request
+     - "Hands" / HTTP session work                  -> use http_request
+     - "Eyes" / DOM/JS / screenshot                 -> use browser_render
+     - "X-Ray" / passive traffic / token detection  -> use intercept_proxy
+     - "Knowledge Store" / "Finding Model"          -> use report_finding / query_findings
+     - chain reasoning                              -> use chain_synthesis / link_chain
+     - finishing the scan                           -> emit finish_scan
+3. The DONE-state JSON schema in the body (with module_checklist keys)
+   is ADVISORY only. The required output schema for every step is:
+     {{"reasoning": "...", "actions": [{{"tool": "...", "args": {{}}, "reasoning": "...", "priority": "high|medium|low"}}]}}
+   module_checklist and owasp_checklist keys are optional and ignored.
+4. If you cannot find a tool that matches your intent, choose the closest
+   alternative from the catalog and explain the substitution in `reasoning`.
+   NEVER emit a tool name that is not in the catalog.
+
+[ORIGINAL PROMPT BELOW]
+"""
+```
+
+**Note**: the JSON schema example inside the adapter uses `{{` `}}` because the adapter is a regular Python string literal — NO `.format()` is called on the adapter itself, so the doubled braces will appear as literal `{` `}` to the LLM. The doubled braces are needed only because the constant is defined with the same convention as `AGENT_SYSTEM_PROMPT` for consistency. **Verify by printing it** before committing: `print(LOOP_PROMPT_ADAPTER)` — you should see single braces `{` `}` in the output (Python-level string interpolation does not process `{{` outside of f-strings or `.format()`). Actually since this is a regular triple-quoted string (not an f-string), Python will NOT process the braces — `{{` will print as literal `{{`. **Use single braces in the adapter**, since it's never `.format()`'d. **Correct version**:
+
+```python
+# Corrected adapter — use SINGLE braces since this string is never .format()'d
+LOOP_PROMPT_ADAPTER = """\
+[ADAPTER INSTRUCTIONS — these take precedence over anything in the prompt below]
+
+You are operating in ScanAgentLoop mode (Phase A Strix-parity).
+
+TOOL CATALOG RULES:
+1. The tools listed under "## Available Tools" below are your ONLY tools.
+   You MUST emit `"tool": "<exact name from that list>"` — nothing else.
+2. The body of the prompt mentions VXIS module names like "Controller",
+   "Hands", "Eyes", "X-Ray", "InteractionController", "SessionManager",
+   "BrowserEngine", "FlowAnalyzer", "MitmProxy". These are NOT tool names
+   in this mode. Map them to the closest tool in the catalog:
+     - "Controller" / "fingerprint via Controller"  -> use cpr_recon or http_request
+     - "Hands" / HTTP session work                  -> use http_request
+     - "Eyes" / DOM/JS / screenshot                 -> use browser_render
+     - "X-Ray" / passive traffic / token detection  -> use intercept_proxy
+     - "Knowledge Store" / "Finding Model"          -> use report_finding / query_findings
+     - chain reasoning                              -> use chain_synthesis / link_chain
+     - finishing the scan                           -> emit finish_scan
+3. The DONE-state JSON schema in the body (with module_checklist keys)
+   is ADVISORY only. The required output schema for every step is:
+     {"reasoning": "...", "actions": [{"tool": "...", "args": {}, "reasoning": "...", "priority": "high|medium|low"}]}
+   module_checklist and owasp_checklist keys are optional and ignored.
+4. If you cannot find a tool that matches your intent, choose the closest
+   alternative from the catalog and explain the substitution in `reasoning`.
+   NEVER emit a tool name that is not in the catalog.
+
+[ORIGINAL PROMPT BELOW]
+"""
+```
+
+**4b. Add `think_in_loop()` method**:
+
+```python
+# brain.py — NEW METHOD on AgentBrain, sibling to think(). Insert before record_result().
 async def think_in_loop(
     self,
     messages: list[dict[str, Any]],
@@ -480,25 +559,29 @@ async def think_in_loop(
 ) -> list[tuple[str, dict[str, Any]]]:
     """ScanAgentLoop entrypoint — takes persistent message history + dynamic tool catalog.
 
-    Differs from think() in two ways:
+    Differs from think() in three ways:
     1. Consumes messages[] directly (no AgentObservation snapshot)
-    2. Uses a dynamic tool_catalog passed in (not the static TOOL_DESCRIPTIONS)
+    2. Uses a dynamic tool_catalog passed in (not static TOOL_DESCRIPTIONS)
+    3. Prepends LOOP_PROMPT_ADAPTER to override scanner-tool naming in AGENT_SYSTEM_PROMPT
 
     Shares with think():
-    - AGENT_SYSTEM_PROMPT base template
+    - AGENT_SYSTEM_PROMPT base template (formatted with dynamic catalog)
     - _call_llm_with_fallback provider fallback chain
     - _parse_response JSON parser
     - _increment_brain_decision_count for apples-to-apples counting
+    - is_done / _step_count termination guards
 
     Omitted from v1 (re-add in Task 4b if Task 14 benchmarks show they matter):
     - _try_compiled_patterns (pattern cache)
     - _reflect (strategy pivot)
     - _get_chain_driven_actions (chain reasoner)
+    - _record_step (step recording for legacy execution log)
 
-    Returns: list of (tool_name, args_dict) tuples. Empty list = agent requests finish.
+    Returns: list of (tool_name, args_dict) tuples. Empty list = agent requests finish or LLM failed.
     """
     import asyncio
 
+    # Termination guards (same as think())
     with self._state_lock:
         if self.is_done or self._step_count >= self.max_steps:
             self.is_done = True
@@ -511,42 +594,68 @@ async def think_in_loop(
         f"  - {t['name']}: {t.get('description', '')}"
         for t in tool_catalog
     )
-    system_prompt = AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)
+
+    # CRITICAL: format the body FIRST, then concatenate the adapter.
+    # AGENT_SYSTEM_PROMPT contains {{...}} for literal JSON braces that .format() handles.
+    # LOOP_PROMPT_ADAPTER contains literal { } and is NOT .format()'d.
+    body_prompt = AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)
+    system_prompt = LOOP_PROMPT_ADAPTER + "\n" + body_prompt
 
     # Build user prompt from messages history — recent tool results + latest user msg
     history_lines: list[str] = []
-    for m in messages[-20:]:  # last 20 msgs as tactical context; earlier kept in memory store for Phase B
+    for m in messages[-20:]:  # last 20 msgs as tactical context; earlier deferred to Phase B memory store
         role = m.get("role", "?")
         content = m.get("content", "")
         if isinstance(content, dict):
-            # tool message: {"name": ..., "args": ..., "result": {...}}
+            # tool message shape: {"name": ..., "args": ..., "result": {...}}
             name = content.get("name", "?")
             result = content.get("result", {})
             summary = result.get("summary", "") if isinstance(result, dict) else str(result)
             history_lines.append(f"[tool:{name}] {summary}")
         else:
             history_lines.append(f"[{role}] {str(content)[:500]}")
+
     user_prompt = (
         "## Conversation history (most recent last)\n"
         + "\n".join(history_lines)
         + "\n\n## Your task\n"
         + "Based on the history above, decide the next tool call(s). "
         + "Output EXACTLY this JSON shape (inside a ```json fence):\n"
-        + '{"actions": [{"tool": "<name>", "args": {...}, "reasoning": "<why>", "priority": "high|medium|low"}]}\n'
-        + "To end the scan, emit a single action with tool='finish_scan'."
+        + '{"reasoning": "<why>", "actions": [{"tool": "<exact name from catalog>", "args": {...}, "reasoning": "<why>", "priority": "high|medium|low"}]}\n'
+        + "To end the scan, emit a single action with tool='finish_scan'.\n"
+        + "REMEMBER: only emit tool names that appear in '## Available Tools' above."
     )
 
-    # Call LLM via the same fallback chain think() uses
+    # Call LLM via the same fallback chain think() uses (sync method, run in thread)
     response = await asyncio.to_thread(
         self._call_llm_with_fallback, system_prompt, user_prompt
     )
     if response is None:
-        logger.warning("think_in_loop: all LLM calls failed")
+        logger.warning("think_in_loop: all LLM calls failed at step %d", self._step_count)
         return []
 
-    # Parse using the same parser
+    # Parse using the same parser as think()
     actions = self._parse_response(response)
     return [(a.tool, a.args) for a in actions]
+```
+
+**Pre-commit verification** (add to Step 6 test list):
+
+```python
+# tests/agent/test_scan_loop_brain.py — additional verification test
+@pytest.mark.asyncio
+async def test_think_in_loop_adapter_concatenation_no_brace_explosion():
+    """Regression guard: adapter prepend must not break .format() of AGENT_SYSTEM_PROMPT."""
+    from vxis.agent.brain import AgentBrain, LOOP_PROMPT_ADAPTER, AGENT_SYSTEM_PROMPT
+    # The adapter must be concatenated AFTER format, never before
+    body = AGENT_SYSTEM_PROMPT.format(available_tools="  - test: test")
+    full = LOOP_PROMPT_ADAPTER + "\n" + body
+    # Sanity: contains both the adapter header and the body's first line
+    assert "ADAPTER INSTRUCTIONS" in full
+    assert "100% COVERAGE" in full  # body marker
+    # Sanity: no doubled braces leaked through (the body resolves {{...}} → {...})
+    assert "{{" not in full
+    assert "}}" not in full
 ```
 
 - [ ] **Step 5: Wire `brain` param into `ScanAgentLoop`**
