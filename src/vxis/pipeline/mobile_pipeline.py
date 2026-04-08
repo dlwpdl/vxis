@@ -103,6 +103,7 @@ class MobilePipeline:
             ("Phase 16: Business Logic — IAP & Feature Flag Bypass", self._phase16_business),
             ("Phase 17: Deep Link Hijacking — URL Scheme Security", self._phase17_deeplink),
             ("Phase 18: IPC Security — Intent/Pasteboard/Extension", self._phase18_ipc),
+            ("Phase 18b: Chain Synthesis — Attack Path Consolidation", self._synthesize_attack_chains),
             ("Phase 19: Report — NCC Style + OWASP Mobile Top 10", self._phase19_report),
         ]
 
@@ -4182,6 +4183,194 @@ class MobilePipeline:
         logger.info(
             "  Push notification security: %d issues found", len(issues),
         )
+
+    # ══════════════════════════════════════════════════════════
+    # Phase 18b: Attack Chain Synthesis
+    # ══════════════════════════════════════════════════════════
+
+    async def _synthesize_attack_chains(self, ctx: MobileScanContext) -> None:
+        """Phase별 findings를 공격 흐름 순서로 정렬하여 AttackChain으로 합성.
+
+        Mobile 공격 체인 흐름:
+          정적 정찰(비밀/권한 노출)
+          → 네트워크 우회(SSL 핀닝 우회)
+          → API 악용(인증 우회/IDOR)
+          → 데이터 탈취(로컬 스토리지/백업)
+          → 런타임 익스플로잇(루팅/코드 주입)
+        2단계 이상의 체인이 구성되면 Chain Intelligence 점수가 부여된다.
+
+        Mobile attack chain flow:
+          Static recon (secrets / permission exposure)
+          → Network bypass (SSL pinning bypass)
+          → API exploitation (auth bypass / IDOR)
+          → Data exfiltration (local storage / backup)
+          → Runtime exploit (root bypass / code injection)
+        Chains with 2+ steps earn Chain Intelligence score.
+        """
+        from vxis.scoring.tracker import AttackChain
+
+        if not ctx.findings:
+            return
+
+        # Mobile 공격 흐름 순서 — 낮을수록 먼저 실행됨
+        # Mobile attack flow ordering — lower = executed first
+        chain_order: dict[str, int] = {
+            "hardcoded_secret": 0,
+            "sensitive_data_exposure": 0,
+            "information_disclosure": 0,
+            "permission_overprivilege": 0,
+            "ssl_pinning_bypass": 1,
+            "weak_tls": 1,
+            "certificate_validation_failure": 1,
+            "network_security_misconfiguration": 1,
+            "broken_authentication": 2,
+            "api_authentication_bypass": 2,
+            "idor": 2,
+            "api_injection": 2,
+            "insecure_data_storage": 3,
+            "backup_vulnerability": 3,
+            "push_notification_security": 3,
+            "jailbreak_bypass": 4,
+            "root_detection_bypass": 4,
+            "code_injection": 4,
+            "business_logic": 4,
+            "iap_bypass": 4,
+        }
+
+        existing_chain_ids = {c.chain_id for c in ctx.score_tracker.attack_chains}
+
+        # ── 메인 공격 체인: 5단계 이하, 가장 흐름이 자연스러운 findings 선택 ──
+        # ── Main chain: up to 5 steps, selecting the most natural flow findings ──
+        chainable: list[tuple[int, str, str, object]] = []
+        seen_ftypes: set[str] = set()
+        for f in ctx.findings:
+            ftype = getattr(f, "finding_type", "") or ""
+            fid = getattr(f, "id", "") or ""
+            if not fid:
+                continue
+            # 같은 finding_type은 첫 번째만 체인에 포함 (중복 제거)
+            # Include only the first finding per type to avoid duplicate steps
+            if ftype in seen_ftypes:
+                continue
+            seen_ftypes.add(ftype)
+            order = chain_order.get(ftype, 5)
+            chainable.append((order, ftype, fid, f))
+
+        chainable.sort(key=lambda x: x[0])
+
+        if len(chainable) >= 2:
+            chain_id = "CHAIN-MOB-MAIN"
+            if chain_id not in existing_chain_ids:
+                chain = AttackChain(
+                    chain_id=chain_id,
+                    description_en=(
+                        "Mobile app full-compromise chain: "
+                        "static recon → network bypass → API exploitation → data exfiltration"
+                    ),
+                    description_ko=(
+                        "모바일 앱 완전 침해 체인: "
+                        "정적 정찰 → 네트워크 우회 → API 악용 → 데이터 유출"
+                    ),
+                    final_impact=(
+                        "Full app compromise with sensitive data exfiltration|||"
+                        "민감 데이터 유출을 동반한 앱 완전 침해"
+                    ),
+                )
+
+                for idx, (order, ftype, fid, f) in enumerate(chainable[:5]):
+                    level = min(order + 1, 4)
+                    title_raw = getattr(f, "title", "") or ftype
+                    parts = title_raw.split("|||")
+                    desc_en = parts[0].strip() if parts else ftype
+                    desc_ko = parts[-1].strip() if len(parts) > 1 else ftype
+                    vector_id = (
+                        ctx.score_tracker.finding_vectors.get(fid)
+                        or ftype
+                        or "MOB-CHAIN"
+                    )
+                    chain.add_step(
+                        vector_id=vector_id,
+                        finding_id=fid,
+                        level=level,
+                        description_en=desc_en[:200],
+                        description_ko=desc_ko[:200],
+                    )
+
+                try:
+                    ctx.score_tracker.record_chain(chain)
+                    logger.info(
+                        "  [CHAIN] %s: %d steps recorded|||%s: %d단계 기록",
+                        chain_id, chain.depth, chain_id, chain.depth,
+                    )
+                except Exception as exc:
+                    logger.debug("  [CHAIN] synthesis failed: %s", exc)
+
+        # ── 부 체인: 런타임 익스플로잇 특화 (Frida/루팅 우회 → 코드 주입) ──
+        # ── Sub-chain: runtime exploit specialization (Frida/root bypass → code injection) ──
+        runtime_ftypes = {
+            "jailbreak_bypass", "root_detection_bypass", "frida_hook",
+            "code_injection", "anti_tamper_bypass", "ssl_pinning_bypass",
+        }
+        runtime_findings = [
+            f for f in ctx.findings
+            if (getattr(f, "finding_type", "") or "") in runtime_ftypes
+        ]
+
+        if len(runtime_findings) >= 2:
+            chain_id_rt = "CHAIN-MOB-RUNTIME"
+            if chain_id_rt not in existing_chain_ids:
+                chain_rt = AttackChain(
+                    chain_id=chain_id_rt,
+                    description_en=(
+                        "Mobile runtime exploit chain: "
+                        "protection bypass → instrumentation → privilege escalation"
+                    ),
+                    description_ko=(
+                        "모바일 런타임 익스플로잇 체인: "
+                        "보호 우회 → 인스트루멘테이션 → 권한 상승"
+                    ),
+                    final_impact=(
+                        "Runtime code control and data interception|||"
+                        "런타임 코드 제어 및 데이터 가로채기"
+                    ),
+                )
+
+                for idx, f in enumerate(runtime_findings[:4]):
+                    ftype = getattr(f, "finding_type", "") or "MOB-CHAIN"
+                    fid = getattr(f, "id", "")
+                    title_raw = getattr(f, "title", "") or ftype
+                    parts = title_raw.split("|||")
+                    desc_en = parts[0].strip() if parts else ftype
+                    desc_ko = parts[-1].strip() if len(parts) > 1 else ftype
+                    vector_id = (
+                        ctx.score_tracker.finding_vectors.get(fid)
+                        or ftype
+                        or "MOB-CHAIN"
+                    )
+                    chain_rt.add_step(
+                        vector_id=vector_id,
+                        finding_id=fid,
+                        level=min(idx + 2, 4),
+                        description_en=desc_en[:200],
+                        description_ko=desc_ko[:200],
+                    )
+
+                try:
+                    ctx.score_tracker.record_chain(chain_rt)
+                    logger.info(
+                        "  [CHAIN] %s: %d steps recorded|||%s: %d단계 기록",
+                        chain_id_rt, chain_rt.depth, chain_id_rt, chain_rt.depth,
+                    )
+                except Exception as exc:
+                    logger.debug("  [CHAIN] runtime synthesis failed: %s", exc)
+
+        try:
+            ctx.score_tracker.record_phase_complete(
+                "Phase 18b: Chain Synthesis — Attack Path Consolidation",
+                findings_count=len(ctx.score_tracker.attack_chains),
+            )
+        except Exception:
+            pass
 
     # ══════════════════════════════════════════════════════════
     # Phase 19: Report
