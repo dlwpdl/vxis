@@ -106,6 +106,11 @@ class ScanContext:
     # ── Chain recursion budget (LLM 호출 폭증 방지) ──
     _chain_llm_count: int = 0
 
+    # ── Benchmark instrumentation: peak in-memory state size ──
+    # Sampled at phase boundaries via update_peak_size(). Used by Task 14
+    # to compare old-pipeline context growth vs new ScanAgentLoop.
+    peak_context_bytes: int = 0
+
     def __post_init__(self) -> None:
         """ScoreTracker를 target_type에 맞게 초기화한다."""
         object.__setattr__(self, "score_tracker", ScoreTracker(target_type=self.target_type))
@@ -184,6 +189,42 @@ class ScanContext:
                 "notes": notes,
             })
             logger.info("[PHASE DONE] %s — %d findings, %s", phase_name, findings_count, notes[:80])
+
+    def update_peak_size(self) -> int:
+        """Sample the current in-memory state size and update peak_context_bytes.
+
+        Called at phase boundaries (not in hot loops) so Task 14 can compare
+        benchmark runs apples-to-apples. Uses json.dumps(default=str) length as
+        a simple, deterministic byte-size proxy across runs.
+        Returns the current size.
+        """
+        snapshot = {
+            "tech_stack": self.tech_stack,
+            "subdomains": self.subdomains,
+            "api_endpoints": self.api_endpoints,
+            "js_bundles": self.js_bundles,
+            "tls_info": self.tls_info,
+            "target_profile": self.target_profile,
+            "threat_model": self.threat_model,
+            "hypotheses": self.hypotheses,
+            "attack_chains": self.attack_chains,
+            "chain_mutations": self.chain_mutations,
+            "matched_cves": self.matched_cves,
+            "forecast_90d": self.forecast_90d,
+            "twin_results": self.twin_results,
+            "biometrics": self.biometrics,
+            "findings_count": len(self.findings),
+            "xray_vulns": self.xray_vulns,
+            "phase_logs": self.phase_logs,
+            "screenshots_keys": list(self.screenshots.keys()),
+        }
+        try:
+            current = len(json.dumps(snapshot, default=str, ensure_ascii=False))
+        except Exception:
+            current = 0
+        if current > self.peak_context_bytes:
+            self.peak_context_bytes = current
+        return current
 
     @property
     def duration_seconds(self) -> float:

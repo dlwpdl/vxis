@@ -1313,6 +1313,11 @@ class ScanPipeline:
         elapsed = (time.monotonic() - t0) * 1000
         new_findings = len(ctx.findings) - pre_count
         ctx.log_phase(name, duration_ms=elapsed, findings_count=new_findings)
+        # Sample peak in-memory state size at phase boundary (benchmark instrumentation)
+        try:
+            ctx.update_peak_size()
+        except Exception:
+            pass
 
         # Severity 카운트 누계 — TUI 실시간 표시용
         _sev_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "informational": 0}
