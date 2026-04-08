@@ -57,7 +57,7 @@ def test_build_default_registry_registers_all_three():
     assert "finish_scan" in tools
     assert "think" in tools
     assert "wait" in tools
-    assert len(tools) == 3
+    assert len(tools) >= 3  # control tools present; more registered by later tasks
 
 
 def test_build_default_registry_describe_all_shape_matches_think_in_loop():
@@ -65,7 +65,7 @@ def test_build_default_registry_describe_all_shape_matches_think_in_loop():
     reg = build_default_registry()
     catalog = reg.describe_all()
     assert isinstance(catalog, list)
-    assert len(catalog) == 3
+    assert len(catalog) >= 3  # control tools present; more registered by later tasks
     for entry in catalog:
         assert "name" in entry
         assert "description" in entry
