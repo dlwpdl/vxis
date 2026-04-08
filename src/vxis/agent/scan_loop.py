@@ -21,13 +21,22 @@ class ScanLoopState:
         self.messages.append({"role": role, "content": content, "iter": self.iteration})
 
 class ScanAgentLoop:
-    def __init__(self, target: str, registry: ToolRegistry, max_iters: int = 300) -> None:
+    def __init__(
+        self,
+        target: str,
+        registry: ToolRegistry,
+        max_iters: int = 300,
+        brain: Any | None = None,
+    ) -> None:
         self.state = ScanLoopState(target=target, max_iters=max_iters)
         self.registry = registry
+        self.brain = brain
 
     async def _decide(self, state: ScanLoopState) -> list[tuple[str, dict[str, Any]]]:
-        """Returns list of (tool_name, args). Overridden by Brain integration in Task 4."""
-        return [("finish_scan", {})]
+        """Returns list of (tool_name, args). Delegates to brain.think_in_loop when brain is set."""
+        if self.brain is None:
+            return [("finish_scan", {})]
+        return await self.brain.think_in_loop(state.messages, self.registry.describe_all())
 
     async def run(self) -> dict[str, Any]:
         self.state.add_message("system", f"Scan started on {self.state.target}")
