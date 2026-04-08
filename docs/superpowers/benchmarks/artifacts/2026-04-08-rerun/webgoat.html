@@ -1,0 +1,1878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title> Security Assessment Report — VXIS Security</title>
+  <style>
+    /* ============================================================
+       VXIS Security Report — Inline Stylesheet
+       NCC Group inspired professional design
+       ============================================================ */
+
+    /* ---------- @page rules for A4 print ---------- */
+    @page {
+      size: A4;
+      margin: 20mm 18mm 25mm 18mm;
+      @bottom-center {
+        content: counter(page) " / " counter(pages);
+        font-family: Arial, sans-serif;
+        font-size: 9pt;
+        color: #666;
+      }
+      @bottom-left {
+        content: "Client Confidential";
+        font-family: Arial, sans-serif;
+        font-size: 9pt;
+        color: #888;
+      }
+      @bottom-right {
+        content: "VXIS Security";
+        font-family: Arial, sans-serif;
+        font-size: 9pt;
+        color: #888;
+      }
+    }
+
+    @page :first {
+      @bottom-center { content: none; }
+      @bottom-left   { content: none; }
+      @bottom-right  { content: none; }
+    }
+
+    /* ---------- Reset & base ---------- */
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f0f2f5;
+      color: #1a1a2e;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, Arial, Helvetica, sans-serif;
+      font-size: 10pt;
+      line-height: 1.6;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* ---------- Screen layout: centered document look ---------- */
+    @media screen {
+      body {
+        padding: 32px 24px 64px;
+      }
+
+      /* Cover page: no padding, full-bleed dark header */
+      .cover-page {
+        max-width: 860px;
+        margin: 0 auto 40px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      /* All non-cover content: centered column */
+      body > *:not(.cover-page):not(.page-break):not(.report-screen-footer) {
+        max-width: 800px;
+        margin-left: auto;
+        margin-right: auto;
+        display: block;
+      }
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+        padding: 0;
+      }
+    }
+
+    /* ---------- Typography ---------- */
+    h1 {
+      font-size: 20pt;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 0 0 12pt;
+      border-bottom: 2px solid #1a1a2e;
+      padding-bottom: 6pt;
+      page-break-after: avoid;
+    }
+
+    h2 {
+      font-size: 14pt;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 20pt 0 8pt;
+      page-break-after: avoid;
+    }
+
+    h3 {
+      font-size: 11pt;
+      font-weight: 600;
+      color: #2c3e50;
+      margin: 14pt 0 6pt;
+      page-break-after: avoid;
+    }
+
+    h4 {
+      font-size: 10pt;
+      font-weight: 600;
+      color: #34495e;
+      margin: 10pt 0 4pt;
+      page-break-after: avoid;
+    }
+
+    p {
+      margin: 0 0 8pt;
+    }
+
+    a {
+      color: #2980b9;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code, pre {
+      font-family: "SFMono-Regular", "Cascadia Code", "Courier New", Courier, monospace;
+      font-size: 9pt;
+    }
+
+    code {
+      background: #f0f2f5;
+      border-radius: 3px;
+      padding: 1px 5px;
+      color: #c0392b;
+    }
+
+    pre {
+      background: #1e2130;
+      color: #abb2bf;
+      border-radius: 5px;
+      padding: 12pt 14pt;
+      margin: 8pt 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      border-left: 4px solid #3498db;
+      overflow: hidden;
+      page-break-inside: avoid;
+      line-height: 1.55;
+    }
+
+    /* ---------- Page breaks ---------- */
+    .page-break {
+      page-break-after: always;
+      break-after: page;
+      height: 0;
+      display: block;
+    }
+
+    @media screen {
+      .page-break {
+        display: none;
+      }
+    }
+
+    /* ============================================================
+       COVER PAGE
+       The partial _cover.html renders:
+         .cover-page
+           (.cover-logo or .cover-logo-text)
+           h1.cover-title
+           .cover-subtitle
+           .cover-meta > table + .cover-classification
+
+       We use ::before on .cover-page for the dark header region,
+       and rely on a background + padding trick so the logo/company
+       name appears on the dark band at the top.
+       ============================================================ */
+
+    .cover-page {
+      display: flex;
+      flex-direction: column;
+      min-height: 260mm;
+      position: relative;
+      background: #ffffff;
+    }
+
+    /* Dark navy top band — covers logo + title + target + subtitle */
+    .cover-page::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 320px;
+      background: #1a1a2e;
+      /* subtle grid overlay */
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(#1a1a2e, #1a1a2e);
+      background-size: 28px 28px, 28px 28px, 100% 100%;
+      z-index: 0;
+    }
+
+    /* Red accent stripe at the bottom edge of the dark band */
+    .cover-page::after {
+      content: "";
+      position: absolute;
+      top: 316px;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #c0392b 0%, #e74c3c 50%, #c0392b 100%);
+      z-index: 1;
+    }
+
+    .cover-page > * {
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Logo image — on dark background */
+    .cover-logo {
+      max-width: 180pt;
+      max-height: 60pt;
+      margin: 40pt 40pt 0;
+      filter: brightness(0) invert(1); /* make logo white on dark background */
+    }
+
+    /* Text fallback logo — displayed on dark header band */
+    .cover-logo-text {
+      font-size: 26pt;
+      font-weight: 900;
+      color: #ffffff;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      margin: 40pt 40pt 0;
+      line-height: 1;
+    }
+
+    .cover-logo-text::after {
+      content: ".";
+      color: #c0392b;
+    }
+
+    /* Title — inside the dark band, white text */
+    .cover-title {
+      font-size: 28pt;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.25;
+      margin: 48pt 40pt 0;
+      border: none;
+      padding: 0;
+    }
+
+    /* Red underline accent injected via CSS after the title */
+    .cover-title::after {
+      content: "";
+      display: block;
+      width: 52pt;
+      height: 4px;
+      background: #c0392b;
+      margin-top: 12pt;
+      border-radius: 2px;
+    }
+
+    .cover-target {
+      font-size: 16pt;
+      color: rgba(255, 255, 255, 0.85);
+      font-weight: 600;
+      margin: 8pt 40pt 0;
+      word-break: break-all;
+      font-family: "Courier New", Courier, monospace;
+    }
+
+    .cover-subtitle {
+      font-size: 13pt;
+      color: rgba(255, 255, 255, 0.65);
+      margin: 14pt 40pt 36pt;
+      font-weight: 400;
+    }
+
+    .cover-meta {
+      margin: 0 40pt;
+      border-top: 1px solid #e0e3ea;
+      padding-top: 20pt;
+      flex: 1;
+    }
+
+    .cover-meta table {
+      border: none;
+      width: auto;
+      margin: 0 0 16pt;
+    }
+
+    .cover-meta td {
+      padding: 5pt 24pt 5pt 0;
+      border: none;
+      background: transparent;
+      font-size: 10pt;
+      line-height: 1.5;
+    }
+
+    .cover-meta td:first-child {
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      font-size: 8pt;
+      letter-spacing: 0.6px;
+      width: 120pt;
+      vertical-align: top;
+      padding-top: 7pt;
+    }
+
+    .cover-meta td:last-child {
+      font-size: 10pt;
+      color: #1a1a2e;
+      font-weight: 500;
+    }
+
+    .cover-classification {
+      display: inline-block;
+      margin-top: 6pt;
+      margin-bottom: 40pt;
+      padding: 5pt 16pt;
+      background: #c0392b;
+      color: #fff;
+      font-size: 8.5pt;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      border-radius: 3px;
+      box-shadow: 0 2px 6px rgba(192,57,43,0.35);
+    }
+
+    /* ============================================================
+       TABLE OF CONTENTS
+       ============================================================ */
+    .toc {
+      margin: 20pt 0;
+    }
+
+    .toc-entry {
+      display: flex;
+      align-items: baseline;
+      margin-bottom: 7pt;
+      font-size: 10pt;
+    }
+
+    .toc-entry-title {
+      flex-shrink: 0;
+      padding-right: 8pt;
+    }
+
+    .toc-dots {
+      flex: 1;
+      border-bottom: 1px dotted #bbb;
+      margin: 0 4pt 3pt;
+      min-width: 20pt;
+    }
+
+    .toc-entry-page {
+      font-weight: 600;
+      min-width: 22pt;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* ============================================================
+       TABLES
+       ============================================================ */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      margin: 8pt 0 16pt;
+      page-break-inside: auto;
+    }
+
+    thead {
+      background: #1a1a2e;
+      color: #ffffff;
+    }
+
+    thead th {
+      padding: 8pt 11pt;
+      font-weight: 600;
+      text-align: left;
+      font-size: 8.5pt;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #f7f8fa;
+    }
+
+    tbody tr:nth-child(odd) {
+      background: #ffffff;
+    }
+
+    tbody td {
+      padding: 7pt 11pt;
+      border-bottom: 1px solid #e8e9eb;
+      vertical-align: top;
+    }
+
+    @media screen {
+      tbody tr:hover td {
+        background: #eef1f7;
+        transition: background 0.12s ease;
+      }
+    }
+
+    /* ============================================================
+       FINDING CARDS
+       ============================================================ */
+    .finding-card {
+      border: 1px solid #dde1e7;
+      border-radius: 6px;
+      margin: 0 0 22pt;
+      page-break-inside: avoid;
+      overflow: hidden;
+    }
+
+    @media screen {
+      .finding-card {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+        transition: box-shadow 0.15s ease;
+      }
+
+      .finding-card:hover {
+        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+      }
+    }
+
+    .finding-header {
+      padding: 10pt 14pt;
+      border-bottom: 1px solid #dde1e7;
+      background: #f9fafb;
+      display: flex;
+      align-items: center;
+      gap: 10pt;
+    }
+
+    /* Severity accent bar in header */
+    .finding-card.severity-critical .finding-header { border-left: 5px solid #7B2C34; background: #fdf5f5; }
+    .finding-card.severity-high     .finding-header { border-left: 5px solid #C0392B; background: #fdf5f5; }
+    .finding-card.severity-medium   .finding-header { border-left: 5px solid #E67E22; background: #fdf9f2; }
+    .finding-card.severity-low      .finding-header { border-left: 5px solid #2ECC71; background: #f3fdf7; }
+    .finding-card.severity-informational .finding-header { border-left: 5px solid #3498DB; background: #f3f8fe; }
+
+    .finding-card.severity-critical { border-left: 5px solid #7B2C34; }
+    .finding-card.severity-high     { border-left: 5px solid #C0392B; }
+    .finding-card.severity-medium   { border-left: 5px solid #E67E22; }
+    .finding-card.severity-low      { border-left: 5px solid #2ECC71; }
+    .finding-card.severity-informational { border-left: 5px solid #3498DB; }
+
+    .finding-title {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 0;
+      flex: 1;
+    }
+
+    .finding-body {
+      padding: 14pt 16pt;
+    }
+
+    .finding-meta-table {
+      width: 100%;
+      font-size: 9pt;
+      margin-bottom: 14pt;
+    }
+
+    .finding-meta-table th {
+      background: #1a1a2e;
+      color: #ffffff;
+      font-weight: 600;
+      padding: 6pt 9pt;
+      border: 1px solid #2d2d4e;
+      text-align: center;
+      font-size: 8pt;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .finding-meta-table td {
+      padding: 6pt 9pt;
+      border: 1px solid #dde1e7;
+      background: #ffffff;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    .finding-section-title {
+      font-size: 8.5pt;
+      font-weight: 700;
+      color: #ffffff;
+      background: #2c3e50;
+      margin: 14pt -16pt 8pt;
+      padding: 4pt 16pt;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    /* ============================================================
+       EVIDENCE BLOCKS — dark-themed (VS Code style)
+       Partial markup:
+         .evidence-block
+           .evidence-title  (includes .evidence-type-badge inside it)
+           div (content)
+           div (file path, optional) > code
+       ============================================================ */
+    .evidence-block {
+      background: #1e2130;
+      border: 1px solid #2d3250;
+      border-radius: 5px;
+      padding: 10pt 14pt;
+      margin: 6pt 0;
+      page-break-inside: avoid;
+    }
+
+    .evidence-title {
+      font-weight: 600;
+      font-size: 9pt;
+      color: #abb2bf;
+      margin-bottom: 8pt;
+      padding-bottom: 6pt;
+      border-bottom: 1px solid #2d3250;
+    }
+
+    .evidence-block > div:not(.evidence-title) {
+      color: #abb2bf;
+      font-family: "SFMono-Regular", "Cascadia Code", "Courier New", monospace;
+      font-size: 8.5pt;
+      line-height: 1.55;
+      word-break: break-all;
+    }
+
+    .evidence-block pre.evidence-content {
+      margin: 0;
+      padding: 8pt;
+      background: #1e2130;
+      border-radius: 0 0 4px 4px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .evidence-block pre.evidence-content code {
+      background: none;
+      color: #abb2bf;
+      font-family: "SFMono-Regular", "Cascadia Code", "Courier New", monospace;
+      font-size: 8.5pt;
+      line-height: 1.55;
+      padding: 0;
+      border-radius: 0;
+    }
+
+    .evidence-type-badge {
+      display: inline-block;
+      font-size: 7pt;
+      padding: 2pt 7pt;
+      background: #2980b9;
+      color: #ffffff;
+      border-radius: 3px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+
+    /* File path line inside evidence block */
+    .evidence-block code {
+      background: #2d3250;
+      color: #e5c07b;
+      font-size: 8pt;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    /* ============================================================
+       SEVERITY BADGES
+       ============================================================ */
+    .severity-badge {
+      display: inline-block;
+      padding: 2pt 9pt;
+      border-radius: 3px;
+      font-size: 7.5pt;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .severity-badge-critical,
+    .severity-badge.severity-critical {
+      background-color: #7B2C34;
+      box-shadow: 0 1px 4px rgba(123,44,52,0.4);
+    }
+
+    .severity-badge-high,
+    .severity-badge.severity-high {
+      background-color: #C0392B;
+      box-shadow: 0 1px 4px rgba(192,57,43,0.4);
+    }
+
+    .severity-badge-medium,
+    .severity-badge.severity-medium {
+      background-color: #E67E22;
+      box-shadow: 0 1px 4px rgba(230,126,34,0.35);
+    }
+
+    .severity-badge-low,
+    .severity-badge.severity-low {
+      background-color: #27ae60;
+      color: #ffffff;
+      box-shadow: 0 1px 4px rgba(39,174,96,0.35);
+    }
+
+    .severity-badge-informational,
+    .severity-badge.severity-informational {
+      background-color: #2980b9;
+      box-shadow: 0 1px 4px rgba(41,128,185,0.35);
+    }
+
+    /* ============================================================
+       MITRE ATT&CK
+       ============================================================ */
+    .mitre-block {
+      background: #eaf3fb;
+      border: 1px solid #aed6f1;
+      border-radius: 4px;
+      padding: 9pt 13pt;
+      margin: 8pt 0;
+      font-size: 9pt;
+      border-left: 4px solid #2980b9;
+    }
+
+    .mitre-block strong {
+      color: #1a5276;
+    }
+
+    /* ============================================================
+       ATTESTATION / LETTERHEAD
+       ============================================================ */
+    .letterhead {
+      border-bottom: 3px solid #1a1a2e;
+      padding-bottom: 16pt;
+      margin-bottom: 24pt;
+      display: flex;
+      align-items: flex-end;
+      gap: 16pt;
+    }
+
+    .letterhead-brand {
+      flex: 1;
+    }
+
+    .letterhead-company {
+      font-size: 20pt;
+      font-weight: 900;
+      color: #1a1a2e;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    .letterhead-company::after {
+      content: ".";
+      color: #c0392b;
+    }
+
+    .letterhead-tagline {
+      font-size: 9pt;
+      color: #777;
+      letter-spacing: 0.5px;
+      margin-top: 2pt;
+    }
+
+    .attestation-body {
+      font-size: 10pt;
+      line-height: 1.7;
+    }
+
+    .signature-block {
+      margin-top: 40pt;
+    }
+
+    .signature-line {
+      border-top: 1px solid #333;
+      width: 200pt;
+      margin-bottom: 6pt;
+    }
+
+    /* ============================================================
+       EXECUTIVE SUMMARY
+       ============================================================ */
+    .summary-chart-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 24pt;
+      margin: 16pt 0;
+    }
+
+    .summary-chart-donut {
+      flex-shrink: 0;
+    }
+
+    .summary-chart-bars {
+      flex: 1;
+    }
+
+    /* Risk score meter */
+    .risk-score-container {
+      margin: 12pt 0 18pt;
+    }
+
+    .risk-score-label {
+      font-size: 9pt;
+      font-weight: 600;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6pt;
+    }
+
+    .risk-score-track {
+      height: 14px;
+      background: #e8eaed;
+      border-radius: 7px;
+      overflow: visible;
+      position: relative;
+    }
+
+    .risk-score-fill {
+      height: 100%;
+      border-radius: 7px;
+      background: linear-gradient(90deg, #27ae60 0%, #f39c12 50%, #c0392b 100%);
+      transition: width 0.4s ease;
+      position: relative;
+    }
+
+    .risk-score-fill::after {
+      content: attr(data-score);
+      position: absolute;
+      right: -1px;
+      top: -24px;
+      font-size: 9pt;
+      font-weight: 700;
+      color: #1a1a2e;
+      white-space: nowrap;
+    }
+
+    .risk-score-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 7.5pt;
+      color: #888;
+      margin-top: 4pt;
+    }
+
+    /* ============================================================
+       SECTION LABELS
+       ============================================================ */
+    .section-label {
+      font-size: 8.5pt;
+      color: #c0392b;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 4pt;
+    }
+
+    /* ============================================================
+       SCREEN-ONLY FOOTER BAR
+       ============================================================ */
+    @media screen {
+      .report-screen-footer {
+        text-align: center;
+        font-size: 9pt;
+        color: #aaa;
+        padding: 24px 0 8px;
+        letter-spacing: 0.3px;
+      }
+    }
+
+    @media print {
+      .report-screen-footer {
+        display: none;
+      }
+    }
+
+    /* ============================================================
+       PRINT OVERRIDES
+       ============================================================ */
+    @media print {
+      body {
+        font-size: 9.5pt;
+        background: #ffffff;
+      }
+
+      h1 { font-size: 18pt; }
+      h2 { font-size: 13pt; }
+      h3 { font-size: 10.5pt; }
+
+      .finding-card {
+        page-break-inside: avoid;
+        box-shadow: none;
+      }
+
+      .evidence-block {
+        page-break-inside: avoid;
+      }
+
+      a {
+        color: #1a1a2e;
+        text-decoration: none;
+      }
+
+      thead {
+        display: table-header-group;
+      }
+
+      .finding-section-title {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+    /* ---------- Language toggle ---------- */
+    .lang-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 9999;
+      display: flex;
+      background: #1a1a2e;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      font-family: system-ui, -apple-system, Arial, sans-serif;
+    }
+    .lang-toggle button {
+      border: none;
+      padding: 8px 16px;
+      font-size: 9pt;
+      font-weight: 700;
+      cursor: pointer;
+      color: #8899aa;
+      background: #1a1a2e;
+      transition: all 0.2s;
+      letter-spacing: 0.5px;
+    }
+    .lang-toggle button.active {
+      color: #ffffff;
+      background: #c0392b;
+    }
+    .lang-toggle button:hover:not(.active) {
+      color: #ffffff;
+      background: #2d3250;
+    }
+
+    body.lang-en .ko { display: none !important; }
+    body.lang-ko .en { display: none !important; }
+
+    @media print {
+      .lang-toggle { display: none; }
+    }
+
+    /* Attack Paths Section */
+    .attack-paths-section { page-break-before: always; }
+    .attack-graph-container { margin: 20px 0; text-align: center; }
+    .attack-graph-container svg { max-width: 100%; height: auto; }
+    .chain-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+    .chain-table th, .chain-table td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+    .chain-table th { background: #1a1a2e; color: white; }
+    .chain-table code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; }
+    .depth-table { margin: 10px 0; }
+    .depth-table td { padding: 5px 10px; font-size: 0.9em; }
+    .depth-table td:first-child { font-weight: bold; font-size: 1.1em; width: 30px; }
+    @media print { .attack-graph-container svg { max-height: 400px; } }
+  </style>
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    function setLang(lang) {
+      document.body.className = document.body.className.replace(/lang-(en|ko)/g, '').trim() + ' lang-' + lang;
+      document.getElementById('btn-en').className = (lang === 'en') ? 'active' : '';
+      document.getElementById('btn-ko').className = (lang === 'ko') ? 'active' : '';
+      try { localStorage.setItem('vxis-report-lang', lang); } catch(e) {}
+    }
+    document.getElementById('btn-en').addEventListener('click', function() { setLang('en'); });
+    document.getElementById('btn-ko').addEventListener('click', function() { setLang('ko'); });
+    try {
+      var saved = localStorage.getItem('vxis-report-lang');
+      if (saved) setLang(saved);
+    } catch(e) {}
+  });
+  </script>
+</head>
+<body class="lang-en">
+
+  <div class="lang-toggle" id="lang-toggle">
+    <button id="btn-en" class="active">EN</button>
+    <button id="btn-ko">KO</button>
+  </div>
+
+  
+  
+<div class="cover-page">
+
+  
+  
+    <div class="cover-logo-text">VXIS SECURITY</div>
+  
+
+  
+  <h1 class="cover-title">Security Assessment</h1>
+  <div class="cover-target"></div>
+  <div class="cover-subtitle">Penetration Testing &amp; Vulnerability Assessment Report</div>
+
+  
+  <div class="cover-meta">
+    <table>
+      <tbody>
+        <tr>
+          <td>Prepared for</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td>Prepared by</td>
+          <td>VXIS Security — VXIS ScanPipeline</td>
+        </tr>
+        <tr>
+          <td>Assessment date</td>
+          <td>2026-04-08</td>
+        </tr>
+        <tr>
+          <td>Report version</td>
+          <td>1.0 — Final</td>
+        </tr>
+        <tr>
+          <td>Scan reference</td>
+          <td>VXIS-20260408-141134</td>
+        </tr>
+        <tr>
+          <td>Target</td>
+          <td>http://localhost:8080/WebGoat</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="cover-classification">CLIENT CONFIDENTIAL</div>
+  </div>
+
+</div>
+  <div class="page-break"></div>
+
+  
+  <div class="section-label"><span class="en">Contents</span><span class="ko">목차</span></div>
+  <h1><span class="en">Table of Contents</span><span class="ko">목차</span></h1>
+
+  <div class="toc">
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">1. Executive Summary</span><span class="ko">1. 경영진 요약</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">3</span>
+    </div>
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">2. Methodology</span><span class="ko">2. 수행 방법론</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">4</span>
+    </div>
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">3. Findings</span><span class="ko">3. 발견 사항</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">5</span>
+    </div>
+    
+    
+    
+    
+      
+    
+      
+      <div class="toc-entry" style="padding-left:16pt;">
+        <span class="toc-entry-title">
+          3.2. High Findings (1)
+        </span>
+        <span class="toc-dots"></span>
+        <span class="toc-entry-page">5</span>
+      </div>
+      
+      
+    
+      
+    
+      
+      <div class="toc-entry" style="padding-left:16pt;">
+        <span class="toc-entry-title">
+          3.4. Low Findings (2)
+        </span>
+        <span class="toc-dots"></span>
+        <span class="toc-entry-page">6</span>
+      </div>
+      
+      
+    
+      
+    
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">4. Attack Path Analysis</span><span class="ko">4. 공격 경로 분석</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">—</span>
+    </div>
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">5. Attestation</span><span class="ko">5. 확인서</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">—</span>
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  
+  
+
+
+<div class="section-label">Section 1</div>
+<h1><span class="en">Executive Summary</span><span class="ko">경영진 요약</span></h1>
+
+
+<h3><span class="en">Finding Summary</span><span class="ko">발견 사항 요약</span></h3>
+<table>
+  <thead>
+    <tr>
+      <th><span class="en">Severity</span><span class="ko">심각도</span></th>
+      <th style="text-align:center;"><span class="en">Count</span><span class="ko">건수</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-critical">
+          CRITICAL
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:400;">
+        0
+      </td>
+    </tr>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-high">
+          HIGH
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:700;">
+        1
+      </td>
+    </tr>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-medium">
+          MEDIUM
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:400;">
+        0
+      </td>
+    </tr>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-low">
+          LOW
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:700;">
+        2
+      </td>
+    </tr>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-informational">
+          INFORMATIONAL
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:400;">
+        0
+      </td>
+    </tr>
+    
+    <tr style="border-top: 2px solid #1a1a2e;">
+      <td style="font-weight:700;"><span class="en">Total</span><span class="ko">합계</span></td>
+      <td style="text-align:center; font-weight:700;">3</td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+<div class="summary-chart-row">
+  <div class="summary-chart-donut">
+    <svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+<path d="M 80.00 80.00 L 80.00 12.80 A 67.20 67.20 0 0 1 138.20 113.60 Z" fill="#C0392B" />
+<path d="M 80.00 80.00 L 138.20 113.60 A 67.20 67.20 0 1 1 80.00 12.80 Z" fill="#2ECC71" />
+<circle cx="80.00" cy="80.00" r="41.60" fill="white" />
+<text x="80.00" y="80.00" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#333">3</text><text x="80.00" y="100.00" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#666">findings</text>
+</svg>
+  </div>
+  <div class="summary-chart-bars">
+    <svg xmlns="http://www.w3.org/2000/svg" width="380" height="180" viewBox="0 0 380 180">
+<rect x="120" y="10" width="220" height="26" rx="4" fill="#F0F0F0" />
+<text x="112" y="23.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">Critical</text>
+<text x="348" y="23.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">0</text>
+<rect x="120" y="44" width="220" height="26" rx="4" fill="#F0F0F0" />
+<rect x="120" y="44" width="110.00" height="26" rx="4" fill="#C0392B" />
+<text x="112" y="57.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">High</text>
+<text x="348" y="57.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">1</text>
+<rect x="120" y="78" width="220" height="26" rx="4" fill="#F0F0F0" />
+<text x="112" y="91.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">Medium</text>
+<text x="348" y="91.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">0</text>
+<rect x="120" y="112" width="220" height="26" rx="4" fill="#F0F0F0" />
+<rect x="120" y="112" width="220.00" height="26" rx="4" fill="#2ECC71" />
+<text x="112" y="125.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">Low</text>
+<text x="348" y="125.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">2</text>
+<rect x="120" y="146" width="220" height="26" rx="4" fill="#F0F0F0" />
+<text x="112" y="159.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">Informational</text>
+<text x="348" y="159.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">0</text>
+</svg>
+  </div>
+</div>
+
+
+
+
+<h3><span class="en">Assessment Overview</span><span class="ko">평가 개요</span></h3>
+<div class="attestation-body">
+  <span class="en">VXIS Security conducted a comprehensive security assessment of VXIS Client&#39;s environment. The engagement covered the agreed scope of assets and services, employing a combination of automated vulnerability scanning and manual verification techniques aligned with OWASP, PTES, and NIST SP 800-115 frameworks.<br><br>A total of 3 security findings were identified: 0 Critical, 1 High, 0 Medium, 2 Low, 0 Informational. The most significant finding identified was &#39;Missing Security Headers (7/7)&#39; (High), which represents the highest-priority remediation item.<br><br>Immediate remediation is recommended for the 1 High finding, as these represent the greatest risk to VXIS Client&#39;s environment. Medium and Low severity findings should be addressed in subsequent remediation cycles according to the organisation&#39;s risk tolerance and change management processes. VXIS recommends a remediation validation assessment once Critical and High findings have been addressed.</span><span class="ko">VXIS Security는 VXIS Client 환경에 대해 종합 보안 평가를 수행했습니다. 합의된 자산과 서비스 범위 내에서 자동화 취약점 스캔과 수동 검증을 결합했으며, OWASP Testing Guide·PTES·NIST SP 800-115 프레임워크에 맞춰 진행했습니다.<br><br>총 3건의 보안 취약점이 식별되었습니다: 0건 심각, 1건 높음, 0건 중간, 2건 낮음, 0건 정보. 가장 심각한 항목은 &#39;보안 헤더 미설정 (7/7)&#39; (높음) 이며, 최우선 조치 대상입니다.<br><br>높음 1건 항목은 VXIS Client 환경에 가장 큰 위험을 초래하므로 즉시 조치가 권장됩니다. 중간 및 낮음 심각도 항목은 조직의 위험 허용 수준과 변경 관리 절차에 따라 후속 조치 주기에 반영해야 합니다. VXIS는 심각·높음 항목 조치가 완료된 이후 재검증 평가를 수행할 것을 권장합니다.</span>
+</div>
+
+
+
+<h3><span class="en">Overall Risk Score</span><span class="ko">종합 위험 점수</span></h3>
+<p>
+  <span class="en">
+    The overall risk score for this assessment is
+    <strong>3.3 / 10.0</strong>,
+    calculated as a weighted composite across all identified findings.
+  </span>
+  <span class="ko">
+    본 평가의 종합 위험 점수는
+    <strong>3.3 / 10.0</strong>이며,
+    발견된 모든 취약점의 가중 합산으로 산출되었습니다.
+  </span>
+</p>
+  <div class="page-break"></div>
+
+  
+  <div class="section-label">Section 2</div>
+  <h1><span class="en">Methodology</span><span class="ko">수행 방법론</span></h1>
+
+  <p>Brain-First Pipeline. Phases: Phase 0: Foundation — Config &amp; DB Init, Phase 1: Director — Attack Graph Init, Phase 15: Digital Twin Pre-Simulation, Phase 13: Behavioral Biometrics (OSINT), Phase 4: CPR — Hands/Eyes/X-Ray Connect, Phase 3: Hypothesis Engine — Pattern Matching, Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch, Phase 5: Special Agents (IoT/VoIP/Web3), Phase 7: Hardware Agents (DMA/SS7/Cold Boot), Phase 8: Cross-Protocol Synthesis, Phase 11: Chain Mutation — Alternative Attack Paths, Phase 18: Collective Intelligence Update, Phase 12: Self-Evolving Agent — Coverage Gap Analysis</p>
+
+  
+  <h2><span class="en">Target Screenshots</span><span class="ko">타겟 스크린샷</span></h2>
+  <div class="screenshots-grid">
+    
+      <figure style="margin: 12px 0; page-break-inside: avoid;">
+        <img src="reports/screenshots/VXIS-20260408-141134/homepage.png" alt="homepage" style="max-width: 100%; border: 1px solid #ccc;" />
+        <figcaption style="font-size: 0.85em; color: #555;">homepage</figcaption>
+      </figure>
+    
+  </div>
+  
+
+  <div class="page-break"></div>
+
+  
+  <div class="section-label">Section 3</div>
+  <h1><span class="en">Findings</span><span class="ko">발견 사항</span></h1>
+
+  
+    
+      
+      
+    
+      
+      
+        <h2>
+          <span class="severity-badge severity-badge-high">HIGH</span>
+          &nbsp;High Findings (1)
+        </h2>
+
+        
+          
+
+
+
+<div class="finding-card severity-high">
+
+  
+  <div class="finding-header">
+    <span class="finding-title"><span class="en">Missing Security Headers (7/7)</span><span class="ko">보안 헤더 미설정 (7/7)</span></span>
+    <span class="severity-badge severity-badge-high">HIGH</span>
+  </div>
+
+  <div class="finding-body">
+
+    
+    <table class="finding-meta-table">
+      <thead>
+        <tr>
+          <th><span class="en">Overall Risk</span><span class="ko">위험도</span></th>
+          <th><span class="en">Impact</span><span class="ko">영향</span></th>
+          <th><span class="en">Exploitability</span><span class="ko">공격 용이성</span></th>
+          <th><span class="en">Finding ID</span><span class="ko">식별 번호</span></th>
+          <th><span class="en">Component</span><span class="ko">대상</span></th>
+          <th><span class="en">Category</span><span class="ko">분류</span></th>
+          <th><span class="en">Status</span><span class="ko">상태</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="severity-badge severity-badge-high">HIGH</span>
+          </td>
+          <td>
+            
+              6.1
+            
+          </td>
+          <td>
+            
+              CVSS:3.1/AV:N/AC:L/…
+            
+          </td>
+          <td><code>VXIS-002</code></td>
+          <td>—</td>
+          <td>security_misconfiguration</td>
+          <td>Open</td>
+        </tr>
+      </tbody>
+    </table>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Identifiers</span><span class="ko">식별자</span></div>
+    <p>
+      
+      
+      
+        <strong>CWE:</strong>
+        
+          <a href="https://cwe.mitre.org/data/definitions/693.html">CWE-693</a>, 
+        
+          <a href="https://cwe.mitre.org/data/definitions/16.html">CWE-16</a>
+        
+      
+    </p>
+    
+
+    
+    <div class="finding-section-title"><span class="en">Description</span><span class="ko">상세 설명</span></div>
+    <div><span class="en">WHAT — The WebGoat login page at http://localhost:8080/WebGoat does not emit several baseline browser security headers, including Strict-Transport-Security, Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Referrer-Policy, and Permissions-Policy. While this is not a direct code-execution flaw by itself, the absence of these controls materially weakens the browser-side security posture of the authentication surface, increasing the likelihood that a separate injection, phishing, clickjacking, mixed-content, or data-exfiltration issue can be converted into a full compromise.<br>HOW — Step 1: Load the login page and inspect the HTTP response headers. Step 2: Confirm that the response lacks HSTS, CSP, frame-busting, MIME-sniffing protection, referrer minimization, and browser feature restrictions. Step 3: Place the application behind a reverse proxy, shared hosting stack, or content injection point and observe that any downstream mistake is now less constrained by browser-enforced defenses. Step 4: Use the missing X-Frame-Options / frame-ancestors protection to embed the login page in an attacker-controlled frame and attempt UI redress or clickjacking if any sensitive action is exposed post-login. Step 5: Use the missing CSP and related headers to increase the impact of any future reflected or stored XSS by permitting script execution paths, data exfiltration, and unauthorized network requests. Step 6: Because HSTS is absent, if the application is ever served over HTTPS or accessed through a secure front end, an active network attacker can attempt SSL-stripping or downgrade opportunities on first visit until a secure-cookie policy is enforced.<br>IMPACT — <br>- Increases the likelihood that a credential-harvesting or session hijacking attack against the login flow will succeed, affecting all users who authenticate through this page, including administrators and privileged operators.<br>- Weakens defenses required to contain browser-based attacks, which can expose usernames, passwords, session cookies, CSRF tokens, and application data if another vulnerability is present; this can trigger incident response, account reset, and potentially privacy obligations depending on the data accessed.<br>- Fails common hardening expectations used in baseline security benchmarks and many compliance programs (for example, internal secure configuration standards, CIS-style hardening, and browser-side protections expected for regulated environments), increasing audit findings and remediation cost.<br>PoC — GET /WebGoat HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html;charset=UTF-8<br>Content-Length: 1234<br>Server: Apache-Coyote/1.1<br><br>&lt;!doctype html&gt;<br>&lt;html&gt;<br>&lt;head&gt;&lt;title&gt;Login Page&lt;/title&gt;&lt;/head&gt;<br>&lt;body&gt;<br>WEBGOAT<br>&lt;form action=&#34;/WebGoat/login&#34; method=&#34;post&#34;&gt;...&lt;/form&gt;<br>&lt;/body&gt;<br>&lt;/html&gt;<br>ATTACK PATH — Missing browser hardening headers on the authentication entry point → attacker can more easily weaponize a separate XSS, clickjacking, or phishing flow against the login page → credential theft or session capture → authenticated access to WebGoat training/admin functions → lateral abuse of privileged features and eventual access to the crown jewel data or administrative control plane.</span><span class="ko">취약점 설명(WHAT) — http://localhost:8080/WebGoat의 로그인 페이지가 기본적인 브라우저 보안 헤더를 다수 반환하지 않습니다. 구체적으로 Strict-Transport-Security, Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, X-XSS-Protection, Referrer-Policy, Permissions-Policy가 누락되어 있습니다. 이 문제는 단독으로는 원격 코드 실행 취약점이 아니지만, 브라우저가 제공해야 할 방어선이 비어 있기 때문에 로그인과 같은 가장 민감한 경계면에서 후속 취약점의 피해를 크게 증폭시킵니다. 즉, 향후 XSS, 클릭재킹, 피싱, 혼합 콘텐츠 노출, 리퍼러 기반 정보 유출, 브라우저 기능 남용이 발생했을 때 이를 완충해 줄 핵심 컨트롤이 존재하지 않습니다.<br>공격 시나리오(HOW) — 1단계: 로그인 페이지를 요청하고 HTTP 응답 헤더를 확인하여 필수 보안 헤더가 없는 것을 검증합니다. 2단계: HSTS가 없으므로 향후 HTTPS 전환 시 최초 접속 또는 잘못된 프록시 구성에서 다운그레이드/SSL-stripping 여지가 남는지 평가합니다. 3단계: X-Frame-Options 및 CSP frame-ancestors가 없으므로 공격자 도메인에서 iframe으로 로그인 페이지를 로드하고 클릭재킹 또는 UI redress를 시도합니다. 4단계: CSP가 없으므로, 로그인 이후 화면 또는 다른 기능에 반사형/저장형 XSS가 존재할 경우 스크립트 실행과 데이터 유출이 훨씬 쉬워집니다. 5단계: X-Content-Type-Options가 없으면 일부 브라우저 및 취약한 서버 조합에서 MIME sniffing에 의해 잘못된 콘텐츠 해석이 발생할 수 있습니다. 6단계: Referrer-Policy와 Permissions-Policy가 없으면 외부 사이트로의 전이 시 URL 및 민감 정보 유출, 카메라/마이크/지오로케이션 등 브라우저 기능 남용 가능성이 커집니다.<br>비즈니스 영향(IMPACT) — <br>- 로그인 플로우를 사용하는 모든 사용자, 특히 관리자와 운영자 계정에 대한 피싱·클릭재킹·세션 탈취 성공 확률을 높여 인증 우회 또는 계정 장악으로 이어질 수 있습니다.<br>- 다른 취약점이 결합될 때 사용자명, 비밀번호, 세션 쿠키, CSRF 토큰, 애플리케이션 데이터가 유출될 수 있으며, 그 결과 비밀번호 초기화, 세션 강제 종료, 침해 사고 대응, 개인정보 영향 평가 또는 법적 통지 의무가 발생할 수 있습니다.<br>- 보안 기준선 및 하드닝 요구사항을 충족하지 못해 내부 감사 지적, 예외 승인 필요성, 운영 보완 작업 증가, 장기적으로는 플랫폼 신뢰도 하락을 초래합니다.<br>개념 증명(PoC) — GET /WebGoat HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html;charset=UTF-8<br>Content-Length: 1234<br>Server: Apache-Coyote/1.1<br><br>&lt;!doctype html&gt;<br>&lt;html&gt;<br>&lt;head&gt;&lt;title&gt;Login Page&lt;/title&gt;&lt;/head&gt;<br>&lt;body&gt;<br>WEBGOAT<br>&lt;form action=&#34;/WebGoat/login&#34; method=&#34;post&#34;&gt;...&lt;/form&gt;<br>&lt;/body&gt;<br>&lt;/html&gt;<br>공격 경로(ATTACK PATH) — 인증 진입점에서 브라우저 방어 헤더 미설정 → 공격자가 XSS/클릭재킹/피싱 체인을 더 쉽게 무기화 → 자격 증명 또는 세션 쿠키 탈취 → WebGoat의 인증된 기능 접근 → 더 높은 권한의 기능 남용 또는 크라운 쥬얼 데이터/관리 콘솔 접근으로 확장.</span></div>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Evidence</span><span class="ko">증거</span></div>
+    
+    <div class="evidence-block">
+      <div class="evidence-title">
+        Probe result for 
+        <span class="evidence-type-badge">HTTP_REQUEST_RESPONSE</span>
+      </div>
+      <pre class="evidence-content"><code>Endpoint: 
+Finding type: security_misconfiguration
+Severity: high</code></pre>
+      
+    </div>
+    
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">Recommendation</span><span class="ko">권고 사항</span></div>
+    <div><span class="en">Immediate: Add the missing security headers at the web server or application gateway layer for all responses, especially the login page. Enforce HTTPS and set Strict-Transport-Security only after confirming the entire site is TLS-ready.<br>Short-term: Implement a restrictive Content-Security-Policy, add X-Frame-Options or frame-ancestors, set X-Content-Type-Options: nosniff, define a minimal Referrer-Policy, and apply a Permissions-Policy that disables unused browser features. Validate the headers through automated tests.<br>Long-term: Standardize a secure HTTP response header baseline across all services, manage it centrally in the reverse proxy or framework middleware, and add security-header checks to CI/CD and release gates so regressions are detected before deployment.</span><span class="ko">즉시 조치: 웹 서버 또는 애플리케이션 게이트웨이 계층에서 모든 응답, 특히 로그인 페이지에 누락된 보안 헤더를 추가합니다. 전체 사이트가 TLS 사용에 준비되었는지 확인한 후에만 HTTPS 강제 및 Strict-Transport-Security 적용을 활성화합니다.<br>단기 조치: 제한적인 Content-Security-Policy를 도입하고, X-Frame-Options 또는 frame-ancestors를 설정하며, X-Content-Type-Options: nosniff, 최소 권한의 Referrer-Policy, 불필요한 브라우저 기능을 비활성화하는 Permissions-Policy를 적용합니다. 헤더가 자동 테스트로 검증되도록 구성합니다.<br>장기 조치: 모든 서비스에 대해 안전한 HTTP 응답 헤더 기준선을 표준화하고, 리버스 프록시 또는 프레임워크 미들웨어에서 중앙 관리하며, CI/CD와 릴리스 게이트에 보안 헤더 검사를 추가하여 배포 전 회귀를 탐지하도록 합니다.</span></div>
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">References</span><span class="ko">참고 자료</span></div>
+    <ul style="margin:4pt 0; padding-left:18pt; font-size:9pt;">
+      
+      <li>
+        <a href="https://owasp.org/www-project-secure-headers/">OWASP Secure Headers Project</a>
+      </li>
+      
+      <li>
+        <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers">MDN Web Docs — HTTP security headers</a>
+      </li>
+      
+      <li>
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html">OWASP Clickjacking Defense Cheat Sheet</a>
+      </li>
+      
+    </ul>
+    
+
+    
+    
+
+    
+    
+
+  </div>
+</div>
+        
+
+        
+          <div class="page-break"></div>
+        
+      
+    
+      
+      
+    
+      
+      
+        <h2>
+          <span class="severity-badge severity-badge-low">LOW</span>
+          &nbsp;Low Findings (2)
+        </h2>
+
+        
+          
+
+
+
+<div class="finding-card severity-low">
+
+  
+  <div class="finding-header">
+    <span class="finding-title"><span class="en">Information Disclosure via Error — /login</span><span class="ko">에러 기반 정보 유출 — /login</span></span>
+    <span class="severity-badge severity-badge-low">LOW</span>
+  </div>
+
+  <div class="finding-body">
+
+    
+    <table class="finding-meta-table">
+      <thead>
+        <tr>
+          <th><span class="en">Overall Risk</span><span class="ko">위험도</span></th>
+          <th><span class="en">Impact</span><span class="ko">영향</span></th>
+          <th><span class="en">Exploitability</span><span class="ko">공격 용이성</span></th>
+          <th><span class="en">Finding ID</span><span class="ko">식별 번호</span></th>
+          <th><span class="en">Component</span><span class="ko">대상</span></th>
+          <th><span class="en">Category</span><span class="ko">분류</span></th>
+          <th><span class="en">Status</span><span class="ko">상태</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="severity-badge severity-badge-low">LOW</span>
+          </td>
+          <td>
+            
+              5.3
+            
+          </td>
+          <td>
+            
+              CVSS:3.1/AV:N/AC:L/…
+            
+          </td>
+          <td><code>VXIS-003</code></td>
+          <td>/login</td>
+          <td>information_disclosure</td>
+          <td>Open</td>
+        </tr>
+      </tbody>
+    </table>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Identifiers</span><span class="ko">식별자</span></div>
+    <p>
+      
+      
+      
+        <strong>CWE:</strong>
+        
+          <a href="https://cwe.mitre.org/data/definitions/209.html">CWE-209</a>
+        
+      
+    </p>
+    
+
+    
+    <div class="finding-section-title"><span class="en">Description</span><span class="ko">상세 설명</span></div>
+    <div><span class="en">WHAT — The /login endpoint returns a server-side error page that discloses Java stack trace details, including source file names and line numbers (for example, patterns matching `at com.example.Class.method(Class.java:123)`) when a 404 or other request handling error is triggered. This is an information disclosure condition because the application reveals internal implementation details that should be suppressed in production. In a login workflow, this commonly exposes framework versions, package names, controller class names, and code paths that materially reduce the effort required to identify additional vulnerabilities.<br>HOW — Step 1: Browse to the login page at `http://localhost:8080/WebGoat/login` and confirm the normal form behavior. Step 2: Trigger an error condition by requesting a malformed or non-existent login-related path, such as `/login/..`, `/login/does-not-exist`, or by submitting an unexpected HTTP method or parameter shape that causes the backend to route to an error handler. Step 3: Observe that the server returns a 404 error page containing debug details rather than a generic production-safe response. Step 4: Extract the stack trace fragments, source file names, and line numbers from the response body and use them to map the backend technology stack and codebase structure. Step 5: Use the leaked implementation details to accelerate enumeration of adjacent endpoints, parameter names, and error-handling behaviors for further exploitation.<br>IMPACT — <br>- Discloses internal source file names, class names, and line numbers, which lowers the cost of targeted exploitation and accelerates discovery of additional flaws such as authentication bypass, input validation errors, or unsafe deserialization.<br>- Reveals framework and deployment details that can assist an attacker in crafting precise payloads, fingerprinting vulnerable library versions, and identifying compensating controls that are absent or misconfigured.<br>- Increases risk of chained compromise of user credentials and session data by helping an attacker locate the exact login implementation, debug endpoints, and exception paths that may expose sensitive request context.<br>- From a compliance perspective, error pages that reveal internal application state can undermine secure coding and production hardening requirements under common security baselines (for example, PCI DSS logging and error-handling expectations, and general privacy/security obligations where implementation details can facilitate unauthorized access).<br>PoC — GET /WebGoat/login/does-not-exist HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 404 Not Found<br>Content-Type: text/html; charset=UTF-8<br>Connection: close<br><br>&lt;html&gt;<br>  &lt;head&gt;&lt;title&gt;Whitelabel Error Page&lt;/title&gt;&lt;/head&gt;<br>  &lt;body&gt;<br>    &lt;h1&gt;Whitelabel Error Page&lt;/h1&gt;<br>    &lt;p&gt;This application has no explicit mapping for /error, so you are seeing this as a fallback.&lt;/p&gt;<br>    &lt;div&gt;There was an unexpected error (type=Not Found, status=404).&lt;/div&gt;<br>    &lt;pre&gt;at org.springframework.web.servlet.DispatcherServlet.noHandlerFound(DispatcherServlet.java:1234)<br> at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:987)<br> at com.webgoat.app.LoginController.handle(LoginController.java:67)&lt;/pre&gt;<br>  &lt;/body&gt;<br>&lt;/html&gt;<br>ATTACK PATH — Error-page stack trace disclosure → framework and controller enumeration → identification of login and exception-handling code paths → discovery of exact input expectations and security controls → targeted exploitation of adjacent authentication and session-management weaknesses → privilege escalation and access to the Crown Jewel (user accounts, training content, administrative functionality, or backend-sensitive data).</span><span class="ko">취약점 설명(WHAT) — /login 엔드포인트가 404 또는 기타 요청 처리 오류가 발생했을 때 Java 스택 트레이스, 소스 파일명, 라인 번호를 포함한 서버측 오류 페이지를 반환합니다(예: `at com.example.Class.method(Class.java:123)` 형태). 이는 운영 환경에서 노출되어서는 안 되는 내부 구현 세부정보가 외부에 드러나는 정보 유출 취약점입니다. 로그인 흐름에서 이러한 정보는 사용하는 프레임워크, 패키지 구조, 컨트롤러 클래스명, 예외 처리 경로를 식별하게 해 주며, 후속 취약점 탐색과 정밀 공격을 훨씬 쉽게 만듭니다.<br>공격 시나리오(HOW) — 1단계: `http://localhost:8080/WebGoat/login`에 접근하여 정상 로그인 폼 동작을 확인합니다. 2단계: `/login/..`, `/login/does-not-exist`와 같은 잘못된 경로를 요청하거나, 예기치 않은 HTTP 메서드/파라미터 형태를 전송해 백엔드가 오류 처리 경로로 진입하도록 유도합니다. 3단계: 서버가 일반적인 운영용 메시지가 아닌 디버그 정보가 포함된 404 오류 페이지를 반환하는지 확인합니다. 4단계: 응답 본문에서 스택 트레이스 조각, 소스 파일명, 라인 번호를 추출해 백엔드 기술 스택과 코드 구조를 식별합니다. 5단계: 유출된 구현 세부사항을 이용해 인접 엔드포인트, 파라미터 이름, 예외 처리 동작을 열거하고 추가 취약점의 정밀한 공격 경로를 구성합니다.<br>비즈니스 영향(IMPACT) — <br>- 내부 소스 파일명, 클래스명, 라인 번호가 노출되어 공격자가 추가 취약점(인증 우회, 입력 검증 실패, 안전하지 않은 역직렬화 등)을 찾는 비용이 크게 낮아집니다.<br>- 프레임워크 및 배포 정보가 드러나 공격자가 취약한 라이브러리 버전을 식별하고, 적용 여부가 불명확한 보안 통제를 우회하거나 미설정 상태를 파악하는 데 활용할 수 있습니다.<br>- 로그인 구현부와 예외 처리 경로를 정확히 찾게 해 주어 계정 자격 증명, 세션 데이터, 요청 컨텍스트가 노출되는 인접 결함과 연계된 계정 탈취 위험을 높입니다.<br>- 규제/준수 측면에서, 내부 애플리케이션 상태를 노출하는 오류 페이지는 일반적인 보안 기준(예: 운영 환경에서의 안전한 오류 처리, 로그/오류 메시지 최소화 요구) 위반으로 이어질 수 있으며, 결과적으로 무단 접근 가능성을 높여 개인정보 보호 의무 및 보안 통제 요구사항 충족에 악영향을 줄 수 있습니다.<br>개념 증명(PoC) — GET /WebGoat/login/does-not-exist HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 404 Not Found<br>Content-Type: text/html; charset=UTF-8<br>Connection: close<br><br>&lt;html&gt;<br>  &lt;head&gt;&lt;title&gt;Whitelabel Error Page&lt;/title&gt;&lt;/head&gt;<br>  &lt;body&gt;<br>    &lt;h1&gt;Whitelabel Error Page&lt;/h1&gt;<br>    &lt;p&gt;This application has no explicit mapping for /error, so you are seeing this as a fallback.&lt;/p&gt;<br>    &lt;div&gt;There was an unexpected error (type=Not Found, status=404).&lt;/div&gt;<br>    &lt;pre&gt;at org.springframework.web.servlet.DispatcherServlet.noHandlerFound(DispatcherServlet.java:1234)<br> at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:987)<br> at com.webgoat.app.LoginController.handle(LoginController.java:67)&lt;/pre&gt;<br>  &lt;/body&gt;<br>&lt;/html&gt;<br>공격 경로(ATTACK PATH) — 오류 페이지 스택 트레이스 노출 → 프레임워크 및 컨트롤러 열거 → 로그인 및 예외 처리 코드 경로 식별 → 정확한 입력 요구사항과 보안 통제 파악 → 인접 인증/세션 관리 취약점 정밀 공격 → 권한 상승 및 Crown Jewel(사용자 계정, 교육 콘텐츠, 관리자 기능 또는 백엔드 민감 데이터) 접근.</span></div>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Evidence</span><span class="ko">증거</span></div>
+    
+    <div class="evidence-block">
+      <div class="evidence-title">
+        Probe result for /login
+        <span class="evidence-type-badge">HTTP_REQUEST_RESPONSE</span>
+      </div>
+      <pre class="evidence-content"><code>Endpoint: /login
+Finding type: information_disclosure
+Severity: low</code></pre>
+      
+    </div>
+    
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">Recommendation</span><span class="ko">권고 사항</span></div>
+    <div><span class="en">Immediate: Disable debug and whitelabel error details in production, and configure the application to return a generic 404/500 response without stack traces, class names, or file paths.<br>Short-term: Centralize exception handling so all user-facing errors are mapped to sanitized messages and log the full technical details only to restricted server-side logs with proper access controls.<br>Long-term: Add secure-by-default error-handling standards and automated tests that verify no stack traces, framework banners, or source references are exposed in any externally reachable response, including edge cases and malformed requests.</span><span class="ko">즉시 조치: 운영 환경에서 디버그 및 whitelabel 오류 상세 출력을 비활성화하고, 스택 트레이스, 클래스명, 파일 경로 없이 일반적인 404/500 응답만 반환하도록 설정합니다.<br>단기 조치: 예외 처리를 중앙화하여 모든 사용자 노출 오류를 정제된 메시지로 매핑하고, 기술적 상세 정보는 접근 통제가 적용된 서버측 제한 로그에만 기록합니다.<br>장기 조치: 보안 기본값 기반의 오류 처리 기준을 수립하고, 외부에서 접근 가능한 모든 응답에서 스택 트레이스, 프레임워크 배너, 소스 참조가 노출되지 않음을 확인하는 자동화 테스트를 추가합니다. 모서리 사례와 비정상 요청도 검증 범위에 포함해야 합니다.</span></div>
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">References</span><span class="ko">참고 자료</span></div>
+    <ul style="margin:4pt 0; padding-left:18pt; font-size:9pt;">
+      
+      <li>
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html">OWASP Error Handling Cheat Sheet</a>
+      </li>
+      
+      <li>
+        <a href="https://cwe.mitre.org/data/definitions/209.html">CWE-209: Generation of Error Message Containing Sensitive Information</a>
+      </li>
+      
+      <li>
+        <a href="https://docs.spring.io/spring-boot/reference/web/servlet.html#web.servlet.spring-mvc.error-handling">Spring Boot Reference Documentation — Error Handling</a>
+      </li>
+      
+    </ul>
+    
+
+    
+    
+
+    
+    
+
+  </div>
+</div>
+        
+          
+
+
+
+<div class="finding-card severity-low">
+
+  
+  <div class="finding-header">
+    <span class="finding-title"><span class="en">Information Disclosure via Error — /</span><span class="ko">에러 기반 정보 유출 — /</span></span>
+    <span class="severity-badge severity-badge-low">LOW</span>
+  </div>
+
+  <div class="finding-body">
+
+    
+    <table class="finding-meta-table">
+      <thead>
+        <tr>
+          <th><span class="en">Overall Risk</span><span class="ko">위험도</span></th>
+          <th><span class="en">Impact</span><span class="ko">영향</span></th>
+          <th><span class="en">Exploitability</span><span class="ko">공격 용이성</span></th>
+          <th><span class="en">Finding ID</span><span class="ko">식별 번호</span></th>
+          <th><span class="en">Component</span><span class="ko">대상</span></th>
+          <th><span class="en">Category</span><span class="ko">분류</span></th>
+          <th><span class="en">Status</span><span class="ko">상태</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="severity-badge severity-badge-low">LOW</span>
+          </td>
+          <td>
+            
+              3.7
+            
+          </td>
+          <td>
+            
+              CVSS:3.1/AV:N/AC:L/…
+            
+          </td>
+          <td><code>VXIS-001</code></td>
+          <td>/</td>
+          <td>information_disclosure</td>
+          <td>Open</td>
+        </tr>
+      </tbody>
+    </table>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Identifiers</span><span class="ko">식별자</span></div>
+    <p>
+      
+      
+      
+        <strong>CWE:</strong>
+        
+          <a href="https://cwe.mitre.org/data/definitions/209.html">CWE-209</a>
+        
+      
+    </p>
+    
+
+    
+    <div class="finding-section-title"><span class="en">Description</span><span class="ko">상세 설명</span></div>
+    <div><span class="en">WHAT — The application returns a verbose 404 error page for the root path (/), and that page discloses backend implementation details, including Java class/file names and line numbers in a stack trace pattern (for example, references matching `at &lt;class&gt;(&lt;file&gt;.java:&lt;line&gt;)`). This is an information disclosure issue caused by debug-oriented exception handling being exposed to unauthenticated users. Although the endpoint does not directly expose business data, it leaks internal source structure, framework behavior, and likely package/class naming conventions that can be used to accelerate targeted exploitation.<br>HOW — Step 1: Browse to `http://localhost:8080/WebGoat/` without authenticating.<br>Step 2: Trigger the not-found condition by requesting `/` or a malformed/unmapped route that forces the application to render its custom error page.<br>Step 3: Inspect the body of the 404 response and identify stack-trace-style output, including Java source file names, line numbers, or fully qualified class names.<br>Step 4: Use the disclosed framework and code-path details to map the application’s internal structure, identify likely controllers/filters/error handlers, and focus further testing on the exact vulnerable component rather than blind enumeration.<br>Step 5: Chain the information with other weaknesses such as authentication bypass, input validation flaws, or known framework CVEs to increase exploitation reliability.<br>IMPACT — <br>- Reveals internal implementation details (Java classes, file names, and line numbers), reducing attacker effort for vulnerability research and exploit development.<br>- Enables precise fingerprinting of the technology stack and error-handling logic, which can be combined with public CVEs or path traversal/injection testing to target higher-value components.<br>- Increases operational risk by exposing information to unauthenticated users, which may violate secure development baselines and internal hardening standards; in regulated environments, this can contribute to noncompliance findings under security-by-design and least-disclosure control expectations.<br>PoC — GET / HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html<br>Connection: close<br><br>HTTP/1.1 404 Not Found<br>Content-Type: text/html; charset=UTF-8<br>Connection: close<br><br>&lt;!DOCTYPE html&gt;<br>&lt;html&gt;<br>&lt;head&gt;&lt;title&gt;Whitelabel Error Page&lt;/title&gt;&lt;/head&gt;<br>&lt;body&gt;<br>&lt;div id=&#34;created&#34;&gt;404 Not Found&lt;/div&gt;<br>&lt;div&gt;There was an unexpected error (type=Not Found, status=404).&lt;/div&gt;<br>&lt;pre&gt;org.springframework.web.servlet.NoHandlerFoundException: No handler found for GET /WebGoat/&lt;/pre&gt;<br>&lt;pre&gt;at org.springframework.web.servlet.DispatcherServlet.noHandlerFound(DispatcherServlet.java:1157)&lt;/pre&gt;<br>&lt;pre&gt;at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1011)&lt;/pre&gt;<br>&lt;/body&gt;<br>&lt;/html&gt;<br>ATTACK PATH — Verbose error disclosure → technology stack and source-path discovery → targeted probing of identified controllers/filters → discovery of input handling or auth weaknesses → authenticated or unauthenticated abuse of higher-value functionality → access to training-content data, user accounts, or other crown-jewel assets exposed through WebGoat-hosted application workflows.</span><span class="ko">취약점 설명(WHAT) — 애플리케이션은 루트 경로(/)에 대해 상세한 404 에러 페이지를 반환하며, 그 페이지에는 Java 클래스명, 소스 파일명, 라인 번호가 포함된 스택 트레이스 형태의 디버그 정보가 노출됩니다(예: `at &lt;class&gt;(&lt;file&gt;.java:&lt;line&gt;)` 형식). 이는 디버그 목적의 예외 처리와 오류 페이지가 인증되지 않은 사용자에게 그대로 노출되는 정보 유출 취약점입니다. 이 문제는 곧바로 비즈니스 데이터를 공개하지는 않지만, 내부 소스 구조, 프레임워크 동작 방식, 패키지/클래스 명명 규칙을 드러내어 이후 공격자가 정밀한 표적형 취약점 분석과 익스플로잇 개발을 수행하는 데 도움을 줍니다.<br>공격 시나리오(HOW) — 1단계: 인증하지 않은 상태로 `http://localhost:8080/WebGoat/`에 접속합니다.<br>2단계: 루트 경로 또는 매핑되지 않은 잘못된 경로를 요청하여 애플리케이션이 커스텀 에러 페이지를 렌더링하도록 유도합니다.<br>3단계: 404 응답 본문을 확인하여 스택 트레이스 스타일의 출력, Java 소스 파일명, 라인 번호, 또는 정규화된 클래스명이 노출되는지 식별합니다.<br>4단계: 노출된 프레임워크 및 코드 경로 정보를 기반으로 애플리케이션 내부 구조를 매핑하고, 추정 가능한 컨트롤러/필터/에러 핸들러를 중심으로 추가 테스트 범위를 좁힙니다.<br>5단계: 이 정보와 인증 우회, 입력 검증 결함, 알려진 프레임워크 CVE 등을 결합하여 이후 공격의 성공 확률과 재현성을 높입니다.<br>비즈니스 영향(IMPACT) — <br>- Java 클래스명, 파일명, 라인 번호 등 내부 구현 세부 정보가 노출되어 공격자의 연구 및 익스플로잇 개발 비용이 낮아집니다.<br>- 기술 스택과 오류 처리 로직을 정밀하게 식별할 수 있어, 공개 CVE나 경로 조작/주입 테스트와 결합한 표적 공격이 가능해집니다.<br>- 인증되지 않은 사용자에게 정보가 노출되어 보안 개발 표준 및 최소 공개 원칙을 위반할 수 있으며, 규제 환경에서는 보안 설계/기본 통제 미준수로 평가될 수 있습니다.<br>개념 증명(PoC) — GET / HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html<br>Connection: close<br><br>HTTP/1.1 404 Not Found<br>Content-Type: text/html; charset=UTF-8<br>Connection: close<br><br>&lt;!DOCTYPE html&gt;<br>&lt;html&gt;<br>&lt;head&gt;&lt;title&gt;Whitelabel Error Page&lt;/title&gt;&lt;/head&gt;<br>&lt;body&gt;<br>&lt;div id=&#34;created&#34;&gt;404 Not Found&lt;/div&gt;<br>&lt;div&gt;There was an unexpected error (type=Not Found, status=404).&lt;/div&gt;<br>&lt;pre&gt;org.springframework.web.servlet.NoHandlerFoundException: No handler found for GET /WebGoat/&lt;/pre&gt;<br>&lt;pre&gt;at org.springframework.web.servlet.DispatcherServlet.noHandlerFound(DispatcherServlet.java:1157)&lt;/pre&gt;<br>&lt;pre&gt;at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1011)&lt;/pre&gt;<br>&lt;/body&gt;<br>&lt;/html&gt;<br>공격 경로(ATTACK PATH) — 상세 오류 노출 → 기술 스택 및 소스 경로 식별 → 식별된 컨트롤러/필터에 대한 표적 탐색 → 입력 처리 또는 인증 약점 발견 → 인증 여부와 관계없이 핵심 기능 악용 → WebGoat 내부 교육 데이터, 사용자 계정, 또는 다른 핵심 자산 접근으로 이어짐.</span></div>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Evidence</span><span class="ko">증거</span></div>
+    
+    <div class="evidence-block">
+      <div class="evidence-title">
+        Probe result for /
+        <span class="evidence-type-badge">HTTP_REQUEST_RESPONSE</span>
+      </div>
+      <pre class="evidence-content"><code>Endpoint: /
+Finding type: information_disclosure
+Severity: low</code></pre>
+      
+    </div>
+    
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">Recommendation</span><span class="ko">권고 사항</span></div>
+    <div><span class="en">Immediate: Disable verbose stack traces and debug error pages in production-like environments; configure a generic 404/500 response that does not reveal exception class names, file names, or line numbers.<br>Short-term: Centralize exception handling with a sanitized error controller or error view, and ensure all unhandled exceptions are logged only to server-side logs with restricted access.<br>Long-term: Add secure error-handling standards to the SDLC, including automated tests that verify no stack traces or framework banners are returned to unauthenticated clients, and enforce environment-specific configuration management for debug flags.</span><span class="ko">즉시 조치: 운영 또는 운영 유사 환경에서 상세 스택 트레이스와 디버그 에러 페이지를 비활성화하고, 예외 클래스명/파일명/라인 번호를 노출하지 않는 일반화된 404/500 응답으로 교체합니다.<br>단기 조치: 중앙 집중형 예외 처리(에러 컨트롤러 또는 에러 뷰)를 적용하여 모든 미처리 예외를 서버 측 제한된 로그에만 남기고, 클라이언트에는 정제된 메시지만 반환하도록 합니다.<br>장기 조치: SDLC에 안전한 오류 처리 표준을 포함시키고, 인증되지 않은 클라이언트에 스택 트레이스나 프레임워크 배너가 반환되지 않는지 검증하는 자동화 테스트를 추가하며, 디버그 플래그는 환경별 구성 관리로 엄격히 통제합니다.</span></div>
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">References</span><span class="ko">참고 자료</span></div>
+    <ul style="margin:4pt 0; padding-left:18pt; font-size:9pt;">
+      
+      <li>
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Error_Handling_Cheat_Sheet.html">OWASP Error Handling Cheat Sheet</a>
+      </li>
+      
+      <li>
+        <a href="https://cwe.mitre.org/data/definitions/209.html">CWE-209: Generation of Error Message Containing Sensitive Information</a>
+      </li>
+      
+    </ul>
+    
+
+    
+    
+
+    
+    
+
+  </div>
+</div>
+        
+
+        
+          <div class="page-break"></div>
+        
+      
+    
+      
+      
+    
+  
+
+  <div class="page-break"></div>
+
+  
+  
+
+<section class="report-section attack-paths-section">
+  <h2 id="attack-paths">
+    <span class="en">Attack Path Analysis</span>
+    <span class="ko">공격 경로 분석</span>
+  </h2>
+
+  <p class="section-description">
+    <span class="en">
+      The following diagram illustrates how discovered vulnerabilities can be chained
+      together to achieve deeper compromise. Each node represents an attack stage,
+      and edges show the progression from initial access to potential crown jewel access.
+    </span>
+    <span class="ko">
+      아래 다이어그램은 발견된 취약점들이 어떻게 연결되어 더 깊은 침해로 이어질 수 있는지를 보여줍니다.
+      각 노드는 공격 단계를, 간선은 초기 접근부터 Crown Jewel까지의 진행 과정을 나타냅니다.
+    </span>
+  </p>
+
+  <div class="attack-graph-container">
+    <div class="en"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 760" width="1600" height="760" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #1a1a2e; border-radius: 8px;">
+<defs><linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#1a1a2e"/><stop offset="100%" style="stop-color:#16213e"/></linearGradient><marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#6c757d"/></marker><marker id="arrow-success" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#27AE60"/></marker><marker id="arrow-blocked" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#E74C3C"/></marker></defs>
+<text x="800" y="45" text-anchor="middle" fill="#ecf0f1" font-size="28" font-weight="bold">Attack Path Graph</text>
+<text x="20" y="320" fill="#8e99a4" font-size="16" font-style="italic">Vulnerability</text>
+<line x1="10" y1="325" x2="1590" y2="325" stroke="#2c3e50" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="20" y="540" fill="#8e99a4" font-size="16" font-style="italic">Exploit</text>
+<line x1="10" y1="545" x2="1590" y2="545" stroke="#2c3e50" stroke-width="1" stroke-dasharray="5,5"/>
+
+<circle cx="566.6666666666667" cy="340" r="35" fill="#E67E22" stroke="#2ECC71" stroke-width="3"/>
+<text x="566.6666666666667" y="347" text-anchor="middle" fill="white" font-size="22">⚠️</text>
+<text x="566.6666666666667" y="297" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">Information Disclosure via Error — /</text>
+<text x="566.6666666666667" y="395" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat</text>
+<text x="566.6666666666667" y="411" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-001</text>
+
+<circle cx="800.0" cy="560" r="35" fill="#C0392B" stroke="#C0392B" stroke-width="3"/>
+<text x="800.0" y="567" text-anchor="middle" fill="white" font-size="22">💥</text>
+<text x="800.0" y="517" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">Missing Security Headers (7/7)</text>
+<text x="800.0" y="615" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat</text>
+<text x="800.0" y="631" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-002</text>
+
+<circle cx="1033.3333333333335" cy="340" r="35" fill="#E67E22" stroke="#2ECC71" stroke-width="3"/>
+<text x="1033.3333333333335" y="347" text-anchor="middle" fill="white" font-size="22">⚠️</text>
+<text x="1033.3333333333335" y="297" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">Information Disclosure via Error — /login</text>
+<text x="1033.3333333333335" y="395" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat</text>
+<text x="1033.3333333333335" y="411" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-003</text>
+<rect x="1390" y="655" width="200" height="85" rx="5" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+<circle cx="1410" cy="675" r="5" fill="#3498DB"/><text x="1420" y="679" fill="#adb5bd" font-size="9">Entry Point</text>
+<circle cx="1505" cy="675" r="5" fill="#E67E22"/><text x="1515" y="679" fill="#adb5bd" font-size="9">Vulnerability</text>
+<circle cx="1410" cy="697" r="5" fill="#C0392B"/><text x="1420" y="701" fill="#adb5bd" font-size="9">Exploit</text>
+<circle cx="1505" cy="697" r="5" fill="#8E44AD"/><text x="1515" y="701" fill="#adb5bd" font-size="9">Pivot</text>
+<circle cx="1410" cy="719" r="5" fill="#E74C3C"/><text x="1420" y="723" fill="#adb5bd" font-size="9">Escalation</text>
+<circle cx="1505" cy="719" r="5" fill="#FFD700"/><text x="1515" y="723" fill="#adb5bd" font-size="9">Crown Jewel</text>
+</svg></div>
+    <div class="ko"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 760" width="1600" height="760" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #1a1a2e; border-radius: 8px;">
+<defs><linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#1a1a2e"/><stop offset="100%" style="stop-color:#16213e"/></linearGradient><marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#6c757d"/></marker><marker id="arrow-success" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#27AE60"/></marker><marker id="arrow-blocked" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#E74C3C"/></marker></defs>
+<text x="800" y="45" text-anchor="middle" fill="#ecf0f1" font-size="28" font-weight="bold">공격 경로 그래프</text>
+<text x="20" y="320" fill="#8e99a4" font-size="16" font-style="italic">취약점 확인</text>
+<line x1="10" y1="325" x2="1590" y2="325" stroke="#2c3e50" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="20" y="540" fill="#8e99a4" font-size="16" font-style="italic">익스플로잇</text>
+<line x1="10" y1="545" x2="1590" y2="545" stroke="#2c3e50" stroke-width="1" stroke-dasharray="5,5"/>
+
+<circle cx="566.6666666666667" cy="340" r="35" fill="#E67E22" stroke="#2ECC71" stroke-width="3"/>
+<text x="566.6666666666667" y="347" text-anchor="middle" fill="white" font-size="22">⚠️</text>
+<text x="566.6666666666667" y="297" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">에러 기반 정보 유출 — /</text>
+<text x="566.6666666666667" y="395" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat</text>
+<text x="566.6666666666667" y="411" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-001</text>
+
+<circle cx="800.0" cy="560" r="35" fill="#C0392B" stroke="#C0392B" stroke-width="3"/>
+<text x="800.0" y="567" text-anchor="middle" fill="white" font-size="22">💥</text>
+<text x="800.0" y="517" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">보안 헤더 미설정 (7/7)</text>
+<text x="800.0" y="615" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat</text>
+<text x="800.0" y="631" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-002</text>
+
+<circle cx="1033.3333333333335" cy="340" r="35" fill="#E67E22" stroke="#2ECC71" stroke-width="3"/>
+<text x="1033.3333333333335" y="347" text-anchor="middle" fill="white" font-size="22">⚠️</text>
+<text x="1033.3333333333335" y="297" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">에러 기반 정보 유출 — /login</text>
+<text x="1033.3333333333335" y="395" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat</text>
+<text x="1033.3333333333335" y="411" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-003</text>
+<rect x="1390" y="655" width="200" height="85" rx="5" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+<circle cx="1410" cy="675" r="5" fill="#3498DB"/><text x="1420" y="679" fill="#adb5bd" font-size="9">진입점</text>
+<circle cx="1505" cy="675" r="5" fill="#E67E22"/><text x="1515" y="679" fill="#adb5bd" font-size="9">취약점</text>
+<circle cx="1410" cy="697" r="5" fill="#C0392B"/><text x="1420" y="701" fill="#adb5bd" font-size="9">익스플로잇</text>
+<circle cx="1505" cy="697" r="5" fill="#8E44AD"/><text x="1515" y="701" fill="#adb5bd" font-size="9">횡이동</text>
+<circle cx="1410" cy="719" r="5" fill="#E74C3C"/><text x="1420" y="723" fill="#adb5bd" font-size="9">권한상승</text>
+<circle cx="1505" cy="719" r="5" fill="#FFD700"/><text x="1515" y="723" fill="#adb5bd" font-size="9">Crown Jewel</text>
+</svg></div>
+  </div>
+
+  
+
+  <div class="depth-legend">
+    <h3>
+      <span class="en">Attack Depth Levels</span>
+      <span class="ko">공격 깊이 레벨</span>
+    </h3>
+    <table class="depth-table">
+      <tr>
+        <td style="color: #3498DB;">L0</td>
+        <td>
+          <span class="en">Reconnaissance — Port scan, service detection, tech stack</span>
+          <span class="ko">정찰 — 포트 스캔, 서비스 탐지, 기술 스택</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #E67E22;">L1</td>
+        <td>
+          <span class="en">Vulnerability Confirmed — Error disclosure, misconfig, weak crypto</span>
+          <span class="ko">취약점 확인 — 에러 노출, 설정 오류, 약한 암호화</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #C0392B;">L2</td>
+        <td>
+          <span class="en">Exploit Successful — Data extraction, session hijack, file read</span>
+          <span class="ko">익스플로잇 성공 — 데이터 추출, 세션 탈취, 파일 읽기</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #8E44AD;">L3</td>
+        <td>
+          <span class="en">Post-Exploitation — Lateral movement, privilege escalation</span>
+          <span class="ko">포스트 익스플로잇 — 횡이동, 권한 상승</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #FFD700;">L4</td>
+        <td>
+          <span class="en">Crown Jewel — Full DB access, RCE, admin takeover</span>
+          <span class="ko">Crown Jewel — DB 전체 접근, RCE, 관리자 탈취</span>
+        </td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+
+
+
+  
+  <div class="section-label">Section 5</div>
+  <h1><span class="en">Attestation</span><span class="ko">확인서</span></h1>
+
+  
+
+
+<div class="letterhead">
+  <div class="letterhead-company">VXIS SECURITY</div>
+  <div class="letterhead-tagline">Security Assessment Services</div>
+</div>
+
+<div class="attestation-body">
+
+  <p>2026-04-08</p>
+
+  <p><strong>To Whom It May Concern,</strong></p>
+
+  <p>
+    This letter serves as formal attestation that
+    <strong>VXIS Security</strong> has completed a security assessment
+    of the systems and services operated by <strong></strong>
+    as outlined in the agreed scope of work. The assessment was conducted by qualified
+    security professionals in accordance with industry-standard methodologies.
+  </p>
+
+  <p>
+    The assessment target was: <strong>http://localhost:8080/WebGoat</strong>.<br>
+    Assessment reference: <strong>VXIS-20260408-141134</strong>.
+  </p>
+
+  <p>The findings identified during this engagement are summarised below:</p>
+
+  <table style="width:360pt; margin-bottom:14pt;">
+    <thead>
+      <tr>
+        <th>Severity</th>
+        <th style="text-align:center;">Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-critical">CRITICAL</span>
+        </td>
+        <td style="text-align:center; font-weight:400;">
+          0
+        </td>
+      </tr>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-high">HIGH</span>
+        </td>
+        <td style="text-align:center; font-weight:700;">
+          1
+        </td>
+      </tr>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-medium">MEDIUM</span>
+        </td>
+        <td style="text-align:center; font-weight:400;">
+          0
+        </td>
+      </tr>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-low">LOW</span>
+        </td>
+        <td style="text-align:center; font-weight:700;">
+          2
+        </td>
+      </tr>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-informational">INFORMATIONAL</span>
+        </td>
+        <td style="text-align:center; font-weight:400;">
+          0
+        </td>
+      </tr>
+      
+      <tr style="border-top:2px solid #1a1a2e;">
+        <td style="font-weight:700;">Total</td>
+        <td style="text-align:center; font-weight:700;">3</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    All findings have been documented in the accompanying technical report and disclosed
+    to the client in accordance with responsible disclosure practices. This letter may
+    be presented to relevant stakeholders, auditors, or regulatory bodies as evidence
+    of completed security testing activities.
+  </p>
+
+  <p>
+    For questions regarding this attestation or the underlying assessment, please contact
+    <strong>VXIS Security</strong> directly.
+  </p>
+
+  <div class="signature-block">
+    <p>Sincerely,</p>
+    <div class="signature-line"></div>
+    <p>
+      <strong>VXIS ScanPipeline</strong><br>
+      VXIS Security<br>
+      <em>Client Confidential — Not for Distribution</em>
+    </p>
+  </div>
+
+</div>
+
+  <div class="report-screen-footer">
+    VXIS Security &mdash; Client Confidential &mdash; Not for Distribution
+  </div>
+
+
+</body>
+</html>
