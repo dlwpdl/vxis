@@ -2,20 +2,69 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Kill the 14-Phase pipeline orchestrator and make a single persistent `AgentBrain.think()` ReAct loop the owner of an entire scan end-to-end, with existing Phase logic demoted to high-level tools the Brain can call.
+**Goal:** Kill the 14-Phase pipeline orchestrator and make a single persistent Brain ReAct loop (via new `AgentBrain.think_in_loop()` sibling method) the owner of an entire scan end-to-end, with existing Phase logic demoted to high-level tools the Brain can call. **Success is defined by `brain_decision_count` growing from baseline 0 to a meaningful number** — see Task 1 discovery below.
 
-**Architecture:** VXIS already has a ReAct-style brain (`AgentBrain.think`), hypothesis queue (`graph/hypothesis.py`), and attack graph (`graph/attack_graph.py`). What it lacks is a single persistent outer loop that owns `messages[]` for the whole scan. We build `ScanAgentLoop` as the new top-level entrypoint (Strix `base_agent.agent_loop` equivalent). `pipeline.py` becomes a thin shim that constructs `ScanAgentLoop` and runs it. Each of the 14 phases is classified: valuable domain logic → wrapped as a `BrainTool`, thin glue → deleted. Hands/Eyes/X-Ray/Finding stay as low-level tools. No context dict passing between "stages" — one `messages[]` array for the whole scan.
+**Architecture:** VXIS already has a ReAct-style brain method `AgentBrain.think()`, hypothesis queue (`graph/hypothesis.py`), and attack graph (`graph/attack_graph.py`). What it lacks is (a) a single persistent outer loop that owns `messages[]` for the whole scan and (b) a Brain entrypoint that actually gets called by that loop. We build `ScanAgentLoop` as the new top-level entrypoint (Strix `base_agent.agent_loop` equivalent) AND add `AgentBrain.think_in_loop()` as a sibling method to `think()` that accepts `messages[]` + dynamic `tool_catalog` directly. `pipeline.py` becomes a thin shim that constructs `ScanAgentLoop` and runs it. Each of the 14 phases is classified: valuable domain logic → wrapped as a `BrainTool`, thin glue → deleted. Hands/Eyes/X-Ray/Finding stay as low-level tools. No context dict passing between "stages" — one `messages[]` array for the whole scan.
 
 **Tech Stack:** Python 3.12, existing VXIS modules (`agent/brain.py`, `agent/runner.py`, `agent/executor.py`, `graph/hypothesis.py`, `evidence/engine.py`, Hands/X-Ray), pytest, no new dependencies.
 
 **Non-goals for Phase A (deferred to Phase B/C/D):** Episodic memory DB, critic loop, typed blackboard, 1M context mode, domain runtimes (Game/Mobile/HW). Phase A is *parity*, not differentiation.
 
+## 🚨 CRITICAL DISCOVERY — Task 1 baseline revealed the true architectural rot (2026-04-08)
+
+Task 1 ran against Juice Shop + WebGoat with the new instrumentation and measured:
+
+| Metric | Juice Shop | WebGoat |
+|---|---:|---:|
+| `peak_context_bytes` | 10,391 | 9,743 |
+| `llm_call_count` | 10 | 12 |
+| **`brain_decision_count`** | **0** | **0** |
+| VXIS Score | 758.8 | 760.4 |
+
+`llm_call_count > 0` + `brain_decision_count = 0` is the **smoking gun** for `CLAUDE.md`'s "Brain-First 원칙 위반" line. The current `pipeline.py:1927-1929` explicitly early-returns for `AgentBrain`:
+
+```python
+def _consult_brain_for_vector(self, ctx, vector_id, vector_name, phase_name):
+    from vxis.agent.brain_filebased import FileBasedBrain
+    if not isinstance(self.brain, FileBasedBrain):
+        return None   # ← AgentBrain path skips think() entirely
+```
+
+The pipeline then calls `brain._call_llm_with_fallback(...)`, `brain.interpret_probe_result(...)`, `brain.generate_chain_attacks(...)` directly as helper functions. **Brain is a bag of LLM helpers, not a decision-making loop.** This is a direct violation of `CLAUDE.md` ("Brain을 가끔 호출하는 헬퍼로 취급 금지").
+
+**Implication for this plan:** A thin `think_in_loop()` wrapper over `think()` is not viable — see Task 4 for the revised β-strategy. `think()` is functional (verified: `AGENT_SYSTEM_PROMPT` at `brain.py:182` is 200+ lines of real pentest methodology, `_call_llm_with_fallback` + `_parse_response` work) but is hardwired to `TOOL_DESCRIPTIONS` (scanner tools) and `AgentObservation` snapshots, incompatible with `ScanAgentLoop`'s persistent-messages model. Task 4 now adds `think_in_loop()` as a **sibling** method that shares the verified helpers but takes `messages[]` + dynamic `tool_catalog`.
+
 **Success criteria (hard gate before Phase B):**
-1. A scan against `juice-shop` local docker finishes in one continuous Brain loop, with `messages[]` never truncated between "phases".
-2. Findings count ≥ current `pipeline.py` baseline on DVWA/Juice Shop/WebGoat (same 3 targets as `growth-loop.yml`).
-3. Chain depth (max `attack_chain` length in report) ≥ current baseline.
-4. `pipeline.py` reduced below 1000 lines (from 5234).
-5. All existing tests still pass; new tests added for `ScanAgentLoop`.
+1. A scan against Juice Shop + WebGoat finishes in one continuous Brain loop, with `messages[]` never truncated between "phases".
+2. **`brain_decision_count` grows from baseline 0 to ≥ 1 per `max_iters` upper bound** on both targets — this is the PRIMARY Brain-First gate.
+3. Findings count ≥ current `pipeline.py` instrumented baseline (Juice Shop: 3, WebGoat: 3) on both targets. **Note**: baseline numbers are lower than the pre-instrumented original Task 1 run because `--allow-inject` was omitted; Task 14 must also run without `--allow-inject` for apples-to-apples.
+4. Chain depth (max `attack_chain` length) ≥ current baseline (≥ 2 on both targets).
+5. **Per-target attempt counts must differ** — current baseline shows exactly 78 attempts + 11 consultations on BOTH targets (profile-hardcoded). Phase A should make attempt count Brain-driven, therefore target-dependent.
+6. `peak_context_bytes` should grow with loop iterations but remain manageable (soft target: < 200 KB at max_iters = 300; document actual).
+7. `pipeline.py` reduced below 1000 lines (from 5234).
+8. All existing tests still pass; new tests added for `ScanAgentLoop` + `think_in_loop`.
+
+**Task 1 status: DONE** (commit `2ae3f9f`). Baseline doc: `docs/superpowers/benchmarks/2026-04-08-phase-a-baseline.md`. Instrumentation commits: `e5dc304`, `09379c2`, `aa69014`, `f9d8da3`.
+
+## ⚠️ Worktree execution hazard — READ BEFORE ANY `poetry run vxis` COMMAND
+
+The poetry venv at `/Users/eliot/Desktop/유/vxis/.venv` has an editable install pointing to the **main repo's `src/` directory**, NOT this worktree's `src/`. Running `poetry run vxis ...` from inside the worktree without override **loads main-repo code**, not worktree code. All four instrumentation commits (e5dc304, 09379c2, aa69014, f9d8da3) are INVISIBLE to `poetry run vxis` unless you force the worktree source path.
+
+**Always prefix with `PYTHONPATH`:**
+
+```bash
+export PYTHONPATH=/Users/eliot/Desktop/유/vxis/.worktrees/phase-a/src
+poetry run vxis scan http://localhost:3000 ...
+```
+
+Verification command (run before any scan):
+
+```bash
+poetry run python -c "import vxis.cli.main as m; import inspect; print(inspect.getfile(m))"
+# Expected: /Users/eliot/Desktop/유/vxis/.worktrees/phase-a/src/vxis/cli/main.py
+```
+
+This hazard is also documented in `WORKTREE_README.md` at the worktree root. Every subagent dispatch MUST include this instruction.
 
 ---
 
@@ -313,94 +362,246 @@ git commit -m "feat(agent): add ScanAgentLoop skeleton with persistent messages"
 
 ---
 
-### Task 4: Wire `AgentBrain` into `ScanAgentLoop._decide`
+### Task 4: Wire `AgentBrain` into `ScanAgentLoop._decide` — **REVISED 2026-04-08 post-Task-1**
+
+> **Why revised:** Task 1 baseline revealed `brain_decision_count=0` across both targets — the current `pipeline.py` *bypasses* `AgentBrain.think()` entirely (see `pipeline.py:1927-1929`) and treats Brain as a bag of helpers (`_call_llm_with_fallback`, `interpret_probe_result`, `generate_chain_attacks`). The existing `think()` method IS functional (verified: `AGENT_SYSTEM_PROMPT` at brain.py:182 is 200+ lines of real pentest methodology, `TOOL_DESCRIPTIONS` at :506 holds 30+ scanner entries, `_parse_response` at :1626 parses `{"actions": [{"tool":..., "args":..., "reasoning":..., "priority":...}]}`) — **but** it:
+> - Hardcodes the scanner-tool catalog `TOOL_DESCRIPTIONS` (nmap/nuclei/sqlmap/...), not our new high-level Phase-as-tool catalog (`cpr_recon`/`intel_agents`/...)
+> - Expects an `AgentObservation` snapshot, not a persistent `messages[]` history
+>
+> So a thin-wrapper approach is impossible. Strategy α (wrap `think()`) is dropped. **Adopted strategy: β — add `think_in_loop()` as a SIBLING method that shares `think()`'s verified helpers (`_call_llm_with_fallback`, `_parse_response`, `AGENT_SYSTEM_PROMPT` template) but takes `messages[]` + dynamic `tool_catalog` as inputs.** `think()` stays untouched as legacy. `_try_compiled_patterns` / `_reflect` are deferred from v1 of `think_in_loop` — add them back in Task 4b if Task 14 benchmarks show they matter.
 
 **Files:**
-- Modify: `src/vxis/agent/scan_loop.py`
-- Modify: `src/vxis/agent/brain.py` (add `think_in_loop(messages)` thin wrapper around existing `think()`; do not rewrite `think()` itself)
+- Modify: `src/vxis/agent/scan_loop.py` (add `brain` param to `ScanAgentLoop.__init__`, replace stub `_decide`)
+- Modify: `src/vxis/agent/brain.py` (add `think_in_loop()` sibling method, do NOT touch `think()`)
 - Test: `tests/agent/test_scan_loop_brain.py`
 
-- [ ] **Step 1:** Read `brain.py:502-741` to understand `think()` signature (takes `AgentObservation`, returns `list[AgentAction]`). Document the exact shape in a docstring comment.
-- [ ] **Step 2: Failing test**
+- [ ] **Step 1: Verify think()'s shared helpers**
+
+Before coding, confirm these exist and behave as documented (they do as of commit `f9d8da3` — this step is a trust-but-verify):
+- `brain.py:182` `AGENT_SYSTEM_PROMPT` — 200+ line pentest methodology prompt
+- `brain.py:1088-1200` `_call_llm_with_fallback(system, user)` — provider fallback chain, returns `str | None`
+- `brain.py:1626` `_parse_response(text)` — parses JSON `{"actions":[{"tool","args","reasoning","priority"}]}` → `list[AgentAction]`
+- `brain.py:60-95` `_increment_brain_decision_count()` — the counter we added in Task 1.5b
+
+```bash
+grep -n "^AGENT_SYSTEM_PROMPT\|def _call_llm_with_fallback\|def _parse_response\|def _increment_brain_decision_count" src/vxis/agent/brain.py
+```
+
+Expected: one match per item, all with line numbers > 0.
+
+- [ ] **Step 2: Failing test** (`tests/agent/test_scan_loop_brain.py`)
 
 ```python
-# tests/agent/test_scan_loop_brain.py
 import pytest
 from unittest.mock import MagicMock, AsyncMock
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
 
 class EchoTool:
-    name = "echo"; description = "echo"; input_schema = {"type": "object"}
+    name = "echo"; description = "echo back"; input_schema = {"type": "object"}
     async def run(self, **kw) -> ToolResult:
         return ToolResult(ok=True, summary="echoed", data=kw)
 
+class FinishTool:
+    name = "finish_scan"; description = "end scan"; input_schema = {"type": "object"}
+    async def run(self, **kw) -> ToolResult:
+        return ToolResult(ok=True, summary="done")
+
 @pytest.mark.asyncio
-async def test_brain_drives_loop(monkeypatch):
-    reg = ToolRegistry(); reg.register(EchoTool())
+async def test_brain_drives_loop_via_think_in_loop():
+    reg = ToolRegistry()
+    reg.register(EchoTool())
+    reg.register(FinishTool())
+
     fake_brain = MagicMock()
     fake_brain.think_in_loop = AsyncMock(side_effect=[
         [("echo", {"msg": "hello"})],
         [("finish_scan", {})],
     ])
-    class FinishTool:
-        name = "finish_scan"; description = ""; input_schema = {"type": "object"}
-        async def run(self, **kw): return ToolResult(ok=True, summary="done")
-    reg.register(FinishTool())
 
     loop = ScanAgentLoop(target="http://x", registry=reg, max_iters=5, brain=fake_brain)
     result = await loop.run()
+
     assert result["completed"] is True
     assert fake_brain.think_in_loop.await_count == 2
+    call_args = fake_brain.think_in_loop.await_args_list[0]
+    messages_arg, tools_arg = call_args.args[0], call_args.args[1]
+    assert isinstance(messages_arg, list) and len(messages_arg) > 0
+    assert any(t["name"] == "echo" for t in tools_arg)
+
+@pytest.mark.asyncio
+async def test_think_in_loop_returns_parsed_actions_from_real_brain(monkeypatch):
+    """Integration test: real AgentBrain.think_in_loop with stubbed _call_llm_with_fallback."""
+    from vxis.agent.brain import AgentBrain, get_brain_decision_count, reset_brain_decision_count
+    reset_brain_decision_count()
+
+    brain = AgentBrain()
+    fake_llm_response = (
+        '```json\n'
+        '{"actions": [{"tool": "cpr_recon", "args": {"depth": 2}, '
+        '"reasoning": "map attack surface", "priority": "high"}]}\n'
+        '```'
+    )
+    monkeypatch.setattr(brain, "_call_llm_with_fallback", lambda s, u: fake_llm_response)
+
+    messages = [
+        {"role": "system", "content": "Scan started"},
+        {"role": "user", "content": "Target: http://example.com"},
+    ]
+    tool_catalog = [
+        {"name": "cpr_recon", "description": "map endpoints + subdomains", "input_schema": {"type": "object"}},
+        {"name": "finish_scan", "description": "end scan", "input_schema": {"type": "object"}},
+    ]
+
+    actions = await brain.think_in_loop(messages, tool_catalog)
+
+    assert len(actions) == 1
+    assert actions[0] == ("cpr_recon", {"depth": 2})
+    assert get_brain_decision_count() == 1
 ```
 
-- [ ] **Step 3: Add `brain` param + `think_in_loop` call**
+- [ ] **Step 3: Run — expect fail**
+
+```bash
+PYTHONPATH=$PWD/src poetry run pytest tests/agent/test_scan_loop_brain.py -v
+# Expected: 2 failed (AttributeError: 'AgentBrain' has no 'think_in_loop')
+```
+
+- [ ] **Step 4: Add `think_in_loop()` as sibling method on `AgentBrain`**
+
+Insert AFTER `think()` (around line 800 in brain.py, before `record_result`). Do NOT modify `think()`.
+
+```python
+# brain.py — NEW METHOD, sibling to think(). Shares helpers but uses messages[] + dynamic catalog.
+async def think_in_loop(
+    self,
+    messages: list[dict[str, Any]],
+    tool_catalog: list[dict[str, Any]],
+) -> list[tuple[str, dict[str, Any]]]:
+    """ScanAgentLoop entrypoint — takes persistent message history + dynamic tool catalog.
+
+    Differs from think() in two ways:
+    1. Consumes messages[] directly (no AgentObservation snapshot)
+    2. Uses a dynamic tool_catalog passed in (not the static TOOL_DESCRIPTIONS)
+
+    Shares with think():
+    - AGENT_SYSTEM_PROMPT base template
+    - _call_llm_with_fallback provider fallback chain
+    - _parse_response JSON parser
+    - _increment_brain_decision_count for apples-to-apples counting
+
+    Omitted from v1 (re-add in Task 4b if Task 14 benchmarks show they matter):
+    - _try_compiled_patterns (pattern cache)
+    - _reflect (strategy pivot)
+    - _get_chain_driven_actions (chain reasoner)
+
+    Returns: list of (tool_name, args_dict) tuples. Empty list = agent requests finish.
+    """
+    import asyncio
+
+    with self._state_lock:
+        if self.is_done or self._step_count >= self.max_steps:
+            self.is_done = True
+            return []
+        self._step_count += 1
+    _increment_brain_decision_count()
+
+    # Build dynamic tool block from the catalog passed in
+    tools_text = "\n".join(
+        f"  - {t['name']}: {t.get('description', '')}"
+        for t in tool_catalog
+    )
+    system_prompt = AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)
+
+    # Build user prompt from messages history — recent tool results + latest user msg
+    history_lines: list[str] = []
+    for m in messages[-20:]:  # last 20 msgs as tactical context; earlier kept in memory store for Phase B
+        role = m.get("role", "?")
+        content = m.get("content", "")
+        if isinstance(content, dict):
+            # tool message: {"name": ..., "args": ..., "result": {...}}
+            name = content.get("name", "?")
+            result = content.get("result", {})
+            summary = result.get("summary", "") if isinstance(result, dict) else str(result)
+            history_lines.append(f"[tool:{name}] {summary}")
+        else:
+            history_lines.append(f"[{role}] {str(content)[:500]}")
+    user_prompt = (
+        "## Conversation history (most recent last)\n"
+        + "\n".join(history_lines)
+        + "\n\n## Your task\n"
+        + "Based on the history above, decide the next tool call(s). "
+        + "Output EXACTLY this JSON shape (inside a ```json fence):\n"
+        + '{"actions": [{"tool": "<name>", "args": {...}, "reasoning": "<why>", "priority": "high|medium|low"}]}\n'
+        + "To end the scan, emit a single action with tool='finish_scan'."
+    )
+
+    # Call LLM via the same fallback chain think() uses
+    response = await asyncio.to_thread(
+        self._call_llm_with_fallback, system_prompt, user_prompt
+    )
+    if response is None:
+        logger.warning("think_in_loop: all LLM calls failed")
+        return []
+
+    # Parse using the same parser
+    actions = self._parse_response(response)
+    return [(a.tool, a.args) for a in actions]
+```
+
+- [ ] **Step 5: Wire `brain` param into `ScanAgentLoop`**
 
 ```python
 # scan_loop.py — modify __init__ and _decide
-def __init__(self, target, registry, max_iters=300, brain=None):
+def __init__(
+    self,
+    target: str,
+    registry: ToolRegistry,
+    max_iters: int = 300,
+    brain: Any | None = None,
+) -> None:
     self.state = ScanLoopState(target=target, max_iters=max_iters)
     self.registry = registry
     self.brain = brain
 
-async def _decide(self, state):
+async def _decide(self, state: ScanLoopState) -> list[tuple[str, dict[str, Any]]]:
     if self.brain is None:
         return [("finish_scan", {})]
     return await self.brain.think_in_loop(state.messages, self.registry.describe_all())
 ```
 
-- [ ] **Step 4: Add `think_in_loop` to `AgentBrain`**
-
-```python
-# brain.py — ADD NEW METHOD, do not touch existing think()
-async def think_in_loop(
-    self, messages: list[dict], tools: list[dict]
-) -> list[tuple[str, dict]]:
-    """Loop-driven entrypoint: receives full message history + tool catalog,
-    returns list of (tool_name, args) to execute. Preserves messages across iterations
-    (unlike legacy think() which rebuilt AgentObservation per phase).
-    """
-    # Build a synthetic AgentObservation from the latest messages (compatibility shim)
-    last_tool_msgs = [m for m in messages[-10:] if m.get("role") == "tool"]
-    observation_text = "\n".join(
-        f"{m.get('content', {}).get('name', '?')}: {m.get('content', {}).get('result', {}).get('summary', '')}"
-        for m in last_tool_msgs
-    ) or "Scan started. No prior observations."
-    # Delegate to existing sync think() via executor
-    import asyncio
-    from vxis.agent.brain import AgentObservation
-    obs = AgentObservation(target=self._target_for_loop, raw_text=observation_text, history=messages)
-    actions = await asyncio.to_thread(self.think, obs)
-    return [(a.tool, a.params) for a in actions]
-```
-
-- [ ] **Step 5: Run tests**
+- [ ] **Step 6: Run tests — expect pass**
 
 ```bash
-pytest tests/agent/test_scan_loop_brain.py tests/agent/test_scan_loop.py -v
+PYTHONPATH=$PWD/src poetry run pytest tests/agent/test_scan_loop_brain.py tests/agent/test_scan_loop.py tests/unit/test_phase_a_instrumentation.py -v
+# Expected: all green. brain_decision_count increments verified.
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Smoke test against a real target (abbreviated)**
+
+Run a 3-iter capped scan against Juice Shop to verify the end-to-end wire-up works (not a full benchmark — just proof-of-life):
+
+```bash
+export PYTHONPATH=$PWD/src
+poetry run python -c "
+import asyncio
+from vxis.agent.scan_loop import ScanAgentLoop
+from vxis.agent.tool_registry import ToolRegistry
+from vxis.agent.brain import AgentBrain
+from vxis.agent.tools.control_tools import FinishScanTool  # from Task 5
+
+reg = ToolRegistry()
+reg.register(FinishScanTool())
+brain = AgentBrain()
+loop = ScanAgentLoop(target='http://localhost:3000', registry=reg, max_iters=3, brain=brain)
+result = asyncio.run(loop.run())
+print('completed:', result['completed'], 'iters:', result['iterations'])
+"
+```
+
+Expected: completes in ≤3 iters (Brain will likely finish_scan immediately because no real tools are registered yet). `brain_decision_count ≥ 1` after the run.
+
+- [ ] **Step 8: Commit**
 
 ```bash
 git add -u
