@@ -1,0 +1,296 @@
+09:19:23 [WARNING] vxis.ghost.transport: [Ghost] curl_cffi 미설치 — TLS 핑거프린트 익명화 비활성 (pip install curl-cffi)
+09:19:24 [INFO] vxis.pipeline.pipeline: ======================================================================
+09:19:24 [INFO] vxis.pipeline.pipeline:   VXIS ScanPipeline — Brain-First Full Orchestration
+09:19:24 [INFO] vxis.pipeline.pipeline:   Target: http://localhost:8080/WebGoat/login
+09:19:24 [INFO] vxis.pipeline.pipeline:   Scan ID: VXIS-20260408-091924
+09:19:24 [INFO] vxis.pipeline.pipeline:   Ghost: OFF
+09:19:24 [INFO] vxis.pipeline.pipeline:   Brain: AgentBrain
+09:19:24 [INFO] vxis.pipeline.pipeline: ======================================================================
+09:19:24 [INFO] vxis.pipeline.pipeline: 
+  ── Stage 1: Foundation ──
+09:19:24 [INFO] vxis.pipeline.pipeline:   [BRAIN] Phase 0: all vectors denied or absent — skipping consultation
+09:19:24 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 0: Foundation — Config & DB Init — 0 findings, 
+09:19:24 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (1 phases, 0 findings)
+09:19:24 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 2 vectors in Phase 1
+09:19:25 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:19:27 [INFO] vxis.interaction.eyes: Browser stopped
+09:19:27 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 1: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:19:27 [INFO] vxis.pipeline.pipeline:   [KB-HIT] 2/2 vectors served from Knowledge Store (skipping LLM)
+09:19:27 [INFO] vxis.pipeline.pipeline:   [KB-FULL] Phase Phase 1: Director — Attack Graph Init: all 2 vectors served from KB
+09:19:27 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INFRA-001: [KB-HIT] Auto-compiled: brain:WEB-INFRA-001 shows 50% effectiveness in context '
+09:19:27 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INFRA-002: [KB-HIT] Auto-compiled: brain:WEB-INFRA-002 shows 50% effectiveness in context '
+09:19:27 [INFO] vxis.pipeline.pipeline:   Chain Reasoner initialized
+09:19:27 [INFO] vxis.pipeline.pipeline:   Evidence Engine initialized
+09:19:30 [INFO] vxis.agent.threat_modeling: [ThreatModeler] STRIDE generated: 18 threats
+09:19:30 [INFO] vxis.pipeline.pipeline:   Threat Model: 18 STRIDE threats → 18 hypotheses
+09:19:30 [INFO] vxis.interaction.hands: New session created: http://localhost:8080/WebGoat/login (ghost=False)
+09:19:30 [INFO] vxis.pipeline.pipeline:   [AUTH] WebGoat detected — registering + logging in...
+09:19:30 [WARNING] vxis.pipeline.pipeline:   [AUTH] WebGoat auth failed (status=200 url=http://localhost:8080/WebGoat/login)
+09:19:30 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 1: Director — Attack Graph Init — 0 findings, 
+09:19:30 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (2 phases, 0 findings)
+09:19:30 [INFO] vxis.pipeline.pipeline: 
+  ── Stage 2: Recon ──
+09:19:30 [WARNING] vxis.pipeline.pipeline: [INJECTION-GATE] auto_approve_injection=True — mode=full
+09:19:30 [INFO] vxis.pipeline.pipeline:   [PARALLEL] Running 3 phases: P4, P13, P15
+09:19:30 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 12 vectors in Phase 4
+09:19:30 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 2 vectors in Phase 13
+09:19:30 [INFO] vxis.pipeline.pipeline:   [BRAIN] Phase 15: all vectors denied or absent — skipping consultation
+09:19:30 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 15: Digital Twin Pre-Simulation — 0 findings, 
+09:19:30 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (3 phases, 0 findings)
+09:19:30 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:19:30 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:19:31 [INFO] vxis.interaction.eyes: Browser stopped
+09:19:31 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 13: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:19:31 [INFO] vxis.interaction.eyes: Browser stopped
+09:19:31 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 4: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:19:31 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 13: Behavioral Biometrics (OSINT): 2 vectors not in KB → calling LLM
+09:19:31 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 4: CPR — Hands/Eyes/X-Ray Connect: 8 vectors not in KB → calling LLM
+09:19:33 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 13: Behavioral Biometrics (OSINT): 2/2 vectors (KB=0) | priority H=0 M=0 L=2
+09:19:33 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INFRA-003: This target is a local WebGoat login page with application-specific endpoints, n
+09:19:33 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INFRA-004: The observed target is a standard web app on localhost with a login form and Web
+09:19:33 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 13: Behavioral Biometrics (OSINT) — 0 findings, 
+09:19:33 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (4 phases, 0 findings)
+09:19:39 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 4: CPR — Hands/Eyes/X-Ray Connect: 8/8 vectors (KB=0) | priority H=2 M=3 L=3
+09:19:39 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-001: A visible login form is present on the observed page, so credential-guessing res
+09:19:39 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-002: The page is a standard username/password login and the target is an educational 
+09:19:39 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-003: No JWT-bearing interface or token handling is visible on this rendered login pag
+09:19:39 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-004: No evidence of JWT authentication is present in the observation, and the app app
+09:19:39 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-005: A login form exists and session handling will occur immediately after authentica
+09:19:39 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-006: Cookie-based session state is likely for a web login, but no cookie metadata is 
+09:19:39 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-007: The rendered page shows a local form login and no OAuth/SSO controls or redirect
+09:19:39 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-008: A visible registration link and known WebGoat password-reset path indicate accou
+09:19:39 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 4: CPR — Hands/Eyes/X-Ray Connect: 4 vectors not in KB → calling LLM
+09:19:43 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 4: CPR — Hands/Eyes/X-Ray Connect: 4/4 vectors (KB=0) | priority H=0 M=0 L=4
+09:19:43 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-011: The observed target is a WebGoat login page with a standard username/password fo
+09:19:43 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-012: No SAML login flow is visible in the rendered page or discovered endpoints. Repl
+09:19:43 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-013: The page shows a direct credential form, not an OAuth authorization redirect or 
+09:19:43 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INFRA-006: The observed application is a local WebGoat training app on localhost, not an ex
+09:19:43 [INFO] vxis.interaction.hands: New session created: http://localhost:8080/WebGoat/login (ghost=False)
+09:19:43 [INFO] vxis.interaction.controller: Hands ready: http://localhost:8080/WebGoat/login (proxy: None)
+09:19:44 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:19:44 [INFO] vxis.interaction.controller: Eyes ready (proxy: None)
+09:19:44 [INFO] vxis.interaction.controller: Target profile: tech=[], waf=False, csrf=False, endpoints=2
+09:19:44 [INFO] vxis.interaction.controller: CPR started: target=http://localhost:8080/WebGoat/login, eyes=True, xray=False
+09:19:44 [INFO] vxis.interaction.controller: Execute: intent=explore, mode=eyes, url=/
+09:19:45 [INFO] vxis.pipeline.pipeline:   Tech: [] | WAF: False | Eyes: True | X-Ray: False
+09:19:45 [INFO] vxis.interaction.controller: Execute: intent=crawl, mode=eyes, url=/
+09:19:45 [INFO] vxis.pipeline.pipeline:   Crawled: 3 endpoints
+09:19:45 [INFO] vxis.interaction.hands: New session created: http://localhost:8080/WebGoat/login (ghost=False)
+09:19:45 [INFO] vxis.pipeline.pipeline:   Total endpoints: 3
+09:19:45 [INFO] vxis.pipeline.context: [HIGH] VXIS-001: Missing Security Headers (7/7)
+09:19:45 [INFO] vxis.pipeline.pipeline:   Subdomain enum skipped (local/IP target)
+09:19:45 [INFO] vxis.interaction.controller: Execute: intent=screenshot, mode=eyes, url=/
+09:19:45 [INFO] vxis.pipeline.pipeline:   [SHOT] / → reports/screenshots/VXIS-20260408-091924/homepage.png
+09:19:45 [INFO] vxis.interaction.eyes: Browser stopped
+09:19:45 [INFO] vxis.interaction.controller: CPR stopped
+09:19:45 [INFO] vxis.pipeline.context: [HIGH] VXIS-002: JWT Vulnerability — /
+09:19:50 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-001 on / (expected L3)
+09:19:50 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-002 on /WebGoat/login (expected L4)
+09:19:50 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-003 on / (expected L3)
+09:19:50 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-4 (2 steps)
+09:19:50 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-4: 2 steps recorded
+09:19:50 [INFO] vxis.scoring.tracker: [SCORE] Escalated VXIS-001: L1 → L3
+09:19:50 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-GLOBAL-KILLCHAIN (2 steps)
+09:19:50 [INFO] vxis.pipeline.pipeline:   [KILLCHAIN] Global kill chain: 2 steps → Crown Jewel
+09:19:50 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 4: CPR — Hands/Eyes/X-Ray Connect — 2 findings, 
+09:19:50 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (5 phases, 2 findings)
+09:19:50 [INFO] vxis.pipeline.pipeline: 
+  ── Stage 3: Intelligence ──
+09:19:50 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 8 vectors in Phase 3
+09:19:51 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:19:51 [INFO] vxis.interaction.eyes: Browser stopped
+09:19:51 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 3: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:19:51 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 3: Hypothesis Engine — Pattern Matching: 8 vectors not in KB → calling LLM
+09:19:57 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 3: Hypothesis Engine — Pattern Matching: 8/8 vectors (KB=0) | priority H=2 M=2 L=4
+09:19:57 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AC-005: The page is WebGoat and the observation already lists multiple known vulnerable 
+09:19:57 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-MISCONF-001: Observed links and known paths indicate exposed application functions and likely
+09:19:57 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-MISCONF-002: WebGoat frequently ships with intentionally permissive or training-oriented defa
+09:19:57 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-MISCONF-003: A visible POST login form means authentication errors may disclose framework or 
+09:19:57 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INJECT-023: No CSP headers, inline script context, or nonce-bearing content are visible in t
+09:19:57 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INFRA-005: This is a local WebGoat deployment and the observation does not indicate reposit
+09:19:57 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SUPPLY-001: No evidence of exposed dependency metadata or artifact browsing is present in th
+09:19:57 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SUPPLY-002: There is no indication of publicly reachable CI/CD assets from the observed logi
+09:19:57 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-3 (2 steps)
+09:19:57 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-3: 2 steps recorded
+09:19:57 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 3: Hypothesis Engine — Pattern Matching — 0 findings, 
+09:19:57 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (6 phases, 2 findings)
+09:19:57 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 4 vectors in Phase 2
+09:19:58 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:19:59 [INFO] vxis.interaction.eyes: Browser stopped
+09:19:59 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 2: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:19:59 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch: 4 vectors not in KB → calling LLM
+09:20:02 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch: 4/4 vectors (KB=0) | priority H=1 M=1 L=2
+09:20:02 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-MISCONF-004: This is a visible login page over HTTP with a simple form; missing security head
+09:20:02 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-MISCONF-005: The app exposes a login page and likely serves interactive content, but no expli
+09:20:02 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-CRYPTO-001: The observation shows an HTTP localhost URL rather than HTTPS, so weak TLS is un
+09:20:02 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-API-006: No evidence of gRPC, protobuf, or API infrastructure is visible; this is a brows
+09:20:02 [INFO] vxis.pipeline.pipeline:   Available agents: 0
+09:20:02 [INFO] vxis.pipeline.context: [INFORMATIONAL] VXIS-003: Missing Security Headers — /
+09:20:06 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-001 on /WebGoat/login (expected L4)
+09:20:06 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-002 on /WebGoat/login (expected L4)
+09:20:06 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-003 on / (expected L3)
+09:20:06 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-2 (3 steps)
+09:20:06 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-2: 3 steps recorded
+09:20:06 [INFO] vxis.scoring.tracker: [SCORE] Escalated VXIS-003: L1 → L3
+09:20:06 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch — 1 findings, 
+09:20:06 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (7 phases, 3 findings)
+09:20:06 [INFO] vxis.pipeline.pipeline: 
+  ── Stage 4: Exploitation ──
+09:20:06 [INFO] vxis.pipeline.pipeline:   [PARALLEL] Running 2 phases: P5, P7
+09:20:06 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 28 vectors in Phase 5
+09:20:06 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 3 vectors in Phase 7
+09:20:06 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:20:06 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:20:07 [INFO] vxis.interaction.eyes: Browser stopped
+09:20:07 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 7: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:20:07 [INFO] vxis.interaction.eyes: Browser stopped
+09:20:07 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 5: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:20:07 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 5: Special Agents (IoT/VoIP/Web3): 8 vectors not in KB → calling LLM
+09:20:07 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 7: Hardware Agents (DMA/SS7/Cold Boot): 3 vectors not in KB → calling LLM
+09:20:10 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 7: Hardware Agents (DMA/SS7/Cold Boot): 3/3 vectors (KB=0) | priority H=0 M=0 L=3
+09:20:10 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SSRF-001: The observed page is a simple login form with username/password only; no URL fet
+09:20:10 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SSRF-002: No user-supplied URL field is rendered on the login page, so blind SSRF is not i
+09:20:10 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SSRF-003: The app appears to be WebGoat, which often contains SSRF labs behind navigation 
+09:20:10 [INFO] vxis.pipeline.pipeline:   Web target — hardware agents N/A
+09:20:10 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-7 (3 steps)
+09:20:10 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-7: 3 steps recorded
+09:20:10 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 7: Hardware Agents (DMA/SS7/Cold Boot) — 0 findings, 
+09:20:10 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (8 phases, 3 findings)
+09:20:13 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 5: Special Agents (IoT/VoIP/Web3): 8/8 vectors (KB=0) | priority H=0 M=4 L=4
+09:20:13 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SQLI-001: A login form is present on a classic web app, so SQLi is plausible on credential
+09:20:13 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SQLI-002: Authentication endpoints often expose boolean-based injection through username/p
+09:20:13 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SQLI-003: If the backend uses SQL in auth checks, time-based blind probes can reveal it ev
+09:20:13 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SQLI-004: Error-based SQLi is plausible on login processing and is a low-noise way to trig
+09:20:13 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SQLI-005: Out-of-band SQLi generally requires specific DB capabilities and is less likely 
+09:20:13 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SQLI-006: Second-order SQLi is less likely to be confirmed from the initial login page alo
+09:20:13 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-NOSQL-001: NoSQL injection is unlikely on a WebGoat login page unless the backend uses a do
+09:20:13 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-NOSQL-002: JavaScript-style NoSQL injection is less likely here because no document-db indi
+09:20:13 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 5: Special Agents (IoT/VoIP/Web3): 8 vectors not in KB → calling LLM
+09:20:18 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 5: Special Agents (IoT/VoIP/Web3): 8/8 vectors (KB=0) | priority H=0 M=0 L=8
+09:20:18 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-CMDI-001: Observed page is a basic login form with only username/password and no command-o
+09:20:18 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-CMDI-002: No evidence of asynchronous jobs, callbacks, or out-of-band processing on this l
+09:20:18 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-LDAP-001: Nothing on the rendered page suggests LDAP-backed authentication or directory se
+09:20:18 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-XPATH-001: No visible XML/query features indicate XPath use, but authentication code can so
+09:20:18 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-SSTI-001: The page looks like a plain server-rendered login form with no templating input 
+09:20:18 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-XXE-001: The observed endpoint accepts standard form fields, not XML, so XXE is unlikely 
+09:20:18 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-DESER-001: No cookies, serialized blobs, or Java object exchange are visible on the login f
+09:20:18 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-UPLOAD-001: The page only exposes a login form and no upload control, so unrestricted file u
+09:20:18 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 5: Special Agents (IoT/VoIP/Web3): 8 vectors not in KB → calling LLM
+09:20:23 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 5: Special Agents (IoT/VoIP/Web3): 8/8 vectors (KB=0) | priority H=0 M=1 L=7
+09:20:23 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-API-007: Observed target is a standard web login page with plain HTML form controls and n
+09:20:23 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INJECT-022: The page shows a simple login form rather than a JSON merge workflow, but protot
+09:20:23 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INJECT-024: A login page is visible and there is no indication of cacheable static content o
+09:20:23 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INJECT-018: No AI/LLM UI, workflow canvas, or prompt-processing component is visible; only a
+09:20:23 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INJECT-019: The observed app does not appear to be Laravel or Livewire; this is a plain WebG
+09:20:23 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INJECT-020: No CMS indicators are present in the rendered page or headers provided; the targ
+09:20:23 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-INJECT-021: There is no sign of an LLM-backed interface, chat box, or agentic workflow; one 
+09:20:23 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-BIZ-001: A login form is definitely present, so negative-value/business-logic checks are 
+09:20:23 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 5: Special Agents (IoT/VoIP/Web3): 4 vectors not in KB → calling LLM
+09:20:27 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 5: Special Agents (IoT/VoIP/Web3): 4/4 vectors (KB=0) | priority H=0 M=1 L=3
+09:20:27 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-BIZ-002: The observed page is only a login form with no visible multi-step workflow, chec
+09:20:27 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-BIZ-003: A race condition on payment requires a payment or order flow, which is not prese
+09:20:27 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-BIZ-004: Replay issues typically apply to one-time tokens, purchase actions, or idempoten
+09:20:27 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-BIZ-005: The page is a login screen with registration link, so privilege escalation via s
+09:20:27 [INFO] vxis.pipeline.pipeline:   No IoT/VoIP/Web3 indicators — skipping
+09:20:27 [INFO] vxis.pipeline.pipeline:   [BIZ-LOGIC] Multi-step Business Logic Attack starting
+09:20:29 [INFO] vxis.agent.business_logic: [BIZ-LOGIC] Learned state graph 'user_registration_flow': 3 states, 2 transitions
+09:20:29 [INFO] vxis.pipeline.pipeline:   [BIZ-LOGIC] 12 transitions tested, 0 apparent successes
+09:20:29 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-5 (3 steps)
+09:20:29 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-5: 3 steps recorded
+09:20:29 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 5: Special Agents (IoT/VoIP/Web3) — 0 findings, 
+09:20:29 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (9 phases, 3 findings)
+09:20:29 [INFO] vxis.pipeline.pipeline: 
+  ── Stage 5: Chain Analysis ──
+09:20:29 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 8 vectors in Phase 8
+09:20:29 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:20:30 [INFO] vxis.interaction.eyes: Browser stopped
+09:20:30 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 8: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:20:30 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 8: Cross-Protocol Synthesis: 8 vectors not in KB → calling LLM
+09:20:36 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 8: Cross-Protocol Synthesis: 8/8 vectors (KB=0) | priority H=1 M=4 L=3
+09:20:36 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AC-001: A login page with WebGoat training content and multiple known lesson endpoints s
+09:20:36 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AC-002: A registration link is present and prior findings indicate broken authentication
+09:20:36 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AC-003: The rendered page is explicitly a login form with username/password fields, so v
+09:20:36 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AC-004: No file-picker, download, or path-like parameter is visible on the login page. T
+09:20:36 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-API-001: Mass assignment requires an API or form that binds extra client-supplied fields 
+09:20:36 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-API-005: The page is a classic form POST endpoint, which can sometimes be susceptible to 
+09:20:36 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-API-008: Property-level authorization problems usually require a JSON/API body with neste
+09:20:36 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-API-009: WebGoat is a training app with lesson navigation and known protected lesson path
+09:20:36 [INFO] vxis.pipeline.pipeline:   Cross-Protocol Synthesis: CrossProtocolSynthesizer.synthesize() takes 1 positional argument but 2 were given
+09:20:36 [INFO] vxis.pipeline.context: [HIGH] VXIS-004: IDOR / Access Control Bypass — /WebGoat/start.mvc
+09:20:40 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-001 on /WebGoat/start.mvc (expected L3)
+09:20:40 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-002 on /WebGoat/start.mvc (expected L3)
+09:20:40 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-003 on /WebGoat/start.mvc (expected L3)
+09:20:40 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-8 (4 steps)
+09:20:40 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-8: 4 steps recorded
+09:20:40 [INFO] vxis.scoring.tracker: [SCORE] Escalated VXIS-004: L2 → L3
+09:20:40 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 8: Cross-Protocol Synthesis — 1 findings, 
+09:20:40 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (10 phases, 4 findings)
+09:20:40 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 3 vectors in Phase 11
+09:20:41 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:20:41 [INFO] vxis.interaction.eyes: Browser stopped
+09:20:41 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 11: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:20:41 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 11: Chain Mutation — Alternative Attack Paths: 3 vectors not in KB → calling LLM
+09:20:44 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 11: Chain Mutation — Alternative Attack Paths: 3/3 vectors (KB=0) | priority H=0 M=0 L=3
+09:20:44 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-WSS-001: Observed target is a standard HTTP login page with a POST form and no evidence o
+09:20:44 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-API-003: The visible app surface shows HTML login, not a GraphQL API, and no API-style en
+09:20:44 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-API-004: No GraphQL transport is evidenced in the rendered page, links, or discovered end
+09:20:44 [INFO] vxis.pipeline.pipeline:   Generated 0 chain mutations
+09:20:44 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-11 (4 steps)
+09:20:44 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-11: 4 steps recorded
+09:20:44 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 11: Chain Mutation — Alternative Attack Paths — 0 findings, 
+09:20:44 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (11 phases, 4 findings)
+09:20:44 [INFO] vxis.pipeline.pipeline: 
+  ── Stage 7: Learning ──
+09:20:44 [INFO] vxis.pipeline.pipeline:   [PARALLEL] Running 2 phases: P12, P18
+09:20:44 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 1 vectors in Phase 12
+09:20:44 [INFO] vxis.pipeline.pipeline:   [BRAIN] Phase 18: all vectors denied or absent — skipping consultation
+09:20:44 [INFO] vxis.knowledge.store: 패턴 컴파일: web+ → pipeline:security_misconfiguration (신뢰도 95%, 3회 관찰)
+09:20:44 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-18 (4 steps)
+09:20:44 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-18: 4 steps recorded
+09:20:44 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 18: Collective Intelligence Update — 0 findings, 
+09:20:44 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (12 phases, 4 findings)
+09:20:44 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:20:45 [INFO] vxis.interaction.eyes: Browser stopped
+09:20:45 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 12: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:20:45 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 12: Self-Evolving Agent — Coverage Gap Analysis: 1 vectors not in KB → calling LLM
+09:20:47 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 12: Self-Evolving Agent — Coverage Gap Analysis: 1/1 vectors (KB=0) | priority H=0 M=1 L=0
+09:20:47 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-API-002: A visible POST login form is present, so rate limiting is plausible on credentia
+09:20:47 [INFO] vxis.pipeline.pipeline:   Self-Evolution: 'list' object has no attribute 'get'
+09:20:47 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-12 (4 steps)
+09:20:47 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-12: 4 steps recorded
+09:20:47 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 12: Self-Evolving Agent — Coverage Gap Analysis — 0 findings, 
+09:20:47 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (13 phases, 4 findings)
+09:20:47 [INFO] vxis.pipeline.pipeline: 
+  ── Stage 6: Report ──
+09:20:47 [INFO] vxis.pipeline.pipeline:   [BRAIN] Consulting Brain for 7 vectors in Phase 6
+09:20:47 [INFO] vxis.interaction.eyes: Browser started (headless=True, proxy=None)
+09:20:48 [INFO] vxis.interaction.eyes: Browser stopped
+09:20:48 [INFO] vxis.pipeline.pipeline:   [EYES-OBS] Phase 6: source=eyes frameworks=[] forms=1 links=2 title='Login Page' dom=1860B
+09:20:48 [INFO] vxis.pipeline.pipeline:   [LLM-CALL] Phase Phase 6: Report Generation — NCC Group Style: 7 vectors not in KB → calling LLM
+09:20:54 [INFO] vxis.pipeline.pipeline:   [LLM-BRAIN] Phase Phase 6: Report Generation — NCC Group Style: 7/7 vectors (KB=0) | priority H=1 M=2 L=4
+09:20:54 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-XSS-001: The page clearly has a login form with username/password fields, so reflected in
+09:20:54 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-XSS-002: A registration link is present, so stored input issues are plausible somewhere i
+09:20:54 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-XSS-003: No client-side search box or obvious DOM sink is visible on the page, but a logi
+09:20:54 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-XSS-004: Mutation XSS usually depends on rich HTML sanitization flows not evident here. T
+09:20:54 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-MISCONF-006: No redirect parameter or redirect UI is visible on the login page, but auth page
+09:20:54 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-CSRF-001: A live POST login form is explicitly visible, making CSRF-adjacent weaknesses ar
+09:20:54 [INFO] vxis.pipeline.pipeline:     [LLM] ATTEMPT WEB-AUTH-010: No magic-link control is shown, but the app exposes registration and a login flo
+09:22:03 [INFO] vxis.pipeline.pipeline:   Report: reports/VXIS_Pipeline_localhost:8080.html
+09:22:03 [INFO] vxis.pipeline.context: [MEDIUM] VXIS-005: Missing CSRF Token — /
+09:22:07 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-001 on /WebGoat/login (expected L3)
+09:22:07 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-002 on /WebGoat/start.mvc (expected L3)
+09:22:07 [INFO] vxis.pipeline.pipeline:     [BRAIN-CHAIN] trying WEB-CHAIN-003 on / (expected L4)
+09:22:07 [INFO] vxis.scoring.tracker: [SCORE] Attack chain recorded: CHAIN-Phase-6 (5 steps)
+09:22:07 [INFO] vxis.pipeline.pipeline:   [CHAIN] CHAIN-Phase-6: 5 steps recorded
+09:22:07 [INFO] vxis.scoring.tracker: [SCORE] Escalated VXIS-005: L1 → L3
+09:22:07 [INFO] vxis.pipeline.context: [PHASE DONE] Phase 6: Report Generation — NCC Group Style — 1 findings, 
+09:22:07 [INFO] vxis.pipeline.context: [CHECKPOINT] Saved to tools/benchmark/.brain/VXIS-20260408-091924-checkpoint.json (14 phases, 5 findings)
+09:22:07 [INFO] vxis.scoring.engine: [SCORE] WEB — Total: 812.0 (A) | VC:122 ER:240 CI:150 FP:200 CO:100
+09:22:07 [INFO] vxis.pipeline.pipeline: 
+======================================================================
+09:22:07 [INFO] vxis.pipeline.pipeline:   PIPELINE COMPLETE
+09:22:07 [INFO] vxis.pipeline.pipeline:   Phases: 14 completed
+09:22:07 [INFO] vxis.pipeline.pipeline:   Findings: 5
+09:22:07 [INFO] vxis.pipeline.pipeline:   Deferred Actions: 0 approved, 0 total
+09:22:07 [INFO] vxis.pipeline.pipeline:   Duration: 163.2s
+09:22:07 [INFO] vxis.pipeline.pipeline: ======================================================================

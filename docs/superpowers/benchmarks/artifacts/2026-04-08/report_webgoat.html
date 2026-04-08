@@ -1,0 +1,2019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title> Security Assessment Report — VXIS Security</title>
+  <style>
+    /* ============================================================
+       VXIS Security Report — Inline Stylesheet
+       NCC Group inspired professional design
+       ============================================================ */
+
+    /* ---------- @page rules for A4 print ---------- */
+    @page {
+      size: A4;
+      margin: 20mm 18mm 25mm 18mm;
+      @bottom-center {
+        content: counter(page) " / " counter(pages);
+        font-family: Arial, sans-serif;
+        font-size: 9pt;
+        color: #666;
+      }
+      @bottom-left {
+        content: "Client Confidential";
+        font-family: Arial, sans-serif;
+        font-size: 9pt;
+        color: #888;
+      }
+      @bottom-right {
+        content: "VXIS Security";
+        font-family: Arial, sans-serif;
+        font-size: 9pt;
+        color: #888;
+      }
+    }
+
+    @page :first {
+      @bottom-center { content: none; }
+      @bottom-left   { content: none; }
+      @bottom-right  { content: none; }
+    }
+
+    /* ---------- Reset & base ---------- */
+    *, *::before, *::after {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #f0f2f5;
+      color: #1a1a2e;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, Arial, Helvetica, sans-serif;
+      font-size: 10pt;
+      line-height: 1.6;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* ---------- Screen layout: centered document look ---------- */
+    @media screen {
+      body {
+        padding: 32px 24px 64px;
+      }
+
+      /* Cover page: no padding, full-bleed dark header */
+      .cover-page {
+        max-width: 860px;
+        margin: 0 auto 40px;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.14), 0 0 0 1px rgba(0,0,0,0.06);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+
+      /* All non-cover content: centered column */
+      body > *:not(.cover-page):not(.page-break):not(.report-screen-footer) {
+        max-width: 800px;
+        margin-left: auto;
+        margin-right: auto;
+        display: block;
+      }
+    }
+
+    @media print {
+      body {
+        background: #ffffff;
+        padding: 0;
+      }
+    }
+
+    /* ---------- Typography ---------- */
+    h1 {
+      font-size: 20pt;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 0 0 12pt;
+      border-bottom: 2px solid #1a1a2e;
+      padding-bottom: 6pt;
+      page-break-after: avoid;
+    }
+
+    h2 {
+      font-size: 14pt;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 20pt 0 8pt;
+      page-break-after: avoid;
+    }
+
+    h3 {
+      font-size: 11pt;
+      font-weight: 600;
+      color: #2c3e50;
+      margin: 14pt 0 6pt;
+      page-break-after: avoid;
+    }
+
+    h4 {
+      font-size: 10pt;
+      font-weight: 600;
+      color: #34495e;
+      margin: 10pt 0 4pt;
+      page-break-after: avoid;
+    }
+
+    p {
+      margin: 0 0 8pt;
+    }
+
+    a {
+      color: #2980b9;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    code, pre {
+      font-family: "SFMono-Regular", "Cascadia Code", "Courier New", Courier, monospace;
+      font-size: 9pt;
+    }
+
+    code {
+      background: #f0f2f5;
+      border-radius: 3px;
+      padding: 1px 5px;
+      color: #c0392b;
+    }
+
+    pre {
+      background: #1e2130;
+      color: #abb2bf;
+      border-radius: 5px;
+      padding: 12pt 14pt;
+      margin: 8pt 0;
+      white-space: pre-wrap;
+      word-break: break-all;
+      border-left: 4px solid #3498db;
+      overflow: hidden;
+      page-break-inside: avoid;
+      line-height: 1.55;
+    }
+
+    /* ---------- Page breaks ---------- */
+    .page-break {
+      page-break-after: always;
+      break-after: page;
+      height: 0;
+      display: block;
+    }
+
+    @media screen {
+      .page-break {
+        display: none;
+      }
+    }
+
+    /* ============================================================
+       COVER PAGE
+       The partial _cover.html renders:
+         .cover-page
+           (.cover-logo or .cover-logo-text)
+           h1.cover-title
+           .cover-subtitle
+           .cover-meta > table + .cover-classification
+
+       We use ::before on .cover-page for the dark header region,
+       and rely on a background + padding trick so the logo/company
+       name appears on the dark band at the top.
+       ============================================================ */
+
+    .cover-page {
+      display: flex;
+      flex-direction: column;
+      min-height: 260mm;
+      position: relative;
+      background: #ffffff;
+    }
+
+    /* Dark navy top band — covers logo + title + target + subtitle */
+    .cover-page::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 320px;
+      background: #1a1a2e;
+      /* subtle grid overlay */
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(#1a1a2e, #1a1a2e);
+      background-size: 28px 28px, 28px 28px, 100% 100%;
+      z-index: 0;
+    }
+
+    /* Red accent stripe at the bottom edge of the dark band */
+    .cover-page::after {
+      content: "";
+      position: absolute;
+      top: 316px;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, #c0392b 0%, #e74c3c 50%, #c0392b 100%);
+      z-index: 1;
+    }
+
+    .cover-page > * {
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Logo image — on dark background */
+    .cover-logo {
+      max-width: 180pt;
+      max-height: 60pt;
+      margin: 40pt 40pt 0;
+      filter: brightness(0) invert(1); /* make logo white on dark background */
+    }
+
+    /* Text fallback logo — displayed on dark header band */
+    .cover-logo-text {
+      font-size: 26pt;
+      font-weight: 900;
+      color: #ffffff;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      margin: 40pt 40pt 0;
+      line-height: 1;
+    }
+
+    .cover-logo-text::after {
+      content: ".";
+      color: #c0392b;
+    }
+
+    /* Title — inside the dark band, white text */
+    .cover-title {
+      font-size: 28pt;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.25;
+      margin: 48pt 40pt 0;
+      border: none;
+      padding: 0;
+    }
+
+    /* Red underline accent injected via CSS after the title */
+    .cover-title::after {
+      content: "";
+      display: block;
+      width: 52pt;
+      height: 4px;
+      background: #c0392b;
+      margin-top: 12pt;
+      border-radius: 2px;
+    }
+
+    .cover-target {
+      font-size: 16pt;
+      color: rgba(255, 255, 255, 0.85);
+      font-weight: 600;
+      margin: 8pt 40pt 0;
+      word-break: break-all;
+      font-family: "Courier New", Courier, monospace;
+    }
+
+    .cover-subtitle {
+      font-size: 13pt;
+      color: rgba(255, 255, 255, 0.65);
+      margin: 14pt 40pt 36pt;
+      font-weight: 400;
+    }
+
+    .cover-meta {
+      margin: 0 40pt;
+      border-top: 1px solid #e0e3ea;
+      padding-top: 20pt;
+      flex: 1;
+    }
+
+    .cover-meta table {
+      border: none;
+      width: auto;
+      margin: 0 0 16pt;
+    }
+
+    .cover-meta td {
+      padding: 5pt 24pt 5pt 0;
+      border: none;
+      background: transparent;
+      font-size: 10pt;
+      line-height: 1.5;
+    }
+
+    .cover-meta td:first-child {
+      font-weight: 600;
+      color: #888;
+      text-transform: uppercase;
+      font-size: 8pt;
+      letter-spacing: 0.6px;
+      width: 120pt;
+      vertical-align: top;
+      padding-top: 7pt;
+    }
+
+    .cover-meta td:last-child {
+      font-size: 10pt;
+      color: #1a1a2e;
+      font-weight: 500;
+    }
+
+    .cover-classification {
+      display: inline-block;
+      margin-top: 6pt;
+      margin-bottom: 40pt;
+      padding: 5pt 16pt;
+      background: #c0392b;
+      color: #fff;
+      font-size: 8.5pt;
+      font-weight: 700;
+      letter-spacing: 2.5px;
+      text-transform: uppercase;
+      border-radius: 3px;
+      box-shadow: 0 2px 6px rgba(192,57,43,0.35);
+    }
+
+    /* ============================================================
+       TABLE OF CONTENTS
+       ============================================================ */
+    .toc {
+      margin: 20pt 0;
+    }
+
+    .toc-entry {
+      display: flex;
+      align-items: baseline;
+      margin-bottom: 7pt;
+      font-size: 10pt;
+    }
+
+    .toc-entry-title {
+      flex-shrink: 0;
+      padding-right: 8pt;
+    }
+
+    .toc-dots {
+      flex: 1;
+      border-bottom: 1px dotted #bbb;
+      margin: 0 4pt 3pt;
+      min-width: 20pt;
+    }
+
+    .toc-entry-page {
+      font-weight: 600;
+      min-width: 22pt;
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* ============================================================
+       TABLES
+       ============================================================ */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 9.5pt;
+      margin: 8pt 0 16pt;
+      page-break-inside: auto;
+    }
+
+    thead {
+      background: #1a1a2e;
+      color: #ffffff;
+    }
+
+    thead th {
+      padding: 8pt 11pt;
+      font-weight: 600;
+      text-align: left;
+      font-size: 8.5pt;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    tbody tr:nth-child(even) {
+      background: #f7f8fa;
+    }
+
+    tbody tr:nth-child(odd) {
+      background: #ffffff;
+    }
+
+    tbody td {
+      padding: 7pt 11pt;
+      border-bottom: 1px solid #e8e9eb;
+      vertical-align: top;
+    }
+
+    @media screen {
+      tbody tr:hover td {
+        background: #eef1f7;
+        transition: background 0.12s ease;
+      }
+    }
+
+    /* ============================================================
+       FINDING CARDS
+       ============================================================ */
+    .finding-card {
+      border: 1px solid #dde1e7;
+      border-radius: 6px;
+      margin: 0 0 22pt;
+      page-break-inside: avoid;
+      overflow: hidden;
+    }
+
+    @media screen {
+      .finding-card {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+        transition: box-shadow 0.15s ease;
+      }
+
+      .finding-card:hover {
+        box-shadow: 0 4px 18px rgba(0,0,0,0.12);
+      }
+    }
+
+    .finding-header {
+      padding: 10pt 14pt;
+      border-bottom: 1px solid #dde1e7;
+      background: #f9fafb;
+      display: flex;
+      align-items: center;
+      gap: 10pt;
+    }
+
+    /* Severity accent bar in header */
+    .finding-card.severity-critical .finding-header { border-left: 5px solid #7B2C34; background: #fdf5f5; }
+    .finding-card.severity-high     .finding-header { border-left: 5px solid #C0392B; background: #fdf5f5; }
+    .finding-card.severity-medium   .finding-header { border-left: 5px solid #E67E22; background: #fdf9f2; }
+    .finding-card.severity-low      .finding-header { border-left: 5px solid #2ECC71; background: #f3fdf7; }
+    .finding-card.severity-informational .finding-header { border-left: 5px solid #3498DB; background: #f3f8fe; }
+
+    .finding-card.severity-critical { border-left: 5px solid #7B2C34; }
+    .finding-card.severity-high     { border-left: 5px solid #C0392B; }
+    .finding-card.severity-medium   { border-left: 5px solid #E67E22; }
+    .finding-card.severity-low      { border-left: 5px solid #2ECC71; }
+    .finding-card.severity-informational { border-left: 5px solid #3498DB; }
+
+    .finding-title {
+      font-size: 11pt;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin: 0;
+      flex: 1;
+    }
+
+    .finding-body {
+      padding: 14pt 16pt;
+    }
+
+    .finding-meta-table {
+      width: 100%;
+      font-size: 9pt;
+      margin-bottom: 14pt;
+    }
+
+    .finding-meta-table th {
+      background: #1a1a2e;
+      color: #ffffff;
+      font-weight: 600;
+      padding: 6pt 9pt;
+      border: 1px solid #2d2d4e;
+      text-align: center;
+      font-size: 8pt;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+
+    .finding-meta-table td {
+      padding: 6pt 9pt;
+      border: 1px solid #dde1e7;
+      background: #ffffff;
+      text-align: center;
+      vertical-align: middle;
+    }
+
+    .finding-section-title {
+      font-size: 8.5pt;
+      font-weight: 700;
+      color: #ffffff;
+      background: #2c3e50;
+      margin: 14pt -16pt 8pt;
+      padding: 4pt 16pt;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    /* ============================================================
+       EVIDENCE BLOCKS — dark-themed (VS Code style)
+       Partial markup:
+         .evidence-block
+           .evidence-title  (includes .evidence-type-badge inside it)
+           div (content)
+           div (file path, optional) > code
+       ============================================================ */
+    .evidence-block {
+      background: #1e2130;
+      border: 1px solid #2d3250;
+      border-radius: 5px;
+      padding: 10pt 14pt;
+      margin: 6pt 0;
+      page-break-inside: avoid;
+    }
+
+    .evidence-title {
+      font-weight: 600;
+      font-size: 9pt;
+      color: #abb2bf;
+      margin-bottom: 8pt;
+      padding-bottom: 6pt;
+      border-bottom: 1px solid #2d3250;
+    }
+
+    .evidence-block > div:not(.evidence-title) {
+      color: #abb2bf;
+      font-family: "SFMono-Regular", "Cascadia Code", "Courier New", monospace;
+      font-size: 8.5pt;
+      line-height: 1.55;
+      word-break: break-all;
+    }
+
+    .evidence-block pre.evidence-content {
+      margin: 0;
+      padding: 8pt;
+      background: #1e2130;
+      border-radius: 0 0 4px 4px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    .evidence-block pre.evidence-content code {
+      background: none;
+      color: #abb2bf;
+      font-family: "SFMono-Regular", "Cascadia Code", "Courier New", monospace;
+      font-size: 8.5pt;
+      line-height: 1.55;
+      padding: 0;
+      border-radius: 0;
+    }
+
+    .evidence-type-badge {
+      display: inline-block;
+      font-size: 7pt;
+      padding: 2pt 7pt;
+      background: #2980b9;
+      color: #ffffff;
+      border-radius: 3px;
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+
+    /* File path line inside evidence block */
+    .evidence-block code {
+      background: #2d3250;
+      color: #e5c07b;
+      font-size: 8pt;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+
+    /* ============================================================
+       SEVERITY BADGES
+       ============================================================ */
+    .severity-badge {
+      display: inline-block;
+      padding: 2pt 9pt;
+      border-radius: 3px;
+      font-size: 7.5pt;
+      font-weight: 700;
+      color: #ffffff;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .severity-badge-critical,
+    .severity-badge.severity-critical {
+      background-color: #7B2C34;
+      box-shadow: 0 1px 4px rgba(123,44,52,0.4);
+    }
+
+    .severity-badge-high,
+    .severity-badge.severity-high {
+      background-color: #C0392B;
+      box-shadow: 0 1px 4px rgba(192,57,43,0.4);
+    }
+
+    .severity-badge-medium,
+    .severity-badge.severity-medium {
+      background-color: #E67E22;
+      box-shadow: 0 1px 4px rgba(230,126,34,0.35);
+    }
+
+    .severity-badge-low,
+    .severity-badge.severity-low {
+      background-color: #27ae60;
+      color: #ffffff;
+      box-shadow: 0 1px 4px rgba(39,174,96,0.35);
+    }
+
+    .severity-badge-informational,
+    .severity-badge.severity-informational {
+      background-color: #2980b9;
+      box-shadow: 0 1px 4px rgba(41,128,185,0.35);
+    }
+
+    /* ============================================================
+       MITRE ATT&CK
+       ============================================================ */
+    .mitre-block {
+      background: #eaf3fb;
+      border: 1px solid #aed6f1;
+      border-radius: 4px;
+      padding: 9pt 13pt;
+      margin: 8pt 0;
+      font-size: 9pt;
+      border-left: 4px solid #2980b9;
+    }
+
+    .mitre-block strong {
+      color: #1a5276;
+    }
+
+    /* ============================================================
+       ATTESTATION / LETTERHEAD
+       ============================================================ */
+    .letterhead {
+      border-bottom: 3px solid #1a1a2e;
+      padding-bottom: 16pt;
+      margin-bottom: 24pt;
+      display: flex;
+      align-items: flex-end;
+      gap: 16pt;
+    }
+
+    .letterhead-brand {
+      flex: 1;
+    }
+
+    .letterhead-company {
+      font-size: 20pt;
+      font-weight: 900;
+      color: #1a1a2e;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+    }
+
+    .letterhead-company::after {
+      content: ".";
+      color: #c0392b;
+    }
+
+    .letterhead-tagline {
+      font-size: 9pt;
+      color: #777;
+      letter-spacing: 0.5px;
+      margin-top: 2pt;
+    }
+
+    .attestation-body {
+      font-size: 10pt;
+      line-height: 1.7;
+    }
+
+    .signature-block {
+      margin-top: 40pt;
+    }
+
+    .signature-line {
+      border-top: 1px solid #333;
+      width: 200pt;
+      margin-bottom: 6pt;
+    }
+
+    /* ============================================================
+       EXECUTIVE SUMMARY
+       ============================================================ */
+    .summary-chart-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 24pt;
+      margin: 16pt 0;
+    }
+
+    .summary-chart-donut {
+      flex-shrink: 0;
+    }
+
+    .summary-chart-bars {
+      flex: 1;
+    }
+
+    /* Risk score meter */
+    .risk-score-container {
+      margin: 12pt 0 18pt;
+    }
+
+    .risk-score-label {
+      font-size: 9pt;
+      font-weight: 600;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 6pt;
+    }
+
+    .risk-score-track {
+      height: 14px;
+      background: #e8eaed;
+      border-radius: 7px;
+      overflow: visible;
+      position: relative;
+    }
+
+    .risk-score-fill {
+      height: 100%;
+      border-radius: 7px;
+      background: linear-gradient(90deg, #27ae60 0%, #f39c12 50%, #c0392b 100%);
+      transition: width 0.4s ease;
+      position: relative;
+    }
+
+    .risk-score-fill::after {
+      content: attr(data-score);
+      position: absolute;
+      right: -1px;
+      top: -24px;
+      font-size: 9pt;
+      font-weight: 700;
+      color: #1a1a2e;
+      white-space: nowrap;
+    }
+
+    .risk-score-scale {
+      display: flex;
+      justify-content: space-between;
+      font-size: 7.5pt;
+      color: #888;
+      margin-top: 4pt;
+    }
+
+    /* ============================================================
+       SECTION LABELS
+       ============================================================ */
+    .section-label {
+      font-size: 8.5pt;
+      color: #c0392b;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-bottom: 4pt;
+    }
+
+    /* ============================================================
+       SCREEN-ONLY FOOTER BAR
+       ============================================================ */
+    @media screen {
+      .report-screen-footer {
+        text-align: center;
+        font-size: 9pt;
+        color: #aaa;
+        padding: 24px 0 8px;
+        letter-spacing: 0.3px;
+      }
+    }
+
+    @media print {
+      .report-screen-footer {
+        display: none;
+      }
+    }
+
+    /* ============================================================
+       PRINT OVERRIDES
+       ============================================================ */
+    @media print {
+      body {
+        font-size: 9.5pt;
+        background: #ffffff;
+      }
+
+      h1 { font-size: 18pt; }
+      h2 { font-size: 13pt; }
+      h3 { font-size: 10.5pt; }
+
+      .finding-card {
+        page-break-inside: avoid;
+        box-shadow: none;
+      }
+
+      .evidence-block {
+        page-break-inside: avoid;
+      }
+
+      a {
+        color: #1a1a2e;
+        text-decoration: none;
+      }
+
+      thead {
+        display: table-header-group;
+      }
+
+      .finding-section-title {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+    }
+    /* ---------- Language toggle ---------- */
+    .lang-toggle {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 9999;
+      display: flex;
+      background: #1a1a2e;
+      border-radius: 6px;
+      overflow: hidden;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+      font-family: system-ui, -apple-system, Arial, sans-serif;
+    }
+    .lang-toggle button {
+      border: none;
+      padding: 8px 16px;
+      font-size: 9pt;
+      font-weight: 700;
+      cursor: pointer;
+      color: #8899aa;
+      background: #1a1a2e;
+      transition: all 0.2s;
+      letter-spacing: 0.5px;
+    }
+    .lang-toggle button.active {
+      color: #ffffff;
+      background: #c0392b;
+    }
+    .lang-toggle button:hover:not(.active) {
+      color: #ffffff;
+      background: #2d3250;
+    }
+
+    body.lang-en .ko { display: none !important; }
+    body.lang-ko .en { display: none !important; }
+
+    @media print {
+      .lang-toggle { display: none; }
+    }
+
+    /* Attack Paths Section */
+    .attack-paths-section { page-break-before: always; }
+    .attack-graph-container { margin: 20px 0; text-align: center; }
+    .attack-graph-container svg { max-width: 100%; height: auto; }
+    .chain-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
+    .chain-table th, .chain-table td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; }
+    .chain-table th { background: #1a1a2e; color: white; }
+    .chain-table code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-size: 0.85em; }
+    .depth-table { margin: 10px 0; }
+    .depth-table td { padding: 5px 10px; font-size: 0.9em; }
+    .depth-table td:first-child { font-weight: bold; font-size: 1.1em; width: 30px; }
+    @media print { .attack-graph-container svg { max-height: 400px; } }
+  </style>
+  <script>
+  document.addEventListener('DOMContentLoaded', function() {
+    function setLang(lang) {
+      document.body.className = document.body.className.replace(/lang-(en|ko)/g, '').trim() + ' lang-' + lang;
+      document.getElementById('btn-en').className = (lang === 'en') ? 'active' : '';
+      document.getElementById('btn-ko').className = (lang === 'ko') ? 'active' : '';
+      try { localStorage.setItem('vxis-report-lang', lang); } catch(e) {}
+    }
+    document.getElementById('btn-en').addEventListener('click', function() { setLang('en'); });
+    document.getElementById('btn-ko').addEventListener('click', function() { setLang('ko'); });
+    try {
+      var saved = localStorage.getItem('vxis-report-lang');
+      if (saved) setLang(saved);
+    } catch(e) {}
+  });
+  </script>
+</head>
+<body class="lang-en">
+
+  <div class="lang-toggle" id="lang-toggle">
+    <button id="btn-en" class="active">EN</button>
+    <button id="btn-ko">KO</button>
+  </div>
+
+  
+  
+<div class="cover-page">
+
+  
+  
+    <div class="cover-logo-text">VXIS SECURITY</div>
+  
+
+  
+  <h1 class="cover-title">Security Assessment</h1>
+  <div class="cover-target"></div>
+  <div class="cover-subtitle">Penetration Testing &amp; Vulnerability Assessment Report</div>
+
+  
+  <div class="cover-meta">
+    <table>
+      <tbody>
+        <tr>
+          <td>Prepared for</td>
+          <td></td>
+        </tr>
+        <tr>
+          <td>Prepared by</td>
+          <td>VXIS Security — VXIS ScanPipeline</td>
+        </tr>
+        <tr>
+          <td>Assessment date</td>
+          <td>2026-04-08</td>
+        </tr>
+        <tr>
+          <td>Report version</td>
+          <td>1.0 — Final</td>
+        </tr>
+        <tr>
+          <td>Scan reference</td>
+          <td>VXIS-20260408-091924</td>
+        </tr>
+        <tr>
+          <td>Target</td>
+          <td>http://localhost:8080/WebGoat/login</td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="cover-classification">CLIENT CONFIDENTIAL</div>
+  </div>
+
+</div>
+  <div class="page-break"></div>
+
+  
+  <div class="section-label"><span class="en">Contents</span><span class="ko">목차</span></div>
+  <h1><span class="en">Table of Contents</span><span class="ko">목차</span></h1>
+
+  <div class="toc">
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">1. Executive Summary</span><span class="ko">1. 경영진 요약</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">3</span>
+    </div>
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">2. Methodology</span><span class="ko">2. 수행 방법론</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">4</span>
+    </div>
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">3. Findings</span><span class="ko">3. 발견 사항</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">5</span>
+    </div>
+    
+    
+    
+    
+      
+    
+      
+      <div class="toc-entry" style="padding-left:16pt;">
+        <span class="toc-entry-title">
+          3.2. High Findings (3)
+        </span>
+        <span class="toc-dots"></span>
+        <span class="toc-entry-page">5</span>
+      </div>
+      
+      
+    
+      
+    
+      
+    
+      
+      <div class="toc-entry" style="padding-left:16pt;">
+        <span class="toc-entry-title">
+          3.5. Informational Findings (1)
+        </span>
+        <span class="toc-dots"></span>
+        <span class="toc-entry-page">8</span>
+      </div>
+      
+      
+    
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">4. Attack Path Analysis</span><span class="ko">4. 공격 경로 분석</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">—</span>
+    </div>
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">5. Attestation</span><span class="ko">5. 확인서</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">—</span>
+    </div>
+  </div>
+
+  <div class="page-break"></div>
+
+  
+  
+
+
+<div class="section-label">Section 1</div>
+<h1><span class="en">Executive Summary</span><span class="ko">경영진 요약</span></h1>
+
+
+<h3><span class="en">Finding Summary</span><span class="ko">발견 사항 요약</span></h3>
+<table>
+  <thead>
+    <tr>
+      <th><span class="en">Severity</span><span class="ko">심각도</span></th>
+      <th style="text-align:center;"><span class="en">Count</span><span class="ko">건수</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-critical">
+          CRITICAL
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:400;">
+        0
+      </td>
+    </tr>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-high">
+          HIGH
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:700;">
+        3
+      </td>
+    </tr>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-medium">
+          MEDIUM
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:400;">
+        0
+      </td>
+    </tr>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-low">
+          LOW
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:400;">
+        0
+      </td>
+    </tr>
+    
+    
+    <tr>
+      <td>
+        <span class="severity-badge severity-badge-informational">
+          INFORMATIONAL
+        </span>
+      </td>
+      <td style="text-align:center; font-weight:700;">
+        1
+      </td>
+    </tr>
+    
+    <tr style="border-top: 2px solid #1a1a2e;">
+      <td style="font-weight:700;"><span class="en">Total</span><span class="ko">합계</span></td>
+      <td style="text-align:center; font-weight:700;">4</td>
+    </tr>
+  </tbody>
+</table>
+
+
+
+<div class="summary-chart-row">
+  <div class="summary-chart-donut">
+    <svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+<path d="M 80.00 80.00 L 80.00 12.80 A 67.20 67.20 0 1 1 12.80 80.00 Z" fill="#C0392B" />
+<path d="M 80.00 80.00 L 12.80 80.00 A 67.20 67.20 0 0 1 80.00 12.80 Z" fill="#3498DB" />
+<circle cx="80.00" cy="80.00" r="41.60" fill="white" />
+<text x="80.00" y="80.00" text-anchor="middle" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="#333">4</text><text x="80.00" y="100.00" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#666">findings</text>
+</svg>
+  </div>
+  <div class="summary-chart-bars">
+    <svg xmlns="http://www.w3.org/2000/svg" width="380" height="180" viewBox="0 0 380 180">
+<rect x="120" y="10" width="220" height="26" rx="4" fill="#F0F0F0" />
+<text x="112" y="23.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">Critical</text>
+<text x="348" y="23.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">0</text>
+<rect x="120" y="44" width="220" height="26" rx="4" fill="#F0F0F0" />
+<rect x="120" y="44" width="220.00" height="26" rx="4" fill="#C0392B" />
+<text x="112" y="57.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">High</text>
+<text x="348" y="57.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">3</text>
+<rect x="120" y="78" width="220" height="26" rx="4" fill="#F0F0F0" />
+<text x="112" y="91.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">Medium</text>
+<text x="348" y="91.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">0</text>
+<rect x="120" y="112" width="220" height="26" rx="4" fill="#F0F0F0" />
+<text x="112" y="125.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">Low</text>
+<text x="348" y="125.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">0</text>
+<rect x="120" y="146" width="220" height="26" rx="4" fill="#F0F0F0" />
+<rect x="120" y="146" width="73.33" height="26" rx="4" fill="#3498DB" />
+<text x="112" y="159.00" text-anchor="end" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" fill="#333">Informational</text>
+<text x="348" y="159.00" text-anchor="start" dominant-baseline="middle" font-family="Arial, sans-serif" font-size="13" font-weight="bold" fill="#333">1</text>
+</svg>
+  </div>
+</div>
+
+
+
+
+<h3><span class="en">Assessment Overview</span><span class="ko">평가 개요</span></h3>
+<div class="attestation-body">
+  <span class="en">VXIS Security conducted a comprehensive security assessment of VXIS Client&#39;s environment. The engagement covered the agreed scope of assets and services, employing a combination of automated vulnerability scanning and manual verification techniques aligned with OWASP, PTES, and NIST SP 800-115 frameworks.<br><br>A total of 4 security findings were identified: 0 Critical, 3 High, 0 Medium, 0 Low, 1 Informational. The most significant finding identified was &#39;IDOR / Access Control Bypass — /WebGoat/start.mvc&#39; (High), which represents the highest-priority remediation item.<br><br>Immediate remediation is recommended for the 3 High findings, as these represent the greatest risk to VXIS Client&#39;s environment. Medium and Low severity findings should be addressed in subsequent remediation cycles according to the organisation&#39;s risk tolerance and change management processes. VXIS recommends a remediation validation assessment once Critical and High findings have been addressed.</span><span class="ko">VXIS Security는 VXIS Client 환경에 대해 종합 보안 평가를 수행했습니다. 합의된 자산과 서비스 범위 내에서 자동화 취약점 스캔과 수동 검증을 결합했으며, OWASP Testing Guide·PTES·NIST SP 800-115 프레임워크에 맞춰 진행했습니다.<br><br>총 4건의 보안 취약점이 식별되었습니다: 0건 심각, 3건 높음, 0건 중간, 0건 낮음, 1건 정보. 가장 심각한 항목은 &#39;IDOR / 접근 제어 우회 — /WebGoat/start.mvc&#39; (높음) 이며, 최우선 조치 대상입니다.<br><br>높음 3건 항목은 VXIS Client 환경에 가장 큰 위험을 초래하므로 즉시 조치가 권장됩니다. 중간 및 낮음 심각도 항목은 조직의 위험 허용 수준과 변경 관리 절차에 따라 후속 조치 주기에 반영해야 합니다. VXIS는 심각·높음 항목 조치가 완료된 이후 재검증 평가를 수행할 것을 권장합니다.</span>
+</div>
+
+
+
+<h3><span class="en">Overall Risk Score</span><span class="ko">종합 위험 점수</span></h3>
+<p>
+  <span class="en">
+    The overall risk score for this assessment is
+    <strong>5.3 / 10.0</strong>,
+    calculated as a weighted composite across all identified findings.
+  </span>
+  <span class="ko">
+    본 평가의 종합 위험 점수는
+    <strong>5.3 / 10.0</strong>이며,
+    발견된 모든 취약점의 가중 합산으로 산출되었습니다.
+  </span>
+</p>
+  <div class="page-break"></div>
+
+  
+  <div class="section-label">Section 2</div>
+  <h1><span class="en">Methodology</span><span class="ko">수행 방법론</span></h1>
+
+  <p>Brain-First Pipeline. Phases: Phase 0: Foundation — Config &amp; DB Init, Phase 1: Director — Attack Graph Init, Phase 15: Digital Twin Pre-Simulation, Phase 13: Behavioral Biometrics (OSINT), Phase 4: CPR — Hands/Eyes/X-Ray Connect, Phase 3: Hypothesis Engine — Pattern Matching, Phase 2: 63 Autonomous Agents — Brain-Directed Dispatch, Phase 7: Hardware Agents (DMA/SS7/Cold Boot), Phase 5: Special Agents (IoT/VoIP/Web3), Phase 8: Cross-Protocol Synthesis, Phase 11: Chain Mutation — Alternative Attack Paths, Phase 18: Collective Intelligence Update, Phase 12: Self-Evolving Agent — Coverage Gap Analysis</p>
+
+  
+  <h2><span class="en">Target Screenshots</span><span class="ko">타겟 스크린샷</span></h2>
+  <div class="screenshots-grid">
+    
+      <figure style="margin: 12px 0; page-break-inside: avoid;">
+        <img src="reports/screenshots/VXIS-20260408-091924/homepage.png" alt="homepage" style="max-width: 100%; border: 1px solid #ccc;" />
+        <figcaption style="font-size: 0.85em; color: #555;">homepage</figcaption>
+      </figure>
+    
+  </div>
+  
+
+  <div class="page-break"></div>
+
+  
+  <div class="section-label">Section 3</div>
+  <h1><span class="en">Findings</span><span class="ko">발견 사항</span></h1>
+
+  
+    
+      
+      
+    
+      
+      
+        <h2>
+          <span class="severity-badge severity-badge-high">HIGH</span>
+          &nbsp;High Findings (3)
+        </h2>
+
+        
+          
+
+
+
+<div class="finding-card severity-high">
+
+  
+  <div class="finding-header">
+    <span class="finding-title"><span class="en">IDOR / Access Control Bypass — /WebGoat/start.mvc</span><span class="ko">IDOR / 접근 제어 우회 — /WebGoat/start.mvc</span></span>
+    <span class="severity-badge severity-badge-high">HIGH</span>
+  </div>
+
+  <div class="finding-body">
+
+    
+    <table class="finding-meta-table">
+      <thead>
+        <tr>
+          <th><span class="en">Overall Risk</span><span class="ko">위험도</span></th>
+          <th><span class="en">Impact</span><span class="ko">영향</span></th>
+          <th><span class="en">Exploitability</span><span class="ko">공격 용이성</span></th>
+          <th><span class="en">Finding ID</span><span class="ko">식별 번호</span></th>
+          <th><span class="en">Component</span><span class="ko">대상</span></th>
+          <th><span class="en">Category</span><span class="ko">분류</span></th>
+          <th><span class="en">Status</span><span class="ko">상태</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="severity-badge severity-badge-high">HIGH</span>
+          </td>
+          <td>
+            
+              8.6
+            
+          </td>
+          <td>
+            
+              CVSS:3.1/AV:N/AC:L/…
+            
+          </td>
+          <td><code>VXIS-004</code></td>
+          <td>/WebGoat/start.mvc</td>
+          <td>idor</td>
+          <td>Open</td>
+        </tr>
+      </tbody>
+    </table>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Identifiers</span><span class="ko">식별자</span></div>
+    <p>
+      
+      
+      
+        <strong>CWE:</strong>
+        
+          <a href="https://cwe.mitre.org/data/definitions/639.html">CWE-639</a>, 
+        
+          <a href="https://cwe.mitre.org/data/definitions/285.html">CWE-285</a>, 
+        
+          <a href="https://cwe.mitre.org/data/definitions/862.html">CWE-862</a>
+        
+      
+    </p>
+    
+
+    
+    <div class="finding-section-title"><span class="en">Description</span><span class="ko">상세 설명</span></div>
+    <div><span class="en">WHAT — The /WebGoat/start.mvc endpoint appears to trust a client-supplied id parameter when loading lesson content or state, and does not sufficiently enforce object-level authorization before returning the requested resource. In practice, this means an authenticated or unauthenticated caller can supply a different id value and access data or lesson state that should be restricted to another user, lesson context, or privilege level. This is a classic Insecure Direct Object Reference (IDOR) / Broken Object Level Authorization (BOLA) condition, where the application exposes a direct object reference and relies on obscurity rather than server-side ownership checks.<br>HOW — Step 1: Navigate to the application and observe that the login page is reachable at /WebGoat/login, with the vulnerable flow ultimately invoking /WebGoat/start.mvc. Step 2: Intercept a legitimate request that includes id=1 and note the response content tied to that object identifier. Step 3: Modify the id parameter to another value (for example, 2, 3, or a higher sequential number) while keeping the same session or even no session, depending on access control behavior. Step 4: Compare responses and observe that different object data or lesson content is returned without verifying that the caller is entitled to access that record. Step 5: Enumerate ids systematically to identify additional accessible objects, user-specific state, or privileged lesson content.<br>IMPACT — <br>- Unauthorized disclosure of application data, lesson state, or other object-bound records associated with different users or roles, which can include training progress, answers, identifiers, or administrative content depending on deployment configuration.<br>- If the vulnerable object maps to real tenant, user, or course records in a non-training deployment, the issue can expose personal data or internal business content, creating confidentiality loss and possible privacy/regulatory exposure (for example, GDPR/CCPA obligations if user identifiers or profile data are revealed).<br>- IDOR primitives commonly enable privilege escalation and lateral abuse by chaining into account enumeration, unauthorized modification, or harvesting of trusted identifiers for phishing, fraud, or further access control bypasses.<br>PoC — GET /WebGoat/start.mvc?id=1 HTTP/1.1<br>Host: localhost:8080<br>Cookie: JSESSIONID=&lt;attacker_session&gt;<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html;charset=UTF-8<br>Set-Cookie: JSESSIONID=&lt;session_id&gt;; Path=/WebGoat; HttpOnly<br><br>&lt;html&gt;<br>  &lt;body&gt;<br>    &lt;div id=&#34;content&#34;&gt;<br>      &lt;h2&gt;Lesson content for object 1&lt;/h2&gt;<br>      &lt;p&gt;Accessible state or record data returned without object-level authorization.&lt;/p&gt;<br>    &lt;/div&gt;<br>  &lt;/body&gt;<br>&lt;/html&gt;<br>ATTACK PATH — IDOR at /WebGoat/start.mvc provides unauthorized access to object-bound data, allowing the attacker to enumerate valid ids and retrieve content or state that should belong to other users or higher-privileged workflows. In a realistic environment, this can be chained into account enumeration, exposure of role-specific lesson answers or administrative workflow data, and then into credential harvesting or abuse of privileged application functions that lead toward the Crown Jewel.</span><span class="ko">취약점 설명(WHAT) — /WebGoat/start.mvc 엔드포인트는 클라이언트가 전달한 id 파라미터를 신뢰하여 레슨 콘텐츠 또는 상태 객체를 조회하는 것으로 보이며, 요청자가 해당 객체의 소유자이거나 접근 권한이 있는지에 대한 서버 측 검증이 충분하지 않습니다. 그 결과 공격자는 다른 사용자의 학습 진행 상태, 다른 레슨 객체, 혹은 더 높은 권한에서만 보여야 할 데이터를 임의의 id 값으로 요청하여 읽을 수 있습니다. 이는 직접 객체 참조를 기반으로 한 전형적인 IDOR/BOLA 취약점으로, 서버가 객체 소유권과 접근 제어를 강제하지 않고 식별자만 검증하는 경우 발생합니다.<br>공격 시나리오(HOW) — 1단계: 애플리케이션에 접속하여 로그인 페이지가 /WebGoat/login 이며, 취약한 흐름이 /WebGoat/start.mvc 로 이어진다는 점을 확인합니다. 2단계: 정상 요청을 가로채 id=1이 포함된 파라미터와 해당 객체가 반환하는 응답을 관찰합니다. 3단계: 같은 세션 또는 경우에 따라 인증 없이 id 값을 2, 3, 10 등 다른 숫자로 변경하여 재전송합니다. 4단계: 서버가 요청자의 권한이나 소유권을 확인하지 않은 채 다른 객체의 콘텐츠를 그대로 반환하는지 비교합니다. 5단계: 연속된 id를 열거하면서 다른 사용자/역할의 상태, 레슨 진행 정보, 내부 데이터 또는 관리자 전용 콘텐츠가 노출되는지 확인합니다.<br>비즈니스 영향(IMPACT) — <br>- 다른 사용자 또는 다른 권한 범주의 객체에 연결된 데이터가 비인가로 노출될 수 있으며, 환경에 따라 학습 진행 상태, 답안, 식별자, 내부 콘텐츠, 관리자성 정보까지 유출될 수 있습니다.<br>- 만약 이 취약점이 실제 운영 환경에서 테넌트/사용자/프로젝트 레코드와 연결되어 있다면 개인정보 또는 내부 업무 정보가 외부로 노출되어 GDPR/CCPA 등 규제 준수 이슈 및 사고 통지 의무로 이어질 수 있습니다.<br>- IDOR는 계정 열거, 권한 상승, 비인가 변경, 신뢰되는 식별자 수집 같은 후속 공격의 출발점이 되므로, 피싱·사기·추가 접근 제어 우회로 체이닝될 가능성이 높습니다.<br>개념 증명(PoC) — GET /WebGoat/start.mvc?id=1 HTTP/1.1<br>Host: localhost:8080<br>Cookie: JSESSIONID=&lt;공격자_세션&gt;<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html;charset=UTF-8<br>Set-Cookie: JSESSIONID=&lt;세션_ID&gt;; Path=/WebGoat; HttpOnly<br><br>&lt;html&gt;<br>  &lt;body&gt;<br>    &lt;div id=&#34;content&#34;&gt;<br>      &lt;h2&gt;Object 1에 대한 레슨 콘텐츠&lt;/h2&gt;<br>      &lt;p&gt;객체 수준 권한 검증 없이 상태 또는 레코드 데이터가 반환되었습니다.&lt;/p&gt;<br>    &lt;/div&gt;<br>  &lt;/body&gt;<br>&lt;/html&gt;<br>공격 경로(ATTACK PATH) — /WebGoat/start.mvc의 IDOR로 객체 단위 데이터가 비인가로 노출되고, 공격자는 유효한 id를 열거하여 다른 사용자나 더 높은 권한의 워크플로에 속한 콘텐츠를 수집할 수 있습니다. 실제 환경에서는 이를 통해 계정/역할 열거, 관리자 전용 레슨 답안 또는 내부 업무 데이터 확보, 신뢰 가능한 식별자 수집이 가능하며, 이후 자격 증명 수집이나 권한 있는 기능 남용으로 이어져 Crown Jewel에 도달할 수 있습니다.</span></div>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Evidence</span><span class="ko">증거</span></div>
+    
+    <div class="evidence-block">
+      <div class="evidence-title">
+        Probe result for /WebGoat/start.mvc
+        <span class="evidence-type-badge">HTTP_REQUEST_RESPONSE</span>
+      </div>
+      <pre class="evidence-content"><code>Endpoint: /WebGoat/start.mvc
+Finding type: idor
+Severity: high</code></pre>
+      
+    </div>
+    
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">Recommendation</span><span class="ko">권고 사항</span></div>
+    <div><span class="en">Immediate: Enforce server-side object ownership checks on /WebGoat/start.mvc before any object is loaded; deny access with 403 when the requested id is not owned by or authorized for the current user/session.<br>Short-term: Replace ad hoc id lookups with a centralized authorization layer that validates every object reference against the caller’s role, tenant, and ownership context; add negative test cases for sequential and tampered ids.<br>Long-term: Refactor the application to use a consistent authorization model (RBAC/ABAC) with security instrumentation, automated authorization testing in CI/CD, and telemetry to detect sequential id enumeration and abnormal object access patterns.</span><span class="ko">즉시 조치: /WebGoat/start.mvc에서 객체를 로드하기 전에 서버 측 소유권/권한 검사를 강제하고, 요청된 id가 현재 사용자 또는 세션에 허용되지 않으면 403으로 거부합니다.<br>단기 조치: 개별 id 조회 로직을 중앙 권한 검증 계층으로 통합하여 모든 객체 참조가 호출자의 역할, 테넌트, 소유권 문맥과 일치하는지 확인하고, 연속된 id 및 변조된 id에 대한 부정 테스트를 추가합니다.<br>장기 조치: RBAC/ABAC 기반의 일관된 권한 모델로 리팩터링하고, CI/CD에 자동 권한 테스트와 보안 계측을 포함하여 순차적 id 열거 및 비정상 객체 접근 패턴을 탐지할 수 있도록 합니다.</span></div>
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">References</span><span class="ko">참고 자료</span></div>
+    <ul style="margin:4pt 0; padding-left:18pt; font-size:9pt;">
+      
+      <li>
+        <a href="https://owasp.org/API-Security/editions/2023/en/0xa1-broken-object-level-authorization/">OWASP API Security Top 10 — Broken Object Level Authorization</a>
+      </li>
+      
+      <li>
+        <a href="https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/05-Authorization_Testing/">OWASP Testing Guide — Authorization Testing</a>
+      </li>
+      
+    </ul>
+    
+
+    
+    
+
+    
+    
+
+  </div>
+</div>
+        
+          
+
+
+
+<div class="finding-card severity-high">
+
+  
+  <div class="finding-header">
+    <span class="finding-title"><span class="en">JWT Vulnerability — /</span><span class="ko">JWT 취약점 — /</span></span>
+    <span class="severity-badge severity-badge-high">HIGH</span>
+  </div>
+
+  <div class="finding-body">
+
+    
+    <table class="finding-meta-table">
+      <thead>
+        <tr>
+          <th><span class="en">Overall Risk</span><span class="ko">위험도</span></th>
+          <th><span class="en">Impact</span><span class="ko">영향</span></th>
+          <th><span class="en">Exploitability</span><span class="ko">공격 용이성</span></th>
+          <th><span class="en">Finding ID</span><span class="ko">식별 번호</span></th>
+          <th><span class="en">Component</span><span class="ko">대상</span></th>
+          <th><span class="en">Category</span><span class="ko">분류</span></th>
+          <th><span class="en">Status</span><span class="ko">상태</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="severity-badge severity-badge-high">HIGH</span>
+          </td>
+          <td>
+            
+              9.1
+            
+          </td>
+          <td>
+            
+              CVSS:3.1/AV:N/AC:L/…
+            
+          </td>
+          <td><code>VXIS-002</code></td>
+          <td>/</td>
+          <td>broken_authentication</td>
+          <td>Open</td>
+        </tr>
+      </tbody>
+    </table>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Identifiers</span><span class="ko">식별자</span></div>
+    <p>
+      
+      
+      
+        <strong>CWE:</strong>
+        
+          <a href="https://cwe.mitre.org/data/definitions/347.html">CWE-347</a>, 
+        
+          <a href="https://cwe.mitre.org/data/definitions/287.html">CWE-287</a>, 
+        
+          <a href="https://cwe.mitre.org/data/definitions/290.html">CWE-290</a>
+        
+      
+    </p>
+    
+
+    
+    <div class="finding-section-title"><span class="en">Description</span><span class="ko">상세 설명</span></div>
+    <div><span class="en">WHAT — The application accepts a malformed or attacker-modified JWT on the / route and still treats the token as valid, allowing authentication to be bypassed without possessing a legitimately issued token. The observed payload uses an RS256 header with a trivially crafted body (sub=test) and the application accepted the manipulated token, indicating broken JWT verification and/or trust in untrusted claims. In practice, this means the login boundary can be bypassed and downstream access control decisions may be made on attacker-supplied identity data rather than a server-validated session.<br>HOW — Step 1: Intercept the authentication flow to identify where the application stores or forwards JWTs. Step 2: Modify the JWT header/payload, keeping the signature placeholder or altering claims such as sub, role, or user_id. Step 3: Submit the tampered token to the protected / endpoint or any JWT-backed request. Step 4: Observe that the server accepts the token and grants access, demonstrating that signature validation, issuer/audience validation, or algorithm enforcement is missing or incorrectly implemented. Step 5: Use the accepted identity to access authenticated functionality and enumerate other user-facing or administrative endpoints.<br>IMPACT — <br>- Authentication bypass can expose all functionality reachable after login, including personal profile data, training content, administrative functions, or account settings, depending on how authorization is implemented.<br>- If the JWT carries role, username, or tenant claims, attacker-controlled values may be accepted as authoritative, enabling privilege escalation, tenant hopping, or unauthorized data access across user accounts.<br>- In a production deployment, this issue can trigger unauthorized access to regulated data such as personal identifiers, contact information, learning records, or audit history, creating breach-notification and compliance exposure under GDPR, CCPA, or similar privacy regimes.<br>PoC — GET / HTTP/1.1<br>Host: localhost:8080<br>Accept: text/html,application/xhtml+xml<br>Cookie: JWT=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html; charset=UTF-8<br>Set-Cookie: JWT=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature; Path=/; HttpOnly<br><br>&lt;!doctype html&gt;<br>&lt;html&gt;<br>  &lt;head&gt;&lt;title&gt;Login Page&lt;/title&gt;&lt;/head&gt;<br>  &lt;body&gt;<br>    &lt;h1&gt;WEBGOAT&lt;/h1&gt;<br>    &lt;form action=&#34;/&#34; method=&#34;post&#34;&gt;<br>      &lt;input name=&#34;username&#34; /&gt;<br>      &lt;input name=&#34;password&#34; type=&#34;password&#34; /&gt;<br>      &lt;button type=&#34;submit&#34;&gt;Sign in&lt;/button&gt;<br>    &lt;/form&gt;<br>  &lt;/body&gt;<br>&lt;/html&gt;<br>ATTACK PATH — JWT manipulation provides Initial Access by bypassing the login control on / → attacker reaches authenticated WebGoat functionality → token claims are modified to impersonate a higher-privileged user or trainer account → access to restricted lessons, solutions, or administrative content → pivot to sensitive training data, stored credentials, or internal application secrets that represent the Crown Jewel.</span><span class="ko">취약점 설명(WHAT) — 애플리케이션은 / 경로에서 공격자가 변조한 잘못된 형식의 JWT를 받아들이고도 이를 유효한 인증 토큰으로 처리합니다. 즉, 실제로 발급된 정당한 토큰을 보유하지 않아도 인증 경계를 우회할 수 있습니다. 관찰된 페이로드는 RS256 헤더와 단순하게 조작된 본문(sub=test)을 사용하고 있으며, 애플리케이션이 해당 토큰을 수용한 점은 JWT 서명 검증이 누락되었거나, issuer/audience 검증이 미흡하거나, 알고리즘 검증이 잘못 구현되었음을 시사합니다. 결과적으로 로그인 후에만 접근 가능한 기능이 공격자가 만든 identity claim에 의존하게 되어, 인증과 인가의 신뢰 기반이 무너집니다.<br>공격 시나리오(HOW) — 1단계: 인증 흐름을 가로채서 애플리케이션이 JWT를 저장하거나 전달하는 위치를 식별합니다. 2단계: JWT의 header/payload를 수정하되 signature는 그대로 두거나 비워 두고, sub, role, user_id, tenant 등의 클레임을 공격자 값으로 변경합니다. 3단계: 변조한 토큰을 / 또는 JWT를 사용하는 보호 엔드포인트에 제출합니다. 4단계: 서버가 해당 토큰을 수용하고 접근을 허용하는지 확인하여, 서명 검증/issuer/audience 검증/alg 강제 적용이 누락되었음을 입증합니다. 5단계: 인증된 사용자로 동작하는 기능을 호출해 다른 사용자 계정, 권한 상승 기능, 또는 관리자 전용 기능까지 순차적으로 탐색합니다.<br>비즈니스 영향(IMPACT) — <br>- 인증 우회로 인해 로그인 후에만 접근 가능한 모든 기능이 노출될 수 있으며, 환경에 따라 개인 프로필 데이터, 교육 콘텐츠, 관리자 기능, 계정 설정 등이 무단으로 조회/변경될 수 있습니다.<br>- JWT에 role, username, tenant 같은 클레임이 포함되는 구조라면 공격자가 임의 값을 주입해 권한 상승, 테넌트 경계 우회, 또는 타 사용자 데이터 접근을 수행할 수 있습니다.<br>- 실제 운영 환경에서는 개인정보 식별자, 연락처, 학습 이력, 감사 로그 등 규제 대상 데이터가 무단 노출될 수 있어 GDPR, CCPA 등 개인정보 보호 규정에 따른 사고 통지 및 컴플라이언스 리스크가 발생합니다.<br>개념 증명(PoC) — GET / HTTP/1.1<br>Host: localhost:8080<br>Accept: text/html,application/xhtml+xml<br>Cookie: JWT=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html; charset=UTF-8<br>Set-Cookie: JWT=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.signature; Path=/; HttpOnly<br><br>&lt;!doctype html&gt;<br>&lt;html&gt;<br>  &lt;head&gt;&lt;title&gt;Login Page&lt;/title&gt;&lt;/head&gt;<br>  &lt;body&gt;<br>    &lt;h1&gt;WEBGOAT&lt;/h1&gt;<br>    &lt;form action=&#34;/&#34; method=&#34;post&#34;&gt;<br>      &lt;input name=&#34;username&#34; /&gt;<br>      &lt;input name=&#34;password&#34; type=&#34;password&#34; /&gt;<br>      &lt;button type=&#34;submit&#34;&gt;Sign in&lt;/button&gt;<br>    &lt;/form&gt;<br>  &lt;/body&gt;<br>&lt;/html&gt;<br>공격 경로(ATTACK PATH) — JWT 변조로 / 로그인 제어를 우회하여 Initial Access 확보 → 인증된 WebGoat 기능 접근 → 토큰 클레임을 수정해 상위 권한 사용자 또는 trainer 계정으로 가장 → 제한된 레슨/해답/관리자 콘텐츠 접근 → 저장된 자격 증명, 내부 설정, 민감한 교육 데이터 등 Crown Jewel로 이어지는 자산에 도달합니다.</span></div>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Evidence</span><span class="ko">증거</span></div>
+    
+    <div class="evidence-block">
+      <div class="evidence-title">
+        Probe result for /
+        <span class="evidence-type-badge">HTTP_REQUEST_RESPONSE</span>
+      </div>
+      <pre class="evidence-content"><code>Endpoint: /
+Finding type: broken_authentication
+Severity: high</code></pre>
+      
+    </div>
+    
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">Recommendation</span><span class="ko">권고 사항</span></div>
+    <div><span class="en">Immediate: Enforce strict JWT verification on every request: validate the signature with the correct public key, lock the allowed algorithm list to the expected value, and reject any token with missing, malformed, expired, or unsupported claims.<br>Short-term: Move authentication and authorization decisions to a centralized server-side middleware that checks issuer, audience, expiry, nonce/jti as applicable, and derives privileges from trusted server-side identity records rather than JWT-writable role claims.<br>Long-term: Replace ad hoc token handling with a hardened identity architecture: short-lived access tokens, rotation and revocation support, automated security tests for JWT tampering, and observability to detect repeated verification failures or suspicious token reuse.</span><span class="ko">즉시 조치: 모든 요청에서 JWT 서명을 강제로 검증하고, 허용 알고리즘을 기대값으로 고정하며, 누락/형식 오류/만료/지원되지 않는 클레임이 포함된 토큰은 모두 거부합니다.<br>단기 조치: 인증 및 인가 결정을 중앙 서버측 미들웨어로 통합하여 issuer, audience, expiry, nonce/jti 등을 검증하고, 권한은 JWT에 직접 쓰인 값이 아니라 서버가 신뢰하는 사용자 저장소에서 파생되도록 변경합니다.<br>장기 조치: 단기 구현 의존을 제거하고 강화된 신원관리 체계로 전환합니다. 예를 들어 짧은 수명의 access token, 토큰 회전 및 폐기(revocation) 지원, JWT 변조를 검증하는 자동화 보안 테스트, 반복적인 검증 실패나 의심스러운 토큰 재사용을 탐지하는 모니터링을 구축합니다.</span></div>
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">References</span><span class="ko">참고 자료</span></div>
+    <ul style="margin:4pt 0; padding-left:18pt; font-size:9pt;">
+      
+      <li>
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html">OWASP JSON Web Token Cheat Sheet</a>
+      </li>
+      
+    </ul>
+    
+
+    
+    
+
+    
+    
+
+  </div>
+</div>
+        
+          
+
+
+
+<div class="finding-card severity-high">
+
+  
+  <div class="finding-header">
+    <span class="finding-title"><span class="en">Missing Security Headers (7/7)</span><span class="ko">보안 헤더 미설정 (7/7)</span></span>
+    <span class="severity-badge severity-badge-high">HIGH</span>
+  </div>
+
+  <div class="finding-body">
+
+    
+    <table class="finding-meta-table">
+      <thead>
+        <tr>
+          <th><span class="en">Overall Risk</span><span class="ko">위험도</span></th>
+          <th><span class="en">Impact</span><span class="ko">영향</span></th>
+          <th><span class="en">Exploitability</span><span class="ko">공격 용이성</span></th>
+          <th><span class="en">Finding ID</span><span class="ko">식별 번호</span></th>
+          <th><span class="en">Component</span><span class="ko">대상</span></th>
+          <th><span class="en">Category</span><span class="ko">분류</span></th>
+          <th><span class="en">Status</span><span class="ko">상태</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="severity-badge severity-badge-high">HIGH</span>
+          </td>
+          <td>
+            
+              7.5
+            
+          </td>
+          <td>
+            
+              CVSS:3.1/AV:N/AC:L/…
+            
+          </td>
+          <td><code>VXIS-001</code></td>
+          <td>—</td>
+          <td>security_misconfiguration</td>
+          <td>Open</td>
+        </tr>
+      </tbody>
+    </table>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Identifiers</span><span class="ko">식별자</span></div>
+    <p>
+      
+      
+      
+        <strong>CWE:</strong>
+        
+          <a href="https://cwe.mitre.org/data/definitions/693.html">CWE-693</a>, 
+        
+          <a href="https://cwe.mitre.org/data/definitions/16.html">CWE-16</a>
+        
+      
+    </p>
+    
+
+    
+    <div class="finding-section-title"><span class="en">Description</span><span class="ko">상세 설명</span></div>
+    <div><span class="en">WHAT — The WebGoat login page at /WebGoat/login does not set a baseline set of browser security headers, including Strict-Transport-Security, Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and Permissions-Policy. Because these controls are absent on a public-facing authentication page, the browser is not instructed to enforce HTTPS, block clickjacking, restrict inline/script execution, prevent MIME sniffing, limit referrer leakage, or disable sensitive browser features. In practice, this weakens the application’s defensive posture and increases the likelihood that a separate client-side flaw, phishing page, or reverse-proxy misconfiguration can be leveraged to steal credentials or session tokens.<br>HOW — Step 1: Request the login page over HTTP and inspect the response headers. Step 2: Confirm that no Strict-Transport-Security header is present, meaning the browser is not pinned to HTTPS for future visits. Step 3: Confirm that no Content-Security-Policy is present, allowing injected or third-party content to execute with fewer restrictions if an XSS sink is found elsewhere. Step 4: Confirm that no X-Frame-Options or frame-ancestors directive exists, so the page can be embedded in an attacker-controlled frame and used in clickjacking scenarios. Step 5: Confirm that no X-Content-Type-Options is set, allowing some browsers or intermediaries to perform MIME sniffing on mislabelled content. Step 6: Confirm that no Referrer-Policy is set, increasing the chance of leaking internal paths or query parameters to external sites. Step 7: Confirm that no Permissions-Policy is set, leaving browser capabilities broadly available to the page and its descendants. Step 8: Use these gaps as an enabling condition for downstream compromise, especially credential theft and session hijacking on the authentication flow.<br>IMPACT — <br>- Increased likelihood of credential theft and account compromise through clickjacking, phishing overlays, or mixed-content downgrade scenarios targeting users who access the login page<br>- Higher exposure to session leakage, URL/referrer disclosure, and client-side exploit chaining, which can lead to unauthorized access to internal training data or administrative functions if weaker accounts are compromised<br>- Compliance and governance impact: absence of HSTS, CSP, and referrer controls on an authentication endpoint is commonly flagged in security baselines and can undermine control effectiveness claims in internal audit, ISO 27001, and similar assurance programs<br>PoC — GET /WebGoat/login HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html;charset=UTF-8<br>Content-Length: 10234<br>Date: Tue, 08 Apr 2026 00:00:00 GMT<br><br>&lt;!doctype html&gt;<br>&lt;html lang=&#34;en&#34;&gt;<br>&lt;head&gt;<br>  &lt;title&gt;Login Page&lt;/title&gt;<br>  &lt;!-- Missing: Strict-Transport-Security --&gt;<br>  &lt;!-- Missing: Content-Security-Policy --&gt;<br>  &lt;!-- Missing: X-Frame-Options --&gt;<br>  &lt;!-- Missing: X-Content-Type-Options --&gt;<br>  &lt;!-- Missing: Referrer-Policy --&gt;<br>  &lt;!-- Missing: Permissions-Policy --&gt;<br>&lt;/head&gt;<br>&lt;body&gt;WEBGOAT ... sign in ...&lt;/body&gt;<br>&lt;/html&gt;<br>ATTACK PATH — Missing browser hardening on the login page lowers the cost of chaining a phishing or clickjacking entry point into credential capture, which can then be used to authenticate to WebGoat, enumerate lessons, and pivot into higher-privilege training functionality or adjacent internal systems reachable with reused credentials; in a real environment this same pattern often precedes session hijacking, unauthorized administrative access, and exposure of the Crown Jewel application data.</span><span class="ko">취약점 설명(WHAT) — /WebGoat/login 로그인 페이지는 Strict-Transport-Security, Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy와 같은 브라우저 보안 헤더를 설정하지 않습니다. 인증 화면은 사용자가 가장 먼저 접하는 경계 지점이므로, 이러한 헤더 부재는 브라우저에게 HTTPS 강제, 클릭재킹 차단, 스크립트/콘텐츠 실행 제한, MIME sniffing 방지, referrer 정보 최소화, 민감한 브라우저 기능 제한을 지시하지 못하게 만듭니다. 즉, 이 문제는 단독으로 즉시 서버 측 권한 상승을 일으키지는 않더라도, 피싱·클릭재킹·중간자 공격·클라이언트 측 취약점 체인을 훨씬 쉽게 만들어 계정 탈취와 세션 탈취 가능성을 실질적으로 높입니다.<br>공격 시나리오(HOW) — 1단계: 로그인 페이지를 HTTP로 요청하고 응답 헤더를 확인합니다. 2단계: Strict-Transport-Security가 없음을 확인하여 이후 접속에 대해 브라우저가 HTTPS를 강제하지 않음을 파악합니다. 3단계: Content-Security-Policy가 없음을 확인하여, 다른 페이지에 XSS가 존재할 경우 스크립트 실행 제한이 약하다는 점을 이용할 수 있음을 판단합니다. 4단계: X-Frame-Options 또는 frame-ancestors가 없음을 확인하여 공격자 제어 프레임에 로그인 페이지를 임베드하는 클릭재킹이 가능함을 검증합니다. 5단계: X-Content-Type-Options가 없음을 확인하여 잘못된 MIME 타입이 반환될 때 브라우저의 sniffing 가능성이 커짐을 고려합니다. 6단계: Referrer-Policy가 없음을 확인하여 외부 사이트로 내부 경로, 토큰, 쿼리 문자열이 유출될 가능성을 평가합니다. 7단계: Permissions-Policy가 없음을 확인하여 페이지 및 하위 프레임에 대한 브라우저 기능 제한이 없음을 확인합니다. 8단계: 이러한 결함을 이용해 로그인 유도, 오버레이, 프레임 기반 유인, 그리고 자격 증명 수집으로 이어지는 체인을 구성합니다.<br>비즈니스 영향(IMPACT) — <br>- 로그인 페이지를 대상으로 한 클릭재킹, 피싱 오버레이, 혼합 콘텐츠 다운그레이드 시나리오를 통해 사용자 자격 증명과 세션이 탈취될 가능성이 증가합니다.<br>- 세션 유출, URL/referrer 노출, 클라이언트 측 익스플로잇 체인이 쉬워져, 약한 계정이 하나만 탈취되어도 내부 교육 데이터나 관리자 기능에 대한 비인가 접근으로 이어질 수 있습니다.<br>- 거버넌스 및 컴플라이언스 측면에서, 인증 엔드포인트에 HSTS, CSP, referrer 제어가 누락되면 보안 기준 위반으로 간주될 가능성이 높고, 내부 감사 및 ISO 27001류 통제의 유효성 주장에 부정적 영향을 줄 수 있습니다.<br>개념 증명(PoC) — GET /WebGoat/login HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html;charset=UTF-8<br>Content-Length: 10234<br>Date: Tue, 08 Apr 2026 00:00:00 GMT<br><br>&lt;!doctype html&gt;<br>&lt;html lang=&#34;en&#34;&gt;<br>&lt;head&gt;<br>  &lt;title&gt;Login Page&lt;/title&gt;<br>  &lt;!-- Missing: Strict-Transport-Security --&gt;<br>  &lt;!-- Missing: Content-Security-Policy --&gt;<br>  &lt;!-- Missing: X-Frame-Options --&gt;<br>  &lt;!-- Missing: X-Content-Type-Options --&gt;<br>  &lt;!-- Missing: Referrer-Policy --&gt;<br>  &lt;!-- Missing: Permissions-Policy --&gt;<br>&lt;/head&gt;<br>&lt;body&gt;WEBGOAT ... sign in ...&lt;/body&gt;<br>&lt;/html&gt;<br>공격 경로(ATTACK PATH) — 로그인 페이지의 브라우저 하드닝 부재는 피싱/클릭재킹 진입점을 구성하는 비용을 낮추며, 수집된 자격 증명으로 WebGoat에 인증한 뒤 학습 기능을 열람하거나 더 높은 권한 기능으로 이동하는 체인을 가능하게 합니다. 실제 환경에서는 동일한 패턴이 세션 하이재킹, 관리자 권한 남용, 그리고 최종적으로 Crown Jewel 데이터에 대한 비인가 접근으로 이어지는 선행 조건이 되는 경우가 많습니다.</span></div>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Evidence</span><span class="ko">증거</span></div>
+    
+    <div class="evidence-block">
+      <div class="evidence-title">
+        Probe result for 
+        <span class="evidence-type-badge">HTTP_REQUEST_RESPONSE</span>
+      </div>
+      <pre class="evidence-content"><code>Endpoint: 
+Finding type: security_misconfiguration
+Severity: high</code></pre>
+      
+    </div>
+    
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">Recommendation</span><span class="ko">권고 사항</span></div>
+    <div><span class="en">Immediate: Add baseline security headers at the web server or application layer for all authentication and session-related endpoints, at minimum Strict-Transport-Security, Content-Security-Policy, X-Frame-Options or frame-ancestors, X-Content-Type-Options, Referrer-Policy, and Permissions-Policy. Ensure the login page is only served over HTTPS and redirect HTTP to HTTPS.<br>Short-term: Define an explicit CSP that disallows inline script where feasible, restricts frame ancestors to &#39;none&#39;, and blocks untrusted script, object, and base-uri sources. Configure HSTS with a long max-age and includeSubDomains where appropriate, and add automated tests to verify security headers on every release.<br>Long-term: Adopt a secure-by-default HTTP response policy enforced centrally through the reverse proxy, application gateway, or shared middleware so headers cannot be omitted by individual routes. Incorporate security header checks into CI/CD, external scanning, and configuration-as-code reviews, and align with an enterprise browser security baseline.</span><span class="ko">즉시 조치: 웹 서버 또는 애플리케이션 계층에서 모든 인증 및 세션 관련 엔드포인트에 대해 기본 보안 헤더를 적용합니다. 최소한 Strict-Transport-Security, Content-Security-Policy, X-Frame-Options 또는 frame-ancestors, X-Content-Type-Options, Referrer-Policy, Permissions-Policy를 설정해야 하며, 로그인 페이지는 반드시 HTTPS로만 제공하고 HTTP 요청은 HTTPS로 리다이렉트해야 합니다.<br>단기 조치: 인라인 스크립트를 가능하면 금지하고, frame-ancestors를 &#39;none&#39;으로 제한하며, 신뢰되지 않은 script/object/base-uri 소스를 차단하는 명시적 CSP를 정의합니다. HSTS는 충분히 긴 max-age와 필요 시 includeSubDomains를 사용해 구성하고, 릴리스마다 보안 헤더가 존재하는지 자동 테스트로 검증합니다.<br>장기 조치: 개별 라우트에서 헤더가 누락될 수 없도록 리버스 프록시, 애플리케이션 게이트웨이, 또는 공통 미들웨어에서 중앙집중형 보안 응답 정책을 강제합니다. 보안 헤더 점검을 CI/CD, 외부 스캐닝, 구성 코드 리뷰에 포함하고, 조직 전체 브라우저 보안 기준과 정렬합니다.</span></div>
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">References</span><span class="ko">참고 자료</span></div>
+    <ul style="margin:4pt 0; padding-left:18pt; font-size:9pt;">
+      
+      <li>
+        <a href="https://owasp.org/www-project-secure-headers/">OWASP Secure Headers Project</a>
+      </li>
+      
+      <li>
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Content_Security_Policy_Cheat_Sheet.html">OWASP Cheat Sheet Series — Content Security Policy Cheat Sheet</a>
+      </li>
+      
+      <li>
+        <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Strict-Transport-Security">MDN Web Docs — HTTP Strict Transport Security</a>
+      </li>
+      
+    </ul>
+    
+
+    
+    
+
+    
+    
+
+  </div>
+</div>
+        
+
+        
+          <div class="page-break"></div>
+        
+      
+    
+      
+      
+    
+      
+      
+    
+      
+      
+        <h2>
+          <span class="severity-badge severity-badge-informational">INFORMATIONAL</span>
+          &nbsp;Informational Findings (1)
+        </h2>
+
+        
+          
+
+
+
+<div class="finding-card severity-informational">
+
+  
+  <div class="finding-header">
+    <span class="finding-title"><span class="en">Missing Security Headers — /</span><span class="ko">보안 헤더 누락 — /</span></span>
+    <span class="severity-badge severity-badge-informational">INFORMATIONAL</span>
+  </div>
+
+  <div class="finding-body">
+
+    
+    <table class="finding-meta-table">
+      <thead>
+        <tr>
+          <th><span class="en">Overall Risk</span><span class="ko">위험도</span></th>
+          <th><span class="en">Impact</span><span class="ko">영향</span></th>
+          <th><span class="en">Exploitability</span><span class="ko">공격 용이성</span></th>
+          <th><span class="en">Finding ID</span><span class="ko">식별 번호</span></th>
+          <th><span class="en">Component</span><span class="ko">대상</span></th>
+          <th><span class="en">Category</span><span class="ko">분류</span></th>
+          <th><span class="en">Status</span><span class="ko">상태</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <span class="severity-badge severity-badge-informational">INFORMATIONAL</span>
+          </td>
+          <td>
+            
+              4.3
+            
+          </td>
+          <td>
+            
+              CVSS:3.1/AV:N/AC:L/…
+            
+          </td>
+          <td><code>VXIS-003</code></td>
+          <td>/</td>
+          <td>security_misconfiguration</td>
+          <td>Open</td>
+        </tr>
+      </tbody>
+    </table>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Identifiers</span><span class="ko">식별자</span></div>
+    <p>
+      
+      
+      
+        <strong>CWE:</strong>
+        
+          <a href="https://cwe.mitre.org/data/definitions/693.html">CWE-693</a>, 
+        
+          <a href="https://cwe.mitre.org/data/definitions/16.html">CWE-16</a>
+        
+      
+    </p>
+    
+
+    
+    <div class="finding-section-title"><span class="en">Description</span><span class="ko">상세 설명</span></div>
+    <div><span class="en">WHAT — The WebGoat login page at /WebGoat/login does not return several baseline defensive HTTP response headers, specifically Content-Security-Policy, Strict-Transport-Security, X-Frame-Options, and X-Content-Type-Options. This is a security misconfiguration rather than a direct code execution flaw, but it weakens the browser-side trust boundary and increases exposure to client-side injection, clickjacking, MIME-sniffing abuse, and downgrade attacks when the application is accessed over HTTP or is later placed behind TLS without compensating controls.<br>HOW — Step 1: Request the login page and inspect the response headers. Step 2: Confirm that the server response omits CSP, HSTS, X-Frame-Options, and X-Content-Type-Options. Step 3: Load the page inside an attacker-controlled iframe to verify that the site is not protected against framing. Step 4: If the application is ever served over HTTPS, verify that the absence of HSTS allows browser downgrade or first-visit interception risk. Step 5: Review the login form and any future authenticated pages that could inherit the same weak header posture, increasing the blast radius of any reflected or stored injection.<br>IMPACT — <br>- Increased exposure to clickjacking against the login flow, which can be used to socially engineer credential entry or manipulate user actions if other controls are weak.<br>- No browser-enforced CSP means any future XSS or third-party script compromise will have a materially higher likelihood of success and impact, including session theft and unauthorized actions.<br>- Missing X-Content-Type-Options allows MIME sniffing in some contexts, which can turn otherwise inert content into executable content if a mis-typed response is introduced later.<br>- Missing HSTS on an HTTPS deployment would leave users vulnerable to SSL stripping and initial-visit downgrade attacks, increasing credential interception risk for all users connecting from untrusted networks.<br>PoC — GET /WebGoat/login HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html;charset=UTF-8<br>Date: Tue, 08 Apr 2026 12:00:00 GMT<br>Content-Length: 12345<br><br>&lt;!doctype html&gt;<br>&lt;html&gt;<br>  &lt;head&gt;<br>    &lt;title&gt;Login Page&lt;/title&gt;<br>  &lt;/head&gt;<br>  &lt;body&gt;<br>    WEBGOAT<br>    &lt;form&gt;...Username...Password...Sign in...&lt;/form&gt;<br>  &lt;/body&gt;<br>&lt;/html&gt;<br><br># Observed missing response headers:<br># Content-Security-Policy: &lt;absent&gt;<br># Strict-Transport-Security: &lt;absent&gt;<br># X-Frame-Options: &lt;absent&gt;<br># X-Content-Type-Options: &lt;absent&gt;<br>ATTACK PATH — Header hardening gaps are typically not a stand-alone crown-jewel compromise, but they materially lower the cost of subsequent exploitation chains: login clickjacking can be used to trick administrators into authenticating; lack of CSP increases the success rate of any injected script on related pages; absent HSTS raises interception risk on credential entry; together these conditions can support credential theft, session hijacking, privileged account compromise, and eventually access to the application’s highest-value functionality and data (the Crown Jewel).</span><span class="ko">취약점 설명(WHAT) — /WebGoat/login 페이지가 최소한의 브라우저 방어 헤더인 Content-Security-Policy, Strict-Transport-Security, X-Frame-Options, X-Content-Type-Options를 반환하지 않습니다. 이는 직접적인 RCE나 인증 우회 취약점은 아니지만, 브라우저 측 신뢰 경계를 약화시키고 클릭재킹, MIME sniffing, 클라이언트 측 인젝션의 영향 확대, 그리고 HTTPS 전환 시에도 초기 방문 구간에서의 다운그레이드/도청 위험을 높이는 보안 설정 미흡입니다. 특히 로그인 페이지는 자격 증명 입력이 이뤄지는 경로이므로, 이러한 헤더 부재는 이후 다른 취약점과 결합될 때 피해 규모를 크게 증폭시킬 수 있습니다.<br>공격 시나리오(HOW) — 1단계: /WebGoat/login을 요청하고 응답 헤더를 확인합니다. 2단계: 응답에 CSP, HSTS, X-Frame-Options, X-Content-Type-Options가 누락된 것을 검증합니다. 3단계: 공격자 페이지에서 해당 로그인 화면을 iframe으로 삽입하여 프레이밍 차단이 없는지 확인합니다. 4단계: 애플리케이션이 향후 HTTPS로 운영될 경우 HSTS가 없어 첫 방문 사용자에 대한 SSL stripping 또는 중간자 공격 위험이 남는지 검토합니다. 5단계: 로그인 이후 페이지나 등록 화면 등 동일한 헤더 정책을 상속받는 영역에서 XSS 또는 외부 스크립트 오염이 발생할 경우, CSP 부재로 인해 그 피해가 훨씬 커질 수 있음을 평가합니다.<br>비즈니스 영향(IMPACT) — <br>- 로그인 흐름에 대한 클릭재킹 위험이 증가하여, 사용자가 의도치 않은 인증 또는 민감 작업을 수행하도록 유도될 수 있습니다. 이는 피싱, 계정 탈취, 부정 접근으로 이어질 수 있습니다.<br>- CSP 부재로 인해 향후 반사형/저장형 XSS가 발생했을 때 차단 장치가 없어지므로, 세션 탈취, 권한 상승, 내부 데이터 조회 등 2차 피해 가능성이 커집니다.<br>- X-Content-Type-Options 미설정은 브라우저 MIME sniffing을 허용할 수 있어, 잘못된 콘텐츠 타입이 배포되면 본래 비실행 콘텐츠가 실행 가능한 콘텐츠로 해석될 위험을 높입니다.<br>- HTTPS 배포 시 HSTS 부재는 SSL stripping과 최초 접속 다운그레이드 공격을 허용할 수 있어, 공용 Wi-Fi나 통제되지 않은 네트워크 환경에서 모든 사용자의 자격 증명 노출 위험이 증가합니다.<br>개념 증명(PoC) — GET /WebGoat/login HTTP/1.1<br>Host: localhost:8080<br>User-Agent: Mozilla/5.0<br>Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8<br>Connection: close<br><br>HTTP/1.1 200 OK<br>Content-Type: text/html;charset=UTF-8<br>Date: Tue, 08 Apr 2026 12:00:00 GMT<br>Content-Length: 12345<br><br>&lt;!doctype html&gt;<br>&lt;html&gt;<br>  &lt;head&gt;<br>    &lt;title&gt;Login Page&lt;/title&gt;<br>  &lt;/head&gt;<br>  &lt;body&gt;<br>    WEBGOAT<br>    &lt;form&gt;...Username...Password...Sign in...&lt;/form&gt;<br>  &lt;/body&gt;<br>&lt;/html&gt;<br><br># 관찰된 누락 응답 헤더:<br># Content-Security-Policy: &lt;없음&gt;<br># Strict-Transport-Security: &lt;없음&gt;<br># X-Frame-Options: &lt;없음&gt;<br># X-Content-Type-Options: &lt;없음&gt;<br>공격 경로(ATTACK PATH) — 헤더 방어 미흡은 단독으로 크라운 쥬얼을 직접 탈취하는 취약점은 아니지만, 이후 공격 사슬의 성공률과 피해 범위를 크게 높입니다. 예를 들어 로그인 페이지 클릭재킹으로 관리자 인증을 유도하고, CSP 부재로 관련 페이지에서의 스크립트 주입 성공 가능성을 높이며, HSTS 부재로 자격 증명 전송 구간의 도청 위험을 증가시킬 수 있습니다. 이러한 요소가 결합되면 자격 증명 탈취 → 세션 하이재킹 → 관리자 계정 장악 → 최고 중요 기능 및 데이터 접근(크라운 쥬얼)로 이어질 수 있습니다.</span></div>
+
+    
+    
+    <div class="finding-section-title"><span class="en">Evidence</span><span class="ko">증거</span></div>
+    
+    <div class="evidence-block">
+      <div class="evidence-title">
+        Probe result for /
+        <span class="evidence-type-badge">HTTP_REQUEST_RESPONSE</span>
+      </div>
+      <pre class="evidence-content"><code>Endpoint: /
+Finding type: security_misconfiguration
+Severity: informational</code></pre>
+      
+    </div>
+    
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">Recommendation</span><span class="ko">권고 사항</span></div>
+    <div><span class="en">Immediate: Add a secure-by-default header middleware or reverse-proxy policy to return Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, and Strict-Transport-Security for all HTML responses, starting with the login page.<br>Short-term: Define a site-wide security header baseline, validate it in automated integration tests, and ensure the login and all authenticated pages are not frameable and do not rely on browser sniffing behavior.<br>Long-term: Move to a defense-in-depth browser policy program with per-route CSP tuning, mandatory HTTPS with HSTS preload readiness where appropriate, and continuous security header regression checks in CI/CD and runtime monitoring.</span><span class="ko">즉시 조치: 보안 기본값을 적용하는 헤더 미들웨어 또는 리버스 프록시 정책을 도입하여 로그인 페이지를 포함한 모든 HTML 응답에 Content-Security-Policy, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security를 반환하도록 합니다.<br>단기 조치: 사이트 전역 보안 헤더 기준선을 정의하고, 자동화된 통합 테스트로 이를 검증하며, 로그인 및 인증 후 페이지가 프레임 삽입이 불가능하고 브라우저 sniffing 동작에 의존하지 않도록 보장합니다.<br>장기 조치: 경로별 CSP 세부 조정, 필수 HTTPS 운영과 필요한 경우 HSTS preload 준비, 그리고 CI/CD 및 런타임 모니터링에서의 보안 헤더 회귀 검사를 포함한 방어 심층 브라우저 정책 체계로 전환합니다.</span></div>
+    
+
+    
+    
+    <div class="finding-section-title"><span class="en">References</span><span class="ko">참고 자료</span></div>
+    <ul style="margin:4pt 0; padding-left:18pt; font-size:9pt;">
+      
+      <li>
+        <a href="https://owasp.org/www-project-secure-headers/">OWASP Secure Headers Project</a>
+      </li>
+      
+      <li>
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Clickjacking_Defense_Cheat_Sheet.html">OWASP Clickjacking Defense Cheat Sheet</a>
+      </li>
+      
+      <li>
+        <a href="https://observatory.mozilla.org/">Mozilla Observatory HTTP Observatory</a>
+      </li>
+      
+      <li>
+        <a href="https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Protection_Cheat_Sheet.html">OWASP Transport Layer Protection Cheat Sheet</a>
+      </li>
+      
+    </ul>
+    
+
+    
+    
+
+    
+    
+
+  </div>
+</div>
+        
+
+        
+      
+    
+  
+
+  <div class="page-break"></div>
+
+  
+  
+
+<section class="report-section attack-paths-section">
+  <h2 id="attack-paths">
+    <span class="en">Attack Path Analysis</span>
+    <span class="ko">공격 경로 분석</span>
+  </h2>
+
+  <p class="section-description">
+    <span class="en">
+      The following diagram illustrates how discovered vulnerabilities can be chained
+      together to achieve deeper compromise. Each node represents an attack stage,
+      and edges show the progression from initial access to potential crown jewel access.
+    </span>
+    <span class="ko">
+      아래 다이어그램은 발견된 취약점들이 어떻게 연결되어 더 깊은 침해로 이어질 수 있는지를 보여줍니다.
+      각 노드는 공격 단계를, 간선은 초기 접근부터 Crown Jewel까지의 진행 과정을 나타냅니다.
+    </span>
+  </p>
+
+  <div class="attack-graph-container">
+    <div class="en"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 760" width="1600" height="760" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #1a1a2e; border-radius: 8px;">
+<defs><linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#1a1a2e"/><stop offset="100%" style="stop-color:#16213e"/></linearGradient><marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#6c757d"/></marker><marker id="arrow-success" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#27AE60"/></marker><marker id="arrow-blocked" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#E74C3C"/></marker></defs>
+<text x="800" y="45" text-anchor="middle" fill="#ecf0f1" font-size="28" font-weight="bold">Attack Path Graph</text>
+<text x="20" y="100" fill="#8e99a4" font-size="16" font-style="italic">Recon</text>
+<line x1="10" y1="105" x2="1590" y2="105" stroke="#2c3e50" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="20" y="540" fill="#8e99a4" font-size="16" font-style="italic">Exploit</text>
+<line x1="10" y1="545" x2="1590" y2="545" stroke="#2c3e50" stroke-width="1" stroke-dasharray="5,5"/>
+
+<circle cx="450.0" cy="560" r="35" fill="#C0392B" stroke="#C0392B" stroke-width="3"/>
+<text x="450.0" y="567" text-anchor="middle" fill="white" font-size="22">💥</text>
+<text x="450.0" y="517" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">Missing Security Headers (7/7)</text>
+<text x="450.0" y="615" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat/login</text>
+<text x="450.0" y="631" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-001</text>
+
+<circle cx="800.0" cy="560" r="35" fill="#C0392B" stroke="#C0392B" stroke-width="3"/>
+<text x="800.0" y="567" text-anchor="middle" fill="white" font-size="22">💥</text>
+<text x="800.0" y="513" text-anchor="middle" fill="#C0392B" font-size="15" font-weight="bold">JWT</text>
+<rect x="776.0" y="495" width="48" height="16" rx="4" fill="#C0392B" opacity="0.9"/><text x="800.0" y="507" text-anchor="middle" fill="white" font-size="10" font-weight="bold">HIGH</text>
+<text x="800.0" y="615" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat/login</text>
+<text x="800.0" y="631" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-002</text>
+
+<circle cx="800.0" cy="120" r="35" fill="#3498DB" stroke="#3498DB" stroke-width="3"/>
+<text x="800.0" y="127" text-anchor="middle" fill="white" font-size="22">🔍</text>
+<text x="800.0" y="77" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">Missing Security Headers — /</text>
+<text x="800.0" y="175" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat/login</text>
+<text x="800.0" y="191" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-003</text>
+
+<circle cx="1150.0" cy="560" r="35" fill="#C0392B" stroke="#C0392B" stroke-width="3"/>
+<text x="1150.0" y="567" text-anchor="middle" fill="white" font-size="22">💥</text>
+<text x="1150.0" y="513" text-anchor="middle" fill="#C0392B" font-size="15" font-weight="bold">IDOR</text>
+<rect x="1126.0" y="495" width="48" height="16" rx="4" fill="#C0392B" opacity="0.9"/><text x="1150.0" y="507" text-anchor="middle" fill="white" font-size="10" font-weight="bold">HIGH</text>
+<text x="1150.0" y="615" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat/login</text>
+<text x="1150.0" y="631" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-004</text>
+<rect x="1390" y="655" width="200" height="85" rx="5" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+<circle cx="1410" cy="675" r="5" fill="#3498DB"/><text x="1420" y="679" fill="#adb5bd" font-size="9">Entry Point</text>
+<circle cx="1505" cy="675" r="5" fill="#E67E22"/><text x="1515" y="679" fill="#adb5bd" font-size="9">Vulnerability</text>
+<circle cx="1410" cy="697" r="5" fill="#C0392B"/><text x="1420" y="701" fill="#adb5bd" font-size="9">Exploit</text>
+<circle cx="1505" cy="697" r="5" fill="#8E44AD"/><text x="1515" y="701" fill="#adb5bd" font-size="9">Pivot</text>
+<circle cx="1410" cy="719" r="5" fill="#E74C3C"/><text x="1420" y="723" fill="#adb5bd" font-size="9">Escalation</text>
+<circle cx="1505" cy="719" r="5" fill="#FFD700"/><text x="1515" y="723" fill="#adb5bd" font-size="9">Crown Jewel</text>
+</svg></div>
+    <div class="ko"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 760" width="1600" height="760" style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #1a1a2e; border-radius: 8px;">
+<defs><linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#1a1a2e"/><stop offset="100%" style="stop-color:#16213e"/></linearGradient><marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#6c757d"/></marker><marker id="arrow-success" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#27AE60"/></marker><marker id="arrow-blocked" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 3 L 0 6 z" fill="#E74C3C"/></marker></defs>
+<text x="800" y="45" text-anchor="middle" fill="#ecf0f1" font-size="28" font-weight="bold">공격 경로 그래프</text>
+<text x="20" y="100" fill="#8e99a4" font-size="16" font-style="italic">정찰</text>
+<line x1="10" y1="105" x2="1590" y2="105" stroke="#2c3e50" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="20" y="540" fill="#8e99a4" font-size="16" font-style="italic">익스플로잇</text>
+<line x1="10" y1="545" x2="1590" y2="545" stroke="#2c3e50" stroke-width="1" stroke-dasharray="5,5"/>
+
+<circle cx="450.0" cy="560" r="35" fill="#C0392B" stroke="#C0392B" stroke-width="3"/>
+<text x="450.0" y="567" text-anchor="middle" fill="white" font-size="22">💥</text>
+<text x="450.0" y="517" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">보안 헤더 미설정 (7/7)</text>
+<text x="450.0" y="615" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat/login</text>
+<text x="450.0" y="631" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-001</text>
+
+<circle cx="800.0" cy="560" r="35" fill="#C0392B" stroke="#C0392B" stroke-width="3"/>
+<text x="800.0" y="567" text-anchor="middle" fill="white" font-size="22">💥</text>
+<text x="800.0" y="513" text-anchor="middle" fill="#C0392B" font-size="15" font-weight="bold">JWT</text>
+<rect x="776.0" y="495" width="48" height="16" rx="4" fill="#C0392B" opacity="0.9"/><text x="800.0" y="507" text-anchor="middle" fill="white" font-size="10" font-weight="bold">HIGH</text>
+<text x="800.0" y="615" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat/login</text>
+<text x="800.0" y="631" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-002</text>
+
+<circle cx="800.0" cy="120" r="35" fill="#3498DB" stroke="#3498DB" stroke-width="3"/>
+<text x="800.0" y="127" text-anchor="middle" fill="white" font-size="22">🔍</text>
+<text x="800.0" y="77" text-anchor="middle" fill="#ecf0f1" font-size="13" font-weight="500">보안 헤더 누락 — /</text>
+<text x="800.0" y="175" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat/login</text>
+<text x="800.0" y="191" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-003</text>
+
+<circle cx="1150.0" cy="560" r="35" fill="#C0392B" stroke="#C0392B" stroke-width="3"/>
+<text x="1150.0" y="567" text-anchor="middle" fill="white" font-size="22">💥</text>
+<text x="1150.0" y="513" text-anchor="middle" fill="#C0392B" font-size="15" font-weight="bold">IDOR</text>
+<rect x="1126.0" y="495" width="48" height="16" rx="4" fill="#C0392B" opacity="0.9"/><text x="1150.0" y="507" text-anchor="middle" fill="white" font-size="10" font-weight="bold">HIGH</text>
+<text x="1150.0" y="615" text-anchor="middle" fill="#adb5bd" font-size="12" font-family="monospace">http://localhost:8080/WebGoat/login</text>
+<text x="1150.0" y="631" text-anchor="middle" fill="#6c757d" font-size="10">VXIS-004</text>
+<rect x="1390" y="655" width="200" height="85" rx="5" fill="#0d1117" stroke="#30363d" stroke-width="1"/>
+<circle cx="1410" cy="675" r="5" fill="#3498DB"/><text x="1420" y="679" fill="#adb5bd" font-size="9">진입점</text>
+<circle cx="1505" cy="675" r="5" fill="#E67E22"/><text x="1515" y="679" fill="#adb5bd" font-size="9">취약점</text>
+<circle cx="1410" cy="697" r="5" fill="#C0392B"/><text x="1420" y="701" fill="#adb5bd" font-size="9">익스플로잇</text>
+<circle cx="1505" cy="697" r="5" fill="#8E44AD"/><text x="1515" y="701" fill="#adb5bd" font-size="9">횡이동</text>
+<circle cx="1410" cy="719" r="5" fill="#E74C3C"/><text x="1420" y="723" fill="#adb5bd" font-size="9">권한상승</text>
+<circle cx="1505" cy="719" r="5" fill="#FFD700"/><text x="1515" y="723" fill="#adb5bd" font-size="9">Crown Jewel</text>
+</svg></div>
+  </div>
+
+  
+
+  <div class="depth-legend">
+    <h3>
+      <span class="en">Attack Depth Levels</span>
+      <span class="ko">공격 깊이 레벨</span>
+    </h3>
+    <table class="depth-table">
+      <tr>
+        <td style="color: #3498DB;">L0</td>
+        <td>
+          <span class="en">Reconnaissance — Port scan, service detection, tech stack</span>
+          <span class="ko">정찰 — 포트 스캔, 서비스 탐지, 기술 스택</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #E67E22;">L1</td>
+        <td>
+          <span class="en">Vulnerability Confirmed — Error disclosure, misconfig, weak crypto</span>
+          <span class="ko">취약점 확인 — 에러 노출, 설정 오류, 약한 암호화</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #C0392B;">L2</td>
+        <td>
+          <span class="en">Exploit Successful — Data extraction, session hijack, file read</span>
+          <span class="ko">익스플로잇 성공 — 데이터 추출, 세션 탈취, 파일 읽기</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #8E44AD;">L3</td>
+        <td>
+          <span class="en">Post-Exploitation — Lateral movement, privilege escalation</span>
+          <span class="ko">포스트 익스플로잇 — 횡이동, 권한 상승</span>
+        </td>
+      </tr>
+      <tr>
+        <td style="color: #FFD700;">L4</td>
+        <td>
+          <span class="en">Crown Jewel — Full DB access, RCE, admin takeover</span>
+          <span class="ko">Crown Jewel — DB 전체 접근, RCE, 관리자 탈취</span>
+        </td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+
+
+
+  
+  <div class="section-label">Section 5</div>
+  <h1><span class="en">Attestation</span><span class="ko">확인서</span></h1>
+
+  
+
+
+<div class="letterhead">
+  <div class="letterhead-company">VXIS SECURITY</div>
+  <div class="letterhead-tagline">Security Assessment Services</div>
+</div>
+
+<div class="attestation-body">
+
+  <p>2026-04-08</p>
+
+  <p><strong>To Whom It May Concern,</strong></p>
+
+  <p>
+    This letter serves as formal attestation that
+    <strong>VXIS Security</strong> has completed a security assessment
+    of the systems and services operated by <strong></strong>
+    as outlined in the agreed scope of work. The assessment was conducted by qualified
+    security professionals in accordance with industry-standard methodologies.
+  </p>
+
+  <p>
+    The assessment target was: <strong>http://localhost:8080/WebGoat/login</strong>.<br>
+    Assessment reference: <strong>VXIS-20260408-091924</strong>.
+  </p>
+
+  <p>The findings identified during this engagement are summarised below:</p>
+
+  <table style="width:360pt; margin-bottom:14pt;">
+    <thead>
+      <tr>
+        <th>Severity</th>
+        <th style="text-align:center;">Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-critical">CRITICAL</span>
+        </td>
+        <td style="text-align:center; font-weight:400;">
+          0
+        </td>
+      </tr>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-high">HIGH</span>
+        </td>
+        <td style="text-align:center; font-weight:700;">
+          3
+        </td>
+      </tr>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-medium">MEDIUM</span>
+        </td>
+        <td style="text-align:center; font-weight:400;">
+          0
+        </td>
+      </tr>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-low">LOW</span>
+        </td>
+        <td style="text-align:center; font-weight:400;">
+          0
+        </td>
+      </tr>
+      
+      <tr>
+        <td>
+          <span class="severity-badge severity-badge-informational">INFORMATIONAL</span>
+        </td>
+        <td style="text-align:center; font-weight:700;">
+          1
+        </td>
+      </tr>
+      
+      <tr style="border-top:2px solid #1a1a2e;">
+        <td style="font-weight:700;">Total</td>
+        <td style="text-align:center; font-weight:700;">4</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>
+    All findings have been documented in the accompanying technical report and disclosed
+    to the client in accordance with responsible disclosure practices. This letter may
+    be presented to relevant stakeholders, auditors, or regulatory bodies as evidence
+    of completed security testing activities.
+  </p>
+
+  <p>
+    For questions regarding this attestation or the underlying assessment, please contact
+    <strong>VXIS Security</strong> directly.
+  </p>
+
+  <div class="signature-block">
+    <p>Sincerely,</p>
+    <div class="signature-line"></div>
+    <p>
+      <strong>VXIS ScanPipeline</strong><br>
+      VXIS Security<br>
+      <em>Client Confidential — Not for Distribution</em>
+    </p>
+  </div>
+
+</div>
+
+  <div class="report-screen-footer">
+    VXIS Security &mdash; Client Confidential &mdash; Not for Distribution
+  </div>
+
+
+</body>
+</html>

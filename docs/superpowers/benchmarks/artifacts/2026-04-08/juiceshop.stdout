@@ -1,0 +1,93 @@
+╭──────────────────────────────────────────────────────────────────────────────╮
+│                          __     __ __  __ ___  ____                          │
+│                         \ \   / / \ \/ /|_ _|/ ___|                          │
+│                          \ \ / /   \  /  | | \___ \                          │
+│                           \ V /    /  \ _| |_ ___) |                         │
+│                            \_/    /_/\_\_____|____/                          │
+╰────────────────── AI-powered security automation platform ───────────────────╯
+Running pre-flight checks...
+╭───────────────────────────────── Pre-flight ─────────────────────────────────╮
+│ Target:        http://localhost:3000 ✓ 19ms                                  │
+│ Brain:         ✓ api:openai/gpt-5.4-mini                                     │
+│ Docker:        ✓ available                                                   │
+│ GitHub Token:  ⚠ not set                                                     │
+│ Logs:          logs/scan_20260408_091337.log (tail -f to follow)             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+  ⚠ GITHUB_TOKEN not set — Phase 13 OSINT will be limited
+  Phase 15: 0 vectors to attack
+  [OSINT] Domain: localhost:3000 | HVT: 0 targets
+  [COMPRESS] Context compressor ready — ContextCompressor
+  Selected 0 agents for web target
+  [KB] Stored 10 findings | Compiled 0 new patterns
+  Phase 18: 0 vectors to attack
+  [ENRICH] Enriching 10 findings with Brain...
+    ✓ VXIS-001: enriched
+    ✓ VXIS-002: enriched
+    ✓ VXIS-003: enriched
+    ✓ VXIS-004: enriched
+    ✓ VXIS-005: enriched
+    ✓ VXIS-006: enriched
+    ✓ VXIS-007: enriched
+    ✓ VXIS-008: enriched
+    ✓ VXIS-009: enriched
+    ✓ VXIS-010: enriched
+╭───────────────────────────────── VXIS Scan ──────────────────────────────────╮
+│ Target:   http://localhost:3000                                              │
+│ Profile:  standard                                                           │
+│ Brain:    api:openai/gpt-5.4-mini                                            │
+│ Ghost:    OFF                                                                │
+│ Version:  v0.2.0                                                             │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭── Phases (14/14) ──╮╭─────── 🧠 Brain Thinking ───────╮╭──── Recent Hits ────╮
+│   P0  0.0s         ││ 🎯 목표: 최종 결과물 생성: 모든 │╰─────────────────────╯
+│   P1  10.…         ││ finding, 모든 chain, 모든 대체  │╭───── Findings ──────╮
+│   P4  21.…     +1  ││ 크라운 경로, 5-dimension VXIS   ││ Critical   2        │
+│   P…  5.1s         ││ 점수, LLM 생성 executive        ││ High       4        │
+│   P…  0.0s         ││ summary, 스크린샷,              ││ Medium     2        │
+│   P3  14.…     +1  ││ 👑 크라운: 리포트 품질은 VXIS의 ││ Low       10        │
+│   P2  19.…     +3  ││ 전문성 서명이다. finding의 필드 ││ Info       2        │
+│   P5  40.…     +3  │╰─────────────────────────────────╯│                     │
+│   P7  5.4s         │╭─── Live Attacks (total: 78) ────╮│ Total     10        │
+│   P8  18.…     +2  │╰─────────────────────────────────╯│                     │
+│   P…  5.7s         │╭───── 🔗 Attack Chains (9) ──────╮│                     │
+╰────────────────────╯╰─────────────────────────────────╯╰─────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Elapsed: 5m 12s │ Score: 824/1000 [A]                                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+                        Findings — VXIS-20260408-091340                         
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ ID           ┃ Severity   ┃ Title                  ┃ Component               ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ VXIS-001     │ HIGH       │ Missing Security       │                         │
+│              │            │ Headers (5/7)          │                         │
+│ VXIS-002     │ LOW        │ Information Disclosure │ /rest/products/search?… │
+│              │            │ via Error —            │                         │
+│              │            │ /rest/products/searc   │                         │
+│ VXIS-003     │ INFORMATI… │ Missing Security       │ /                       │
+│              │            │ Headers — /            │                         │
+│ VXIS-004     │ LOW        │ Information Disclosure │ /rest/products/search   │
+│              │            │ via Error —            │                         │
+│              │            │ /rest/products/searc   │                         │
+│ VXIS-005     │ MEDIUM     │ CORS Misconfiguration  │ /                       │
+│              │            │ — /                    │                         │
+│ VXIS-006     │ CRITICAL   │ SQL Injection          │ /rest/products/search?… │
+│              │            │ (Error-Based) —        │                         │
+│              │            │ /rest/products/search… │                         │
+│ VXIS-007     │ LOW        │ Information Disclosure │ /rest/basket/           │
+│              │            │ via Error —            │                         │
+│              │            │ /rest/basket/          │                         │
+│ VXIS-008     │ LOW        │ Information Disclosure │ /api/BasketItems/       │
+│              │            │ via Error —            │                         │
+│              │            │ /api/BasketItems/      │                         │
+│ VXIS-009     │ LOW        │ Information Disclosure │ /api/users/             │
+│              │            │ via Error —            │                         │
+│              │            │ /api/users/            │                         │
+│ VXIS-010     │ HIGH       │ Mass Assignment —      │ /api/users/             │
+│              │            │ /api/users/            │                         │
+└──────────────┴────────────┴────────────────────────┴─────────────────────────┘
+
+VXIS Score: 824.3/1000 A
+Scan completed  |  311.8s  |  10 finding(s)  |  14/14 phases
+Report: reports/VXIS_Pipeline_localhost:3000.html
