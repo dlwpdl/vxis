@@ -594,6 +594,7 @@ def scan(
             injection_approval_callback=_injection_gate,
             approval_callback=_deferred_approval,
             auto_approve_injection=_is_benchmark,
+            report_output_path=output,
         )
 
         refresh_task = _aio.create_task(_refresh_loop())

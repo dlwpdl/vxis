@@ -721,6 +721,7 @@ class ScanPipeline:
         event_callback: Callable[[str, dict], None] | None = None,
         injection_approval_callback: Callable[[dict], Awaitable[bool]] | None = None,
         auto_approve_injection: bool = False,
+        report_output_path: Path | str | None = None,
     ) -> None:
         self.brain = brain
         self.config = config
@@ -744,6 +745,9 @@ class ScanPipeline:
         self._injection_mode: str | None = None
         # Legacy alias so existing checks (if any) still work:
         self._injection_approved: bool | None = None
+        # User-specified HTML report output path (from CLI --output).
+        # None → fall back to default reports/VXIS_Pipeline_<host>.html
+        self._report_output_path = report_output_path
 
     def _emit(self, event_type: str, data: dict) -> None:
         """이벤트 발생 — 등록된 callback에 전달 (thread-safe)."""
@@ -5099,8 +5103,12 @@ class ScanPipeline:
         gen = ReportGenerator()
         from urllib.parse import urlparse
         safe_name = urlparse(ctx.target).netloc.replace(".", "_")
-        output = Path("reports") / f"VXIS_Pipeline_{safe_name}.html"
-        output.parent.mkdir(exist_ok=True)
+        if self._report_output_path is not None:
+            output = Path(self._report_output_path)
+            logger.info("Report written to user-specified path: %s", output)
+        else:
+            output = Path("reports") / f"VXIS_Pipeline_{safe_name}.html"
+        output.parent.mkdir(parents=True, exist_ok=True)
         gen.generate_html_file(rd, output)
         logger.info("  Report: %s", output)
 
