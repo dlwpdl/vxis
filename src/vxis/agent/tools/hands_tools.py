@@ -40,35 +40,64 @@ class HttpRequestTool:
     name = "http_request"
     description = (
         "Send an HTTP request to the target via the shared VXIS SessionManager. "
-        "Auth cookies and CSRF tokens persist across calls within the same scan."
+        "Auth cookies and CSRF tokens persist across calls within the same scan. "
+        "Accepts either `url` (full URL) OR `base_url` + `path` (split form)."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
+            "url": {
+                "type": "string",
+                "description": "Full URL (scheme+host+port+path+query). Alternative to base_url+path.",
+            },
             "base_url": {
                 "type": "string",
-                "description": "Target base URL (scheme+host+port), e.g. http://localhost:3000",
+                "description": "Target base URL (scheme+host+port). Required if `url` not given.",
             },
             "method": {
                 "type": "string",
                 "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+                "default": "GET",
             },
             "path": {
                 "type": "string",
-                "description": "Path+query, e.g. /api/users?id=1",
+                "description": "Path+query. Required if `url` not given.",
             },
             "headers": {"type": "object", "additionalProperties": {"type": "string"}},
             "params": {"type": "object", "additionalProperties": {"type": "string"}},
             "data": {"type": "object"},
             "json": {"type": "object"},
         },
-        "required": ["base_url", "method", "path"],
+        "required": ["method"],
     }
 
     async def run(self, **kwargs: Any) -> ToolResult:
         base_url = kwargs.get("base_url", "")
+        path = kwargs.get("path", "")
+        url_arg = kwargs.get("url", "")
+
+        # Phase B fix: accept `url` as an alternative to base_url+path.
+        # Brain frequently emits {"url": "http://..."} naturally, so auto-split.
+        if url_arg and not base_url:
+            from urllib.parse import urlparse
+            parsed = urlparse(url_arg)
+            if parsed.scheme and parsed.netloc:
+                base_url = f"{parsed.scheme}://{parsed.netloc}"
+                split_path = parsed.path or "/"
+                if parsed.query:
+                    split_path = f"{split_path}?{parsed.query}"
+                path = split_path
+            else:
+                return ToolResult(
+                    ok=False,
+                    summary=f"http_request: invalid url '{url_arg[:100]}'",
+                    error="invalid_url",
+                )
+
+        if not path:
+            path = "/"
+
         method = kwargs.get("method", "GET")
-        path = kwargs.get("path", "/")
         headers = kwargs.get("headers") or None
         params = kwargs.get("params") or None
         data = kwargs.get("data") or None
@@ -77,7 +106,7 @@ class HttpRequestTool:
         if not base_url:
             return ToolResult(
                 ok=False,
-                summary="http_request: base_url is required",
+                summary="http_request: base_url or url is required",
                 error="missing_base_url",
             )
 

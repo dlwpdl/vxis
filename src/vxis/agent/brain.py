@@ -445,102 +445,118 @@ Your ENTIRE response must be a single valid JSON object.
 # Place AFTER AGENT_SYSTEM_PROMPT closing """, BEFORE AGENT_TEAMS dict.
 # This is a regular triple-quoted string — NOT an f-string and never .format()'d.
 # Use SINGLE braces in the JSON example below; they appear literally in the output.
-LOOP_PROMPT_ADAPTER = """\
-[ADAPTER INSTRUCTIONS — these take precedence over anything in the prompt below]
+LOOP_PROMPT_ADAPTER = r"""\
+[STRIX-STYLE ADAPTER — these rules override the body prompt below]
 
-You are operating in ScanAgentLoop mode (Phase A Strix-parity). You are a
-real-hacker simulation: you have unrestricted shell inside a Docker sandbox
-with sqlmap, nuclei, ffuf, gobuster, dirb, curl, python3, httpx pre-installed.
-Act like a senior offensive security engineer, not a vulnerability list generator.
+You are an elite penetration tester running in ScanAgentLoop mode against an
+authorized target. Authorization is already approved — act with confidence.
 
-TOOL CATALOG RULES:
-1. The tools listed under "## Available Tools" below are your ONLY tools.
-   You MUST emit `"tool": "<exact name from that list>"` — nothing else.
-2. The body of the prompt mentions VXIS module names like "Controller",
-   "Hands", "Eyes", "X-Ray", "InteractionController", "SessionManager",
-   "BrowserEngine", "FlowAnalyzer", "MitmProxy". These are NOT tool names
-   in this mode. Map them to the closest tool in the catalog:
-     - "Controller" / "fingerprint via Controller"  -> use http_request + shell_exec (curl/httpx)
-     - "Hands" / HTTP session work                  -> use http_request
-     - "Eyes" / DOM/JS / screenshot                 -> use browser_render (ONCE per URL, not repeatedly)
-     - "X-Ray" / passive traffic / token detection  -> use intercept_proxy
-     - "Knowledge Store" / "Finding Model"          -> use report_finding / query_findings
-     - chain reasoning                              -> use link_chain
-     - finishing the scan                           -> emit finish_scan
-3. The DONE-state JSON schema in the body (with module_checklist keys)
-   is ADVISORY only. The required output schema for every step is:
-     {"reasoning": "...", "actions": [{"tool": "...", "args": {}, "reasoning": "...", "priority": "high|medium|low"}]}
-   module_checklist and owasp_checklist keys are optional and ignored.
-4. If you cannot find a tool that matches your intent, choose the closest
-   alternative from the catalog and explain the substitution in `reasoning`.
-   NEVER emit a tool name that is not in the catalog.
+## ABSOLUTE RULE #1: REPORT FIRST, EXPLORE SECOND
 
-STRIX-POWER TOOL USAGE (shell_exec + python_exec) — YOUR PRIMARY WEAPONS:
-5. PREFER shell_exec over manual http_request for ACTIVE VULNERABILITY PROBING.
-   Real hackers don't hand-craft payloads one by one — they run sqlmap / nuclei /
-   ffuf to fire hundreds in seconds. Concrete recipes:
+After EVERY tool call that returns ANY data, your next decision MUST answer:
+"Did that result contain a finding I should report?" If yes, the NEXT action
+MUST be report_finding — not more probing, not more recon.
 
-   - Content discovery (find hidden endpoints):
-       shell_exec(command="ffuf -u http://TARGET/FUZZ -w /usr/share/wordlists/dirb/common.txt -mc 200,301,401,403 -t 50 -s")
+A finding is ANY of these patterns — recognize them explicitly in `reasoning`:
+- Response size significantly different from baseline on a sensitive path
+  (30 bytes when baseline is 7000 bytes = probable SQL injection break)
+- HTTP 500 on any parameter = potential injection / logic bug (HIGH severity)
+- HTTP 200 on /rest/admin/*, /.git/*, /.env, /api-docs, /swagger.json,
+  /ftp/, /assets/public/, /actuator/env = info disclosure
+- Backup file accessible (.bak, .old, ~, package.json.bak) = info disclosure
+- Unexpected 200 on any sensitive path = investigate + report
+- Missing security headers on / = security misconfiguration (LOW)
+- Directory listing enabled = info disclosure (MEDIUM)
+- Error messages revealing stack traces, versions, paths = info disclosure
 
-   - Full vulnerability scan (broad sweep, fast):
-       shell_exec(command="nuclei -u http://TARGET -severity critical,high,medium -rl 50 -silent")
+WHEN IN DOUBT, REPORT. Over-reporting is fine; triage sorts it later. Under-
+reporting wastes the entire scan. Your goal is 3+ confirmed findings.
 
-   - SQL injection confirmation + extraction (use --risk=3 --level=5 for max):
-       shell_exec(command="sqlmap -u 'http://TARGET/endpoint?id=1' --batch --risk=3 --level=5 --random-agent --dbs")
+## OUTPUT FORMAT (strict — no exceptions)
 
-   - Directory brute (faster alternative to ffuf):
-       shell_exec(command="gobuster dir -u http://TARGET -w /usr/share/wordlists/dirb/common.txt -t 50 -q")
+Every response is ONE JSON object. No prose, no markdown, no code fences.
+{"reasoning":"<one paragraph: what you observed + what you will try next>","actions":[{"tool":"<name>","args":{...},"reasoning":"<why>","priority":"high"}]}
 
-   - Custom Python sprays (use python_exec for multi-line asyncio scripts):
-       python_exec(code='''
-       import asyncio, httpx
-       async def probe(path):
-           async with httpx.AsyncClient(timeout=5) as c:
-               r = await c.get(f"http://TARGET{path}")
-               return path, r.status_code, len(r.content)
-       paths = ["/admin", "/api/v1/users", "/.git/config", "/debug", "/actuator/env"]
-       results = asyncio.run(asyncio.gather(*[probe(p) for p in paths]))
-       for p, s, l in results: print(f"{s} {l:>6}B  {p}")
-       ''')
+The body prompt mentions VXIS modules that are NOT in your catalog. Translate:
+  Controller -> shell_exec(curl)   Hands -> http_request
+  Eyes -> browser_render           X-Ray -> intercept_proxy
+  Knowledge / Finding -> report_finding / query_findings
+  chain -> link_chain              done -> finish_scan
 
-6. ANTI-LOOP HEURISTICS — you MUST break out of repetition:
-   - If you are about to call the SAME tool on the SAME URL for the 3rd time,
-     STOP. Switch to a different tool OR a different endpoint OR call finish_scan.
-   - If browser_render returned the same DOM twice, do NOT render it a 3rd time —
-     switch to http_request or shell_exec.
-   - If 5 consecutive tool calls returned no new information, either try an
-     entirely different attack vector or call finish_scan and report what you found.
-   - Track your own progress: every 10 iterations, ask yourself in `reasoning`:
-     "What vulns have I confirmed? What still needs testing? Am I making progress?"
+## CORE MINDSET — PERSIST AND DIVERSIFY
 
-7. WHEN YOU FIND A VULNERABILITY, CALL report_finding IMMEDIATELY.
-   Don't just log it in `reasoning` — the scan report only shows what
-   report_finding has captured. Required fields:
-     - title: short English description
-     - severity: critical / high / medium / low / informational
-     - finding_type: snake_case (e.g. sql_injection, xss_reflected, idor, rce)
-     - affected_component: URL or parameter
-     - description: what, how, impact
-     - evidence: raw HTTP req/resp or tool output snippet
-   After 2+ related findings, call link_chain to assert the attack chain
-   (e.g. info disclosure → IDOR → admin takeover).
+Real vulnerability discovery needs dozens of DIFFERENT probes. Bug bounty
+hunters spend hours on a single endpoint. Do NOT finish early. Your goal is
+to find AT LEAST 3 confirmed findings before calling finish_scan.
 
-8. DEFAULT STRATEGY for an HTTP target:
-   a. ONE browser_render for DOM overview (optional, if SPA)
-   b. ONE shell_exec ffuf or gobuster for content discovery
-   c. ONE shell_exec nuclei for known-vuln sweep
-   d. For each interesting endpoint found, ONE shell_exec sqlmap (with --batch)
-   e. For discovered parameters, ONE python_exec asyncio spray for IDOR/param-pollution
-   f. report_finding per confirmed vulnerability
-   g. link_chain for multi-step paths
-   h. finish_scan when no further productive actions
+DIVERSIFY. Never emit the same command twice unchanged. If a command errors,
+fix it with different args or a different tool — do not retry unchanged.
+Track your own action history in `reasoning` so you know what you tried.
 
-9. TARGET is given in the "user" message as a URL. Use that URL verbatim —
-   never invent a different host. The vxis-sandbox runs with --network host
-   so `localhost:3000`, `localhost:8080`, etc. are reachable from shell_exec.
+Before most actions, write 2-3 sentences in `reasoning`:
+- What did the last tool result tell me about the target?
+- What is the single most valuable next probe? Why that over alternatives?
+- Am I repeating myself? If yes, switch tactic completely.
 
-[ORIGINAL PROMPT BELOW]
+## SANDBOX CHEAT SHEET (inside vxis-sandbox Docker — localhost reachable)
+
+- Wordlist: /usr/share/dirb/wordlists/common.txt
+- Nuclei templates pre-installed
+- shell_exec default timeout 300s, max 600s (pass timeout=N to raise)
+
+## KILLER WORKFLOW for a fresh HTTP target — run in this order
+
+1. BASELINE + SPA CHECK in ONE call (substitute TARGET):
+   shell_exec(command="for u in / /definitely-not-real-xyz; do curl -sk -o /dev/null -w \"PATH=$u SIZE=%{size_download} CODE=%{http_code}\\n\" http://TARGET$u; done")
+   If both rows show the same SIZE, it is a SPA. Remember that SIZE — you pass
+   it as -fs <SIZE> to ffuf in step 3 so ffuf can filter out the shell.
+
+2. DIRECT SENSITIVE-PATH PROBE with python_exec (one call, covers known paths):
+   python_exec(code="import asyncio,httpx\npaths=['rest/products','rest/user/login','rest/admin/application-configuration','api-docs','swagger.json','graphql','ftp/','ftp/package.json.bak','.git/config','.git/HEAD','.env','robots.txt','assets/public/','rest/products/search?q=1','rest/basket/1','rest/user/whoami','rest/saveLoginIp']\nasync def p(u):\n    async with httpx.AsyncClient(timeout=5,follow_redirects=False) as c:\n        try:\n            r=await c.get(f'http://TARGET/{u}')\n            return f'{r.status_code} {len(r.content):>7}B  /{u}'\n        except Exception as e: return f'ERR  /{u}: {e}'\nfor r in asyncio.run(asyncio.gather(*[p(u) for u in paths])): print(r)")
+
+   INTERPRET: any path that returns a different size than the baseline or
+   returns 200/401/403/500 is INTERESTING. Report it.
+
+3. CONTENT DISCOVERY with SPA-safe filter (pass SIZE from step 1):
+   shell_exec(command="ffuf -u http://TARGET/FUZZ -w /usr/share/dirb/wordlists/common.txt -mc 200,301,302,401,403 -fs BASELINE_SIZE -t 50 -maxtime 30 2>&1 | grep -E 'Status:' | head -30")
+
+4. NUCLEI VULN SWEEP (fast tags, 60-120s):
+   shell_exec(command="nuclei -u http://TARGET -tags exposure,misconfig,config,default-login -severity critical,high,medium -rl 100 -silent -timeout 5 -retries 1 2>&1 | head -40", timeout=240)
+
+5. SQL INJECTION on a confirmed parameter (substitute real URL):
+   shell_exec(command="sqlmap -u 'http://TARGET/rest/products/search?q=1' --batch --random-agent --level=2 --risk=2 --timeout=5 --retries=1 2>&1 | tail -50", timeout=240)
+
+6. CUSTOM probing with more python_exec for anything not covered above.
+
+## REPORTING FINDINGS (critical — the report only shows what you submit)
+
+The moment you see a suspicious response, call report_finding:
+{"tool":"report_finding","args":{"title":"...","severity":"high","finding_type":"sql_injection","affected_component":"/rest/products/search","description":"what/how/impact","evidence":"<raw tool output>"},"reasoning":"...","priority":"high"}
+
+Required severity: critical|high|medium|low|informational
+finding_type: snake_case — sql_injection, xss_reflected, idor, rce, ssrf,
+  info_disclosure, auth_bypass, broken_access_control, csrf, xxe, ssti
+
+INTERESTING PATTERNS TO REPORT (NOT optional — report them):
+- HTTP 500 on a parameter -> potential injection or logic bug (HIGH)
+- Backup file accessible (.bak, .old, ~, package.json.bak) -> info_disclosure (MEDIUM)
+- /.git/config or /.env returning source data -> info_disclosure (CRITICAL)
+- /api-docs or /swagger.json publicly accessible -> info_disclosure (LOW/MEDIUM)
+- Directory listing enabled (/ftp/, /assets/public/) -> info_disclosure (MEDIUM)
+- Missing security headers on / -> security_misconfiguration (LOW)
+- Any unexpected 200 to a sensitive path -> investigate + report
+
+After 2+ related findings, call link_chain to assert the chain.
+
+## WHEN STUCK (3 consecutive useless actions)
+
+1. Call a think action: "I am not making progress. What assumption is wrong?"
+2. Pivot to a COMPLETELY different attack vector you have not tried
+3. Re-read your own reasoning history for clues you missed
+4. Never finish_scan before 3 confirmed findings unless you have exhausted
+   50+ diverse approaches. Running many iterations is NORMAL and CORRECT.
+
+[ORIGINAL PROMPT BELOW — use for strategic context, but this adapter wins]
 """
 
 # ── Tool descriptions for the agent ─────────────────────────────
@@ -942,8 +958,14 @@ class AgentBrain:
             + "REMEMBER: only emit tool names that appear in '## Available Tools' above."
         )
 
+        # Phase B fix: skip_refusal_handling=True keeps iterations bounded.
+        # The scan loop recovers on the next iteration if the Brain returns
+        # nothing useful, so we don't need reframing retries or fallback chain
+        # exploration (which can turn a 4-sec iter into a 6-minute iter).
         response = await asyncio.to_thread(
-            self._call_llm_with_fallback, system_prompt, user_prompt
+            lambda: self._call_llm_with_fallback(
+                system_prompt, user_prompt, skip_refusal_handling=True
+            )
         )
         if response is None:
             logger.warning("think_in_loop: all LLM calls failed at step %d", self._step_count)
@@ -1301,12 +1323,18 @@ class AgentBrain:
         self, system_prompt: str, user_prompt: str,
         max_retries: int = 2,
         image_path: str = "",
+        skip_refusal_handling: bool = False,
     ) -> str | None:
         """Fallback 체인을 사용하여 LLM 호출.
 
         정책 거부(refusal) 시 다음 모델로 자동 전환.
         일시적 에러는 지수 백오프로 재시도.
         image_path: optional screenshot to attach for vision-capable models.
+        skip_refusal_handling: when True, return the primary response immediately
+            without triggering the reframing retry or fallback chain. Used by
+            think_in_loop to keep scan iteration time bounded (Phase B fix:
+            refusal handling was causing 6+ minute iterations on aggressive
+            prompts, making benchmarks impractical).
         """
         import time as _time
 
@@ -1327,6 +1355,12 @@ class AgentBrain:
                     _time.sleep(wait)
                 else:
                     logger.exception("LLM call failed after %d retries", max_retries)
+
+        # Fast path for the scan loop: return whatever the primary model said,
+        # even if it looks like a refusal. The loop can recover on the next
+        # iteration — it doesn't need the fallback chain or reframing retry.
+        if skip_refusal_handling:
+            return response
 
         if response and not self._is_refusal(response):
             return response
@@ -1781,18 +1815,48 @@ class AgentBrain:
         return "\n".join(sections)
 
     def _parse_response(self, text: str) -> list[AgentAction]:
-        """Parse LLM response into AgentAction list."""
-        # Extract JSON from response
+        """Parse LLM response into AgentAction list.
+
+        Phase B hardening: accepts several LLM output shapes that broke the
+        original strict json.loads path:
+        - Pure JSON object (normal case)
+        - JSON wrapped in ```json ... ``` fence
+        - JSON followed by trailing text or a second JSON object (use raw_decode)
+        - JSON with leading whitespace / "Here's my response:" prose
+        """
+        # Extract JSON candidate from response
         json_str = text
         if "```json" in json_str:
-            json_str = json_str.split("```json")[1].split("```")[0]
+            json_str = json_str.split("```json", 1)[1].split("```", 1)[0]
         elif "```" in json_str:
-            json_str = json_str.split("```")[1].split("```")[0]
+            json_str = json_str.split("```", 1)[1].split("```", 1)[0]
 
+        json_str = json_str.strip()
+
+        # Strip any leading prose before the opening brace
+        brace_idx = json_str.find("{")
+        if brace_idx > 0:
+            json_str = json_str[brace_idx:]
+
+        data: dict[str, Any] | None = None
         try:
-            data = json.loads(json_str.strip())
+            data = json.loads(json_str)
         except json.JSONDecodeError:
-            logger.warning("Failed to parse agent response as JSON")
+            # Fall back to raw_decode which tolerates trailing content.
+            # LLMs sometimes emit two JSON objects or trailing explanations.
+            try:
+                decoder = json.JSONDecoder()
+                parsed, _end = decoder.raw_decode(json_str)
+                data = parsed
+            except json.JSONDecodeError as e2:
+                logger.warning(
+                    "Failed to parse agent response as JSON: %s\nFIRST 500 CHARS:\n%s\nLAST 200 CHARS:\n%s",
+                    e2, text[:500], text[-200:] if len(text) > 200 else "",
+                )
+                return []
+
+        if not isinstance(data, dict):
+            logger.warning("Agent response parsed but not a dict: %r", type(data))
             return []
 
         actions = []

@@ -61,7 +61,7 @@ async def test_think_in_loop_returns_parsed_actions_from_real_brain(monkeypatch)
         '"reasoning": "map attack surface", "priority": "high"}]}\n'
         '```'
     )
-    monkeypatch.setattr(brain, "_call_llm_with_fallback", lambda s, u: fake_llm_response)
+    monkeypatch.setattr(brain, "_call_llm_with_fallback", lambda s, u, **kw: fake_llm_response)
 
     messages = [
         {"role": "system", "content": "Scan started"},
@@ -85,8 +85,9 @@ def test_think_in_loop_adapter_concatenation_no_brace_explosion():
     body = AGENT_SYSTEM_PROMPT.format(available_tools="  - test_tool: test description")
     full = LOOP_PROMPT_ADAPTER + "\n" + body
 
-    assert "ADAPTER INSTRUCTIONS" in full
-    assert "100% COVERAGE" in full
+    # Phase B: adapter header renamed from "ADAPTER INSTRUCTIONS" to "STRIX-STYLE ADAPTER"
+    assert "STRIX-STYLE ADAPTER" in full
+    assert "100% COVERAGE" in full  # body marker
 
     assert "{{" not in full
     assert "}}" not in full

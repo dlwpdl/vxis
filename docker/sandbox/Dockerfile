@@ -45,6 +45,16 @@ RUN ARCH=$(dpkg --print-architecture) && \
 RUN pip3 install --break-system-packages --no-cache-dir httpx aiohttp requests || true
 RUN pip3 install --break-system-packages --no-cache-dir arjun || true
 
+# Pre-download nuclei templates so the first shell_exec nuclei call doesn't
+# spend 30-60 seconds on template download during a scan.
+RUN nuclei -ut 2>&1 | tail -3 || true
+
+# Kali-convention wordlist symlinks — many scanner recipes assume
+# /usr/share/wordlists/dirb/... but Debian's dirb package installs to
+# /usr/share/dirb/wordlists/... so we bridge both paths.
+RUN mkdir -p /usr/share/wordlists && \
+    ln -sf /usr/share/dirb/wordlists /usr/share/wordlists/dirb
+
 # Create the shared workspace directory (will be bind-mounted at runtime)
 RUN mkdir -p /workspace
 WORKDIR /workspace

@@ -59,8 +59,17 @@ class ScanAgentLoop:
         return await self.brain.think_in_loop(state.messages, self.registry.describe_all())
 
     async def run(self) -> dict[str, Any]:
+        import json as _json
+
         self.state.add_message("system", f"Scan started on {self.state.target}")
         self.state.add_message("user", f"Target: {self.state.target}. Find all vulnerabilities.")
+
+        # Phase B fix: code-level anti-repetition. Track hash of (tool, args)
+        # so we can detect when Brain is about to run an identical call a 3rd+
+        # time and inject a synthetic "DEDUP" result instead of re-running.
+        # This breaks the loop regardless of whether Brain's prompt adherence.
+        _call_counts: dict[str, int] = {}
+
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
             actions = await self._decide(self.state)
@@ -68,6 +77,37 @@ class ScanAgentLoop:
                 logger.warning("iter %d: no actions returned, stopping", self.state.iteration)
                 break
             for name, args in actions:
+                # Compute a stable hash key for the (tool, args) pair
+                try:
+                    key = f"{name}::{_json.dumps(args, sort_keys=True, default=str)}"
+                except Exception:
+                    key = f"{name}::{args!r}"
+
+                count = _call_counts.get(key, 0) + 1
+                _call_counts[key] = count
+
+                if count >= 3 and name != "finish_scan":
+                    # Third or later time we're seeing this exact call. Skip the
+                    # real dispatch and inject a nudge message so Brain sees
+                    # different context on the next iteration.
+                    nudge = (
+                        f"DEDUP: You already ran {name} with these exact args "
+                        f"{count - 1} times in this scan. The result did not "
+                        f"change. STOP repeating this call and try something "
+                        f"different: pick a NEW endpoint, a DIFFERENT tool, or "
+                        f"call finish_scan if you truly have nothing new to try."
+                    )
+                    self.state.add_message("tool", {"name": name, "args": args, "result": {
+                        "ok": False,
+                        "summary": nudge,
+                        "data": {"dedup": True, "prior_calls": count - 1},
+                    }})
+                    logger.warning(
+                        "iter %d: dedup-blocked repeated call: %s (count=%d)",
+                        self.state.iteration, name, count,
+                    )
+                    continue
+
                 result = await self.registry.dispatch(name, args)
                 self.state.add_message("tool", {"name": name, "args": args, "result": {
                     "ok": result.ok, "summary": result.summary, "data": result.data,

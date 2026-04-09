@@ -29,7 +29,7 @@ SANDBOX_IMAGE = "vxis/sandbox:latest"
 SANDBOX_CONTAINER = "vxis-sandbox"
 SANDBOX_WORKSPACE_HOST = "/tmp/vxis-workspace"
 SANDBOX_WORKSPACE_MOUNT = "/workspace"
-DEFAULT_TIMEOUT = 120.0
+DEFAULT_TIMEOUT = 300.0  # 5 min — nuclei scans against medium targets need ~4 min
 
 # Module-level state (idempotent lifecycle cache)
 _sandbox_verified: bool = False
