@@ -434,7 +434,7 @@ def scan(
 
     async def _run():
         nonlocal ctx
-        from vxis.pipeline.pipeline import ScanPipeline
+        from vxis.pipeline.scan_pipeline_v2 import ScanPipeline
 
         if interactive:
             from vxis.agent.brain_interactive import InteractiveBrain
