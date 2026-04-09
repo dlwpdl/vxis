@@ -40,6 +40,26 @@ class ScanLoopState:
             self.peak_context_bytes = current
         return current
 
+CRITIC_PROMPT_TEMPLATE = """\
+You are a senior pentest strategist reviewing an in-progress scan.
+Do NOT emit tool calls. Output a SHORT critique (2-5 sentences) covering:
+1. What has been discovered so far (summarize findings)
+2. What is missing or unexplored (be specific — name endpoints/techniques)
+3. Concrete next action(s) the executor agent should take
+4. Whether to continue probing OR call finish_scan
+
+TARGET: {target}
+ITERATION: {iteration}/{max_iters}
+FINDINGS SO FAR: {finding_count}
+RECENT ACTIONS (last 10):
+{recent_actions}
+
+CURRENT FINDINGS:
+{findings_list}
+
+Your critique:"""
+
+
 class ScanAgentLoop:
     def __init__(
         self,
@@ -47,16 +67,87 @@ class ScanAgentLoop:
         registry: ToolRegistry,
         max_iters: int = 300,
         brain: Any | None = None,
+        critic_interval: int = 8,
     ) -> None:
         self.state = ScanLoopState(target=target, max_iters=max_iters)
         self.registry = registry
         self.brain = brain
+        self.critic_interval = critic_interval
+        self._last_critic_iter = 0
 
     async def _decide(self, state: ScanLoopState) -> list[tuple[str, dict[str, Any]]]:
         """Returns list of (tool_name, args). Delegates to brain.think_in_loop when brain is set."""
         if self.brain is None:
             return [("finish_scan", {})]
         return await self.brain.think_in_loop(state.messages, self.registry.describe_all())
+
+    async def _critic_review(self) -> str | None:
+        """Dual Brain critic: every N iterations, ask a stronger model to
+        review progress and suggest next direction. Returns the critique
+        text to inject as a user message, or None if unavailable.
+
+        Uses the same brain instance but calls _call_llm_with_fallback
+        directly with the critic prompt (no tool catalog). If gpt-5.4 full
+        is available via OPENAI_API_KEY, it will be used instead of the
+        loop's mini model for the critique.
+        """
+        import asyncio
+        if self.brain is None or not hasattr(self.brain, "_call_llm_with_fallback"):
+            return None
+        try:
+            from vxis.agent.tools.finding_tools import _get_findings
+            current_findings = _get_findings()
+        except Exception:
+            current_findings = []
+        # Build a compact recent-action summary
+        recent: list[str] = []
+        for m in self.state.messages[-20:]:
+            c = m.get("content")
+            if isinstance(c, dict):
+                name = c.get("name", "?")
+                summary = (c.get("result") or {}).get("summary", "")[:100]
+                recent.append(f"  {name}: {summary}")
+        findings_summary = "\n".join(
+            f"  [{f['severity']}] {f['finding_type']}: {f.get('title','')[:80]}"
+            for f in current_findings[:10]
+        ) or "  (none yet)"
+        prompt = CRITIC_PROMPT_TEMPLATE.format(
+            target=self.state.target,
+            iteration=self.state.iteration,
+            max_iters=self.state.max_iters,
+            finding_count=len(current_findings),
+            recent_actions="\n".join(recent[-10:]) or "  (no actions)",
+            findings_list=findings_summary,
+        )
+        # Temporarily switch to gpt-5.4 full for the critic call if OpenAI is
+        # the current provider. This gives stronger reasoning at negligible cost
+        # (one call per critic_interval iterations).
+        import os
+        orig_model = getattr(self.brain, "_model", None)
+        use_stronger = False
+        if (
+            getattr(self.brain, "_provider", None) == "openai"
+            and os.environ.get("OPENAI_API_KEY")
+            and orig_model
+            and "mini" in str(orig_model)
+        ):
+            self.brain._model = "gpt-5.4"  # upgrade for critic only
+            use_stronger = True
+        try:
+            response = await asyncio.to_thread(
+                self.brain._call_llm_with_fallback,
+                "You are a senior pentest strategist. Output prose only, no JSON, no tool calls.",
+                prompt,
+            )
+        except Exception as e:
+            logger.warning("critic review failed: %s", e)
+            return None
+        finally:
+            if use_stronger and orig_model is not None:
+                self.brain._model = orig_model
+        if not response:
+            return None
+        return response.strip()[:1500]
 
     async def run(self) -> dict[str, Any]:
         import json as _json
@@ -302,6 +393,36 @@ class ScanAgentLoop:
             # Sample messages[] byte size at the end of each iteration.
             # Phase B fix: populates peak_context_bytes metric that was 0 in Task 11.
             self.state.update_peak_size()
+
+            # Dual Brain critic check: every N iterations, ask a stronger
+            # model to review progress and inject strategic guidance.
+            # Only fires if we have made enough iterations since last check
+            # AND the loop hasn't naturally completed.
+            if (
+                not self.state.completed
+                and self.critic_interval > 0
+                and self.state.iteration - self._last_critic_iter >= self.critic_interval
+                and self.state.iteration < self.state.max_iters - 2
+            ):
+                self._last_critic_iter = self.state.iteration
+                try:
+                    critique = await self._critic_review()
+                except Exception:
+                    logger.exception("critic_review raised")
+                    critique = None
+                if critique:
+                    self.state.add_message(
+                        "user",
+                        (
+                            "CRITIC REVIEW (strategic guidance from the senior "
+                            f"strategist, iter {self.state.iteration}):\n\n{critique}\n\n"
+                            "Incorporate this guidance in your next action."
+                        ),
+                    )
+                    logger.info(
+                        "iter %d: critic review injected (%d chars)",
+                        self.state.iteration, len(critique),
+                    )
         return {
             "target": self.state.target,
             "completed": self.state.completed,

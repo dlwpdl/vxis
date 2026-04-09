@@ -57,12 +57,15 @@ _SIGNALS: dict[str, list[tuple[str, str]]] = {
         ("XSRF-TOKEN", "cookie"),
     ],
     "django_python": [
+        # csrftoken is a strong Django signal — sessionid alone is shared with
+        # Spring/Rails/etc. Only count sessionid if csrftoken is also present.
         ("csrftoken=", "cookie"),
-        ("sessionid=", "cookie"),
         ("X-Frame-Options: DENY", "header"),
         ("Django administration", "body"),
         ("Django tried these URL patterns", "body"),
         ("{% csrf_token %}", "body"),
+        ("django-admin", "body"),
+        ("csrfmiddlewaretoken", "body"),
     ],
     "rails": [
         ("Phusion Passenger", "header"),
@@ -104,12 +107,47 @@ _SIGNALS: dict[str, list[tuple[str, str]]] = {
 }
 
 
+# Strong signals (weight 3) are framework-exclusive. Weak signals (weight 1)
+# are shared across stacks and only count as corroboration. Use substring
+# matching (case-insensitive) against this set to assign weight.
+_STRONG_SIGNALS: frozenset[str] = frozenset({
+    # Spring Boot strong
+    "jsessionid", "apache-coyote", "whitelabel error page", "x-application-context",
+    # Express/Node strong
+    "x-powered-by: express", "ng-version=", "mat-app-background",
+    "connect.sid=", "app-root", "x-recruiting",
+    # PHP/WP strong
+    "x-powered-by: php", "phpsessid=", "wp-content", "wp-includes",
+    'name="generator" content="wordpress', "laravel_session",
+    # Django strong
+    "csrftoken=", "django administration", "django tried these",
+    "{% csrf_token %}", "csrfmiddlewaretoken", "django-admin",
+    # Rails strong
+    "phusion passenger", "x-runtime:", 'name="csrf-token"',
+    "server: webrick", "server: puma", "server: unicorn",
+    # Flask/FastAPI strong
+    "server: werkzeug", "server: gunicorn", "server: uvicorn",
+    "<title>swagger ui</title>", "x-process-time:",
+    # Go strong
+    "server: gin-gonic", "server: fiber", "x-gin-version",
+    # ASP.NET strong
+    "x-powered-by: asp.net", "x-aspnet-version", "x-aspnetmvc-version",
+    "asp.net_sessionid=", ".aspnetcore", "server: microsoft-iis",
+    "server: kestrel",
+})
+
+
 def _score_playbooks(
     headers: str,
     body: str,
     url: str,
 ) -> list[tuple[str, int, list[str]]]:
-    """Return [(playbook_name, score, matched_signals), ...] sorted desc."""
+    """Return [(playbook_name, score, matched_signals), ...] sorted desc.
+
+    Scoring: strong signals (framework-exclusive) = 3 points, weak signals
+    (shared) = 1 point. This prevents false positives from cookie-name
+    collisions like sessionid= matching both Django and Spring/Rails.
+    """
     headers_l = headers.lower()
     body_l = body.lower()
     url_l = url.lower()
@@ -120,18 +158,16 @@ def _score_playbooks(
         matched: list[str] = []
         for pattern, kind in signals:
             haystack = ""
-            if kind == "header":
-                haystack = headers_l
-            elif kind == "cookie":
-                # Set-Cookie lines are inside headers
+            if kind == "header" or kind == "cookie":
                 haystack = headers_l
             elif kind == "body":
                 haystack = body_l
             elif kind == "url":
                 haystack = url_l
             if pattern.lower() in haystack:
-                score += 1
-                matched.append(pattern)
+                weight = 3 if pattern.lower() in _STRONG_SIGNALS else 1
+                score += weight
+                matched.append(f"{pattern} (×{weight})")
         if score > 0:
             results.append((playbook, score, matched))
 
