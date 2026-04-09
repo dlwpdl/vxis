@@ -12,6 +12,7 @@ from vxis.agent.tools.hands_tools import (
     BrowserRenderTool,
     InterceptProxyTool,
 )
+from vxis.agent.tools.shell_tools import ShellExecTool
 
 __all__ = [
     "FinishScanTool",
@@ -20,6 +21,7 @@ __all__ = [
     "HttpRequestTool",
     "BrowserRenderTool",
     "InterceptProxyTool",
+    "ShellExecTool",
     "build_default_registry",
 ]
 
@@ -37,4 +39,5 @@ def build_default_registry() -> ToolRegistry:
     reg.register(HttpRequestTool())
     reg.register(BrowserRenderTool())
     reg.register(InterceptProxyTool())
+    reg.register(ShellExecTool())
     return reg
