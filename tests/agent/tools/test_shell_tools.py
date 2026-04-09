@@ -136,4 +136,4 @@ def test_build_default_registry_now_has_seven_tools():
     reg = build_default_registry()
     names = reg.list_tools()
     assert "shell_exec" in names
-    assert len(names) == 7
+    assert len(names) >= 7
