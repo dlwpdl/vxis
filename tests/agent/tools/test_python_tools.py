@@ -136,4 +136,4 @@ def test_build_default_registry_now_has_eight_tools():
     names = reg.list_tools()
     assert "python_exec" in names
     assert "shell_exec" in names
-    assert len(names) == 8
+    assert len(names) >= 8

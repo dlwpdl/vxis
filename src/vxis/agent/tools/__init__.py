@@ -14,6 +14,11 @@ from vxis.agent.tools.hands_tools import (
 )
 from vxis.agent.tools.shell_tools import ShellExecTool
 from vxis.agent.tools.python_tools import PythonExecTool
+from vxis.agent.tools.finding_tools import (
+    ReportFindingTool,
+    QueryFindingsTool,
+    LinkChainTool,
+)
 
 __all__ = [
     "FinishScanTool",
@@ -24,6 +29,9 @@ __all__ = [
     "InterceptProxyTool",
     "ShellExecTool",
     "PythonExecTool",
+    "ReportFindingTool",
+    "QueryFindingsTool",
+    "LinkChainTool",
     "build_default_registry",
 ]
 
@@ -43,4 +51,7 @@ def build_default_registry() -> ToolRegistry:
     reg.register(InterceptProxyTool())
     reg.register(ShellExecTool())
     reg.register(PythonExecTool())
+    reg.register(ReportFindingTool())
+    reg.register(QueryFindingsTool())
+    reg.register(LinkChainTool())
     return reg
