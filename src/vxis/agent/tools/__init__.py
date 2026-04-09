@@ -19,6 +19,10 @@ from vxis.agent.tools.finding_tools import (
     QueryFindingsTool,
     LinkChainTool,
 )
+from vxis.agent.tools.playbook_tools import (
+    ListPlaybooksTool,
+    LoadPlaybookTool,
+)
 
 __all__ = [
     "FinishScanTool",
@@ -32,6 +36,8 @@ __all__ = [
     "ReportFindingTool",
     "QueryFindingsTool",
     "LinkChainTool",
+    "ListPlaybooksTool",
+    "LoadPlaybookTool",
     "build_default_registry",
 ]
 
@@ -39,8 +45,9 @@ __all__ = [
 def build_default_registry() -> ToolRegistry:
     """Build a ToolRegistry with the default tool set registered.
 
-    As Tasks 7-12 land, this helper will also register high-level Phase wrappers
-    and Finding CRUD tools.
+    Phase B: playbook tools added so Brain can load stack-specific technique
+    libraries instead of memorizing per-target paths. This scales across
+    targets because knowledge is stack-based, not target-based.
     """
     reg = ToolRegistry()
     reg.register(FinishScanTool())
@@ -54,4 +61,6 @@ def build_default_registry() -> ToolRegistry:
     reg.register(ReportFindingTool())
     reg.register(QueryFindingsTool())
     reg.register(LinkChainTool())
+    reg.register(ListPlaybooksTool())
+    reg.register(LoadPlaybookTool())
     return reg
