@@ -6,9 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sqlmap \
     ffuf \
-    nikto \
     gobuster \
-    wapiti \
     dirb \
     curl \
     wget \
@@ -19,7 +17,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-venv \
     git \
+    perl \
+    libnet-ssleay-perl \
     && rm -rf /var/lib/apt/lists/*
+
+# Nikto (Perl-based, not in trixie main — clone from GitHub)
+RUN git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto && \
+    ln -s /opt/nikto/program/nikto.pl /usr/local/bin/nikto && \
+    chmod +x /opt/nikto/program/nikto.pl
+
+# Wapiti (Python-based, install via pip)
+RUN pip3 install --break-system-packages --no-cache-dir wapiti3 || true
 
 # Nuclei — download the official binary (arch-aware)
 ARG NUCLEI_VERSION=3.3.4
