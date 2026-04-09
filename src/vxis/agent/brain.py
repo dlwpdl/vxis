@@ -533,17 +533,26 @@ STEP 4 — EXECUTE the probe recipe from the framework playbook:
     The scan loop will parse this format and inject a SYSTEM HINT telling
     you exactly which rows to report as findings.
 
-STEP 5 — REPORT findings immediately after each probe:
+STEP 5 — REPORT findings, but VERIFY high/critical ones first:
     The SYSTEM HINT that appears after your probe tells you which paths
-    are real findings. Call report_finding for EACH suggested item in a
-    SINGLE JSON actions array (multiple actions per response).
+    are real findings. Your flow:
 
-    For HIGH or CRITICAL severity findings, OPTIONALLY call verify_finding
-    first to get an adversarial check from a stronger model. If verdict
-    is REFUTED, do NOT call report_finding — it's likely a false positive.
-    If CONFIRMED or UNCONFIRMED with high/medium confidence, proceed.
-    verify_finding costs one extra LLM call per check, so skip it for
-    obvious LOW/INFO severity items.
+    For each hinted finding:
+    - LOW or INFORMATIONAL severity → call report_finding directly
+    - MEDIUM severity → call report_finding directly
+    - HIGH or CRITICAL severity → you MUST call verify_finding FIRST
+      with the finding details + raw evidence. Check the verdict:
+        CONFIRMED → call report_finding
+        UNCONFIRMED with high/medium confidence → call report_finding (keep it)
+        UNCONFIRMED with low confidence → downgrade severity and report
+        REFUTED → DO NOT call report_finding (it's a false positive)
+
+    This verify-before-report flow for HIGH/CRITICAL is MANDATORY. It
+    costs one LLM call per finding but structurally eliminates SPA-shell-
+    echo false positives that plagued earlier scans.
+
+    You can emit multiple verify_finding + report_finding calls in a
+    SINGLE actions array (one response per hint pass).
 
 STEP 6 — After reporting the easy wins, load injection_vectors playbook
     and run the SQLi response-length oracle on any REST endpoint you
@@ -833,6 +842,14 @@ class AgentBrain:
 
         # Tier 1: Anthropic (기본 Brain — 추론/전략 최강)
         if os.environ.get("ANTHROPIC_API_KEY"):
+            # Phase C: 1M-context mode for enterprise scans with large message history.
+            # VXIS_LONG_CONTEXT=1 forces the 1M variant as the primary model so the
+            # MemoryCompressor never needs to truncate. Cost is higher but for
+            # multi-hour enterprise scans the loss of context is worse than the
+            # extra tokens.
+            if os.environ.get("VXIS_LONG_CONTEXT") == "1":
+                chain.append({"provider": "anthropic", "model": "claude-opus-4-6[1m]"})
+                chain.append({"provider": "anthropic", "model": "claude-sonnet-4-6[1m]"})
             chain.append({"provider": "anthropic", "model": "claude-opus-4-6"})
             chain.append({"provider": "anthropic", "model": "claude-sonnet-4-6"})
             chain.append({"provider": "anthropic", "model": "claude-haiku-4-5-20251001"})
@@ -966,8 +983,13 @@ class AgentBrain:
         body_prompt = AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)
         system_prompt = LOOP_PROMPT_ADAPTER + "\n" + body_prompt
 
+        # Phase C: in long-context mode, Brain sees the FULL message history
+        # (up to 500 entries) instead of the last 20. For 1M context models
+        # this is the point — no information loss across long scans.
+        import os as _os
+        _history_window = 500 if _os.environ.get("VXIS_LONG_CONTEXT") == "1" else 20
         history_lines: list[str] = []
-        for m in messages[-20:]:
+        for m in messages[-_history_window:]:
             role = m.get("role", "?")
             content = m.get("content", "")
             if isinstance(content, dict):

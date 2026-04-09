@@ -216,6 +216,73 @@ class ScanAgentLoop:
                     )
                     continue
 
+                # Phase C: auto-verify HIGH/CRITICAL report_finding calls
+                # before dispatch. If verify_finding is available in the
+                # registry and the severity is high or critical, run the
+                # adversarial check first. If REFUTED, block the report.
+                if (
+                    name == "report_finding"
+                    and isinstance(args, dict)
+                    and str(args.get("severity", "")).lower() in ("high", "critical")
+                    and "verify_finding" in self.registry.list_tools()
+                ):
+                    try:
+                        verify_args = {
+                            "title": args.get("title", ""),
+                            "severity": args.get("severity", ""),
+                            "finding_type": args.get("finding_type", ""),
+                            "affected_component": args.get("affected_component", ""),
+                            "description": args.get("description", ""),
+                            "evidence": args.get("evidence", ""),
+                        }
+                        if _baseline_size is not None:
+                            verify_args["baseline_size"] = _baseline_size
+                        verdict_result = await self.registry.dispatch("verify_finding", verify_args)
+                        if verdict_result.ok:
+                            verdict_data = verdict_result.data or {}
+                            verdict = verdict_data.get("verdict", "UNCONFIRMED")
+                            self.state.add_message("tool", {
+                                "name": "verify_finding",
+                                "args": verify_args,
+                                "result": {
+                                    "ok": True,
+                                    "summary": verdict_result.summary,
+                                    "data": verdict_data,
+                                },
+                            })
+                            logger.info(
+                                "iter %d: auto-verify for %s severity=%s → %s",
+                                self.state.iteration,
+                                args.get("affected_component", "?"),
+                                args.get("severity", "?"),
+                                verdict,
+                            )
+                            if verdict == "REFUTED":
+                                # Block the report_finding dispatch — treat
+                                # as a soft fail so Brain sees the refutation
+                                # reasoning on next iteration.
+                                self.state.add_message("tool", {
+                                    "name": "report_finding",
+                                    "args": args,
+                                    "result": {
+                                        "ok": False,
+                                        "summary": (
+                                            "report_finding BLOCKED by auto-verifier "
+                                            "(REFUTED). Reason: "
+                                            + str(verdict_data.get("reasoning", ""))[:300]
+                                        ),
+                                        "data": {"verifier_blocked": True, "verdict": verdict},
+                                    },
+                                })
+                                logger.warning(
+                                    "iter %d: report_finding BLOCKED (REFUTED) for %s",
+                                    self.state.iteration,
+                                    args.get("affected_component", "?"),
+                                )
+                                continue
+                    except Exception:
+                        logger.exception("auto-verify failed — proceeding with report_finding")
+
                 result = await self.registry.dispatch(name, args)
                 self.state.add_message("tool", {"name": name, "args": args, "result": {
                     "ok": result.ok, "summary": result.summary, "data": result.data,

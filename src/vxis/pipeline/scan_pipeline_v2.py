@@ -341,6 +341,33 @@ class ScanPipeline:
             f"findings_count={findings_count}"
         )
 
+        # Phase C: MITRE ATT&CK coverage calculation. Builds technique and
+        # tactic coverage from the current scan's findings and prints a
+        # summary line for operators.
+        try:
+            from vxis.agent.tools.mitre_data import coverage_report
+            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            logger.info(
+                "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
+                len(mitre["techniques_covered"]),
+                len(mitre["tactics_covered"]),
+                mitre["coverage_pct"],
+            )
+            # Attach to ctx for the report generator
+            ctx.mitre_coverage = mitre  # type: ignore[attr-defined]
+            if mitre["per_technique"]:
+                print(
+                    "MITRE_COVERAGE techniques={} tactics={} pct={}".format(
+                        len(mitre["techniques_covered"]),
+                        len(mitre["tactics_covered"]),
+                        mitre["coverage_pct"],
+                    )
+                )
+                for t in mitre["per_technique"][:10]:
+                    print(f"  {t['id']} {t['name']} ({t['tactic']}) x{t['finding_count']}")
+        except Exception:
+            logger.exception("MITRE coverage calculation failed")
+
         # Phase B: persist scan results to cross-scan memory KB so the next
         # scan of this target can query prior findings via query_scan_memory.
         # Also extract the fingerprint_target result from the loop's message

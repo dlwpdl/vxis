@@ -103,7 +103,56 @@ _SIGNALS: dict[str, list[tuple[str, str]]] = {
     "generic_rest_api": [
         ("Content-Type: application/json", "header"),
         ("Access-Control-Allow-Origin:", "header"),
+        ("application/hal+json", "header"),
+        ("application/vnd.api+json", "header"),
     ],
+    # Additional stacks — re-use existing playbooks by aliasing in the
+    # signal layer. Shopify/Next.js/Strapi/SvelteKit all map to
+    # express_node_spa or generic_rest_api depending on their surface.
+    "express_node_spa_additional": [
+        # Next.js markers (recommends express_node_spa playbook)
+        ("x-powered-by: next.js", "header"),
+        ("__next_data__", "body"),
+        ("_next/static", "body"),
+        # Nuxt / Vue
+        ("x-nuxt-fallback", "header"),
+        ("_nuxt/", "body"),
+        ("__nuxt__", "body"),
+        # SvelteKit
+        ("x-sveltekit", "header"),
+        # Gatsby
+        ("gatsby-plugin-", "body"),
+        ("___gatsby", "body"),
+    ],
+    "spring_boot_additional": [
+        # Spring variations
+        ("X-Content-Type-Options: nosniff", "header"),  # weak
+        ("Server: Jetty(", "header"),
+        ("jolokia", "body"),
+    ],
+    "generic_rest_api_additional": [
+        # Strapi CMS
+        ("x-powered-by: strapi", "header"),
+        ("strapi.io", "body"),
+        # Ghost blog
+        ("x-powered-by: ghost", "header"),
+        # Directus
+        ("x-directus-version", "header"),
+        # Hasura
+        ("x-hasura-role", "header"),
+        # Shopify
+        ("x-shopify-stage", "header"),
+        ("shopify-checkout-api-token", "header"),
+        ("x-shopid", "header"),
+    ],
+}
+
+
+# Alias mapping: additional signal groups map back to existing playbooks
+_PLAYBOOK_ALIASES: dict[str, str] = {
+    "express_node_spa_additional": "express_node_spa",
+    "spring_boot_additional": "spring_boot",
+    "generic_rest_api_additional": "generic_rest_api",
 }
 
 
@@ -153,6 +202,8 @@ def _score_playbooks(
     url_l = url.lower()
     results: list[tuple[str, int, list[str]]] = []
 
+    # Accumulate scores per real playbook (aliases are merged here)
+    agg: dict[str, tuple[int, list[str]]] = {}
     for playbook, signals in _SIGNALS.items():
         score = 0
         matched: list[str] = []
@@ -168,9 +219,17 @@ def _score_playbooks(
                 weight = 3 if pattern.lower() in _STRONG_SIGNALS else 1
                 score += weight
                 matched.append(f"{pattern} (×{weight})")
-        if score > 0:
-            results.append((playbook, score, matched))
+        if score <= 0:
+            continue
+        # Merge alias groups back to the real playbook name
+        real_name = _PLAYBOOK_ALIASES.get(playbook, playbook)
+        if real_name in agg:
+            prev_score, prev_matched = agg[real_name]
+            agg[real_name] = (prev_score + score, prev_matched + matched)
+        else:
+            agg[real_name] = (score, matched)
 
+    results = [(name, s, m) for name, (s, m) in agg.items()]
     results.sort(key=lambda x: x[1], reverse=True)
     return results
 
