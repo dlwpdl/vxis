@@ -2907,11 +2907,27 @@ class ScanPipeline:
             pass
 
     async def _phase5_special(self, ctx: ScanContext) -> None:
-        """Phase 5: IoT/VoIP/Web3 — 해당 시에만. 현대 CVE 인젝션 벡터는 항상 기록."""
-        # Modern CVE injection vectors — always attempted regardless of target type
-        # LLM/AI 인젝션, CMS RCE, LLM 프롬프트 인젝션은 범용 웹 타깃에도 적용
+        """Phase 5: IoT/VoIP/Web3 — 해당 시에만. 핵심 인젝션 및 현대 CVE 벡터는 항상 기록.
+
+        Phase 5: Special agents for IoT/VoIP/Web3 — run only when relevant.
+        Core injection vectors and modern CVE vectors are always recorded.
+        """
+        # Core injection vectors — always attempted regardless of target type
+        # 핵심 인젝션 벡터 — 모든 웹 타깃에서 항상 시도 (IoT 여부 무관)
+        # Brain이 실제 공격 여부를 결정하지만, 벡터 커버리지 스코어링은 항상 기록
         try:
             for vid in [
+                # SQL Injection variants | SQL 인젝션 변형
+                "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
+                "WEB-SQLI-005", "WEB-SQLI-006",
+                # NoSQL Injection | NoSQL 인젝션
+                "WEB-NOSQL-001", "WEB-NOSQL-002",
+                # Command Injection | 명령 주입
+                "WEB-CMDI-001", "WEB-CMDI-002",
+                # Other injection classes | 기타 인젝션 분류
+                "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
+                "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
+                # Modern CVE injection vectors | 현대 CVE 인젝션 벡터
                 "WEB-INJECT-018",  # AI/LLM Workflow Code Injection (Langflow)
                 "WEB-INJECT-019",  # Laravel Livewire RCE (CVE-2025-54068)
                 "WEB-INJECT-020",  # CMS Code Injection (Craft CMS CVE-2025-32432)
@@ -2925,16 +2941,6 @@ class ScanPipeline:
         if is_iot:
             logger.info("  IoT indicators detected — running IoT agents")
             try:
-                # Phase 5 injection vectors
-                for vid in [
-                    "WEB-SQLI-001", "WEB-SQLI-002", "WEB-SQLI-003", "WEB-SQLI-004",
-                    "WEB-SQLI-005", "WEB-SQLI-006",
-                    "WEB-NOSQL-001", "WEB-NOSQL-002",
-                    "WEB-CMDI-001", "WEB-CMDI-002",
-                    "WEB-LDAP-001", "WEB-XPATH-001", "WEB-SSTI-001",
-                    "WEB-XXE-001", "WEB-DESER-001", "WEB-UPLOAD-001",
-                ]:
-                    ctx.score_tracker.record_vector_attempt(vid)
                 ctx.score_tracker.record_phase_complete("Phase 5: Special Agents (IoT/VoIP/Web3)")
             except Exception:
                 pass
