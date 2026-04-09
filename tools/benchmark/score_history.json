@@ -1,145 +1,5 @@
 [
   {
-    "date": "2026-04-01",
-    "iteration": 1,
-    "target_name": "dvwa",
-    "target_type": "web",
-    "total": 867.3744911804613,
-    "grade": "A",
-    "dimensions": {
-      "vector_coverage": 143.28358208955223,
-      "exploitation_reach": 274.0909090909091,
-      "chain_intelligence": 150.0,
-      "finding_precision": 200.0,
-      "completeness": 100.0
-    },
-    "delta": 0.0
-  },
-  {
-    "date": "2026-04-01",
-    "iteration": 1,
-    "target_name": "juice-shop",
-    "target_type": "web",
-    "total": 823.5820895522388,
-    "grade": "A",
-    "dimensions": {
-      "vector_coverage": 133.5820895522388,
-      "exploitation_reach": 240.0,
-      "chain_intelligence": 150.0,
-      "finding_precision": 200.0,
-      "completeness": 100.0
-    },
-    "delta": 0.0
-  },
-  {
-    "date": "2026-04-01",
-    "iteration": 1,
-    "target_name": "webgoat",
-    "target_type": "web",
-    "total": 829.4029850746268,
-    "grade": "A",
-    "dimensions": {
-      "vector_coverage": 139.40298507462686,
-      "exploitation_reach": 240.0,
-      "chain_intelligence": 150.0,
-      "finding_precision": 200.0,
-      "completeness": 100.0
-    },
-    "delta": 0.0
-  },
-  {
-    "date": "2026-04-01",
-    "iteration": 1,
-    "target_name": "nodegoat",
-    "target_type": "web",
-    "total": 831.5848032564451,
-    "grade": "A",
-    "dimensions": {
-      "vector_coverage": 139.40298507462686,
-      "exploitation_reach": 242.1818181818182,
-      "chain_intelligence": 150.0,
-      "finding_precision": 200.0,
-      "completeness": 100.0
-    },
-    "delta": 0.0
-  },
-  {
-    "date": "2026-04-02",
-    "iteration": 1,
-    "target_name": "mutillidae",
-    "target_type": "web",
-    "total": 783.8805970149253,
-    "grade": "A",
-    "dimensions": {
-      "vector_coverage": 123.88059701492537,
-      "exploitation_reach": 260.0,
-      "chain_intelligence": 100.0,
-      "finding_precision": 200.0,
-      "completeness": 100.0
-    },
-    "delta": 0.0
-  },
-  {
-    "date": "2026-04-05",
-    "iteration": 1,
-    "target_name": "dvwa",
-    "target_type": "web",
-    "total": 681.4925373134329,
-    "grade": "B",
-    "dimensions": {
-      "vector_coverage": 91.49253731343283,
-      "exploitation_reach": 240.0,
-      "chain_intelligence": 50.0,
-      "finding_precision": 200.0,
-      "completeness": 100.0
-    }
-  },
-  {
-    "date": "2026-04-05",
-    "iteration": 1,
-    "target_name": "juice-shop",
-    "target_type": "web",
-    "total": 681.4925373134329,
-    "grade": "B",
-    "dimensions": {
-      "vector_coverage": 91.49253731343283,
-      "exploitation_reach": 240.0,
-      "chain_intelligence": 50.0,
-      "finding_precision": 200.0,
-      "completeness": 100.0
-    }
-  },
-  {
-    "date": "2026-04-05",
-    "iteration": 1,
-    "target_name": "vampi",
-    "target_type": "web",
-    "total": 681.4925373134329,
-    "grade": "B",
-    "dimensions": {
-      "vector_coverage": 91.49253731343283,
-      "exploitation_reach": 240.0,
-      "chain_intelligence": 50.0,
-      "finding_precision": 200.0,
-      "completeness": 100.0
-    }
-  },
-  {
-    "date": "2026-04-05",
-    "iteration": 2,
-    "target_name": "dvwa",
-    "target_type": "web",
-    "total": 681.4925373134329,
-    "grade": "B",
-    "dimensions": {
-      "vector_coverage": 91.49253731343283,
-      "exploitation_reach": 240.0,
-      "chain_intelligence": 50.0,
-      "finding_precision": 200.0,
-      "completeness": 100.0
-    }
-  },
-  {
     "date": "2026-04-05",
     "iteration": 2,
     "target_name": "juice-shop",
@@ -3991,6 +3851,141 @@
       "exploitation_reach": 240.0,
       "chain_intelligence": 50.0,
       "finding_precision": 200.0,
+      "completeness": 100.0
+    }
+  },
+  {
+    "date": "2026-04-09",
+    "iteration": 1,
+    "target_name": "dvwa",
+    "target_type": "web",
+    "total": 100.0,
+    "grade": "D",
+    "dimensions": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 0.0,
+      "chain_intelligence": 0.0,
+      "finding_precision": 0.0,
+      "completeness": 100.0
+    }
+  },
+  {
+    "date": "2026-04-09",
+    "iteration": 1,
+    "target_name": "juice-shop",
+    "target_type": "web",
+    "total": 100.0,
+    "grade": "D",
+    "dimensions": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 0.0,
+      "chain_intelligence": 0.0,
+      "finding_precision": 0.0,
+      "completeness": 100.0
+    }
+  },
+  {
+    "date": "2026-04-09",
+    "iteration": 1,
+    "target_name": "vampi",
+    "target_type": "web",
+    "total": 100.0,
+    "grade": "D",
+    "dimensions": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 0.0,
+      "chain_intelligence": 0.0,
+      "finding_precision": 0.0,
+      "completeness": 100.0
+    }
+  },
+  {
+    "date": "2026-04-09",
+    "iteration": 2,
+    "target_name": "dvwa",
+    "target_type": "web",
+    "total": 100.0,
+    "grade": "D",
+    "dimensions": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 0.0,
+      "chain_intelligence": 0.0,
+      "finding_precision": 0.0,
+      "completeness": 100.0
+    }
+  },
+  {
+    "date": "2026-04-09",
+    "iteration": 2,
+    "target_name": "juice-shop",
+    "target_type": "web",
+    "total": 100.0,
+    "grade": "D",
+    "dimensions": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 0.0,
+      "chain_intelligence": 0.0,
+      "finding_precision": 0.0,
+      "completeness": 100.0
+    }
+  },
+  {
+    "date": "2026-04-09",
+    "iteration": 2,
+    "target_name": "vampi",
+    "target_type": "web",
+    "total": 100.0,
+    "grade": "D",
+    "dimensions": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 0.0,
+      "chain_intelligence": 0.0,
+      "finding_precision": 0.0,
+      "completeness": 100.0
+    }
+  },
+  {
+    "date": "2026-04-09",
+    "iteration": 3,
+    "target_name": "dvwa",
+    "target_type": "web",
+    "total": 100.0,
+    "grade": "D",
+    "dimensions": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 0.0,
+      "chain_intelligence": 0.0,
+      "finding_precision": 0.0,
+      "completeness": 100.0
+    }
+  },
+  {
+    "date": "2026-04-09",
+    "iteration": 3,
+    "target_name": "juice-shop",
+    "target_type": "web",
+    "total": 100.0,
+    "grade": "D",
+    "dimensions": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 0.0,
+      "chain_intelligence": 0.0,
+      "finding_precision": 0.0,
+      "completeness": 100.0
+    }
+  },
+  {
+    "date": "2026-04-09",
+    "iteration": 3,
+    "target_name": "vampi",
+    "target_type": "web",
+    "total": 100.0,
+    "grade": "D",
+    "dimensions": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 0.0,
+      "chain_intelligence": 0.0,
+      "finding_precision": 0.0,
       "completeness": 100.0
     }
   },
