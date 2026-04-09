@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -16,9 +17,28 @@ class ScanLoopState:
     completed: bool = False
     started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     findings: list[dict[str, Any]] = field(default_factory=list)
+    # Peak byte size of messages[] seen across the run — sampled each iteration.
+    # Surfaced by ScanPipelineV2 into ctx.peak_context_bytes for the Task 14 benchmark.
+    peak_context_bytes: int = 0
 
     def add_message(self, role: str, content: Any) -> None:
         self.messages.append({"role": role, "content": content, "iter": self.iteration})
+
+    def update_peak_size(self) -> int:
+        """Sample current messages[] byte size and update peak_context_bytes.
+
+        Called once per iteration in ScanAgentLoop.run so the Phase A
+        instrumentation metric has a meaningful non-zero value. Deterministic
+        JSON-length proxy matching ScanContext.update_peak_size for consistency.
+        Returns the current size.
+        """
+        try:
+            current = len(json.dumps(self.messages, default=str, ensure_ascii=False))
+        except Exception:
+            current = 0
+        if current > self.peak_context_bytes:
+            self.peak_context_bytes = current
+        return current
 
 class ScanAgentLoop:
     def __init__(
@@ -55,10 +75,14 @@ class ScanAgentLoop:
                 if name == "finish_scan" and result.ok:
                     self.state.completed = True
                     break
+            # Sample messages[] byte size at the end of each iteration.
+            # Phase B fix: populates peak_context_bytes metric that was 0 in Task 11.
+            self.state.update_peak_size()
         return {
             "target": self.state.target,
             "completed": self.state.completed,
             "iterations": self.state.iteration,
             "findings": self.state.findings,
             "messages": len(self.state.messages),
+            "peak_context_bytes": self.state.peak_context_bytes,
         }

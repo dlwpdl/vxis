@@ -92,4 +92,7 @@ def test_think_in_loop_adapter_concatenation_no_brace_explosion():
     assert "}}" not in full
 
     assert "Controller" in full
-    assert "cpr_recon" in full
+    # Phase B: adapter upgraded to prefer shell_exec (real sqlmap/nuclei/ffuf)
+    # over the hypothetical cpr_recon tool that was never implemented
+    assert "shell_exec" in full
+    assert "http_request" in full

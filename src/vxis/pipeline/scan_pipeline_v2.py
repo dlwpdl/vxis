@@ -261,6 +261,13 @@ class ScanPipeline:
             {"phase": "scan_loop", "iterations": loop_result.get("iterations", 0)},
         )
 
+        # Phase B fix: surface peak_context_bytes from the loop state into ctx.
+        # Task 11 reported peak_context_bytes=0 because the v2 shim had no wire-up;
+        # now ScanAgentLoop samples it each iteration and exposes it on loop_result.
+        peak_bytes_from_loop = int(loop_result.get("peak_context_bytes", 0))
+        if peak_bytes_from_loop > getattr(ctx, "peak_context_bytes", 0):
+            ctx.peak_context_bytes = peak_bytes_from_loop
+
         # 6. Copy findings from the in-memory store into ctx.findings
         finding_dicts = _get_finding_dicts()
         for d in finding_dicts:
