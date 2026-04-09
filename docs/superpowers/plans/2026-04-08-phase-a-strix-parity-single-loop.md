@@ -752,7 +752,136 @@ Scope: wrap existing primitives (`src/vxis/primitives/` or equivalent — verify
 
 ---
 
-### Task 7: Classify and wrap Phase 4 CPR as `cpr_recon` tool
+## 🚨 PIVOT 2026-04-09 — Tasks 7-11 REPLACED with Strix-power tools
+
+**Discovery:** On starting Task 7, verified that `src/vxis/phases/guides/*.py` files are `PhaseGuide` metadata objects (playbooks), NOT execution code. All phase execution logic lives inside `ScanPipeline._phaseN_*` methods in `pipeline.py`, tightly coupled to `self` and `ScanContext`. Extracting them is exactly Task 13's job — Tasks 7-11 as originally planned would have been duplicated work.
+
+**Decision:** Replace Tasks 7-11 (5 Phase wrappers) with 2 Strix-power tools. This makes VXIS architecturally equivalent to Strix: low-level primitives + unrestricted shell + Python subprocess + Docker sandbox isolation. Brain drives scanner selection dynamically per target instead of being boxed into hardcoded phases.
+
+**Trade-off accepted:** Phase A benchmark (Task 14 revised) may show lower finding count than baseline temporarily — because gpt-5.4-mini running ad-hoc shell commands is less tuned than the current hand-coded phase pipeline. The win is that `brain_decision_count` is meaningful (each decision is a strategic scanner choice, not a micro-payload step) AND Phase B can trivially scale quality by adding better scanners or better models without touching the architecture.
+
+**Enterprise gate note:** `shell_exec` bypasses the existing Hands-layer deferred mutation queue (sqlmap/nuclei do their own HTTP clients). For Phase A this is intentional — targets are local Docker (Juice Shop / WebGoat) and full destructive power is the goal ("real hacker simulation"). Phase C will add a second-layer egress filter on the sandbox for enterprise scans against customer production.
+
+### Revised task list (15 → 12)
+
+```
+✅ Task 1-6 complete (baseline, registry, loop, think_in_loop, control, Hands/Eyes/Xray)
+🎯 Task 7  (NEW)       shell_exec tool + vxis-sandbox Docker image (Strix terminal equivalent)
+   Task 8  (NEW)       python_exec tool (Strix python equivalent, same sandbox)
+   Task 9  (was 12)    Finding CRUD tools
+   Task 10 (was 13)    🔥 pipeline.py gutting — DELETE _phaseN_* methods (no extraction)
+   Task 11 (was 14)    🚦 Benchmark gate (brain_decision_count >> 0)
+   Task 12 (was 15)    Cleanup obsolete phase guide files
+```
+
+---
+
+### Task 7 (NEW): `shell_exec` tool + Docker sandbox
+
+**Files:**
+- Create: `docker/sandbox/Dockerfile` — `debian:trixie-slim` base + `sqlmap ffuf nuclei nikto gobuster wapiti dalfox jwt_tool httpx arjun curl python3 python3-pip` installed
+- Create: `src/vxis/agent/tools/shell_tools.py` — `ShellExecTool` class, lifecycle manager for `vxis-sandbox` container
+- Modify: `src/vxis/agent/tools/__init__.py` — register `ShellExecTool` in `build_default_registry()`
+- Test: `tests/agent/tools/test_shell_tools.py`
+
+**`ShellExecTool` behavior:**
+- `name = "shell_exec"`
+- `input_schema = {"type": "object", "properties": {"command": {"type": "string"}, "timeout": {"type": "number", "default": 120}}, "required": ["command"]}`
+- `run(command, timeout=120)`:
+  1. Lazy-init: if `vxis-sandbox` container not running, start it via `docker run -d --name vxis-sandbox --network host -v /tmp/vxis-workspace:/workspace vxis/sandbox:latest sleep infinity`. If image not built, return `ToolResult(ok=False, summary="vxis-sandbox image not built — run: docker build -t vxis/sandbox:latest docker/sandbox/")`.
+  2. Dispatch: `asyncio.create_subprocess_exec("docker", "exec", "vxis-sandbox", "sh", "-c", command)` with the timeout
+  3. Capture stdout/stderr, return:
+     ```python
+     ToolResult(
+         ok=(exit_code == 0),
+         data={"stdout": stdout[:5000], "stderr": stderr[:2000], "exit_code": exit_code, "command": command[:200]},
+         summary=f"shell_exec: exit={exit_code}, {len(stdout)} bytes stdout",
+     )
+     ```
+- **Unrestricted**: no command whitelist, no arg filtering. Brain emits any shell command and it runs inside the sandbox.
+- **Module-level container lifecycle**: a helper `_ensure_sandbox_running()` that's idempotent and caches state.
+- **Cleanup**: add `_reset_for_tests()` following the Task 6 pattern. Production code does NOT auto-stop the container; it stays warm across scans.
+
+**Dockerfile sketch:**
+```dockerfile
+FROM debian:trixie-slim
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    sqlmap ffuf nikto gobuster wapiti dirb curl wget jq \
+    python3 python3-pip python3-venv python3-httpx python3-aiohttp \
+    git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Nuclei (Go-based, install binary)
+RUN curl -fsSL "https://github.com/projectdiscovery/nuclei/releases/download/v3.3.4/nuclei_3.3.4_linux_$(dpkg --print-architecture).zip" -o /tmp/nuclei.zip \
+    && unzip /tmp/nuclei.zip -d /usr/local/bin/ \
+    && rm /tmp/nuclei.zip \
+    && chmod +x /usr/local/bin/nuclei
+
+# httpx, arjun, dalfox via pip where available
+RUN pip3 install --break-system-packages httpx dalfox-py jwt-tool arjun 2>/dev/null || true
+
+WORKDIR /workspace
+CMD ["sleep", "infinity"]
+```
+
+(The subagent may adjust package names for availability — record actual packages installed in the Dockerfile.)
+
+**Tests (unit, mocked docker):**
+- `test_shell_exec_tool_conforms_to_brain_tool` — isinstance check
+- `test_shell_exec_tool_runs_command_via_docker_exec` — mock `asyncio.create_subprocess_exec`, verify called with `["docker", "exec", "vxis-sandbox", "sh", "-c", command]`
+- `test_shell_exec_tool_captures_exit_code_and_stdout` — mock returns exit=0, stdout="hello"
+- `test_shell_exec_tool_timeout_handling` — mock raises `asyncio.TimeoutError`, verify graceful fail
+- `test_shell_exec_tool_image_not_built` — mock `_check_image_exists` returns False, verify error ToolResult
+- `test_build_default_registry_now_has_seven_tools` — registry count assertion (control 3 + Hands/Eyes/Xray 3 + shell_exec 1 = 7)
+
+**Manual integration (not in CI):**
+- Controller builds the Docker image manually: `docker build -t vxis/sandbox:latest docker/sandbox/`
+- Smoke test: `shell_exec("nuclei -u http://localhost:3000 -severity high")` — verify real nuclei runs
+
+**Commit:** `feat(agent/tools): add shell_exec tool + vxis-sandbox Docker image`
+
+---
+
+### Task 8 (NEW): `python_exec` tool
+
+**Files:**
+- Create: `src/vxis/agent/tools/python_tools.py` — `PythonExecTool`
+- Modify: `src/vxis/agent/tools/__init__.py` — register
+- Test: `tests/agent/tools/test_python_tools.py`
+
+**`PythonExecTool` behavior:**
+- `name = "python_exec"`
+- `input_schema = {"type": "object", "properties": {"code": {"type": "string"}, "timeout": {"type": "number", "default": 120}}, "required": ["code"]}`
+- `run(code, timeout=120)`:
+  1. Ensure sandbox running (reuse `shell_tools._ensure_sandbox_running`)
+  2. Write code to `/tmp/vxis-workspace/_python_exec_<uuid>.py` on the host (mounted into sandbox at `/workspace/`)
+  3. Dispatch: `docker exec vxis-sandbox python3 /workspace/_python_exec_<uuid>.py`
+  4. Capture stdout/stderr, cleanup the temp file
+  5. Return ToolResult with stdout/stderr/exit_code
+
+**Why a separate tool (not just `shell_exec python3 -c '...'`):**
+- Multi-line Python with quotes is painful to escape in a single command string
+- File-based dispatch lets Brain write larger scripts cleanly
+- Shared `/workspace` volume means Brain can persist state (CSVs of discovered endpoints, found credentials, etc.) between tool calls
+
+**Tests:**
+- `test_python_exec_tool_conforms_to_brain_tool`
+- `test_python_exec_tool_writes_code_to_tempfile_and_dispatches`
+- `test_python_exec_tool_captures_output`
+- `test_python_exec_tool_timeout`
+- `test_python_exec_tool_cleanup_on_error`
+- `test_build_default_registry_now_has_eight_tools`
+
+**Commit:** `feat(agent/tools): add python_exec tool (Strix python equivalent)`
+
+---
+
+### ~~Task 7: Classify and wrap Phase 4 CPR as `cpr_recon` tool~~ (DELETED — see pivot above)
+
+### ~~Task 8-11: Phase wrappers~~ (DELETED — see pivot above)
+
+### OLD Task 7 content (kept below for reference, DO NOT IMPLEMENT):
 
 **Files:**
 - Read: `src/vxis/phases/p4_cpr.py` (entire file)
