@@ -23,6 +23,8 @@ from vxis.agent.tools.playbook_tools import (
     ListPlaybooksTool,
     LoadPlaybookTool,
 )
+from vxis.agent.tools.fingerprint_tools import FingerprintTargetTool
+from vxis.agent.tools.memory_tools import QueryScanMemoryTool
 
 __all__ = [
     "FinishScanTool",
@@ -38,6 +40,8 @@ __all__ = [
     "LinkChainTool",
     "ListPlaybooksTool",
     "LoadPlaybookTool",
+    "FingerprintTargetTool",
+    "QueryScanMemoryTool",
     "build_default_registry",
 ]
 
@@ -45,9 +49,10 @@ __all__ = [
 def build_default_registry() -> ToolRegistry:
     """Build a ToolRegistry with the default tool set registered.
 
-    Phase B: playbook tools added so Brain can load stack-specific technique
-    libraries instead of memorizing per-target paths. This scales across
-    targets because knowledge is stack-based, not target-based.
+    Phase B: playbook + fingerprint + memory tools added so Brain can:
+    1. fingerprint_target → detect stack automatically
+    2. query_scan_memory → check prior findings on this target
+    3. list_playbooks / load_playbook → pull stack-specific techniques
     """
     reg = ToolRegistry()
     reg.register(FinishScanTool())
@@ -63,4 +68,6 @@ def build_default_registry() -> ToolRegistry:
     reg.register(LinkChainTool())
     reg.register(ListPlaybooksTool())
     reg.register(LoadPlaybookTool())
+    reg.register(FingerprintTargetTool())
+    reg.register(QueryScanMemoryTool())
     return reg

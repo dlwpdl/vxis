@@ -501,29 +501,25 @@ tool — do not retry unchanged.
 You MUST execute these steps in this exact order. Do not skip any step.
 Do not reorder them. Each step has a specific purpose.
 
-STEP 1 — CALL list_playbooks() FIRST.
-    This tells you which attack playbooks are available. You will load
-    the relevant ones in STEP 3. This is always your first action.
+STEP 1 — QUERY scan memory for this target:
+    query_scan_memory(url="<TARGET_URL>")
+    If VXIS has scanned this target before, you will get prior findings as
+    context. Verify those still exist first, then hunt for new ones. If
+    "target_known": false, you are on a fresh target — proceed to STEP 2.
 
-STEP 2 — FINGERPRINT the target with ONE shell_exec call:
-    shell_exec(command="curl -sk -D - -o /dev/null <TARGET_URL>/ 2>&1 | head -30")
-    Look at the headers for framework signals: Server, X-Powered-By,
-    Set-Cookie (JSESSIONID = Spring, PHPSESSID = PHP, connect.sid = Node,
-    csrftoken+sessionid = Django, laravel_session = Laravel), X-Frame-Options,
-    custom X-* headers. Record what you see in your `reasoning`.
+STEP 2 — FINGERPRINT the target in a single call:
+    fingerprint_target(url="<TARGET_URL>")
+    This fetches headers + body, detects the web stack, and returns
+    `recommended_playbooks` (a ranked list). No more manual curl + header
+    inspection. The tool also reports SPA detection + baseline shell size.
 
-STEP 3 — LOAD the matching playbooks via load_playbook:
-    - ALWAYS load "generic_sensitive_files" first
-    - Based on fingerprint, load ONE framework playbook:
-        load_playbook(name="spring_boot")          # Spring/Java
-        load_playbook(name="express_node_spa")     # Node + SPA
-        load_playbook(name="php_wordpress")        # PHP
-        load_playbook(name="django_python")        # Django
-        load_playbook(name="generic_rest_api")     # JSON-first API
-    - Load "injection_vectors" after the framework playbook for SQLi/XSS recipes
-
-    Each load_playbook call returns a full markdown body with probe recipes.
-    Read them; you will paste them in STEP 4.
+STEP 3 — LOAD each recommended playbook via load_playbook:
+    For each name in `recommended_playbooks`:
+        load_playbook(name="<playbook_name>")
+    Available playbooks include: generic_sensitive_files, generic_rest_api,
+    spring_boot, express_node_spa, php_wordpress, django_python, rails,
+    flask_fastapi, go_web, aspnet, injection_vectors.
+    Load multiple — each returns a full markdown body with probe recipes.
 
 STEP 4 — EXECUTE the probe recipe from the framework playbook:
     Copy the python_exec code block from the loaded playbook and run it,

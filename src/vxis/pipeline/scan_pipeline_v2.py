@@ -50,6 +50,7 @@ from vxis.agent.tools import build_default_registry
 from vxis.agent.tools.finding_tools import _get_chains as _get_chain_dicts
 from vxis.agent.tools.finding_tools import _get_findings as _get_finding_dicts
 from vxis.agent.tools.finding_tools import _reset_for_tests as _reset_finding_store
+from vxis.agent.tools.memory_tools import record_scan_result as _record_scan_memory
 from vxis.pipeline.context import ScanContext
 
 logger = logging.getLogger(__name__)
@@ -339,6 +340,18 @@ class ScanPipeline:
             f"llm_call_count={llm_calls} brain_decision_count={brain_decisions} "
             f"findings_count={findings_count}"
         )
+
+        # Phase B: persist scan results to cross-scan memory KB so the next
+        # scan of this target can query prior findings via query_scan_memory.
+        try:
+            finding_dicts_raw = _get_finding_dicts()
+            _record_scan_memory(
+                target=ctx.target,
+                findings=finding_dicts_raw,
+                fingerprint=None,  # TODO: surface fingerprint from scan loop
+            )
+        except Exception:
+            logger.exception("Failed to record scan memory")
 
         return ctx
 
