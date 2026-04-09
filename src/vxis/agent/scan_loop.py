@@ -182,6 +182,13 @@ class ScanAgentLoop:
         # finding_tools store and drop items once Brain reports them.
         _pending_findings: dict[tuple[str, str], str] = {}
 
+        # Phase C: enterprise egress allowlist. No-op unless VXIS_EGRESS_STRICT=1.
+        from vxis.agent.egress import build_allowlist, check_violations, is_strict_mode
+        _egress_allowlist = build_allowlist(self.state.target)
+        _egress_strict = is_strict_mode()
+        if _egress_strict:
+            logger.info("egress filter ENABLED — allowlist=%s", sorted(_egress_allowlist))
+
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
             actions = await self._decide(self.state)
@@ -219,6 +226,33 @@ class ScanAgentLoop:
                         self.state.iteration, name, count,
                     )
                     continue
+
+                # Phase C: egress filter — block shell/python/http commands
+                # that reference off-allowlist hosts when strict mode is on.
+                if _egress_strict and name in ("shell_exec", "python_exec", "http_request", "http_get", "http_post"):
+                    blob = ""
+                    if isinstance(args, dict):
+                        blob = " ".join(str(v) for v in args.values() if v)
+                    violations = check_violations(blob, _egress_allowlist)
+                    if violations:
+                        self.state.add_message("tool", {
+                            "name": name, "args": args,
+                            "result": {
+                                "ok": False,
+                                "summary": (
+                                    f"EGRESS BLOCKED: command references off-allowlist host(s) "
+                                    f"{violations}. Only these hosts are permitted: "
+                                    f"{sorted(_egress_allowlist)}. Rewrite the command to target "
+                                    f"the authorized scope only."
+                                ),
+                                "data": {"egress_blocked": True, "violations": violations},
+                            },
+                        })
+                        logger.warning(
+                            "iter %d: egress-blocked %s (violations=%s)",
+                            self.state.iteration, name, violations,
+                        )
+                        continue
 
                 # Phase C: auto-verify HIGH/CRITICAL report_finding calls
                 # before dispatch. If verify_finding is available in the

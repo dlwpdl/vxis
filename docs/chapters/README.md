@@ -12,6 +12,8 @@
 | 02 | [Phase B Day 1 — Findings Breakthrough](02-phase-b-day1-findings-breakthrough.md) | 2026-04-09 | Strix-style adapter + auto-hint + dedup. 0 → 8 findings on Juice Shop |
 | 03 | [Phase B Day 2 — Playbook Architecture Pivot](03-phase-b-day2-playbook-pivot.md) | 2026-04-09 | User insight: memorize techniques, not targets. `load_playbook` tool + 7 stack playbooks |
 | 04 | [Phase B Day 2 — Fingerprint + Memory + Stabilization](04-phase-b-day2-fingerprint-memory.md) | 2026-04-09 | `fingerprint_target` + `query_scan_memory` + 4 more playbooks. 15 tools total |
+| 05 | [Phase B Day 2 — sqlmap/critic stabilization](05-phase-b-day2-sqlmap-critic-stabilization.md) | 2026-04-09 | sqlmap integration + dual-brain critic + JSON recovery hardening |
+| 06 | [Phase C — Verifier, Belief State, Egress Filter](06-phase-c-verifier-belief-egress.md) | 2026-04-10 | Adversarial verifier + rubric rebalance + belief tracking + enterprise egress guardrail |
 
 ## What these chapters are for
 
