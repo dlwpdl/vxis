@@ -144,8 +144,19 @@ class ScanAgentLoop:
                             common = Counter(sizes).most_common(1)
                             if common and common[0][1] >= 3:
                                 _baseline_size = common[0][0]
+
                         findings_hint: list[str] = []
-                        seen = set()
+                        seen: set[tuple[str, str]] = set()
+
+                        # First pass: collect per-base-path sizes for query-param
+                        # diff detection (SQL injection / XSS / IDOR via response-
+                        # length oracle)
+                        path_sizes: dict[str, list[tuple[str, int, str]]] = {}
+                        for code, size_s, path in rows:
+                            base = path.split("?", 1)[0].rstrip("/")
+                            path_sizes.setdefault(base, []).append((code, int(size_s), path))
+
+                        # Second pass: per-row heuristics
                         for code, size_s, path in rows:
                             size = int(size_s)
                             key = (code, path)
@@ -154,39 +165,72 @@ class ScanAgentLoop:
                             seen.add(key)
                             code_i = int(code)
                             norm_path = "/" + path.lstrip("/")
-                            # Real-finding heuristics:
+                            base_key = path.split("?", 1)[0].rstrip("/")
+                            lower = norm_path.lower()
+
                             if code_i == 500:
                                 findings_hint.append(
                                     f"  - {code} {size}B {norm_path} → HTTP 500 = potential injection/logic bug (severity=high, finding_type=information_disclosure)"
                                 )
-                            elif code_i == 401 and "basket" in norm_path.lower():
+                            elif code_i == 401 and "basket" in lower:
                                 findings_hint.append(
-                                    f"  - {code} {size}B {norm_path} → auth-protected but enumerable = IDOR candidate (severity=medium, finding_type=broken_access_control)"
+                                    f"  - {code} {size}B {norm_path} → auth-protected enumerable resource = IDOR candidate (severity=medium, finding_type=broken_access_control)"
                                 )
-                            elif code_i == 403 and any(x in norm_path.lower() for x in (".bak", ".old", ".backup", "~")):
+                            elif code_i == 403 and any(x in lower for x in (".bak", ".old", ".backup", "~")):
                                 findings_hint.append(
-                                    f"  - {code} {size}B {norm_path} → backup file accessible (severity=medium, finding_type=information_disclosure)"
+                                    f"  - {code} {size}B {norm_path} → backup file accessible via bypass = info disclosure (severity=medium, finding_type=information_disclosure)"
+                                )
+                            elif code_i == 200 and "/ftp" in lower and _baseline_size and size != _baseline_size:
+                                # FTP directory — Juice Shop classic
+                                findings_hint.append(
+                                    f"  - {code} {size}B {norm_path} → directory listing exposed (size differs from shell {_baseline_size}) (severity=medium, finding_type=information_disclosure)"
                                 )
                             elif code_i == 200 and _baseline_size is not None and size != _baseline_size and size > 100:
-                                # Different from SPA shell → real content
-                                sensitive = any(x in norm_path.lower() for x in (
+                                sensitive = any(x in lower for x in (
                                     "admin", "config", "api-doc", "swagger", "graphql",
-                                    "ftp", ".git", ".env", "actuator", "debug", "backup",
-                                    "assets", "rest/admin", "rest/user", "rest/basket",
+                                    ".git", ".env", "actuator", "debug", "backup",
+                                    "rest/admin", "rest/user", "rest/basket", "rest/order",
+                                    "rest/memories", "rest/captcha", "rest/languages",
                                 ))
                                 if sensitive:
+                                    sev = "high" if any(x in lower for x in ("admin", "config", ".git", ".env", "actuator")) else "medium"
                                     findings_hint.append(
-                                        f"  - {code} {size}B {norm_path} → differs from SPA baseline {_baseline_size}B = real content exposed (severity=high if admin/config, medium otherwise, finding_type=information_disclosure)"
+                                        f"  - {code} {size}B {norm_path} → sensitive endpoint returning {size}B (differs from SPA shell {_baseline_size}B) (severity={sev}, finding_type=information_disclosure)"
                                     )
+
+                        # Third pass: query-param response-length oracle (SQL injection)
+                        for base, entries in path_sizes.items():
+                            if len(entries) < 2 or not base:
+                                continue
+                            # Collect distinct sizes for this base
+                            distinct = {s for _, s, _ in entries}
+                            if len(distinct) < 2:
+                                continue
+                            # Find the max (benign) and min (injection break) sizes
+                            max_row = max(entries, key=lambda e: e[1])
+                            min_row = min(entries, key=lambda e: e[1])
+                            if max_row[1] - min_row[1] < 500:
+                                continue  # not a meaningful size delta
+                            if min_row[1] < 100 or max_row[1] > 1000:
+                                # min likely empty response, max likely real data
+                                findings_hint.append(
+                                    f"  - query-param oracle on {base}: {min_row[0]} {min_row[1]}B for '{min_row[2]}' vs {max_row[0]} {max_row[1]}B for '{max_row[2]}' → response-length oracle suggests SQL/NoSQL injection or parameter handling bug (severity=high, finding_type=sql_injection)"
+                                )
+
                         if findings_hint:
                             hint_msg = (
-                                "SYSTEM HINT — the previous probe output contains "
-                                "likely findings. Call report_finding for each one "
-                                "BEFORE running another probe:\n"
-                                + "\n".join(findings_hint[:8])
-                                + f"\n\nBaseline SPA shell size = {_baseline_size or 'unknown'} bytes. "
-                                "Any path returning exactly that size is the SPA shell and NOT a finding. "
-                                "Use report_finding with the severity and finding_type suggested above."
+                                "SYSTEM HINT — MANDATORY ACTION REQUIRED\n\n"
+                                "The previous probe output contains "
+                                f"{len(findings_hint)} likely REAL findings (baseline "
+                                f"SPA shell = {_baseline_size or 'unknown'}B, already filtered out).\n\n"
+                                "Your NEXT actions MUST be report_finding calls for "
+                                "EVERY item below — one report_finding per item, in a "
+                                "single response. DO NOT run another probe until all "
+                                "of these are reported. DO NOT skip any of them.\n\n"
+                                + "\n".join(findings_hint[:12])
+                                + "\n\nEmit them all now as a single JSON object with "
+                                "multiple actions in the 'actions' array. After "
+                                "reporting, proceed to sqlmap or deeper verification."
                             )
                             self.state.add_message("user", hint_msg)
                             logger.info(

@@ -144,8 +144,9 @@ async def test_query_findings_text_contains_matches_title_or_description():
 @pytest.mark.asyncio
 async def test_query_findings_respects_limit():
     rep = ReportFindingTool()
+    # Phase B: use distinct affected_component values so dedup doesn't merge them
     for i in range(10):
-        await rep.run(title=f"F{i}", severity="low", finding_type="misc", affected_component="/x", description="y")
+        await rep.run(title=f"F{i}", severity="low", finding_type="misc", affected_component=f"/path/{i}", description="y")
     q = QueryFindingsTool()
     r = await q.run(limit=3)
     assert r.data["count"] == 3

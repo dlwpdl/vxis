@@ -81,6 +81,34 @@ class ReportFindingTool:
                 error="missing_fields",
             )
 
+        # Phase B: simple dedup — if a finding with the same (finding_type,
+        # affected_component) already exists, skip re-creation and return the
+        # existing id. Prevents Brain from reporting the same issue twice when
+        # it loses track of its own state.
+        new_type = str(kwargs["finding_type"]).lower()
+        new_component = str(kwargs["affected_component"]).lower().strip()
+        for existing in _findings:
+            if (
+                existing["finding_type"].lower() == new_type
+                and existing["affected_component"].lower().strip() == new_component
+            ):
+                logger.info(
+                    "[Finding] duplicate skipped: %s %s (already %s)",
+                    new_type, new_component, existing["id"],
+                )
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "id": existing["id"],
+                        "total_findings": len(_findings),
+                        "deduped": True,
+                    },
+                    summary=(
+                        f"finding already recorded as {existing['id']} "
+                        f"(skipped duplicate). Do not report this again."
+                    ),
+                )
+
         finding_id = f"VXIS-{len(_findings) + 1:04d}"
         finding = {
             "id": finding_id,
