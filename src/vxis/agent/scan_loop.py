@@ -60,6 +60,7 @@ class ScanAgentLoop:
 
     async def run(self) -> dict[str, Any]:
         import json as _json
+        import re as _re
 
         self.state.add_message("system", f"Scan started on {self.state.target}")
         self.state.add_message("user", f"Target: {self.state.target}. Find all vulnerabilities.")
@@ -69,6 +70,18 @@ class ScanAgentLoop:
         # time and inject a synthetic "DEDUP" result instead of re-running.
         # This breaks the loop regardless of whether Brain's prompt adherence.
         _call_counts: dict[str, int] = {}
+
+        # Phase B fix: baseline tracking + auto-finding extraction.
+        # When Brain runs a probe that returns "status size path" rows, we
+        # parse the output and inject a SYSTEM HINT message listing likely
+        # findings. This compensates for gpt-5.4-mini's weak reason->action
+        # linkage: Brain has all the data it needs but doesn't emit
+        # report_finding on its own. The hint makes the conclusion explicit.
+        _baseline_size: int | None = None
+        _probe_row_re = _re.compile(
+            r"^\s*(\d{3})\s+(\d+)\s*B?\s+[/]*([^\s]+)\s*$",
+            _re.MULTILINE,
+        )
 
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
@@ -112,6 +125,75 @@ class ScanAgentLoop:
                 self.state.add_message("tool", {"name": name, "args": args, "result": {
                     "ok": result.ok, "summary": result.summary, "data": result.data,
                 }})
+
+                # Phase B: auto-extract findings from probe output. If the tool
+                # output looks like a path-size-status probe result, parse it,
+                # diff against baseline, and inject a SYSTEM HINT nudging Brain
+                # to call report_finding on the real finds.
+                if name in ("python_exec", "shell_exec") and result.ok:
+                    stdout = ""
+                    if isinstance(result.data, dict):
+                        stdout = str(result.data.get("stdout", ""))
+                    rows = _probe_row_re.findall(stdout)
+                    if rows and len(rows) >= 3:
+                        # Update baseline if we see the SPA shell size showing up repeatedly
+                        sizes = [int(s) for _, s, _ in rows]
+                        if _baseline_size is None:
+                            # Assume the most common size is the SPA shell
+                            from collections import Counter
+                            common = Counter(sizes).most_common(1)
+                            if common and common[0][1] >= 3:
+                                _baseline_size = common[0][0]
+                        findings_hint: list[str] = []
+                        seen = set()
+                        for code, size_s, path in rows:
+                            size = int(size_s)
+                            key = (code, path)
+                            if key in seen:
+                                continue
+                            seen.add(key)
+                            code_i = int(code)
+                            norm_path = "/" + path.lstrip("/")
+                            # Real-finding heuristics:
+                            if code_i == 500:
+                                findings_hint.append(
+                                    f"  - {code} {size}B {norm_path} → HTTP 500 = potential injection/logic bug (severity=high, finding_type=information_disclosure)"
+                                )
+                            elif code_i == 401 and "basket" in norm_path.lower():
+                                findings_hint.append(
+                                    f"  - {code} {size}B {norm_path} → auth-protected but enumerable = IDOR candidate (severity=medium, finding_type=broken_access_control)"
+                                )
+                            elif code_i == 403 and any(x in norm_path.lower() for x in (".bak", ".old", ".backup", "~")):
+                                findings_hint.append(
+                                    f"  - {code} {size}B {norm_path} → backup file accessible (severity=medium, finding_type=information_disclosure)"
+                                )
+                            elif code_i == 200 and _baseline_size is not None and size != _baseline_size and size > 100:
+                                # Different from SPA shell → real content
+                                sensitive = any(x in norm_path.lower() for x in (
+                                    "admin", "config", "api-doc", "swagger", "graphql",
+                                    "ftp", ".git", ".env", "actuator", "debug", "backup",
+                                    "assets", "rest/admin", "rest/user", "rest/basket",
+                                ))
+                                if sensitive:
+                                    findings_hint.append(
+                                        f"  - {code} {size}B {norm_path} → differs from SPA baseline {_baseline_size}B = real content exposed (severity=high if admin/config, medium otherwise, finding_type=information_disclosure)"
+                                    )
+                        if findings_hint:
+                            hint_msg = (
+                                "SYSTEM HINT — the previous probe output contains "
+                                "likely findings. Call report_finding for each one "
+                                "BEFORE running another probe:\n"
+                                + "\n".join(findings_hint[:8])
+                                + f"\n\nBaseline SPA shell size = {_baseline_size or 'unknown'} bytes. "
+                                "Any path returning exactly that size is the SPA shell and NOT a finding. "
+                                "Use report_finding with the severity and finding_type suggested above."
+                            )
+                            self.state.add_message("user", hint_msg)
+                            logger.info(
+                                "iter %d: injected finding hint with %d candidates",
+                                self.state.iteration, len(findings_hint),
+                            )
+
                 if name == "finish_scan" and result.ok:
                     self.state.completed = True
                     break
