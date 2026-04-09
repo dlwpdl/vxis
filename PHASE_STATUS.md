@@ -1,8 +1,26 @@
 # Phase Status — Migration Roadmap
 
-> Where VXIS is in its multi-phase evolution from hardcoded-phase pipeline to Strix-parity Brain-First architecture. Updated 2026-04-09.
+> Where VXIS is in its multi-phase evolution from hardcoded-phase pipeline to Strix-parity Brain-First architecture. Updated 2026-04-09 (Day 2).
 
-## Phase A — Strix-Parity Single-Loop Migration (In Progress)
+## Overall progress: ~50% of total roadmap
+
+| Phase | Weight | Progress | Contribution |
+|---|---:|---:|---:|
+| **A — Strix-parity single loop** | 30% | ✅ 100% | 30% |
+| **B — Tuning + Playbook + Memory** | 25% | 🔥 ~80% | ~20% |
+| C — Structured belief / Enterprise | 25% | ❌ 0% | 0% |
+| D — Game/Mobile/Hardware domains | 20% | ❌ 0% | 0% |
+| **Total** | 100% | | **~50%** |
+
+**Fast context recovery**: read [`docs/chapters/`](docs/chapters/README.md)
+in order. Each chapter is one decision or milestone with context → problem →
+decision → execution → result → lessons learned → next.
+
+Current state in one line:
+> 15 tools, 11 playbooks, fingerprint-driven workflow, cross-scan memory KB,
+> 0 false positives on both benchmark targets, gpt-5.4-mini sufficient.
+
+## Phase A — Strix-Parity Single-Loop Migration (COMPLETE ✅)
 
 **Goal:** Kill the 14-Phase `ScanPipeline` orchestrator. Make a single persistent Brain ReAct loop the owner of an entire scan end-to-end. Success criterion: `brain_decision_count` grows from baseline 0 to a meaningful number.
 
