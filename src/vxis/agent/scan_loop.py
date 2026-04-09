@@ -83,7 +83,47 @@ class ScanAgentLoop:
         """Returns list of (tool_name, args). Delegates to brain.think_in_loop when brain is set."""
         if self.brain is None:
             return [("finish_scan", {})]
-        return await self.brain.think_in_loop(state.messages, self.registry.describe_all())
+        # Phase C belief prompt: prepend a compact belief-state message so
+        # Brain sees what was refuted (don't re-claim) and what was confirmed
+        # (extend with new angles). Only emitted when state is non-empty.
+        belief_msg = self._build_belief_prompt()
+        messages = state.messages
+        if belief_msg:
+            messages = state.messages + [{"role": "user", "content": belief_msg, "iter": state.iteration}]
+        return await self.brain.think_in_loop(messages, self.registry.describe_all())
+
+    def _build_belief_prompt(self) -> str | None:
+        """Compose the belief-state reminder injected into each think call.
+
+        Lists refuted components so Brain stops re-claiming them and lists
+        confirmed ones so Brain knows which angles already paid off. Returns
+        None if both lists are empty.
+        """
+        refuted = self.state.refuted_findings
+        confirmed = self.state.confirmed_findings
+        if not refuted and not confirmed:
+            return None
+        lines: list[str] = ["BELIEF STATE REMINDER:"]
+        if refuted:
+            lines.append(
+                f"  REFUTED ({len(refuted)}) — do NOT re-report these, the "
+                "verifier already rejected them. Try different angles:"
+            )
+            for rf in refuted[-5:]:
+                lines.append(
+                    f"    - {rf.get('finding_type','?')} @ {rf.get('affected_component','?')}: "
+                    f"{rf.get('reasoning','')[:140]}"
+                )
+        if confirmed:
+            lines.append(f"  CONFIRMED ({len(confirmed)}) — build on these:")
+            for cf in confirmed[-5:]:
+                lines.append(
+                    f"    - {cf.get('finding_type','?')} @ {cf.get('affected_component','?')}"
+                )
+        lines.append(
+            "Pick a NEW endpoint, path, or technique. Do not retry refuted claims."
+        )
+        return "\n".join(lines)
 
     async def _critic_review(self) -> str | None:
         """Dual Brain critic: every N iterations, ask a stronger model to
@@ -181,6 +221,9 @@ class ScanAgentLoop:
         # Keyed by (finding_type, affected_component) so we can check against
         # finding_tools store and drop items once Brain reports them.
         _pending_findings: dict[tuple[str, str], str] = {}
+        # Track which iteration we last emitted a sticky re-injection on, so
+        # multi-action iterations don't spam the same nudge N times.
+        _sticky_last_iter: int = 0
 
         # Phase C: enterprise egress allowlist. No-op unless VXIS_EGRESS_STRICT=1.
         from vxis.agent.egress import build_allowlist, check_violations, is_strict_mode
@@ -476,7 +519,7 @@ class ScanAgentLoop:
                 # If there are still >= 2 unreported items, re-emit a condensed
                 # nudge. This catches the case where Brain reports 2 items and
                 # wanders off without finishing the list.
-                if _pending_findings and name != "report_finding":
+                if _pending_findings and name != "report_finding" and _sticky_last_iter < self.state.iteration:
                     try:
                         from vxis.agent.tools.finding_tools import _get_findings as _fget
                         reported_components = {
@@ -485,14 +528,22 @@ class ScanAgentLoop:
                         }
                     except Exception:
                         reported_components = set()
-                    still_pending = {
-                        k: v for k, v in _pending_findings.items()
-                        if k not in reported_components
+                    # Cull: drop reported AND refuted entries from pending so
+                    # we don't keep nudging Brain toward items the verifier
+                    # already killed.
+                    refuted_keys = {
+                        (str(rf.get("finding_type", "")).lower(), str(rf.get("affected_component", "")))
+                        for rf in self.state.refuted_findings
                     }
+                    for k in list(_pending_findings.keys()):
+                        if k in reported_components or k in refuted_keys:
+                            _pending_findings.pop(k, None)
+                    still_pending = dict(_pending_findings)
                     # Only nudge if there are unreported items AND we've done
                     # at least 2 non-report actions since the last hint (avoid
-                    # spam after first emission).
+                    # spam after first emission). Also throttle: once per iter.
                     if len(still_pending) >= 2 and name in ("python_exec", "shell_exec", "http_request"):
+                        _sticky_last_iter = self.state.iteration
                         nudge_lines = list(still_pending.values())[:6]
                         nudge_msg = (
                             "STICKY HINT REMINDER — you still have "

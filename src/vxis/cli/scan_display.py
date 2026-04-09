@@ -84,13 +84,13 @@ class ScanLiveDisplay:
                 self.current_objective = guide.get("objective_ko", "")[:100]
                 self.current_crown_hint = guide.get("crown_hint_ko", "")[:80]
             for p in self.phases:
-                if p["name"] in data["name"]:
+                if p["name"] in (data.get("name") or data.get("phase") or ""):
                     p["status"] = "running"
                     break
 
         elif event_type == "phase_end":
             for p in self.phases:
-                if p["name"] in data["name"]:
+                if p["name"] in (data.get("name") or data.get("phase") or ""):
                     p["status"] = "failed" if data.get("failed") else "done"
                     p["duration"] = data.get("duration_s", 0.0)
                     p["findings"] = data.get("new_findings", 0)
@@ -107,7 +107,7 @@ class ScanLiveDisplay:
 
         elif event_type == "phase_skip":
             for p in self.phases:
-                if p["name"] in data["name"]:
+                if p["name"] in (data.get("name") or data.get("phase") or ""):
                     p["status"] = "skipped"
                     break
 

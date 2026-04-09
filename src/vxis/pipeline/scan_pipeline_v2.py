@@ -434,9 +434,15 @@ class ScanPipeline:
             logger.warning("Report modules unavailable: %s", e)
             return
 
-        if not ctx.findings:
-            logger.info("No findings — skipping report generation")
+        # Phase C: render report even when findings=0 if we have belief state
+        # (verdict counts, refutations, MITRE) — the verification summary is
+        # itself valuable evidence of what was tried and ruled out.
+        has_belief = bool(getattr(ctx, "verdict_counts", {})) or bool(getattr(ctx, "refuted_findings", []))
+        if not ctx.findings and not has_belief:
+            logger.info("No findings and no belief state — skipping report generation")
             return
+        if not ctx.findings:
+            logger.info("No findings but belief state present — rendering verification-only report")
 
         if self._report_output_path:
             output_path = Path(self._report_output_path)
