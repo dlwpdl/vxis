@@ -128,22 +128,92 @@ def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str
     )
 
 
-def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
-    """Compute a simple VXIS score from finding counts. Returns (score, grade).
+def _compute_vxis_score(
+    ctx: Any,
+    finding_dicts: list[dict[str, Any]] | None = None,
+) -> tuple[float, str]:
+    """Compute the VXIS score using the real ScoringEngine + ScoreTracker.
 
-    Phase A uses a severity-weighted heuristic. Phase B will use the full
-    scoring module once findings carry richer metadata.
+    Populates ctx.score_tracker from finding_dicts (which carry vector_id),
+    then delegates to ScoringEngine for the full 5-dimension score.
+    Falls back to a severity-weighted heuristic if the scoring module is
+    unavailable.
+
+    Args:
+        ctx: ScanContext with target_type, scan_id, findings, and score_tracker.
+        finding_dicts: Raw finding dicts from finding_tools (before conversion to
+            Finding objects). Used to read vector_id. Defaults to [].
     """
+    from vxis.scoring.engine import ScoringEngine
+    from vxis.scoring.tracker import ScoreTracker
+
+    target_type = getattr(ctx, "target_type", "web")
+    scan_id = getattr(ctx, "scan_id", "")
+    tracker: ScoreTracker = getattr(ctx, "score_tracker", ScoreTracker(target_type=target_type))
+
+    # Populate the tracker from raw finding dicts so vector_id is captured.
+    for d in (finding_dicts or []):
+        fid = str(d.get("id", ""))
+        vid = str(d.get("vector_id", "")).strip()
+        sev_str = str(d.get("severity", "medium")).lower()
+        # Map severity to exploitation level: info→0, low→1, medium→2, high→3, critical→4
+        level_map = {"informational": 0, "info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+        level = level_map.get(sev_str, 2)
+        evidence_count = 1 if d.get("evidence") else 0
+        try:
+            if vid:
+                tracker.record_vector_attempt(vid)
+            if fid:
+                tracker.record_finding(fid, vid or "UNKNOWN", level, evidence_count)
+        except Exception:
+            pass  # Never let scoring failures affect the scan result
+
+    # Populate chains into the tracker from ctx.attack_chains.
+    try:
+        from vxis.scoring.tracker import AttackChain, ChainStep  # noqa: F401
+        for chain_dict in (getattr(ctx, "attack_chains", None) or []):
+            raw = chain_dict.get("raw", chain_dict)
+            chain_id = str(raw.get("id", "CHAIN-?"))
+            finding_ids: list[str] = list(raw.get("finding_ids", []))
+            if len(finding_ids) >= 2:
+                chain = AttackChain(
+                    chain_id=chain_id,
+                    description_en=str(raw.get("crown_jewel", "")),
+                    description_ko=str(raw.get("crown_jewel", "")),
+                    final_impact=str(raw.get("rationale", "")),
+                )
+                for idx, fid in enumerate(finding_ids):
+                    vid = tracker.finding_vectors.get(fid, "UNKNOWN")
+                    lvl = tracker.exploitation_levels.get(fid, 1)
+                    chain.add_step(
+                        vector_id=vid,
+                        finding_id=fid,
+                        level=lvl,
+                        description_en=f"Step {idx + 1}: {fid}",
+                        description_ko=f"{idx + 1}단계: {fid}",
+                    )
+                tracker.record_chain(chain)
+    except Exception:
+        pass
+
+    try:
+        engine = ScoringEngine(target_type=target_type)
+        vxis_score = engine.calculate(
+            tracker,
+            list(getattr(ctx, "findings", [])),
+            scan_id=scan_id,
+        )
+        return vxis_score.total, vxis_score.grade
+    except Exception:
+        logger.exception("ScoringEngine.calculate failed — using heuristic fallback")
+
+    # Heuristic fallback (severity-weighted)
     sev_weights = {
-        "critical": 200,
-        "high": 100,
-        "medium": 50,
-        "low": 20,
-        "info": 5,
-        "informational": 5,
+        "critical": 200, "high": 100, "medium": 50,
+        "low": 20, "info": 5, "informational": 5,
     }
     score = 0.0
-    for f in ctx.findings:
+    for f in getattr(ctx, "findings", []):
         sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
         score += sev_weights.get(sev, 5)
     score = min(1000.0, score)
@@ -307,8 +377,8 @@ class ScanPipeline:
         except Exception:
             logger.exception("Report generation failed — continuing")
 
-        # 10. Compute VXIS score
-        score_value, grade = _compute_vxis_score(ctx)
+        # 10. Compute VXIS score (pass raw finding_dicts so vector_id is available)
+        score_value, grade = _compute_vxis_score(ctx, finding_dicts=finding_dicts)
         ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
 
         # 11. Populate phase logs (duration_seconds is a computed @property on ctx)

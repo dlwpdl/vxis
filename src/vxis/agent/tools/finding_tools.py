@@ -59,6 +59,14 @@ class ReportFindingTool:
             "evidence": {"type": "string", "description": "Raw evidence: HTTP req/resp, payload, log excerpt"},
             "remediation": {"type": "string"},
             "cwe": {"type": "string", "description": "e.g. 'CWE-89'"},
+            "vector_id": {
+                "type": "string",
+                "description": (
+                    "VXIS attack vector ID from the registry that was tested when this finding was "
+                    "discovered. Examples: 'WEB-SQLI-001', 'WEB-XSS-002', 'MOB-NET-001'. "
+                    "Providing this enables accurate vector-coverage scoring."
+                ),
+            },
         },
         "required": ["title", "severity", "finding_type", "affected_component", "description"],
     }
@@ -129,6 +137,7 @@ class ReportFindingTool:
             "evidence": str(kwargs.get("evidence", "")),
             "remediation": str(kwargs.get("remediation", "")),
             "cwe": str(kwargs.get("cwe", "")),
+            "vector_id": str(kwargs.get("vector_id", "")),
         }
         _findings.append(finding)
         logger.info("[Finding] %s [%s] %s — %s", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80])
