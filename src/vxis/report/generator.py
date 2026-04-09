@@ -78,6 +78,25 @@ class ReportData:
     methodology: str = field(default=_DEFAULT_METHODOLOGY)
     attack_chains: list[list[str]] | None = None  # finding_id 체인 리스트
     screenshots: dict[str, str] = field(default_factory=dict)  # label → file path/URL
+    # Phase C belief state (optional — populated by ScanPipelineV2)
+    verdict_counts: dict[str, int] = field(default_factory=dict)
+    confirmed_findings: list[dict] = field(default_factory=list)
+    refuted_findings: list[dict] = field(default_factory=list)
+    mitre_coverage: dict = field(default_factory=dict)
+
+    @property
+    def has_verdicts(self) -> bool:
+        return bool(self.verdict_counts) and sum(self.verdict_counts.values()) > 0
+
+    @property
+    def verification_rate(self) -> float:
+        """Fraction of verified findings that were CONFIRMED (0..1)."""
+        if not self.verdict_counts:
+            return 0.0
+        total = sum(self.verdict_counts.values())
+        if total == 0:
+            return 0.0
+        return round(self.verdict_counts.get("CONFIRMED", 0) / total, 3)
 
     @property
     def attack_graph_svg(self) -> str:

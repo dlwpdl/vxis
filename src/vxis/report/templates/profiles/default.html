@@ -984,6 +984,61 @@
      SECTION 1: EXECUTIVE SUMMARY
      ============================================================ #}
   {% include "partials/_executive_summary.html" %}
+
+  {% if report.has_verdicts %}
+  <div class="section-label">Phase C</div>
+  <h2><span class="en">Verification Summary</span><span class="ko">검증 요약</span></h2>
+  <p>
+    <span class="en">Each High/Critical claim was independently adjudicated by an adversarial verifier LLM before inclusion.</span>
+    <span class="ko">모든 High/Critical 등급 주장은 리포트 포함 전에 독립적인 반박형 검증 LLM이 판정합니다.</span>
+  </p>
+  <table style="width:100%;border-collapse:collapse;margin:12px 0;">
+    <thead>
+      <tr style="background:#0b1220;color:#fff;">
+        <th style="padding:8px;text-align:left;">Verdict</th>
+        <th style="padding:8px;text-align:right;">Count</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;color:#16a34a;"><strong>CONFIRMED</strong></td>
+          <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">{{ report.verdict_counts.get('CONFIRMED', 0) }}</td></tr>
+      <tr><td style="padding:8px;border-bottom:1px solid #e5e7eb;color:#ca8a04;"><strong>UNCONFIRMED</strong></td>
+          <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;">{{ report.verdict_counts.get('UNCONFIRMED', 0) }}</td></tr>
+      <tr><td style="padding:8px;color:#dc2626;"><strong>REFUTED</strong></td>
+          <td style="padding:8px;text-align:right;">{{ report.verdict_counts.get('REFUTED', 0) }}</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Verification rate:</strong> {{ (report.verification_rate * 100) | round(1) }}% CONFIRMED of all adjudicated claims.</p>
+  {% endif %}
+
+  {% if report.mitre_coverage and report.mitre_coverage.get('per_technique') %}
+  <h2><span class="en">MITRE ATT&amp;CK Coverage</span><span class="ko">MITRE ATT&amp;CK 커버리지</span></h2>
+  <p>
+    <span class="en">{{ report.mitre_coverage.techniques_covered | length }} technique(s) across {{ report.mitre_coverage.tactics_covered | length }} tactic(s) — {{ report.mitre_coverage.coverage_pct }}% of curated set.</span>
+    <span class="ko">{{ report.mitre_coverage.techniques_covered | length }}개 기법, {{ report.mitre_coverage.tactics_covered | length }}개 전술 — 큐레이션 집합의 {{ report.mitre_coverage.coverage_pct }}%.</span>
+  </p>
+  <table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;">
+    <thead>
+      <tr style="background:#0b1220;color:#fff;">
+        <th style="padding:6px;text-align:left;">ID</th>
+        <th style="padding:6px;text-align:left;">Technique</th>
+        <th style="padding:6px;text-align:left;">Tactic</th>
+        <th style="padding:6px;text-align:right;">Findings</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in report.mitre_coverage.per_technique[:15] %}
+      <tr>
+        <td style="padding:6px;border-bottom:1px solid #e5e7eb;font-family:monospace;">{{ t.id }}</td>
+        <td style="padding:6px;border-bottom:1px solid #e5e7eb;">{{ t.name }}</td>
+        <td style="padding:6px;border-bottom:1px solid #e5e7eb;">{{ t.tactic }}</td>
+        <td style="padding:6px;border-bottom:1px solid #e5e7eb;text-align:right;">{{ t.finding_count }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <div class="page-break"></div>
 
   {# ============================================================

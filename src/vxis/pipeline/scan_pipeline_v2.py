@@ -477,6 +477,10 @@ class ScanPipeline:
                 f"|||Phase A 스캔 완료: {len(ctx.findings)}건 발견"
             ),
             attack_chains=chain_id_lists,
+            verdict_counts=getattr(ctx, "verdict_counts", {}) or {},
+            confirmed_findings=getattr(ctx, "confirmed_findings", []) or [],
+            refuted_findings=getattr(ctx, "refuted_findings", []) or [],
+            mitre_coverage=getattr(ctx, "mitre_coverage", {}) or {},
         )
         gen = ReportGenerator()
         gen.generate_html_file(data, output_path)
