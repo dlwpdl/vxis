@@ -523,11 +523,19 @@ Before most actions, write 2-3 sentences in `reasoning`:
    If both rows show the same SIZE, it is a SPA. Remember that SIZE — you pass
    it as -fs <SIZE> to ffuf in step 3 so ffuf can filter out the shell.
 
-2. DIRECT SENSITIVE-PATH PROBE with python_exec (one call, covers known paths):
-   python_exec(code="import asyncio,httpx\npaths=['rest/products','rest/user/login','rest/admin/application-configuration','api-docs','swagger.json','graphql','ftp/','ftp/package.json.bak','.git/config','.git/HEAD','.env','robots.txt','assets/public/','rest/products/search?q=1','rest/basket/1','rest/user/whoami','rest/saveLoginIp']\nasync def p(u):\n    async with httpx.AsyncClient(timeout=5,follow_redirects=False) as c:\n        try:\n            r=await c.get(f'http://TARGET/{u}')\n            return f'{r.status_code} {len(r.content):>7}B  /{u}'\n        except Exception as e: return f'ERR  /{u}: {e}'\nfor r in asyncio.run(asyncio.gather(*[p(u) for u in paths])): print(r)")
+2. DIRECT SENSITIVE-PATH PROBE with python_exec (one call, covers known paths).
+   IMPORTANT: include SQL-injection query variants (q=1 AND q=' AND q=1' OR '1'='1)
+   in the same probe so the system can detect response-length differentials.
+   Also include Spring Boot / Node / PHP / framework-specific paths so a
+   single probe covers ALL common web stacks — do not assume the target
+   framework before probing.
+
+   python_exec(code="import asyncio,httpx\npaths=[\n  # Node / Express / Juice Shop-ish\n  'rest/products','rest/user/login','rest/admin/application-configuration',\n  'api-docs','swagger.json','swagger-ui.html','graphql','ftp/',\n  'ftp/package.json.bak','rest/products/search?q=1','rest/products/search?q=%27',\n  'rest/products/search?q=1%27%20OR%20%271%27=%271','rest/basket/1','rest/basket/2',\n  'rest/user/whoami','rest/saveLoginIp','rest/memories','rest/captcha',\n  # Spring Boot actuator / WebGoat-ish\n  'actuator','actuator/env','actuator/health','actuator/info','actuator/mappings',\n  'actuator/beans','actuator/configprops','actuator/heapdump','actuator/trace',\n  'registration','h2-console','error','v2/api-docs','v3/api-docs','service/lesson.mvc',\n  # Generic / PHP / WordPress / Laravel\n  '.git/config','.git/HEAD','.env','.env.local','.htaccess','config.php',\n  'wp-config.php','wp-login.php','wp-admin','phpinfo.php','phpmyadmin','server-status',\n  # Universal low-risk info\n  'robots.txt','sitemap.xml','crossdomain.xml','.well-known/security.txt',\n  'assets/public/','backup.zip','backup.tar.gz','dump.sql',\n]\nasync def p(u):\n    async with httpx.AsyncClient(timeout=5,follow_redirects=False) as c:\n        try:\n            r=await c.get(f'http://TARGET/{u}')\n            return f'{r.status_code} {len(r.content):>7}B  /{u}'\n        except Exception as e: return f'ERR  /{u}: {e}'\nfor r in asyncio.run(asyncio.gather(*[p(u) for u in paths])): print(r)")
 
    INTERPRET: any path that returns a different size than the baseline or
-   returns 200/401/403/500 is INTERESTING. Report it.
+   returns 200/401/403/500 is INTERESTING. If two rows share the same base
+   path but different query params return DIFFERENT sizes, that is a
+   response-length oracle hit — report as sql_injection.
 
 3. CONTENT DISCOVERY with SPA-safe filter (pass SIZE from step 1):
    shell_exec(command="ffuf -u http://TARGET/FUZZ -w /usr/share/dirb/wordlists/common.txt -mc 200,301,302,401,403 -fs BASELINE_SIZE -t 50 -maxtime 30 2>&1 | grep -E 'Status:' | head -30")

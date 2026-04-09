@@ -82,6 +82,10 @@ class ScanAgentLoop:
             r"^\s*(\d{3})\s+(\d+)\s*B?\s+[/]*([^\s]+)\s*$",
             _re.MULTILINE,
         )
+        # Sticky hint: track candidates Brain still hasn't reported yet.
+        # Keyed by (finding_type, affected_component) so we can check against
+        # finding_tools store and drop items once Brain reports them.
+        _pending_findings: dict[tuple[str, str], str] = {}
 
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
@@ -191,9 +195,17 @@ class ScanAgentLoop:
                                     ".git", ".env", "actuator", "debug", "backup",
                                     "rest/admin", "rest/user", "rest/basket", "rest/order",
                                     "rest/memories", "rest/captcha", "rest/languages",
+                                    "registration", "h2-console", "server-status",
+                                    "phpinfo", "wp-config", "wp-login", "wp-admin",
+                                    "phpmyadmin", "heapdump", "beans", "configprops",
                                 ))
                                 if sensitive:
-                                    sev = "high" if any(x in lower for x in ("admin", "config", ".git", ".env", "actuator")) else "medium"
+                                    # Critical-level paths get HIGH, others MEDIUM
+                                    critical_markers = (
+                                        "admin", "config", ".git", ".env", "actuator",
+                                        "heapdump", "phpinfo", "wp-config", "h2-console",
+                                    )
+                                    sev = "high" if any(x in lower for x in critical_markers) else "medium"
                                     findings_hint.append(
                                         f"  - {code} {size}B {norm_path} → sensitive endpoint returning {size}B (differs from SPA shell {_baseline_size}B) (severity={sev}, finding_type=information_disclosure)"
                                     )
@@ -217,6 +229,16 @@ class ScanAgentLoop:
                                     f"  - query-param oracle on {base}: {min_row[0]} {min_row[1]}B for '{min_row[2]}' vs {max_row[0]} {max_row[1]}B for '{max_row[2]}' → response-length oracle suggests SQL/NoSQL injection or parameter handling bug (severity=high, finding_type=sql_injection)"
                                 )
 
+                        # Update the sticky pending-findings map so we can
+                        # re-inject unreported items on future iterations.
+                        for hint_line in findings_hint:
+                            # Parse finding_type + component from the hint line —
+                            # hint lines look like "  - 500 3031B /path → ... finding_type=X)"
+                            ft_match = _re.search(r"finding_type=([a-z_]+)", hint_line)
+                            path_match = _re.search(r"\s(/[^\s]+)\s*→", hint_line)
+                            if ft_match and path_match:
+                                key = (ft_match.group(1), path_match.group(1))
+                                _pending_findings[key] = hint_line
                         if findings_hint:
                             hint_msg = (
                                 "SYSTEM HINT — MANDATORY ACTION REQUIRED\n\n"
@@ -237,6 +259,42 @@ class ScanAgentLoop:
                                 "iter %d: injected finding hint with %d candidates",
                                 self.state.iteration, len(findings_hint),
                             )
+
+                # Sticky hint re-injection: after any tool call, check which
+                # pending findings are still NOT in the finding_tools store.
+                # If there are still >= 2 unreported items, re-emit a condensed
+                # nudge. This catches the case where Brain reports 2 items and
+                # wanders off without finishing the list.
+                if _pending_findings and name != "report_finding":
+                    try:
+                        from vxis.agent.tools.finding_tools import _get_findings as _fget
+                        reported_components = {
+                            (f["finding_type"].lower(), f["affected_component"])
+                            for f in _fget()
+                        }
+                    except Exception:
+                        reported_components = set()
+                    still_pending = {
+                        k: v for k, v in _pending_findings.items()
+                        if k not in reported_components
+                    }
+                    # Only nudge if there are unreported items AND we've done
+                    # at least 2 non-report actions since the last hint (avoid
+                    # spam after first emission).
+                    if len(still_pending) >= 2 and name in ("python_exec", "shell_exec", "http_request"):
+                        nudge_lines = list(still_pending.values())[:6]
+                        nudge_msg = (
+                            "STICKY HINT REMINDER — you still have "
+                            f"{len(still_pending)} unreported findings from the earlier "
+                            "probe. Emit report_finding for each of these BEFORE any "
+                            "more probing:\n"
+                            + "\n".join(nudge_lines)
+                        )
+                        self.state.add_message("user", nudge_msg)
+                        logger.info(
+                            "iter %d: sticky re-injection, %d pending",
+                            self.state.iteration, len(still_pending),
+                        )
 
                 if name == "finish_scan" and result.ok:
                     self.state.completed = True
