@@ -144,14 +144,17 @@ async def test_intercept_proxy_flows_when_not_running():
 
 # ── Registry integration ────────────────────────────────────
 
-def test_build_default_registry_now_has_six_tools():
+def test_build_default_registry_contains_hands_eyes_xray_tools():
     from vxis.agent.tools import build_default_registry
     reg = build_default_registry()
     names = reg.list_tools()
-    assert "finish_scan" in names
-    assert "think" in names
-    assert "wait" in names
+    # Hands/Eyes/X-Ray primitives from Task 6
     assert "http_request" in names
     assert "browser_render" in names
     assert "intercept_proxy" in names
-    assert len(names) == 6
+    # Control tools from Task 5 also present
+    assert "finish_scan" in names
+    assert "think" in names
+    assert "wait" in names
+    # Forward-compat: Tasks 7-8 add more tools; assert minimum only
+    assert len(names) >= 6
