@@ -55,6 +55,196 @@ from vxis.pipeline.context import ScanContext
 
 logger = logging.getLogger(__name__)
 
+# ── finding_type → primary vector ID ────────────────────────────────────────
+# Maps the snake_case finding_type strings that Brain emits to the closest
+# AttackVector ID in the registry. Used to populate score_tracker.
+_FINDING_TYPE_TO_VECTOR_ID: dict[str, str] = {
+    # SQL injection variants
+    "sql_injection": "WEB-SQLI-001",
+    "sqli": "WEB-SQLI-001",
+    "sql_injection_blind": "WEB-SQLI-002",
+    "sql_injection_boolean": "WEB-SQLI-002",
+    "sql_injection_time_based": "WEB-SQLI-003",
+    "sql_injection_error_based": "WEB-SQLI-004",
+    "sql_injection_second_order": "WEB-SQLI-006",
+    # NoSQL injection
+    "nosql_injection": "WEB-NOSQL-001",
+    "mongodb_injection": "WEB-NOSQL-001",
+    # Command injection
+    "command_injection": "WEB-CMDI-001",
+    "os_command_injection": "WEB-CMDI-001",
+    "rce": "WEB-CMDI-001",
+    "remote_code_execution": "WEB-CMDI-001",
+    # Injection — other
+    "ldap_injection": "WEB-LDAP-001",
+    "xpath_injection": "WEB-XPATH-001",
+    "ssti": "WEB-SSTI-001",
+    "template_injection": "WEB-SSTI-001",
+    "xxe": "WEB-XXE-001",
+    "xml_external_entity": "WEB-XXE-001",
+    "insecure_deserialization": "WEB-DESER-001",
+    "deserialization": "WEB-DESER-001",
+    "file_upload": "WEB-UPLOAD-001",
+    "unrestricted_file_upload": "WEB-UPLOAD-001",
+    "prototype_pollution": "WEB-INJECT-022",
+    "cache_poisoning": "WEB-INJECT-024",
+    "web_cache_deception": "WEB-INJECT-024",
+    "websocket_injection": "WEB-WSS-001",
+    "llm_prompt_injection": "WEB-INJECT-021",
+    "prompt_injection": "WEB-INJECT-021",
+    # XSS
+    "xss": "WEB-XSS-001",
+    "xss_reflected": "WEB-XSS-001",
+    "reflected_xss": "WEB-XSS-001",
+    "xss_stored": "WEB-XSS-002",
+    "stored_xss": "WEB-XSS-002",
+    "persistent_xss": "WEB-XSS-002",
+    "xss_dom": "WEB-XSS-003",
+    "dom_xss": "WEB-XSS-003",
+    "dom_based_xss": "WEB-XSS-003",
+    "mxss": "WEB-XSS-004",
+    # SSRF
+    "ssrf": "WEB-SSRF-001",
+    "server_side_request_forgery": "WEB-SSRF-001",
+    "blind_ssrf": "WEB-SSRF-002",
+    # Authentication
+    "brute_force": "WEB-AUTH-001",
+    "default_credentials": "WEB-AUTH-002",
+    "jwt_alg_confusion": "WEB-AUTH-003",
+    "jwt_none_algorithm": "WEB-AUTH-004",
+    "jwt_vulnerability": "WEB-AUTH-003",
+    "session_fixation": "WEB-AUTH-005",
+    "session_hijacking": "WEB-AUTH-006",
+    "oauth_open_redirect": "WEB-AUTH-007",
+    "oauth_state_missing": "WEB-AUTH-013",
+    "password_reset_poisoning": "WEB-AUTH-008",
+    "saml_bypass": "WEB-AUTH-011",
+    "magic_link_bypass": "WEB-AUTH-010",
+    # CSRF
+    "csrf": "WEB-CSRF-001",
+    "cross_site_request_forgery": "WEB-CSRF-001",
+    # Access control
+    "idor": "WEB-AC-001",
+    "insecure_direct_object_reference": "WEB-AC-001",
+    "privilege_escalation_horizontal": "WEB-AC-002",
+    "privilege_escalation_vertical": "WEB-AC-003",
+    "privilege_escalation": "WEB-AC-003",
+    "path_traversal": "WEB-AC-004",
+    "directory_traversal": "WEB-AC-004",
+    "forced_browsing": "WEB-AC-005",
+    # Misconfiguration
+    "debug_endpoint": "WEB-MISCONF-001",
+    "default_configuration": "WEB-MISCONF-002",
+    "verbose_error": "WEB-MISCONF-003",
+    "stack_trace_disclosure": "WEB-MISCONF-003",
+    "information_disclosure": "WEB-MISCONF-003",
+    "missing_security_headers": "WEB-MISCONF-004",
+    "security_headers": "WEB-MISCONF-004",
+    "cors_misconfiguration": "WEB-MISCONF-005",
+    "cors": "WEB-MISCONF-005",
+    "open_redirect": "WEB-MISCONF-006",
+    # Crypto
+    "weak_tls": "WEB-CRYPTO-001",
+    "weak_ssl": "WEB-CRYPTO-001",
+    "weak_hashing": "WEB-CRYPTO-002",
+    "hardcoded_secrets": "WEB-CRYPTO-003",
+    "hardcoded_credentials": "WEB-CRYPTO-003",
+    "insecure_randomness": "WEB-CRYPTO-004",
+    # API
+    "mass_assignment": "WEB-API-001",
+    "rate_limiting_bypass": "WEB-API-002",
+    "rate_limiting": "WEB-API-002",
+    "graphql_introspection": "WEB-API-003",
+    "http_verb_tampering": "WEB-API-005",
+    "grpc_reflection": "WEB-API-006",
+    "bopla": "WEB-API-008",
+    "bfla": "WEB-API-009",
+    # Infrastructure
+    "subdomain_takeover": "WEB-INFRA-001",
+    "dns_zone_transfer": "WEB-INFRA-002",
+    "s3_bucket_public": "WEB-INFRA-003",
+    "firebase_public": "WEB-INFRA-004",
+    "exposed_git": "WEB-INFRA-005",
+    "git_exposure": "WEB-INFRA-005",
+    # Business logic
+    "business_logic": "WEB-BIZ-001",
+    "negative_value_injection": "WEB-BIZ-001",
+    "race_condition": "WEB-RACE-001",
+    "toctou": "WEB-RACE-001",
+    # Supply chain
+    "supply_chain": "WEB-SUPPLY-001",
+    "dependency_confusion": "WEB-SUPPLY-001",
+    "cicd_compromise": "WEB-SUPPLY-002",
+    "ci_cd": "WEB-SUPPLY-002",
+}
+
+# Severity string → exploitation level (0-4)
+_SEV_TO_LEVEL: dict[str, int] = {
+    "critical": 3,
+    "high": 2,
+    "medium": 1,
+    "low": 0,
+    "informational": 0,
+    "info": 0,
+}
+
+
+def _infer_vector_id(finding_dict: dict[str, Any]) -> str:
+    """Map a Brain-reported finding_type to the closest vector ID.
+
+    Falls back to a generic category vector when no exact match exists.
+    Returns a non-empty string in all cases.
+
+    English: Returns vector ID from finding_type lookup or keyword scan.
+    한국어: finding_type을 벡터 ID로 매핑한다. 매칭 실패 시 키워드로 추론.
+    """
+    ftype = str(finding_dict.get("finding_type", "")).lower().strip()
+    if ftype in _FINDING_TYPE_TO_VECTOR_ID:
+        return _FINDING_TYPE_TO_VECTOR_ID[ftype]
+
+    # Keyword scan on finding_type for partial matches
+    for keyword, vid in _FINDING_TYPE_TO_VECTOR_ID.items():
+        if keyword in ftype or ftype in keyword:
+            return vid
+
+    # Fall back: inspect title for well-known keywords
+    title_lower = str(finding_dict.get("title", "")).lower()
+    keyword_title_map = [
+        ("sql", "WEB-SQLI-001"),
+        ("xss", "WEB-XSS-001"),
+        ("ssrf", "WEB-SSRF-001"),
+        ("command", "WEB-CMDI-001"),
+        ("rce", "WEB-CMDI-001"),
+        ("idor", "WEB-AC-001"),
+        ("path traversal", "WEB-AC-004"),
+        ("directory traversal", "WEB-AC-004"),
+        ("jwt", "WEB-AUTH-003"),
+        ("csrf", "WEB-CSRF-001"),
+        ("xxe", "WEB-XXE-001"),
+        ("ssti", "WEB-SSTI-001"),
+        ("cors", "WEB-MISCONF-005"),
+        ("upload", "WEB-UPLOAD-001"),
+        ("deserialization", "WEB-DESER-001"),
+        ("secret", "WEB-CRYPTO-003"),
+        ("hardcode", "WEB-CRYPTO-003"),
+        ("tls", "WEB-CRYPTO-001"),
+        ("open redirect", "WEB-MISCONF-006"),
+        ("prototype", "WEB-INJECT-022"),
+        ("cache", "WEB-INJECT-024"),
+        ("race", "WEB-RACE-001"),
+        ("brute", "WEB-AUTH-001"),
+        ("subdomain", "WEB-INFRA-001"),
+        ("privilege", "WEB-AC-003"),
+        ("business logic", "WEB-BIZ-001"),
+        ("graphql", "WEB-API-003"),
+    ]
+    for keyword, vid in keyword_title_map:
+        if keyword in title_lower:
+            return vid
+
+    # Ultimate fallback: generic misconfiguration / info disclosure
+    return "WEB-MISCONF-003"
+
 
 def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str) -> Any:
     """Convert a finding_tools dict into a Finding object for the report.
@@ -270,6 +460,7 @@ class ScanPipeline:
             ctx.peak_context_bytes = peak_bytes_from_loop
 
         # 6. Copy findings from the in-memory store into ctx.findings
+        # Also wire up score_tracker so vector coverage is recorded.
         finding_dicts = _get_finding_dicts()
         for d in finding_dicts:
             try:
@@ -287,7 +478,29 @@ class ScanPipeline:
             except Exception:
                 logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
 
+            # Record vector attempt + finding in score_tracker.
+            # Wrapped separately so a tracker error never drops the finding.
+            try:
+                vector_id = _infer_vector_id(d)
+                sev_str = str(d.get("severity", "medium")).lower()
+                level = _SEV_TO_LEVEL.get(sev_str, 1)
+                finding_id = str(d.get("id", "VXIS-0000"))
+                evidence_count = 1 if d.get("evidence") else 0
+                ctx.score_tracker.record_vector_attempt(vector_id)
+                ctx.score_tracker.record_finding(
+                    finding_id=finding_id,
+                    vector_id=vector_id,
+                    level=level,
+                    evidence_count=evidence_count,
+                )
+            except Exception:
+                logger.exception(
+                    "score_tracker update failed for finding %s — skipping",
+                    d.get("id", "?"),
+                )
+
         # 7. Copy chains into ctx.attack_chains (stored as list[dict] per ScanContext typing)
+        # Also record chains in score_tracker for the Chain Intelligence dimension.
         chain_dicts = _get_chain_dicts()
         try:
             ctx.attack_chains = [
@@ -296,6 +509,49 @@ class ScanPipeline:
             ]
         except Exception:
             ctx.attack_chains = []
+
+        try:
+            from vxis.scoring.tracker import AttackChain
+
+            for c in chain_dicts:
+                try:
+                    chain_obj = AttackChain(
+                        chain_id=str(c.get("id", "CHAIN-000")),
+                        description_en=str(c.get("rationale", "")),
+                        description_ko=str(c.get("rationale", "")),
+                        final_impact=str(c.get("crown_jewel", "")),
+                    )
+                    for idx, fid in enumerate(c.get("finding_ids", [])):
+                        # Resolve vector_id for each finding in the chain
+                        matched = next(
+                            (d for d in finding_dicts if d.get("id") == fid), {}
+                        )
+                        vid = _infer_vector_id(matched) if matched else "WEB-MISCONF-003"
+                        sev_str = str(matched.get("severity", "medium")).lower()
+                        lvl = _SEV_TO_LEVEL.get(sev_str, 1)
+                        chain_obj.add_step(
+                            vector_id=vid,
+                            finding_id=fid,
+                            level=lvl,
+                            description_en=f"Step {idx + 1}: {fid}",
+                            description_ko=f"{idx + 1}단계: {fid}",
+                        )
+                    ctx.score_tracker.record_chain(chain_obj)
+                except Exception:
+                    logger.exception("score_tracker chain recording failed for %s", c.get("id", "?"))
+        except Exception:
+            logger.exception("score_tracker chain batch failed — skipping")
+
+        # Record the scan_loop phase as complete so Phase Completeness is scored.
+        try:
+            ctx.score_tracker.record_phase_complete(
+                phase_name="scan_loop",
+                duration_ms=(time.monotonic() - started) * 1000,
+                findings_count=len(ctx.findings),
+                vectors_attempted=list(ctx.score_tracker.vectors_attempted),
+            )
+        except Exception:
+            logger.exception("score_tracker record_phase_complete failed — skipping")
 
         # 8. Deferred actions gate (Phase A: usually empty, but plumbing preserved)
         if self.enable_deferred_approval and getattr(ctx, "deferred_actions", None):
