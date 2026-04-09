@@ -28,6 +28,7 @@ from vxis.agent.brain import (
     AgentObservation,
     AgentStep,
     TOOL_DESCRIPTIONS,
+    _increment_brain_decision_count,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ class InteractiveBrain:
             return []
 
         self._step_count += 1
+        _increment_brain_decision_count()
 
         # Observation을 JSON으로 출력 (Claude Code가 읽음)
         obs_msg: dict[str, Any] = {

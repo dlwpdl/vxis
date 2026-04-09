@@ -434,7 +434,7 @@ def scan(
 
     async def _run():
         nonlocal ctx
-        from vxis.pipeline.pipeline import ScanPipeline
+        from vxis.pipeline.scan_pipeline_v2 import ScanPipeline
 
         if interactive:
             from vxis.agent.brain_interactive import InteractiveBrain
@@ -594,6 +594,7 @@ def scan(
             injection_approval_callback=_injection_gate,
             approval_callback=_deferred_approval,
             auto_approve_injection=_is_benchmark,
+            report_output_path=output,
         )
 
         refresh_task = _aio.create_task(_refresh_loop())
@@ -688,6 +689,25 @@ def scan(
     if phase_failed:
         summary_parts.append(f"[red]{phase_failed} failed[/red]")
     console.print("  |  ".join(summary_parts))
+
+    # ── Benchmark instrumentation summary (grep-parseable) ──
+    # Task 1 baseline capture and Task 14 post-migration gate parse this line.
+    try:
+        from vxis.agent.brain import (
+            get_llm_call_count as _get_llm_calls,
+            get_brain_decision_count as _get_brain_decisions,
+        )
+        _llm_calls = _get_llm_calls()
+        _brain_decisions = _get_brain_decisions()
+    except Exception:
+        _llm_calls = 0
+        _brain_decisions = 0
+    _peak_bytes = getattr(ctx, "peak_context_bytes", 0)
+    console.print(
+        f"[dim]VXIS_BENCHMARK peak_context_bytes={_peak_bytes} "
+        f"llm_call_count={_llm_calls} brain_decision_count={_brain_decisions} "
+        f"findings_count={len(ctx.findings)}[/dim]"
+    )
 
     # Report path (Phase 6이 리포트 생성했으면)
     if ctx.findings:

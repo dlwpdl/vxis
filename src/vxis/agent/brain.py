@@ -41,6 +41,60 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ── Benchmark instrumentation: authoritative LLM invocation counter ──
+# Incremented once per `_call_llm_direct` entry (the single choke point for
+# all provider paths in AgentBrain). Used by Task 1 baseline + Task 14
+# post-migration comparison. Does NOT affect dispatch — claude-first routing
+# stays untouched.
+_LLM_CALL_COUNT: int = 0
+_LLM_CALL_COUNT_LOCK = threading.Lock()
+
+
+def get_llm_call_count() -> int:
+    """Return total number of LLM provider invocations since process start."""
+    return _LLM_CALL_COUNT
+
+
+def reset_llm_call_count() -> None:
+    """Reset counter to zero (test hook)."""
+    global _LLM_CALL_COUNT
+    with _LLM_CALL_COUNT_LOCK:
+        _LLM_CALL_COUNT = 0
+
+
+def _increment_llm_call_count() -> None:
+    global _LLM_CALL_COUNT
+    with _LLM_CALL_COUNT_LOCK:
+        _LLM_CALL_COUNT += 1
+
+
+# ── Benchmark instrumentation: unified brain decision counter ──
+# Incremented once per `think()` entry (after early-return checks) across ALL
+# Brain backends (AgentBrain API path + InteractiveBrain + FileBasedBrain).
+# Apples-to-apples metric for Task 14 comparison independent of backend.
+# Process-global, not per-scan.
+_BRAIN_DECISION_COUNT: int = 0
+_BRAIN_DECISION_LOCK = threading.Lock()
+
+
+def get_brain_decision_count() -> int:
+    """Return total number of Brain think() decisions since process start."""
+    return _BRAIN_DECISION_COUNT
+
+
+def reset_brain_decision_count() -> None:
+    """Reset counter to zero (test hook)."""
+    global _BRAIN_DECISION_COUNT
+    with _BRAIN_DECISION_LOCK:
+        _BRAIN_DECISION_COUNT = 0
+
+
+def _increment_brain_decision_count() -> None:
+    global _BRAIN_DECISION_COUNT
+    with _BRAIN_DECISION_LOCK:
+        _BRAIN_DECISION_COUNT += 1
+
+
 def _parse_llm_json(response: str) -> Any:
     """LLM 응답에서 JSON을 안정적으로 파싱 (dict or list).
 
@@ -388,6 +442,39 @@ Your ENTIRE response must be a single valid JSON object.
 - If you cannot comply, output {{"reasoning": "error", "actions": []}} — still valid JSON
 """
 
+# Place AFTER AGENT_SYSTEM_PROMPT closing """, BEFORE AGENT_TEAMS dict.
+# This is a regular triple-quoted string — NOT an f-string and never .format()'d.
+# Use SINGLE braces in the JSON example below; they appear literally in the output.
+LOOP_PROMPT_ADAPTER = """\
+[ADAPTER INSTRUCTIONS — these take precedence over anything in the prompt below]
+
+You are operating in ScanAgentLoop mode (Phase A Strix-parity).
+
+TOOL CATALOG RULES:
+1. The tools listed under "## Available Tools" below are your ONLY tools.
+   You MUST emit `"tool": "<exact name from that list>"` — nothing else.
+2. The body of the prompt mentions VXIS module names like "Controller",
+   "Hands", "Eyes", "X-Ray", "InteractionController", "SessionManager",
+   "BrowserEngine", "FlowAnalyzer", "MitmProxy". These are NOT tool names
+   in this mode. Map them to the closest tool in the catalog:
+     - "Controller" / "fingerprint via Controller"  -> use cpr_recon or http_request
+     - "Hands" / HTTP session work                  -> use http_request
+     - "Eyes" / DOM/JS / screenshot                 -> use browser_render
+     - "X-Ray" / passive traffic / token detection  -> use intercept_proxy
+     - "Knowledge Store" / "Finding Model"          -> use report_finding / query_findings
+     - chain reasoning                              -> use chain_synthesis / link_chain
+     - finishing the scan                           -> emit finish_scan
+3. The DONE-state JSON schema in the body (with module_checklist keys)
+   is ADVISORY only. The required output schema for every step is:
+     {"reasoning": "...", "actions": [{"tool": "...", "args": {}, "reasoning": "...", "priority": "high|medium|low"}]}
+   module_checklist and owasp_checklist keys are optional and ignored.
+4. If you cannot find a tool that matches your intent, choose the closest
+   alternative from the catalog and explain the substitution in `reasoning`.
+   NEVER emit a tool name that is not in the catalog.
+
+[ORIGINAL PROMPT BELOW]
+"""
+
 # ── Tool descriptions for the agent ─────────────────────────────
 
 # ── Sub-agent team definitions ──────────────────────────────────
@@ -682,6 +769,7 @@ class AgentBrain:
                 self.is_done = True
                 return []
             self._step_count += 1
+        _increment_brain_decision_count()
 
         # ── Step 1: RECALL — 컴파일된 패턴 매칭 (LLM 호출 없이) ──
         compiled_actions = self._try_compiled_patterns(observation)
@@ -739,6 +827,62 @@ class AgentBrain:
         )
 
         return actions
+
+    async def think_in_loop(
+        self,
+        messages: list[dict[str, Any]],
+        tool_catalog: list[dict[str, Any]],
+    ) -> list[tuple[str, dict[str, Any]]]:
+        """ScanAgentLoop entrypoint — takes persistent message history + dynamic tool catalog."""
+        import asyncio
+
+        with self._state_lock:
+            if self.is_done or self._step_count >= self.max_steps:
+                self.is_done = True
+                return []
+            self._step_count += 1
+        _increment_brain_decision_count()
+
+        tools_text = "\n".join(
+            f"  - {t['name']}: {t.get('description', '')}"
+            for t in tool_catalog
+        )
+
+        body_prompt = AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)
+        system_prompt = LOOP_PROMPT_ADAPTER + "\n" + body_prompt
+
+        history_lines: list[str] = []
+        for m in messages[-20:]:
+            role = m.get("role", "?")
+            content = m.get("content", "")
+            if isinstance(content, dict):
+                name = content.get("name", "?")
+                result = content.get("result", {})
+                summary = result.get("summary", "") if isinstance(result, dict) else str(result)
+                history_lines.append(f"[tool:{name}] {summary}")
+            else:
+                history_lines.append(f"[{role}] {str(content)[:500]}")
+
+        user_prompt = (
+            "## Conversation history (most recent last)\n"
+            + "\n".join(history_lines)
+            + "\n\n## Your task\n"
+            + "Based on the history above, decide the next tool call(s). "
+            + "Output EXACTLY this JSON shape (inside a ```json fence):\n"
+            + '{"reasoning": "<why>", "actions": [{"tool": "<exact name from catalog>", "args": {...}, "reasoning": "<why>", "priority": "high|medium|low"}]}\n'
+            + "To end the scan, emit a single action with tool='finish_scan'.\n"
+            + "REMEMBER: only emit tool names that appear in '## Available Tools' above."
+        )
+
+        response = await asyncio.to_thread(
+            self._call_llm_with_fallback, system_prompt, user_prompt
+        )
+        if response is None:
+            logger.warning("think_in_loop: all LLM calls failed at step %d", self._step_count)
+            return []
+
+        actions = self._parse_response(response)
+        return [(a.tool, a.args) for a in actions]
 
     def record_result(self, action: AgentAction, result: dict[str, Any]) -> None:
         """결과 기록 + Knowledge Store 학습 + Chain Reasoner 업데이트."""
@@ -1223,6 +1367,10 @@ class AgentBrain:
         image_path: str = "",
     ) -> str | None:
         """특정 provider/model을 지정하여 LLM 호출."""
+        # Authoritative LLM invocation counter — incremented per request
+        # (regardless of success/failure of the response). Single choke point
+        # for all provider paths from AgentBrain.
+        _increment_llm_call_count()
         provider = provider or self._provider
         model = model or self._model
 
