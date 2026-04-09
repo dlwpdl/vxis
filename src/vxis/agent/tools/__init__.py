@@ -25,6 +25,7 @@ from vxis.agent.tools.playbook_tools import (
 )
 from vxis.agent.tools.fingerprint_tools import FingerprintTargetTool
 from vxis.agent.tools.memory_tools import QueryScanMemoryTool
+from vxis.agent.tools.verifier_tools import VerifyFindingTool
 
 __all__ = [
     "FinishScanTool",
@@ -42,17 +43,21 @@ __all__ = [
     "LoadPlaybookTool",
     "FingerprintTargetTool",
     "QueryScanMemoryTool",
+    "VerifyFindingTool",
     "build_default_registry",
 ]
 
 
-def build_default_registry() -> ToolRegistry:
+def build_default_registry(brain: object | None = None) -> ToolRegistry:
     """Build a ToolRegistry with the default tool set registered.
 
-    Phase B: playbook + fingerprint + memory tools added so Brain can:
-    1. fingerprint_target → detect stack automatically
-    2. query_scan_memory → check prior findings on this target
-    3. list_playbooks / load_playbook → pull stack-specific techniques
+    Phase B: playbook + fingerprint + memory tools let Brain auto-detect
+    stack and pull stack-specific techniques.
+
+    Phase C: verify_finding tool added — adversarial verifier that uses
+    a stronger model to refute claimed findings. If `brain` is passed,
+    it's injected into VerifyFindingTool so the verifier can reuse the
+    brain's provider fallback chain.
     """
     reg = ToolRegistry()
     reg.register(FinishScanTool())
@@ -70,4 +75,6 @@ def build_default_registry() -> ToolRegistry:
     reg.register(LoadPlaybookTool())
     reg.register(FingerprintTargetTool())
     reg.register(QueryScanMemoryTool())
+    verifier = VerifyFindingTool(brain=brain)
+    reg.register(verifier)
     return reg

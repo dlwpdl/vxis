@@ -538,6 +538,13 @@ STEP 5 — REPORT findings immediately after each probe:
     are real findings. Call report_finding for EACH suggested item in a
     SINGLE JSON actions array (multiple actions per response).
 
+    For HIGH or CRITICAL severity findings, OPTIONALLY call verify_finding
+    first to get an adversarial check from a stronger model. If verdict
+    is REFUTED, do NOT call report_finding — it's likely a false positive.
+    If CONFIRMED or UNCONFIRMED with high/medium confidence, proceed.
+    verify_finding costs one extra LLM call per check, so skip it for
+    obvious LOW/INFO severity items.
+
 STEP 6 — After reporting the easy wins, load injection_vectors playbook
     and run the SQLi response-length oracle on any REST endpoint you
     discovered. Look for query-param size deltas.

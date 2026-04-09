@@ -233,7 +233,7 @@ class ScanPipeline:
         reset_llm_call_count()
 
         # 3. Build the tool registry
-        registry = build_default_registry()
+        registry = build_default_registry(brain=self.brain)
 
         # 4. Emit a synthetic phase_start so the CLI Rich Live display has content
         self._emit("phase_start", {"phase": "scan_loop", "name": "ScanAgentLoop"})
