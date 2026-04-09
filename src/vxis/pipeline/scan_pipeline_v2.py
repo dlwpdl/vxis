@@ -227,10 +227,15 @@ class ScanPipeline:
         except Exception:
             pass  # Ghost optional; missing = no-op
 
-        # 2. Reset per-scan state (findings + brain counters)
+        # 2. Reset per-scan state (findings + brain counters + playbook dedup)
         _reset_finding_store()
         reset_brain_decision_count()
         reset_llm_call_count()
+        try:
+            from vxis.agent.tools.playbook_tools import _loaded_playbooks
+            _loaded_playbooks.clear()
+        except Exception:
+            pass
 
         # 3. Build the tool registry
         registry = build_default_registry(brain=self.brain)

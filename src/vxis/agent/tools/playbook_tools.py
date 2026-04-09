@@ -81,6 +81,11 @@ class ListPlaybooksTool:
         )
 
 
+# Module-level dedup: track which playbooks were already loaded in this
+# process. Prevents Brain from wasting tokens re-loading the same playbook.
+_loaded_playbooks: set[str] = set()
+
+
 class LoadPlaybookTool:
     name = "load_playbook"
     description = (
@@ -139,6 +144,20 @@ class LoadPlaybookTool:
                 error="read_failed",
             )
 
+        # Dedup: if already loaded this process, return a short summary
+        # instead of the full content to save tokens.
+        if name in _loaded_playbooks:
+            logger.info("Playbook already loaded (dedup): %s", name)
+            return ToolResult(
+                ok=True,
+                data={"name": name, "length": len(content), "already_loaded": True},
+                summary=(
+                    f"playbook '{name}' already loaded earlier in this scan. "
+                    "Re-read the probe recipes from your prior messages and "
+                    "execute them — no need to reload."
+                ),
+            )
+        _loaded_playbooks.add(name)
         logger.info("Loaded playbook: %s (%d chars)", name, len(content))
         return ToolResult(
             ok=True,

@@ -531,10 +531,20 @@ class ScanAgentLoop:
                     # Cull: drop reported AND refuted entries from pending so
                     # we don't keep nudging Brain toward items the verifier
                     # already killed.
-                    refuted_keys = {
-                        (str(rf.get("finding_type", "")).lower(), str(rf.get("affected_component", "")))
-                        for rf in self.state.refuted_findings
-                    }
+                    # Normalize refuted component keys: strip scheme+host so
+                    # "/api" matches "http://localhost:3000/api"
+                    refuted_keys: set[tuple[str, str]] = set()
+                    for rf in self.state.refuted_findings:
+                        _rc = str(rf.get("affected_component", ""))
+                        refuted_keys.add((str(rf.get("finding_type", "")).lower(), _rc))
+                        # Also add path-only version
+                        try:
+                            from urllib.parse import urlparse as _uparse
+                            _rp = _uparse(_rc).path
+                            if _rp:
+                                refuted_keys.add((str(rf.get("finding_type", "")).lower(), _rp))
+                        except Exception:
+                            pass
                     for k in list(_pending_findings.keys()):
                         if k in reported_components or k in refuted_keys:
                             _pending_findings.pop(k, None)
@@ -558,9 +568,32 @@ class ScanAgentLoop:
                             self.state.iteration, len(still_pending),
                         )
 
-                if name == "finish_scan" and result.ok:
-                    self.state.completed = True
-                    break
+                if name == "finish_scan":
+                    # Reject premature finish: enforce minimum exploration
+                    _min_iters = min(30, self.state.max_iters // 2)
+                    if self.state.iteration < _min_iters:
+                        self.state.add_message("tool", {
+                            "name": "finish_scan", "args": {},
+                            "result": {
+                                "ok": False,
+                                "summary": (
+                                    f"finish_scan REJECTED — only {self.state.iteration} "
+                                    f"iterations done, minimum {_min_iters} required. "
+                                    "Keep exploring: try injection_vectors playbook, "
+                                    "test SQLi on discovered endpoints, run nuclei, "
+                                    "or probe authentication endpoints."
+                                ),
+                                "data": {"premature": True},
+                            },
+                        })
+                        logger.warning(
+                            "iter %d: finish_scan rejected (min=%d)",
+                            self.state.iteration, _min_iters,
+                        )
+                        continue
+                    if result.ok:
+                        self.state.completed = True
+                        break
             # Sample messages[] byte size at the end of each iteration.
             # Phase B fix: populates peak_context_bytes metric that was 0 in Task 11.
             self.state.update_peak_size()

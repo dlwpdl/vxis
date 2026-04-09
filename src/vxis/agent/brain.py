@@ -558,8 +558,13 @@ STEP 6 — After reporting the easy wins, load injection_vectors playbook
     and run the SQLi response-length oracle on any REST endpoint you
     discovered. Look for query-param size deltas.
 
-STEP 7 — When you have 3+ confirmed findings OR you have exhausted the
-    loaded playbooks, call finish_scan.
+STEP 7 — DO NOT call finish_scan until you have run at least 30
+    iterations AND one of: (a) 5+ confirmed findings, or (b) you have
+    exhausted ALL loaded playbooks AND injection_vectors. If the
+    verifier REFUTED your last claim, that means you need to try a
+    DIFFERENT angle — not give up. Load another playbook, test another
+    endpoint, try a deeper payload. Persistence is the #1 quality of a
+    real pentester.
 
 ## ANTI-REPETITION
 
