@@ -20,6 +20,10 @@ class ScanLoopState:
     # Peak byte size of messages[] seen across the run — sampled each iteration.
     # Surfaced by ScanPipelineV2 into ctx.peak_context_bytes for the Task 14 benchmark.
     peak_context_bytes: int = 0
+    # Phase C belief state: per-verdict counts from auto-verify interception
+    verdict_counts: dict[str, int] = field(default_factory=lambda: {"CONFIRMED": 0, "UNCONFIRMED": 0, "REFUTED": 0})
+    refuted_findings: list[dict[str, Any]] = field(default_factory=list)
+    confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
 
     def add_message(self, role: str, content: Any) -> None:
         self.messages.append({"role": role, "content": content, "iter": self.iteration})
@@ -241,6 +245,21 @@ class ScanAgentLoop:
                         if verdict_result.ok:
                             verdict_data = verdict_result.data or {}
                             verdict = verdict_data.get("verdict", "UNCONFIRMED")
+                            # Phase C belief state: track verdict counts
+                            self.state.verdict_counts[verdict] = self.state.verdict_counts.get(verdict, 0) + 1
+                            _belief_entry = {
+                                "iter": self.state.iteration,
+                                "title": args.get("title", ""),
+                                "severity": args.get("severity", ""),
+                                "finding_type": args.get("finding_type", ""),
+                                "affected_component": args.get("affected_component", ""),
+                                "confidence": verdict_data.get("confidence", "low"),
+                                "reasoning": str(verdict_data.get("reasoning", ""))[:300],
+                            }
+                            if verdict == "CONFIRMED":
+                                self.state.confirmed_findings.append(_belief_entry)
+                            elif verdict == "REFUTED":
+                                self.state.refuted_findings.append(_belief_entry)
                             self.state.add_message("tool", {
                                 "name": "verify_finding",
                                 "args": verify_args,
@@ -497,4 +516,7 @@ class ScanAgentLoop:
             "findings": self.state.findings,
             "messages": len(self.state.messages),
             "peak_context_bytes": self.state.peak_context_bytes,
+            "verdict_counts": dict(self.state.verdict_counts),
+            "confirmed_findings": list(self.state.confirmed_findings),
+            "refuted_findings": list(self.state.refuted_findings),
         }

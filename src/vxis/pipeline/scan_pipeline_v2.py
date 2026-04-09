@@ -269,6 +269,20 @@ class ScanPipeline:
         if peak_bytes_from_loop > getattr(ctx, "peak_context_bytes", 0):
             ctx.peak_context_bytes = peak_bytes_from_loop
 
+        # Phase C belief state: surface verdict counts + confirmed/refuted lists.
+        verdict_counts = loop_result.get("verdict_counts", {}) or {}
+        ctx.verdict_counts = verdict_counts  # type: ignore[attr-defined]
+        ctx.confirmed_findings = loop_result.get("confirmed_findings", []) or []  # type: ignore[attr-defined]
+        ctx.refuted_findings = loop_result.get("refuted_findings", []) or []  # type: ignore[attr-defined]
+        if verdict_counts:
+            print(
+                "VXIS_BELIEF verdicts={} confirmed={} refuted={}".format(
+                    verdict_counts,
+                    len(ctx.confirmed_findings),  # type: ignore[attr-defined]
+                    len(ctx.refuted_findings),  # type: ignore[attr-defined]
+                )
+            )
+
         # 6. Copy findings from the in-memory store into ctx.findings
         finding_dicts = _get_finding_dicts()
         for d in finding_dicts:
