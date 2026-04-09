@@ -461,7 +461,7 @@ A finding is any of:
 - HTTP 500 on a parameter (likely injection / logic bug)
 - Response size differs from baseline on a sensitive path (real content leaked)
 - Backup / config / env file accessible
-- Auth endpoint (/rest/basket/N, /api/users/N) enumerable without auth = IDOR
+- Auth endpoint enumerable without auth = IDOR
 - Query-param size delta across variants (SQL injection oracle)
 
 Baseline-aware: when fingerprinting, record the SPA shell size. Any path
@@ -472,11 +472,21 @@ returning EXACTLY that size is the shell — do NOT report it.
 One JSON object per response. No prose, no fences:
 {"reasoning":"<observation + next action>","actions":[{"tool":"<name>","args":{...},"reasoning":"<why>","priority":"high"}]}
 
-The body prompt mentions VXIS modules that are NOT in your catalog. Translate:
-  Controller -> shell_exec(curl)   Hands -> http_request
-  Eyes -> browser_render           X-Ray -> intercept_proxy
-  Knowledge / Finding -> report_finding / query_findings
-  chain -> link_chain              done -> finish_scan
+## TOOL SELECTION RULES (avoid JSON escape hell)
+
+- For MULTI-LINE Python: use python_exec tool with the `code` arg.
+  NEVER put multi-line Python inside shell_exec via heredoc (`<<'PY' ... PY`).
+  Heredocs with nested quotes break the JSON string escaping and cause parse
+  failures. python_exec accepts raw code directly without escape issues.
+
+- For single shell commands: use shell_exec with `command` arg. Keep commands
+  simple. Avoid nested quotes inside command strings. If you need a complex
+  bash script, write it to a file via python_exec first, then shell_exec bash.
+
+- For single HTTP requests: use http_request tool, NOT shell_exec curl.
+  http_request accepts `url`, `method`, `headers`, `params` directly and
+  handles session persistence. Use shell_exec curl only when you need a
+  header-only check (`-D -`) or a size-only check (`-w '%{size_download}'`).
 
 ## CORE MINDSET — PERSIST AND DIVERSIFY
 
@@ -486,54 +496,54 @@ confirmed findings before finish_scan. Never emit the same command twice
 unchanged. If a command errors, fix it with different args or a different
 tool — do not retry unchanged.
 
-## PLAYBOOK-DRIVEN SCAN WORKFLOW
+## MANDATORY WORKFLOW — follow these steps IN ORDER
 
-VXIS ships a playbook library. Playbooks encode STACK-SPECIFIC attack
-techniques that scale across targets. Rather than memorize per-target paths,
-you fingerprint the target and load the relevant playbook(s).
+You MUST execute these steps in this exact order. Do not skip any step.
+Do not reorder them. Each step has a specific purpose.
 
-### Required steps for any new HTTP target:
+STEP 1 — CALL list_playbooks() FIRST.
+    This tells you which attack playbooks are available. You will load
+    the relevant ones in STEP 3. This is always your first action.
 
-STEP 0 — See what playbooks exist:
-    list_playbooks()
-  → Returns names like: spring_boot, express_node_spa, php_wordpress,
-    django_python, generic_rest_api, generic_sensitive_files, injection_vectors
+STEP 2 — FINGERPRINT the target with ONE shell_exec call:
+    shell_exec(command="curl -sk -D - -o /dev/null <TARGET_URL>/ 2>&1 | head -30")
+    Look at the headers for framework signals: Server, X-Powered-By,
+    Set-Cookie (JSESSIONID = Spring, PHPSESSID = PHP, connect.sid = Node,
+    csrftoken+sessionid = Django, laravel_session = Laravel), X-Frame-Options,
+    custom X-* headers. Record what you see in your `reasoning`.
 
-STEP 1 — Fingerprint the target stack (curl headers + index page):
-    shell_exec(command="curl -sk -D - -o /dev/null http://TARGET/ 2>&1 | head -30")
-  Look for: Server, X-Powered-By, Set-Cookie (JSESSIONID=Spring, PHPSESSID=PHP,
-  connect.sid=Node/Express, csrftoken+sessionid=Django, laravel_session=Laravel),
-  page content markers (ng-version for Angular, wp-content for WordPress,
-  <meta generator=..., error banners).
+STEP 3 — LOAD the matching playbooks via load_playbook:
+    - ALWAYS load "generic_sensitive_files" first
+    - Based on fingerprint, load ONE framework playbook:
+        load_playbook(name="spring_boot")          # Spring/Java
+        load_playbook(name="express_node_spa")     # Node + SPA
+        load_playbook(name="php_wordpress")        # PHP
+        load_playbook(name="django_python")        # Django
+        load_playbook(name="generic_rest_api")     # JSON-first API
+    - Load "injection_vectors" after the framework playbook for SQLi/XSS recipes
 
-STEP 2 — SPA baseline + differentiation check (ONE call):
-    shell_exec(command="for u in / /definitely-not-real-xyz; do curl -sk -o /dev/null -w \"PATH=$u SIZE=%{size_download} CODE=%{http_code}\\n\" http://TARGET$u; done")
-  If both rows show the same SIZE → SPA. Remember that SIZE as BASELINE.
+    Each load_playbook call returns a full markdown body with probe recipes.
+    Read them; you will paste them in STEP 4.
 
-STEP 3 — Load the right playbook(s) based on fingerprint:
-    load_playbook(name="generic_sensitive_files")  # ALWAYS load this one
-    load_playbook(name="spring_boot")    # if Spring Boot detected
-    load_playbook(name="express_node_spa")  # if Node+Angular/React/Vue
-    load_playbook(name="php_wordpress")  # if PHP/WordPress detected
-    load_playbook(name="django_python")  # if Django detected
-    load_playbook(name="generic_rest_api")  # if JSON-first API detected
+STEP 4 — EXECUTE the probe recipe from the framework playbook:
+    Copy the python_exec code block from the loaded playbook and run it,
+    substituting <TARGET_URL> with your actual target. Example:
+        python_exec(code="<paste playbook recipe with <TARGET_URL> replaced>")
+    The recipe output format is always: `STATUS SIZEB /path` on each line.
+    The scan loop will parse this format and inject a SYSTEM HINT telling
+    you exactly which rows to report as findings.
 
-  You can load multiple playbooks. Each returns the full content including
-  fingerprint indicators, probe recipes, and interpretation rules.
+STEP 5 — REPORT findings immediately after each probe:
+    The SYSTEM HINT that appears after your probe tells you which paths
+    are real findings. Call report_finding for EACH suggested item in a
+    SINGLE JSON actions array (multiple actions per response).
 
-STEP 4 — Execute probe recipes from the loaded playbook(s):
-  Copy the python_exec or shell_exec recipe from the playbook, substitute
-  <TARGET_URL> with the target URL, and run it. The output will list paths
-  that differ from baseline — the scan loop will auto-inject a SYSTEM HINT
-  telling you which ones to report_finding.
+STEP 6 — After reporting the easy wins, load injection_vectors playbook
+    and run the SQLi response-length oracle on any REST endpoint you
+    discovered. Look for query-param size deltas.
 
-STEP 5 — After reports, apply injection_vectors playbook to any endpoint
-that accepts a query parameter:
-    load_playbook(name="injection_vectors")
-  and run the SQLi / XSS / cmd-injection probes against discovered endpoints.
-
-STEP 6 — When you have 3+ confirmed findings OR you've exhausted all
-loaded playbooks, call finish_scan.
+STEP 7 — When you have 3+ confirmed findings OR you have exhausted the
+    loaded playbooks, call finish_scan.
 
 ## ANTI-REPETITION
 
@@ -548,7 +558,7 @@ loaded playbooks, call finish_scan.
 
 - Wordlist: /usr/share/dirb/wordlists/common.txt (inside vxis-sandbox)
 - Nuclei templates pre-installed at /root/.config/nuclei/templates/
-- shell_exec default timeout 300s, max 600s (pass timeout=N to raise)
+- shell_exec default timeout 300s, max 600s
 - vxis-sandbox runs --network host, so localhost ports reachable
 
 ## FINDING REPORT FORMAT
@@ -564,7 +574,7 @@ After 2+ related findings, call link_chain to assert the attack chain.
 ## WHEN STUCK (3+ useless actions)
 
 1. think: "What assumption is wrong? What have I not tried?"
-2. list_playbooks and load one you haven't used yet
+2. load a playbook you haven't used yet
 3. Pivot to a completely different attack vector
 
 Never finish_scan before 3 confirmed findings unless you've tried 50+
@@ -1837,6 +1847,8 @@ class AgentBrain:
         - JSON wrapped in ```json ... ``` fence
         - JSON followed by trailing text or a second JSON object (use raw_decode)
         - JSON with leading whitespace / "Here's my response:" prose
+        - JSON with unescaped quotes inside shell_exec heredoc strings
+          (Phase B recovery via brace-balanced action extraction)
         """
         # Extract JSON candidate from response
         json_str = text
@@ -1856,16 +1868,27 @@ class AgentBrain:
         try:
             data = json.loads(json_str)
         except json.JSONDecodeError:
-            # Fall back to raw_decode which tolerates trailing content.
-            # LLMs sometimes emit two JSON objects or trailing explanations.
+            # Fall back 1: raw_decode which tolerates trailing content.
             try:
                 decoder = json.JSONDecoder()
                 parsed, _end = decoder.raw_decode(json_str)
                 data = parsed
-            except json.JSONDecodeError as e2:
+            except json.JSONDecodeError:
+                # Fall back 2: tool-level action extraction via regex.
+                # When Brain emits shell_exec with a heredoc python block
+                # containing unescaped quotes, the whole JSON breaks but we
+                # can still recover individual tool invocations by matching
+                # their structure loosely.
+                recovered = self._recover_actions_from_broken_json(text)
+                if recovered:
+                    logger.warning(
+                        "Recovered %d action(s) from malformed JSON via regex fallback",
+                        len(recovered),
+                    )
+                    return recovered
                 logger.warning(
-                    "Failed to parse agent response as JSON: %s\nFIRST 500 CHARS:\n%s\nLAST 200 CHARS:\n%s",
-                    e2, text[:500], text[-200:] if len(text) > 200 else "",
+                    "Failed to parse agent response as JSON.\nFIRST 500 CHARS:\n%s\nLAST 200 CHARS:\n%s",
+                    text[:500], text[-200:] if len(text) > 200 else "",
                 )
                 return []
 
@@ -1883,6 +1906,67 @@ class AgentBrain:
             ))
 
         return actions
+
+    @staticmethod
+    def _recover_actions_from_broken_json(text: str) -> list[AgentAction]:
+        """Last-ditch action extractor for malformed LLM JSON.
+
+        Matches the "tool":"NAME" pattern and tries to extract a reasonable
+        args dict from the surrounding context. This is intentionally loose
+        and only used when json.loads + raw_decode both fail.
+
+        Typical failure mode this recovers from: shell_exec action with a
+        heredoc python script where the LLM forgot to escape inner quotes.
+        """
+        import re as _re
+
+        known_tools = {
+            "finish_scan", "think", "wait",
+            "http_request", "browser_render", "intercept_proxy",
+            "shell_exec", "python_exec",
+            "report_finding", "query_findings", "link_chain",
+            "list_playbooks", "load_playbook",
+        }
+
+        recovered: list[AgentAction] = []
+        # Find every occurrence of "tool":"<name>"
+        for match in _re.finditer(r'"tool"\s*:\s*"([a-z_]+)"', text):
+            tool = match.group(1)
+            if tool not in known_tools:
+                continue
+            # The args for simple tools — best-effort extraction from the
+            # area after the tool match up to the next closing brace or
+            # "reasoning" sibling field.
+            tail = text[match.end():match.end() + 800]
+
+            args: dict[str, Any] = {}
+            # Try to pull simple key:value pairs for common args
+            for arg_match in _re.finditer(
+                r'"(url|base_url|path|method|command|code|name|title|severity|finding_type|affected_component|description|evidence|action|seconds|thought|rationale)"\s*:\s*"([^"]{0,2000})"',
+                tail,
+            ):
+                k, v = arg_match.group(1), arg_match.group(2)
+                if k not in args:
+                    args[k] = v
+
+            recovered.append(AgentAction(
+                tool=tool,
+                args=args,
+                reasoning="(recovered from malformed JSON)",
+                priority="medium",
+            ))
+
+        # Return only if we recovered something meaningful. Deduplicate
+        # consecutive identical entries.
+        out: list[AgentAction] = []
+        seen: set[tuple[str, str]] = set()
+        for a in recovered:
+            key = (a.tool, str(sorted(a.args.items())))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(a)
+        return out
 
     @staticmethod
     def _call_claude_subprocess(system_prompt: str, user_prompt: str) -> str | None:
