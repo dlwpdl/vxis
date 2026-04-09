@@ -41,9 +41,13 @@ def test_scan_context_peak_context_bytes_grows_with_state() -> None:
 
 
 # ── Fix #3: --output flag honored by ScanPipeline ────────────────
+# Phase A Task 12: legacy `vxis.pipeline.pipeline` deleted. These tests now target
+# the v2 shim `ScanPipelineV2` exposed via `vxis.pipeline.ScanPipeline`. The
+# _phase6_report test was dropped because the legacy private method no longer
+# exists — v2's report generation is covered by tests/pipeline/test_scan_pipeline_v2.py.
 
 def test_scan_pipeline_accepts_report_output_path(tmp_path: Path) -> None:
-    from vxis.pipeline.pipeline import ScanPipeline
+    from vxis.pipeline import ScanPipeline
 
     custom = tmp_path / "sub" / "custom_report.html"
     pipeline = ScanPipeline(brain=object(), report_output_path=custom)
@@ -51,30 +55,10 @@ def test_scan_pipeline_accepts_report_output_path(tmp_path: Path) -> None:
 
 
 def test_scan_pipeline_default_report_output_is_none() -> None:
-    from vxis.pipeline.pipeline import ScanPipeline
+    from vxis.pipeline import ScanPipeline
 
     pipeline = ScanPipeline(brain=object())
     assert pipeline._report_output_path is None
-
-
-@pytest.mark.asyncio
-async def test_phase6_report_writes_to_custom_path(tmp_path: Path) -> None:
-    """When report_output_path is set, _phase6_report writes there instead of default."""
-    from vxis.pipeline.context import ScanContext
-    from vxis.pipeline.pipeline import ScanPipeline
-
-    custom = tmp_path / "nested" / "my_report.html"
-    pipeline = ScanPipeline(brain=object(), report_output_path=custom)
-
-    ctx = ScanContext(target="http://example.test", scan_id="unit-out")
-
-    # Stub ai_summary to avoid network + ReportGenerator.generate_html_file
-    with patch("vxis.report.ai_summary.generate_executive_summary", return_value=None), \
-         patch("vxis.report.generator.ReportGenerator.generate_html_file") as mock_gen:
-        await pipeline._phase6_report(ctx)
-        assert mock_gen.called
-        out_arg = mock_gen.call_args[0][1]
-        assert Path(out_arg) == custom
 
 
 # ── Fix #4: LLM invocation counter ───────────────────────────────

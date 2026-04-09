@@ -258,17 +258,16 @@ class BenchmarkRunner:
         logger.info("[BENCHMARK] Brain: AgentBrain (LLM)")
 
         if target_type == "web":
-            from vxis.pipeline.pipeline import ScanPipeline
+            from vxis.pipeline import ScanPipeline  # Phase A: v2 shim via pipeline/__init__.py
             pipeline = ScanPipeline(brain=brain)
             ctx = await pipeline.run(target=target_url)
-        elif target_type == "game":
-            from vxis.pipeline.pipeline import ScanPipeline
-            pipeline = ScanPipeline(brain=brain)
-            ctx = await pipeline.run(target=target_url)
-        elif target_type == "mobile":
-            from vxis.pipeline.mobile_pipeline import MobilePipeline
-            pipeline = MobilePipeline()
-            ctx = await pipeline.run(target=target_url)
+        elif target_type in ("game", "mobile"):
+            # Phase A deleted legacy game_pipeline / mobile_pipeline. Phase D will
+            # rebuild them on top of ScanPipelineV2 + domain-specific BrainTools.
+            raise NotImplementedError(
+                f"target_type={target_type!r} is deferred to Phase D — "
+                "see docs/PHASE_STATUS.md"
+            )
         else:
             raise ValueError(f"Unknown target_type: {target_type!r}")
 
