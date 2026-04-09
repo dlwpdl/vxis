@@ -85,12 +85,21 @@ class ReportFindingTool:
         # affected_component) already exists, skip re-creation and return the
         # existing id. Prevents Brain from reporting the same issue twice when
         # it loses track of its own state.
-        new_type = str(kwargs["finding_type"]).lower()
-        new_component = str(kwargs["affected_component"]).lower().strip()
+        def _normalize(s: str) -> str:
+            """Normalize finding_type and affected_component for dedup matching."""
+            s = str(s).lower().strip()
+            # Strip trailing slashes so "/api" and "/api/" dedupe together
+            s = s.rstrip("/")
+            # Collapse whitespace
+            s = " ".join(s.split())
+            return s
+
+        new_type = _normalize(kwargs["finding_type"])
+        new_component = _normalize(kwargs["affected_component"])
         for existing in _findings:
             if (
-                existing["finding_type"].lower() == new_type
-                and existing["affected_component"].lower().strip() == new_component
+                _normalize(existing["finding_type"]) == new_type
+                and _normalize(existing["affected_component"]) == new_component
             ):
                 logger.info(
                     "[Finding] duplicate skipped: %s %s (already %s)",

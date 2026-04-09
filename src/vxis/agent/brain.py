@@ -501,22 +501,26 @@ tool — do not retry unchanged.
 You MUST execute these steps in this exact order. Do not skip any step.
 Do not reorder them. Each step has a specific purpose.
 
-STEP 1 — QUERY scan memory for this target:
-    query_scan_memory(url="<TARGET_URL>")
-    If VXIS has scanned this target before, you will get prior findings as
-    context. Verify those still exist first, then hunt for new ones. If
-    "target_known": false, you are on a fresh target — proceed to STEP 2.
-
-STEP 2 — FINGERPRINT the target in a single call:
+STEP 1 — FINGERPRINT the target in a single call:
     fingerprint_target(url="<TARGET_URL>")
     This fetches headers + body, detects the web stack, and returns
-    `recommended_playbooks` (a ranked list). No more manual curl + header
-    inspection. The tool also reports SPA detection + baseline shell size.
+    `recommended_playbooks` (a ranked list). The tool also reports SPA
+    detection + baseline shell size. Record the TOP recommended playbook
+    name in your reasoning — you'll use it as stack_hint in STEP 2.
+
+STEP 2 — QUERY cross-scan memory with the stack hint:
+    query_scan_memory(url="<TARGET_URL>", stack_hint="<top_playbook_from_step_1>")
+    Returns TWO kinds of data:
+    - "known_findings": prior findings on THIS exact target (verify still valid)
+    - "cross_target_findings": findings from OTHER targets of the same stack
+      (these are hints — try the same paths, they often still exist on new
+      targets of the same framework)
+    VXIS gets smarter each scan because of this cross-stack memory. Use it.
 
 STEP 3 — LOAD each recommended playbook via load_playbook:
-    For each name in `recommended_playbooks`:
+    For each name in `recommended_playbooks` (from STEP 1):
         load_playbook(name="<playbook_name>")
-    Available playbooks include: generic_sensitive_files, generic_rest_api,
+    Available playbooks: generic_sensitive_files, generic_rest_api,
     spring_boot, express_node_spa, php_wordpress, django_python, rails,
     flask_fastapi, go_web, aspnet, injection_vectors.
     Load multiple — each returns a full markdown body with probe recipes.

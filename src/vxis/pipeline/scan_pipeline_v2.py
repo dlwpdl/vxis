@@ -343,12 +343,31 @@ class ScanPipeline:
 
         # Phase B: persist scan results to cross-scan memory KB so the next
         # scan of this target can query prior findings via query_scan_memory.
+        # Also extract the fingerprint_target result from the loop's message
+        # history (if Brain called it) so cross-stack learning works.
         try:
             finding_dicts_raw = _get_finding_dicts()
+            extracted_fingerprint: dict[str, Any] | None = None
+            for msg in getattr(loop.state, "messages", []):
+                c = msg.get("content") if isinstance(msg, dict) else None
+                if isinstance(c, dict) and c.get("name") == "fingerprint_target":
+                    data = (c.get("result") or {}).get("data") or {}
+                    if "recommended_playbooks" in data:
+                        extracted_fingerprint = {
+                            "recommended_playbooks": data.get("recommended_playbooks"),
+                            "is_spa": data.get("is_spa"),
+                            "root_status": data.get("root_status"),
+                            "root_size": data.get("root_size"),
+                            "matches": [
+                                {"playbook": m.get("playbook"), "score": m.get("score")}
+                                for m in (data.get("matches") or [])[:5]
+                            ],
+                        }
+                        break  # use first fingerprint in the scan
             _record_scan_memory(
                 target=ctx.target,
                 findings=finding_dicts_raw,
-                fingerprint=None,  # TODO: surface fingerprint from scan loop
+                fingerprint=extracted_fingerprint,
             )
         except Exception:
             logger.exception("Failed to record scan memory")

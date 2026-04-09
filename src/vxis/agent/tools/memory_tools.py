@@ -123,12 +123,22 @@ class QueryScanMemoryTool:
                 "type": "string",
                 "description": "Target URL (same format as fingerprint_target).",
             },
+            "stack_hint": {
+                "type": "string",
+                "description": (
+                    "Optional stack name (e.g. 'spring_boot', 'express_node_spa') "
+                    "from fingerprint_target.recommended_playbooks[0]. When "
+                    "provided, the tool ALSO returns findings from other targets "
+                    "of the same stack as cross-stack learning context."
+                ),
+            },
         },
         "required": ["url"],
     }
 
     async def run(self, **kwargs: Any) -> ToolResult:
         url = str(kwargs.get("url", "")).strip()
+        stack_hint = str(kwargs.get("stack_hint", "")).strip().lower()
         if not url:
             return ToolResult(
                 ok=False,
@@ -138,31 +148,76 @@ class QueryScanMemoryTool:
 
         kb = _load_kb()
         key = _target_key(url)
-        entry = kb.get("targets", {}).get(key)
+        targets = kb.get("targets", {})
+        entry = targets.get(key)
 
-        if not entry:
+        # Exact-target results
+        exact_findings: list[dict[str, Any]] = []
+        prior_scans = 0
+        if entry:
+            prior_scans = len(entry.get("scans", []))
+            exact_findings = entry.get("known_findings", [])
+
+        # Phase B cross-target learning: if caller passes a stack_hint (e.g.
+        # "spring_boot"), find other targets with the same stack fingerprint
+        # and surface their findings as cross-target context.
+        cross_target: list[dict[str, Any]] = []
+        if stack_hint:
+            for other_key, other_entry in targets.items():
+                if other_key == key:
+                    continue
+                other_scans = other_entry.get("scans", [])
+                if not other_scans:
+                    continue
+                # Check the last scan's fingerprint for the stack
+                last_fp = other_scans[-1].get("fingerprint") or {}
+                recommended = last_fp.get("recommended_playbooks") or []
+                if stack_hint in [str(r).lower() for r in recommended]:
+                    for kf in other_entry.get("known_findings", [])[:5]:
+                        cross_target.append({
+                            "source_target": other_key,
+                            "finding_type": kf.get("finding_type"),
+                            "affected_component": kf.get("affected_component"),
+                            "severity": kf.get("severity"),
+                        })
+
+        if not entry and not cross_target:
             return ToolResult(
                 ok=True,
-                data={"target_known": False, "scans": [], "known_findings": []},
+                data={
+                    "target_known": False,
+                    "scans": [],
+                    "known_findings": [],
+                    "cross_target_findings": [],
+                },
                 summary=f"query_scan_memory: no prior scans recorded for {key}. Fresh target.",
             )
 
-        scans = entry.get("scans", [])
-        known = entry.get("known_findings", [])
+        total_unique = len(exact_findings)
+        summary_parts = []
+        if entry:
+            summary_parts.append(
+                f"{key} has {prior_scans} prior scan(s), {total_unique} unique findings known"
+            )
+        if cross_target:
+            summary_parts.append(
+                f"{len(cross_target)} findings from other {stack_hint} targets as cross-stack context"
+            )
 
         return ToolResult(
             ok=True,
             data={
-                "target_known": True,
+                "target_known": entry is not None,
                 "key": key,
-                "prior_scan_count": len(scans),
-                "last_scan": scans[-1] if scans else None,
-                "known_findings": known[:30],
-                "total_unique_findings_ever": len(known),
+                "prior_scan_count": prior_scans,
+                "last_scan": entry["scans"][-1] if entry and entry.get("scans") else None,
+                "known_findings": exact_findings[:30],
+                "total_unique_findings_ever": total_unique,
+                "cross_target_findings": cross_target[:20],
+                "stack_hint": stack_hint or None,
             },
-            summary=(
-                f"query_scan_memory: {key} has {len(scans)} prior scan(s), "
-                f"{len(known)} unique findings known. Verify these still "
-                f"exist and hunt for new ones."
-            ),
+            summary="query_scan_memory: " + ". ".join(summary_parts)
+            + ". Verify these still exist and hunt for new ones."
+            if summary_parts
+            else f"query_scan_memory: no prior data for {key}.",
         )
