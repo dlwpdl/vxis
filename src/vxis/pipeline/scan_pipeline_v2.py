@@ -128,36 +128,315 @@ def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str
     )
 
 
-def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
-    """Compute a simple VXIS score from finding counts. Returns (score, grade).
+# ── Severity → exploitation level mapping (0-4 scale for ScoringEngine) ──
+_SEVERITY_TO_LEVEL: dict[str, int] = {
+    "critical": 4,
+    "high": 3,
+    "medium": 2,
+    "low": 1,
+    "informational": 0,
+    "info": 0,
+}
 
-    Phase A uses a severity-weighted heuristic. Phase B will use the full
-    scoring module once findings carry richer metadata.
+# ── finding_type → primary vector ID per target type ──────────────────────
+# Maps agent-generated finding_type strings to registered vector IDs so
+# ScoringEngine.Vector Coverage dimension can score real attempts/finds.
+# 에이전트가 생성한 finding_type을 벡터 레지스트리 ID로 매핑한다.
+_FINDING_TYPE_TO_VECTOR: dict[str, dict[str, str]] = {
+    "web": {
+        "sql_injection": "WEB-SQLI-001",
+        "sqli": "WEB-SQLI-001",
+        "blind_sqli": "WEB-SQLI-002",
+        "time_based_sqli": "WEB-SQLI-003",
+        "error_based_sqli": "WEB-SQLI-004",
+        "nosql_injection": "WEB-NOSQL-001",
+        "nosql": "WEB-NOSQL-001",
+        "command_injection": "WEB-CMDI-001",
+        "cmdi": "WEB-CMDI-001",
+        "os_command_injection": "WEB-CMDI-001",
+        "rce": "WEB-CMDI-001",
+        "remote_code_execution": "WEB-CMDI-001",
+        "ldap_injection": "WEB-LDAP-001",
+        "ldap": "WEB-LDAP-001",
+        "xpath_injection": "WEB-XPATH-001",
+        "ssti": "WEB-SSTI-001",
+        "template_injection": "WEB-SSTI-001",
+        "server_side_template_injection": "WEB-SSTI-001",
+        "xxe": "WEB-XXE-001",
+        "xml_external_entity": "WEB-XXE-001",
+        "deserialization": "WEB-DESER-001",
+        "insecure_deserialization": "WEB-DESER-001",
+        "file_upload": "WEB-UPLOAD-001",
+        "unrestricted_file_upload": "WEB-UPLOAD-001",
+        "websocket": "WEB-WSS-001",
+        "websocket_injection": "WEB-WSS-001",
+        "xss": "WEB-XSS-001",
+        "cross_site_scripting": "WEB-XSS-001",
+        "reflected_xss": "WEB-XSS-001",
+        "stored_xss": "WEB-XSS-002",
+        "persistent_xss": "WEB-XSS-002",
+        "dom_xss": "WEB-XSS-003",
+        "ssrf": "WEB-SSRF-001",
+        "server_side_request_forgery": "WEB-SSRF-001",
+        "blind_ssrf": "WEB-SSRF-002",
+        "authentication": "WEB-AUTH-001",
+        "auth": "WEB-AUTH-001",
+        "brute_force": "WEB-AUTH-001",
+        "default_credentials": "WEB-AUTH-002",
+        "jwt": "WEB-AUTH-003",
+        "jwt_vulnerability": "WEB-AUTH-003",
+        "session_fixation": "WEB-AUTH-005",
+        "session": "WEB-AUTH-005",
+        "csrf": "WEB-CSRF-001",
+        "cross_site_request_forgery": "WEB-CSRF-001",
+        "oauth": "WEB-AUTH-006",
+        "oauth_vulnerability": "WEB-AUTH-006",
+        "saml": "WEB-AUTH-011",
+        "idor": "WEB-AC-001",
+        "insecure_direct_object_reference": "WEB-AC-001",
+        "privilege_escalation": "WEB-AC-002",
+        "horizontal_privilege_escalation": "WEB-AC-002",
+        "vertical_privilege_escalation": "WEB-AC-003",
+        "path_traversal": "WEB-AC-004",
+        "directory_traversal": "WEB-AC-004",
+        "lfi": "WEB-AC-004",
+        "local_file_inclusion": "WEB-AC-004",
+        "forced_browsing": "WEB-AC-005",
+        "misconfiguration": "WEB-MISCONF-001",
+        "misconfig": "WEB-MISCONF-001",
+        "debug_endpoint": "WEB-MISCONF-001",
+        "default_config": "WEB-MISCONF-002",
+        "verbose_errors": "WEB-MISCONF-003",
+        "security_headers": "WEB-MISCONF-004",
+        "cors": "WEB-MISCONF-005",
+        "cors_misconfiguration": "WEB-MISCONF-005",
+        "open_redirect": "WEB-MISCONF-006",
+        "weak_tls": "WEB-CRYPTO-001",
+        "tls": "WEB-CRYPTO-001",
+        "weak_hashing": "WEB-CRYPTO-002",
+        "crypto": "WEB-CRYPTO-001",
+        "hardcoded_secret": "WEB-CRYPTO-003",
+        "hardcoded_secrets": "WEB-CRYPTO-003",
+        "secrets": "WEB-CRYPTO-003",
+        "insecure_randomness": "WEB-CRYPTO-004",
+        "mass_assignment": "WEB-API-001",
+        "rate_limiting": "WEB-API-002",
+        "graphql": "WEB-API-003",
+        "grpc": "WEB-API-005",
+        "bola": "WEB-API-006",
+        "bfla": "WEB-API-007",
+        "business_logic": "WEB-BIZ-001",
+        "logic_flaw": "WEB-BIZ-001",
+        "race_condition": "WEB-RACE-001",
+        "subdomain_takeover": "WEB-INFRA-001",
+        "dns_zone_transfer": "WEB-INFRA-002",
+        "cloud_misconfiguration": "WEB-INFRA-003",
+        "s3_bucket": "WEB-INFRA-003",
+        "git_exposure": "WEB-INFRA-005",
+        "supply_chain": "WEB-SUPPLY-001",
+        "llm_injection": "WEB-INJECT-018",
+        "prompt_injection": "WEB-INJECT-018",
+        "ai_injection": "WEB-INJECT-018",
+    },
+    "game": {
+        "server_validation": "GAME-SV-001",
+        "negative_value": "GAME-SV-001",
+        "integer_overflow": "GAME-SV-002",
+        "zero_price": "GAME-SV-003",
+        "speed_hack": "GAME-SV-004",
+        "teleport": "GAME-SV-005",
+        "idor": "GAME-SV-006",
+        "economy": "GAME-ECON-001",
+        "currency_duplication": "GAME-ECON-001",
+        "replay_attack": "GAME-PROTO-002",
+        "packet_injection": "GAME-PROTO-003",
+        "memory_manipulation": "GAME-CLIENT-001",
+        "binary_reversing": "GAME-CLIENT-002",
+        "save_file_tampering": "GAME-CLIENT-003",
+        "anti_cheat": "GAME-AC-001",
+        "cheat_detection": "GAME-AC-001",
+        "leaderboard": "GAME-LOGIC-001",
+        "gacha_rng": "GAME-LOGIC-004",
+        "chat_injection": "GAME-SOCIAL-001",
+        "xss": "GAME-SOCIAL-002",
+        "drm": "GAME-DRM-001",
+        "iap_bypass": "GAME-ECON-006",
+    },
+    "mobile": {
+        "hardcoded_secrets": "MOB-STATIC-001",
+        "hardcoded_secret": "MOB-STATIC-001",
+        "secrets": "MOB-STATIC-001",
+        "weak_crypto": "MOB-STATIC-002",
+        "crypto": "MOB-STATIC-002",
+        "over_privileged": "MOB-STATIC-003",
+        "permissions": "MOB-STATIC-003",
+        "exported_component": "MOB-STATIC-004",
+        "debug_flag": "MOB-STATIC-005",
+        "backup_enabled": "MOB-STATIC-006",
+        "firebase_config": "MOB-STATIC-007",
+        "ssl_pinning": "MOB-NET-001",
+        "cleartext_traffic": "MOB-NET-002",
+        "certificate_validation": "MOB-NET-003",
+        "authentication": "MOB-API-001",
+        "auth": "MOB-API-001",
+        "idor": "MOB-API-002",
+        "rate_limiting": "MOB-API-003",
+        "graphql": "MOB-API-004",
+        "storage": "MOB-STORE-001",
+        "sqlite_unencrypted": "MOB-STORE-001",
+        "shared_preferences": "MOB-STORE-002",
+        "keychain": "MOB-STORE-003",
+        "cache_leakage": "MOB-STORE-004",
+        "clipboard_exposure": "MOB-STORE-005",
+        "iap_bypass": "MOB-BIZ-001",
+        "subscription_spoofing": "MOB-BIZ-002",
+        "deep_link": "MOB-BIZ-003",
+        "webview": "MOB-PLAT-005",
+        "intent_injection": "MOB-PLAT-001",
+        "content_provider": "MOB-PLAT-002",
+        "firebase": "MOB-CLOUD-001",
+        "s3_bucket": "MOB-CLOUD-002",
+    },
+}
+
+
+def _finding_type_to_vector_id(finding_type: str, target_type: str) -> str | None:
+    """Map finding_type string to the nearest registered vector ID.
+
+    Returns None when no match exists — the ScoringEngine silently ignores
+    unknown IDs, so callers need not guard against None returns.
+
+    finding_type 문자열을 벡터 레지스트리 ID로 변환한다. 매칭 실패 시 None 반환.
     """
-    sev_weights = {
-        "critical": 200,
-        "high": 100,
-        "medium": 50,
-        "low": 20,
-        "info": 5,
-        "informational": 5,
-    }
-    score = 0.0
-    for f in ctx.findings:
-        sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
-        score += sev_weights.get(sev, 5)
-    score = min(1000.0, score)
-    if score >= 700:
-        grade = "A"
-    elif score >= 400:
-        grade = "B"
-    elif score >= 200:
-        grade = "C"
-    elif score > 0:
-        grade = "D"
-    else:
-        grade = "F"
-    return score, grade
+    lookup = _FINDING_TYPE_TO_VECTOR.get(target_type, {})
+    ft_norm = finding_type.lower().replace("-", "_").replace(" ", "_")
+    if ft_norm in lookup:
+        return lookup[ft_norm]
+    # Substring fallback — first key that appears inside ft_norm or vice-versa
+    for key, vid in lookup.items():
+        if key in ft_norm or ft_norm in key:
+            return vid
+    return None
+
+
+def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
+    """Compute the full 5-dimension VXIS score using ScoringEngine.
+
+    Builds a ScoreTracker from ctx.findings (mapping finding_type → vector ID),
+    records the scan_loop phase result, reconstructs attack chains, then runs
+    ScoringEngine.calculate() for an accurate 1000-point score.
+
+    Falls back to a severity-weighted heuristic if scoring modules fail.
+
+    전체 5차원 VXIS 점수를 ScoringEngine으로 계산한다.
+    모듈 불가 시 중증도 가중치 휴리스틱으로 대체한다.
+    """
+    try:
+        from vxis.scoring.engine import ScoringEngine
+        from vxis.scoring.tracker import AttackChain, ScoreTracker
+
+        target_type: str = getattr(ctx, "target_type", "web")
+        tracker: ScoreTracker = getattr(ctx, "score_tracker", None)  # type: ignore[assignment]
+        if tracker is None:
+            tracker = ScoreTracker(target_type=target_type)
+
+        # ── Populate tracker from findings ────────────────────────────────
+        for f in ctx.findings:
+            fid: str = getattr(f, "id", "") or ""
+            finding_type: str = getattr(f, "finding_type", "") or ""
+            sev_raw = getattr(f, "severity", None)
+            sev: str = sev_raw.value if hasattr(sev_raw, "value") else str(sev_raw or "medium")
+            level: int = _SEVERITY_TO_LEVEL.get(sev.lower(), 1)
+            evidence_count: int = len(getattr(f, "evidence", []) or [])
+
+            vid = _finding_type_to_vector_id(finding_type, target_type) or finding_type
+            if vid:
+                try:
+                    tracker.record_vector_attempt(vid)
+                    if fid:
+                        tracker.record_finding(fid, vid, level, evidence_count)
+                except Exception:
+                    logger.debug(
+                        "record_finding failed for %s / %s — skipped", fid, vid
+                    )
+
+        # ── Record scan_loop phase completion ─────────────────────────────
+        try:
+            tracker.record_phase_complete(
+                "scan_loop",
+                findings_count=len(ctx.findings),
+            )
+        except Exception:
+            logger.debug("record_phase_complete failed — skipped")
+
+        # ── Reconstruct attack chains from ctx.attack_chains ──────────────
+        try:
+            for i, chain_dict in enumerate(getattr(ctx, "attack_chains", []) or []):
+                finding_ids: list[str] = chain_dict.get("finding_ids", [])
+                if len(finding_ids) >= 2:
+                    chain = AttackChain(
+                        chain_id=f"CHAIN-{i + 1:03d}",
+                        description_en=(
+                            f"Attack chain — {len(finding_ids)} linked findings"
+                        ),
+                        description_ko=f"공격 체인 — {len(finding_ids)}개 연결된 취약점",
+                    )
+                    for j, step_fid in enumerate(finding_ids):
+                        chain.add_step(
+                            vector_id=tracker.finding_vectors.get(step_fid, "unknown"),
+                            finding_id=step_fid,
+                            level=tracker.exploitation_levels.get(step_fid, 1),
+                            description_en=f"Step {j + 1}",
+                            description_ko=f"{j + 1}단계",
+                        )
+                    tracker.record_chain(chain)
+        except Exception:
+            logger.debug("attack chain reconstruction failed — skipped")
+
+        # ── Run the full 5-dimension ScoringEngine ────────────────────────
+        engine = ScoringEngine(target_type=target_type)
+        vxis_score = engine.calculate(
+            tracker,
+            list(ctx.findings),
+            scan_id=getattr(ctx, "scan_id", ""),
+        )
+        # Attach full VXISScore to ctx for downstream consumers (report, CLI)
+        try:
+            object.__setattr__(ctx, "vxis_score_full", vxis_score)
+        except Exception:
+            ctx.vxis_score_full = vxis_score  # type: ignore[attr-defined]
+
+        return vxis_score.total, vxis_score.grade
+
+    except Exception as exc:
+        logger.warning(
+            "ScoringEngine unavailable — falling back to heuristic: %s", exc
+        )
+        # ── Fallback: severity-weighted heuristic (original Phase A logic) ──
+        sev_weights = {
+            "critical": 200,
+            "high": 100,
+            "medium": 50,
+            "low": 20,
+            "info": 5,
+            "informational": 5,
+        }
+        score = 0.0
+        for f in ctx.findings:
+            sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+            score += sev_weights.get(sev, 5)
+        score = min(1000.0, score)
+        if score >= 700:
+            grade = "A"
+        elif score >= 400:
+            grade = "B"
+        elif score >= 200:
+            grade = "C"
+        elif score > 0:
+            grade = "D"
+        else:
+            grade = "F"
+        return score, grade
 
 
 class _SimpleScore:
