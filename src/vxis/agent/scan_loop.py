@@ -660,7 +660,7 @@ class ScanAgentLoop:
             # uses it but never tries fill_form. Code enforces the action.
             if (
                 not _auto_login_done
-                and self.state.iteration == 8
+                and self.state.iteration >= 8
                 and "browser_navigate" in self.registry.list_tools()
             ):
                 _auto_browser_done = True
@@ -743,7 +743,7 @@ class ScanAgentLoop:
             # Auto-nuclei: if Brain hasn't run nuclei by iter 12, fire it
             if (
                 not _auto_nuclei_done
-                and self.state.iteration == 12
+                and self.state.iteration >= 12
                 and "shell_exec" in self.registry.list_tools()
             ):
                 # Check if Brain already ran nuclei by scanning messages
@@ -756,7 +756,7 @@ class ScanAgentLoop:
                     try:
                         nuclei_cmd = (
                             f"nuclei -u {self.state.target} "
-                            "-t /root/.config/nuclei/templates/ "
+                            "-t /root/nuclei-templates/ "
                             "-severity critical,high,medium "
                             "-silent -nc -timeout 5 -retries 1 "
                             "-rate-limit 50"
