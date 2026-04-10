@@ -94,133 +94,95 @@ class ScanAgentLoop:
     def _build_scan_dashboard(self) -> str:
         """Build a compact scan-progress dashboard injected every iteration.
 
-        This is the CRITICAL fix for Brain's 20-message history window: by
-        iter 15, Brain has forgotten iters 1-10. The dashboard gives it a
-        complete picture of what happened, what worked, what failed, and
-        what it hasn't tried yet — in <40 lines instead of 200+ messages.
+        Brain sees this every iteration instead of scrolling through 200+
+        messages. Focused on: what did you find, what haven't you tested,
+        what should your next GOAL be.
         """
         s = self.state
-        lines: list[str] = [f"═══ SCAN DASHBOARD (iter {s.iteration}/{s.max_iters}) ═══"]
 
-        # 1. Tools used vs not used
+        # Collect state from messages
         tools_used: set[str] = set()
-        endpoints_discovered: set[str] = set()
-        tools_called_with_args: list[str] = []
+        endpoints_seen: set[str] = set()
         for m in s.messages:
             content = m.get("content", {})
             if isinstance(content, dict) and content.get("name"):
-                tool_name = content["name"]
-                tools_used.add(tool_name)
+                tools_used.add(content["name"])
                 args = content.get("args", {})
                 if isinstance(args, dict):
-                    # Track unique tool+key-arg combos for dedup awareness
-                    url_or_cmd = args.get("url", args.get("command", args.get("code", "")))
-                    if url_or_cmd:
-                        tools_called_with_args.append(f"{tool_name}({str(url_or_cmd)[:60]})")
-                    comp = args.get("affected_component", "")
-                    if comp:
-                        endpoints_discovered.add(comp)
+                    for k in ("url", "affected_component"):
+                        if args.get(k):
+                            endpoints_seen.add(str(args[k])[:80])
 
-        all_tools = set(self.registry.list_tools()) if self.registry else set()
-        # Highlight high-value unused tools
-        high_value_unused = []
-        for t in ["browser_fill_form", "browser_eval_js", "shell_exec",
-                   "browser_click", "browser_screenshot"]:
-            if t in all_tools and t not in tools_used:
-                high_value_unused.append(t)
-
-        lines.append(f"Tools used: {', '.join(sorted(tools_used)) or 'none'}")
-        if high_value_unused:
-            lines.append(f"⚠ NOT YET USED (try these!): {', '.join(high_value_unused)}")
-
-        # 2. Endpoints discovered
-        if endpoints_discovered:
-            lines.append(f"Endpoints found ({len(endpoints_discovered)}): {', '.join(sorted(endpoints_discovered)[:10])}")
-
-        # 3. Findings status
         try:
             from vxis.agent.tools.finding_tools import _get_findings
             reported = _get_findings()
         except Exception:
             reported = []
-        lines.append(f"Findings reported: {len(reported)}")
-        for f in reported[-5:]:
-            lines.append(f"  ✓ [{f.get('severity','?').upper()}] {f.get('title','?')[:60]}")
 
-        # 4. Refuted / Confirmed
-        if s.refuted_findings:
-            lines.append(f"REFUTED ({len(s.refuted_findings)}) — do NOT re-report:")
-            for rf in s.refuted_findings[-3:]:
-                lines.append(f"  ✗ {rf.get('finding_type','?')} @ {rf.get('affected_component','?')[:50]}")
-        if s.confirmed_findings:
-            lines.append(f"CONFIRMED ({len(s.confirmed_findings)}) — extend these:")
-            for cf in s.confirmed_findings[-3:]:
-                lines.append(f"  ✓ {cf.get('finding_type','?')} @ {cf.get('affected_component','?')[:50]}")
+        # Build attack vector checklist
+        tested_vectors: dict[str, str] = {}  # vector → status
+        finding_types = {f.get("finding_type", "") for f in reported}
 
-        # 5. Recent unique tool calls (last 5, deduped)
-        if tools_called_with_args:
-            seen = []
-            for tc in reversed(tools_called_with_args):
-                if tc not in seen:
-                    seen.append(tc)
-                if len(seen) >= 5:
-                    break
-            lines.append(f"Recent calls: {' → '.join(reversed(seen))}")
+        vectors = [
+            ("SQLi", "sql_injection", "shell_exec" in tools_used or "sql" in str(finding_types)),
+            ("XSS", "xss", "browser_eval_js" in tools_used),
+            ("Auth bypass", "auth_bypass", "browser_fill_form" in tools_used),
+            ("IDOR", "idor", any("idor" in str(f.get("finding_type","")).lower() for f in reported)),
+            ("Sensitive files", "information_disclosure", "load_playbook" in tools_used),
+            ("Dir bruteforce", "directory", any(m.get("role") == "tool" and "ffuf" in str(m.get("content", {}).get("args", "")) for m in s.messages)),
+            ("CVE scan", "cve", any(m.get("role") == "tool" and "nuclei" in str(m.get("content", {}).get("args", "")) for m in s.messages)),
+        ]
+        for name, ftype, tested in vectors:
+            found = ftype in finding_types
+            if found:
+                tested_vectors[name] = "✓ FOUND"
+            elif tested:
+                tested_vectors[name] = "tested, nothing yet"
+            else:
+                tested_vectors[name] = "⬚ NOT TESTED"
 
-        # 6. Concrete next-action suggestions based on gaps + exploit depth
-        suggestions: list[str] = []
+        # Determine current goal based on what's missing
+        untested = [name for name, status in tested_vectors.items() if "NOT TESTED" in status]
 
-        # Phase 1: tool usage gaps
-        if "browser_fill_form" not in tools_used:
-            suggestions.append("browser_fill_form on login page with default creds")
-        if "shell_exec" not in tools_used:
-            suggestions.append("shell_exec: run sqlmap or nuclei on discovered endpoints")
-        if "browser_eval_js" not in tools_used:
-            suggestions.append("browser_eval_js: check localStorage/sessionStorage for tokens")
+        lines: list[str] = [f"═══ SCAN DASHBOARD (iter {s.iteration}) ═══"]
 
-        # Phase 2: exploit depth — if we have surface findings, push deeper
+        # Findings
         if reported:
-            finding_types = {f.get("finding_type", "") for f in reported}
-            components = [f.get("affected_component", "") for f in reported]
-            # If only error-oracle findings, push for actual exploitation
-            has_only_errors = all(
-                "500" in f.get("title", "") or "error" in f.get("finding_type", "")
-                for f in reported
-            )
-            if has_only_errors and "shell_exec" in all_tools:
-                # Pick a component to exploit
-                target_ep = components[0] if components else self.state.target
-                suggestions.insert(0, (
-                    f"STOP reporting more 500 errors — you've found the pattern. "
-                    f"Now EXPLOIT: shell_exec(command=\"sqlmap -u '{target_ep}' "
-                    f"--batch --level=2 --risk=2 -t /root/nuclei-templates/\")"
-                ))
-            if "sql_injection" in finding_types or "error" in str(finding_types):
-                suggestions.append(
-                    "Run sqlmap --dump on SQL-error endpoints to extract actual data"
-                )
-            if "information_disclosure" in finding_types:
-                suggestions.append(
-                    "Use the disclosed info (creds, tokens, config) to escalate access"
-                )
-        elif s.iteration > 10:
-            suggestions.append("0 findings after 10 iters — try injection payloads, brute creds")
+            lines.append(f"Findings ({len(reported)}):")
+            for f in reported[-5:]:
+                lines.append(f"  [{f.get('severity','?').upper()}] {f.get('title','?')[:60]}")
+        else:
+            lines.append("Findings: 0")
 
-        # Phase 3: diversification — if many findings of same type, switch attack class
-        if len(reported) >= 3:
-            from collections import Counter
-            type_counts = Counter(f.get("finding_type", "") for f in reported)
-            dominant = type_counts.most_common(1)[0] if type_counts else ("", 0)
-            if dominant[1] >= 3:
-                suggestions.insert(0, (
-                    f"You have {dominant[1]}x '{dominant[0]}' findings — ENOUGH. "
-                    f"Switch attack class: try XSS, SQLi, auth bypass, IDOR, SSRF."
-                ))
+        # Attack vector checklist
+        lines.append("Attack vectors:")
+        for name, status in tested_vectors.items():
+            lines.append(f"  {status} {name}")
 
-        if suggestions:
-            lines.append("SUGGESTED NEXT:")
-            for i, sug in enumerate(suggestions[:5], 1):
-                lines.append(f"  {i}. {sug}")
+        # Endpoints
+        if endpoints_seen:
+            lines.append(f"Known endpoints: {', '.join(sorted(endpoints_seen)[:8])}")
+
+        # Current goal
+        if untested:
+            goal = untested[0]
+            lines.append(f"\n>> YOUR GOAL: Test {goal}.")
+            if goal == "SQLi":
+                lines.append("   Try: shell_exec sqlmap on an endpoint, or browser_fill_form with ' OR 1=1--")
+            elif goal == "XSS":
+                lines.append("   Try: browser_navigate to /search?q=<script>alert(1)</script>, then browser_eval_js")
+            elif goal == "Auth bypass":
+                lines.append("   Try: browser_navigate to login page, browser_fill_form with test creds")
+            elif goal == "IDOR":
+                lines.append("   Try: access /api/Users/2 or /api/Orders/2 with and without auth token")
+            elif goal == "Dir bruteforce":
+                lines.append("   Try: shell_exec ffuf with common.txt wordlist")
+            elif goal == "CVE scan":
+                lines.append("   Try: shell_exec nuclei with http/cves templates")
+        elif reported:
+            lines.append("\n>> All vectors tested. Deepen: exploit confirmed findings further or finish_scan.")
+        else:
+            lines.append("\n>> No findings yet. Be more aggressive.")
 
         lines.append("═══ Pick a NEW action you haven't tried. Do NOT repeat previous calls. ═══")
         return "\n".join(lines)
