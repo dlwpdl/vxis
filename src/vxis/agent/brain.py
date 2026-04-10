@@ -1037,7 +1037,7 @@ class AgentBrain:
         # (up to 500 entries) instead of the last 20. For 1M context models
         # this is the point — no information loss across long scans.
         import os as _os
-        _history_window = 500 if _os.environ.get("VXIS_LONG_CONTEXT") == "1" else 20
+        _history_window = 500 if _os.environ.get("VXIS_LONG_CONTEXT") == "1" else 50
         history_lines: list[str] = []
         for m in messages[-_history_window:]:
             role = m.get("role", "?")
