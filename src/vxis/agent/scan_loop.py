@@ -316,7 +316,7 @@ class ScanAgentLoop:
             actions = await self._decide(self.state)
             if not actions:
                 _consecutive_empty += 1
-                _min_iters = min(30, self.state.max_iters // 2)
+                _min_iters = min(50, self.state.max_iters // 2)
                 if self.state.iteration < _min_iters and _consecutive_empty <= 2:
                     self.state.add_message("user", (
                         f"SYSTEM: You returned no actions at iteration "
@@ -351,16 +351,20 @@ class ScanAgentLoop:
                 count = _call_counts.get(key, 0) + 1
                 _call_counts[key] = count
 
-                if count >= 3 and name != "finish_scan":
+                if count >= 5 and name != "finish_scan":
                     # Third or later time we're seeing this exact call. Skip the
                     # real dispatch and inject a nudge message so Brain sees
                     # different context on the next iteration.
                     nudge = (
-                        f"DEDUP: You already ran {name} with these exact args "
-                        f"{count - 1} times in this scan. The result did not "
-                        f"change. STOP repeating this call and try something "
-                        f"different: pick a NEW endpoint, a DIFFERENT tool, or "
-                        f"call finish_scan if you truly have nothing new to try."
+                        f"BLOCKED: {name} with same args was already called "
+                        f"{count - 1} times. You MUST use a DIFFERENT tool now. "
+                        f"Look at the dashboard — find a 'NOT TESTED' attack "
+                        f"vector and test it. Options:\n"
+                        f"  shell_exec: sqlmap, nuclei, ffuf, nmap\n"
+                        f"  browser_fill_form: try login with payloads\n"
+                        f"  browser_eval_js: check tokens, test XSS\n"
+                        f"  python_exec: custom HTTP fuzzing script\n"
+                        f"  think: reason about what you've learned so far"
                     )
                     self.state.add_message("tool", {"name": name, "args": args, "result": {
                         "ok": False,
@@ -695,7 +699,7 @@ class ScanAgentLoop:
 
                 if name == "finish_scan":
                     # Reject premature finish: enforce minimum exploration
-                    _min_iters = min(30, self.state.max_iters // 2)
+                    _min_iters = min(50, self.state.max_iters // 2)
                     if self.state.iteration < _min_iters:
                         self.state.add_message("tool", {
                             "name": "finish_scan", "args": {},

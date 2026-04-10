@@ -669,7 +669,7 @@ class AgentBrain:
 
     def __init__(
         self,
-        max_steps: int = 100,
+        max_steps: int = 300,
         provider: str | None = None,
         model: str | None = None,
         memory: "AgentMemory | None" = None,
