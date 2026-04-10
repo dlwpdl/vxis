@@ -52,6 +52,14 @@ the EXACT next tool call the executor should make.
 Output ONLY a JSON object — no prose, no explanation:
 {{"tool": "<tool_name>", "args": {{...}}}}
 
+MANDATORY PRIORITY ORDER — pick the FIRST that applies:
+1. If "SQLi" is NOT TESTED → shell_exec sqlmap on the target
+2. If "CVE scan" is NOT TESTED → shell_exec nuclei
+3. If "XSS" is NOT TESTED → browser_eval_js with XSS payload
+4. If "IDOR" is NOT TESTED → http_request to /api/Users/2
+5. If "Auth bypass" is NOT TESTED → browser_fill_form with SQLi creds
+6. Otherwise → shell_exec with a custom recon command
+
 Available tools: fingerprint_target, browser_navigate, browser_analyze_dom,
 browser_fill_form, browser_click, browser_eval_js, browser_get_cookies,
 browser_screenshot, shell_exec, python_exec, http_request, load_playbook,
@@ -74,12 +82,25 @@ RECENT ACTIONS (last 10):
 CURRENT FINDINGS:
 {findings_list}
 
-Pick the MOST VALUABLE untested action. Prefer:
-1. shell_exec with sqlmap/nuclei on known endpoints
-2. browser_fill_form with SQLi/XSS payloads on forms
-3. browser_eval_js to check tokens/storage
-4. python_exec for custom fuzzing scripts
-Do NOT pick browser_get_cookies or browser_navigate to the same URL again."""
+EXACT ARG FORMATS (copy these):
+
+shell_exec:
+  {{"tool":"shell_exec","args":{{"command":"sqlmap -u 'http://TARGET/endpoint?q=1' --batch --level=2 --risk=2","timeout":120}}}}
+  {{"tool":"shell_exec","args":{{"command":"nuclei -u http://TARGET -t /root/nuclei-templates/http/cves/ -silent -nc","timeout":60}}}}
+
+browser_fill_form (login with SQLi):
+  {{"tool":"browser_fill_form","args":{{"form_selector":"form","fields":{{"email":"' OR 1=1--","password":"x"}},"submit_selector":"#loginButton"}}}}
+
+browser_eval_js:
+  {{"tool":"browser_eval_js","args":{{"expression":"JSON.stringify({{localStorage: Object.keys(localStorage), cookies: document.cookie}})"}}}}
+
+http_request (IDOR test):
+  {{"tool":"http_request","args":{{"url":"http://TARGET/api/Users/2","method":"GET"}}}}
+
+python_exec (custom fuzzer):
+  {{"tool":"python_exec","args":{{"code":"import httpx\\nwith httpx.Client(verify=False) as c:\\n    for i in range(1,10):\\n        r=c.get('http://TARGET/api/Users/'+str(i))\\n        print(r.status_code, len(r.content), '/api/Users/'+str(i))"}}}}
+
+Replace TARGET with the actual target URL. Pick ONE action."""
 
 
 class ScanAgentLoop:
@@ -89,7 +110,7 @@ class ScanAgentLoop:
         registry: ToolRegistry,
         max_iters: int = 300,
         brain: Any | None = None,
-        critic_interval: int = 8,
+        critic_interval: int = 6,
     ) -> None:
         self.state = ScanLoopState(target=target, max_iters=max_iters)
         self.registry = registry
@@ -1131,25 +1152,52 @@ class ScanAgentLoop:
                     director_action = None
                 if director_action:
                     d_name, d_args = director_action
-                    # Execute the director's decision directly
+                    # Dedup: don't let director repeat the same call
                     try:
-                        d_result = await self.registry.dispatch(d_name, d_args)
-                        self.state.add_message("tool", {
-                            "name": d_name,
-                            "args": d_args,
-                            "result": {
-                                "ok": d_result.ok,
-                                "summary": f"[DIRECTOR] {d_result.summary}",
-                                "data": d_result.data,
-                            },
-                        })
-                        logger.info(
-                            "iter %d: director executed %s → %s",
-                            self.state.iteration, d_name,
-                            "ok" if d_result.ok else "fail",
-                        )
+                        d_key = f"{d_name}::{_json.dumps(d_args, sort_keys=True, default=str)}"
                     except Exception:
-                        logger.exception("director action dispatch failed")
+                        d_key = f"{d_name}::{d_args!r}"
+                    d_count = _call_counts.get(d_key, 0)
+                    if d_count >= 3:
+                        logger.warning("iter %d: director dedup-blocked %s", self.state.iteration, d_name)
+                    else:
+                        _call_counts[d_key] = d_count + 1
+                        try:
+                            d_result = await self.registry.dispatch(d_name, d_args)
+                            self.state.add_message("tool", {
+                                "name": d_name,
+                                "args": d_args,
+                                "result": {
+                                    "ok": d_result.ok,
+                                    "summary": f"[DIRECTOR] {d_result.summary}",
+                                    "data": d_result.data,
+                                },
+                            })
+                            logger.info(
+                                "iter %d: director executed %s → %s",
+                                self.state.iteration, d_name,
+                                "ok" if d_result.ok else "fail",
+                            )
+                            # Auto-analyze director results for findings
+                            if d_result.ok and d_name in ("http_request", "shell_exec", "python_exec"):
+                                data = d_result.data or {}
+                                stdout = str(data.get("stdout", data.get("body", "")))[:2000]
+                                status = data.get("status_code", data.get("exit_code", 0))
+                                if stdout and (
+                                    "vulnerable" in stdout.lower()
+                                    or "injectable" in stdout.lower()
+                                    or "payload:" in stdout.lower()
+                                    or (isinstance(status, int) and status == 500)
+                                ):
+                                    self.state.add_message("user", (
+                                        f"DIRECTOR RESULT ANALYSIS: {d_name} on "
+                                        f"{d_args.get('url', d_args.get('command',''))[:80]} "
+                                        f"returned interesting data (status={status}). "
+                                        f"Output: {stdout[:500]}\n"
+                                        "If this is a real vulnerability, call report_finding."
+                                    ))
+                        except Exception:
+                            logger.exception("director action dispatch failed")
         return {
             "target": self.state.target,
             "completed": self.state.completed,
