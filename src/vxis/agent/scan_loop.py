@@ -236,6 +236,22 @@ class ScanAgentLoop:
             self.state.iteration += 1
             actions = await self._decide(self.state)
             if not actions:
+                _min_iters = min(30, self.state.max_iters // 2)
+                if self.state.iteration < _min_iters:
+                    self.state.add_message("user", (
+                        f"SYSTEM: You returned no actions at iteration "
+                        f"{self.state.iteration}. Minimum {_min_iters} required. "
+                        "You MUST keep scanning. Try: browser_navigate to the "
+                        "login page and browser_fill_form with default creds "
+                        "(admin/admin, admin@juice-sh.op/admin123), run "
+                        "shell_exec with nuclei or sqlmap on discovered endpoints, "
+                        "or load a playbook you haven't tried yet."
+                    ))
+                    logger.warning(
+                        "iter %d: no actions but below min=%d — injecting nudge",
+                        self.state.iteration, _min_iters,
+                    )
+                    continue
                 logger.warning("iter %d: no actions returned, stopping", self.state.iteration)
                 break
             for name, args in actions:
