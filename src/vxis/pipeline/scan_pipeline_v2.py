@@ -316,6 +316,13 @@ class ScanPipeline:
         except Exception:
             ctx.attack_chains = []
 
+        # 7.5 Shutdown browser if Eyes was used during the scan
+        try:
+            from vxis.agent.tools.browser_tools import shutdown_browser
+            await shutdown_browser()
+        except Exception:
+            pass
+
         # 8. Deferred actions gate (Phase A: usually empty, but plumbing preserved)
         if self.enable_deferred_approval and getattr(ctx, "deferred_actions", None):
             await self._run_deferred_gate(ctx)

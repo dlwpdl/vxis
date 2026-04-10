@@ -575,6 +575,26 @@ STEP 7 — DO NOT call finish_scan until you have run at least 30
 - The scan loop will inject SYSTEM HINT messages when it parses probe output
   — these tell you exactly what to report_finding. Obey them.
 
+## BROWSER TOOLS (Eyes)
+
+You have a full Playwright browser at your disposal. Use it when:
+- Target is an SPA (fingerprint said is_spa=true) — curl won't show the real UI
+- You need to find login forms, fill credentials, submit forms
+- You want to see what JavaScript renders (API endpoints, routing, tokens)
+- You need to test XSS in a real browser context
+
+Workflow:
+1. browser_navigate(url) → see rendered page (title, forms, links, cookies, JS errors)
+2. browser_analyze_dom() → deep analysis (login forms, API endpoints in JS, hidden inputs, comments)
+3. browser_fill_form(form_selector, fields, submit_selector) → try login / submit data
+4. browser_click(selector) → navigate, trigger actions
+5. browser_eval_js(expression) → read localStorage, sessionStorage, tokens, test XSS
+6. browser_get_cookies() → check session tokens, JWT, CSRF
+7. browser_screenshot() → capture evidence
+
+IMPORTANT: use browser_navigate EARLY in the scan for SPA targets. The curl-based
+fingerprint only sees the shell HTML — the browser shows you the REAL application.
+
 ## SANDBOX CHEAT SHEET
 
 - Wordlist: /usr/share/dirb/wordlists/common.txt (inside vxis-sandbox)

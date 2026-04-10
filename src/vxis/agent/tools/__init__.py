@@ -26,6 +26,15 @@ from vxis.agent.tools.playbook_tools import (
 from vxis.agent.tools.fingerprint_tools import FingerprintTargetTool
 from vxis.agent.tools.memory_tools import QueryScanMemoryTool
 from vxis.agent.tools.verifier_tools import VerifyFindingTool
+from vxis.agent.tools.browser_tools import (
+    BrowserNavigateTool,
+    BrowserAnalyzeDomTool,
+    BrowserClickTool,
+    BrowserFillFormTool,
+    BrowserScreenshotTool,
+    BrowserEvalJsTool,
+    BrowserGetCookiesTool,
+)
 
 __all__ = [
     "FinishScanTool",
@@ -77,4 +86,13 @@ def build_default_registry(brain: object | None = None) -> ToolRegistry:
     reg.register(QueryScanMemoryTool())
     verifier = VerifyFindingTool(brain=brain)
     reg.register(verifier)
+    # Phase C Eyes integration: browser tools for rendered-page visibility.
+    # Graceful: if Playwright not installed, tools will return error on use.
+    reg.register(BrowserNavigateTool())
+    reg.register(BrowserAnalyzeDomTool())
+    reg.register(BrowserClickTool())
+    reg.register(BrowserFillFormTool())
+    reg.register(BrowserScreenshotTool())
+    reg.register(BrowserEvalJsTool())
+    reg.register(BrowserGetCookiesTool())
     return reg
