@@ -232,28 +232,33 @@ class ScanAgentLoop:
         if _egress_strict:
             logger.info("egress filter ENABLED — allowlist=%s", sorted(_egress_allowlist))
 
+        _consecutive_empty = 0  # Track consecutive empty-action iterations
+
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
             actions = await self._decide(self.state)
             if not actions:
+                _consecutive_empty += 1
                 _min_iters = min(30, self.state.max_iters // 2)
-                if self.state.iteration < _min_iters:
+                if self.state.iteration < _min_iters and _consecutive_empty <= 2:
                     self.state.add_message("user", (
                         f"SYSTEM: You returned no actions at iteration "
                         f"{self.state.iteration}. Minimum {_min_iters} required. "
-                        "You MUST keep scanning. Try: browser_navigate to the "
-                        "login page and browser_fill_form with default creds "
-                        "(admin/admin, admin@juice-sh.op/admin123), run "
-                        "shell_exec with nuclei or sqlmap on discovered endpoints, "
-                        "or load a playbook you haven't tried yet."
+                        "You MUST keep scanning. Here are concrete next actions:\n"
+                        f"1. browser_navigate(url=\"{self.state.target}/#/login\") "
+                        "then browser_fill_form with default creds\n"
+                        f"2. shell_exec(command=\"curl -s {self.state.target}/rest/products/search?q=test\")\n"
+                        "3. load_playbook(name=\"injection_vectors\") if not loaded\n"
+                        f"4. python_exec with httpx to test /api/Users, /api/Challenges, /api/SecurityQuestions"
                     ))
                     logger.warning(
-                        "iter %d: no actions but below min=%d — injecting nudge",
-                        self.state.iteration, _min_iters,
+                        "iter %d: no actions but below min=%d (empty=%d) — nudge",
+                        self.state.iteration, _min_iters, _consecutive_empty,
                     )
                     continue
                 logger.warning("iter %d: no actions returned, stopping", self.state.iteration)
                 break
+            _consecutive_empty = 0  # Reset on successful action batch
             for name, args in actions:
                 # Compute a stable hash key for the (tool, args) pair
                 try:
