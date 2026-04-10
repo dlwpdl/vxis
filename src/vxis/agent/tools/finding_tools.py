@@ -88,33 +88,71 @@ class ReportFindingTool:
         def _normalize(s: str) -> str:
             """Normalize finding_type and affected_component for dedup matching."""
             s = str(s).lower().strip()
-            # Strip trailing slashes so "/api" and "/api/" dedupe together
             s = s.rstrip("/")
-            # Collapse whitespace
             s = " ".join(s.split())
             return s
 
+        def _base_path(component: str) -> str:
+            """Extract base API path, stripping numeric IDs and query params.
+
+            /api/Orders/1      → /api/orders
+            /api/Orders/2      → /api/orders
+            /api/Baskets/1/items → /api/baskets
+            http://x:3000/api/Orders/1 → /api/orders
+            /rest/products/search?q=test' → /rest/products/search
+            """
+            import re
+            from urllib.parse import urlparse
+            try:
+                parsed = urlparse(component)
+                path = parsed.path or component
+            except Exception:
+                path = component
+            path = path.lower().strip().rstrip("/")
+            # Remove query string
+            path = path.split("?")[0]
+            # Strip trailing numeric segments (/1, /2, /123)
+            path = re.sub(r"/\d+(/|$)", "/", path).rstrip("/")
+            return path
+
         new_type = _normalize(kwargs["finding_type"])
         new_component = _normalize(kwargs["affected_component"])
+        new_base = _base_path(kwargs["affected_component"])
+
         for existing in _findings:
-            if (
-                _normalize(existing["finding_type"]) == new_type
-                and _normalize(existing["affected_component"]) == new_component
-            ):
-                logger.info(
-                    "[Finding] duplicate skipped: %s %s (already %s)",
-                    new_type, new_component, existing["id"],
-                )
+            ex_type = _normalize(existing["finding_type"])
+            ex_component = _normalize(existing["affected_component"])
+            ex_base = _base_path(existing["affected_component"])
+
+            # Exact match OR same base path + same finding type
+            if ex_type == new_type and (ex_component == new_component or ex_base == new_base):
+                # If base-path match, append this variant to affected_endpoints
+                if ex_component != new_component:
+                    endpoints = existing.get("affected_endpoints", [existing["affected_component"]])
+                    if kwargs["affected_component"] not in endpoints:
+                        endpoints.append(kwargs["affected_component"])
+                    existing["affected_endpoints"] = endpoints
+                    logger.info(
+                        "[Finding] base-path dedup: %s grouped into %s (%d endpoints)",
+                        new_component, existing["id"], len(endpoints),
+                    )
+                else:
+                    logger.info(
+                        "[Finding] exact dedup: %s %s (already %s)",
+                        new_type, new_component, existing["id"],
+                    )
                 return ToolResult(
                     ok=True,
                     data={
                         "id": existing["id"],
                         "total_findings": len(_findings),
                         "deduped": True,
+                        "affected_endpoints": existing.get("affected_endpoints", []),
                     },
                     summary=(
-                        f"finding already recorded as {existing['id']} "
-                        f"(skipped duplicate). Do not report this again."
+                        f"finding grouped into {existing['id']} "
+                        f"(same base path {ex_base}). "
+                        f"Try a DIFFERENT endpoint or attack type instead."
                     ),
                 )
 

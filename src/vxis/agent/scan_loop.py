@@ -167,19 +167,59 @@ class ScanAgentLoop:
                     break
             lines.append(f"Recent calls: {' → '.join(reversed(seen))}")
 
-        # 6. Concrete next-action suggestions based on gaps
+        # 6. Concrete next-action suggestions based on gaps + exploit depth
         suggestions: list[str] = []
+
+        # Phase 1: tool usage gaps
         if "browser_fill_form" not in tools_used:
             suggestions.append("browser_fill_form on login page with default creds")
         if "shell_exec" not in tools_used:
-            suggestions.append("shell_exec: sqlmap or nuclei on discovered endpoints")
+            suggestions.append("shell_exec: run sqlmap or nuclei on discovered endpoints")
         if "browser_eval_js" not in tools_used:
             suggestions.append("browser_eval_js: check localStorage/sessionStorage for tokens")
-        if len(reported) == 0 and s.iteration > 10:
-            suggestions.append("You have 0 findings — be more aggressive, try injection payloads")
+
+        # Phase 2: exploit depth — if we have surface findings, push deeper
+        if reported:
+            finding_types = {f.get("finding_type", "") for f in reported}
+            components = [f.get("affected_component", "") for f in reported]
+            # If only error-oracle findings, push for actual exploitation
+            has_only_errors = all(
+                "500" in f.get("title", "") or "error" in f.get("finding_type", "")
+                for f in reported
+            )
+            if has_only_errors and "shell_exec" in all_tools:
+                # Pick a component to exploit
+                target_ep = components[0] if components else self.state.target
+                suggestions.insert(0, (
+                    f"STOP reporting more 500 errors — you've found the pattern. "
+                    f"Now EXPLOIT: shell_exec(command=\"sqlmap -u '{target_ep}' "
+                    f"--batch --level=2 --risk=2 -t /root/nuclei-templates/\")"
+                ))
+            if "sql_injection" in finding_types or "error" in str(finding_types):
+                suggestions.append(
+                    "Run sqlmap --dump on SQL-error endpoints to extract actual data"
+                )
+            if "information_disclosure" in finding_types:
+                suggestions.append(
+                    "Use the disclosed info (creds, tokens, config) to escalate access"
+                )
+        elif s.iteration > 10:
+            suggestions.append("0 findings after 10 iters — try injection payloads, brute creds")
+
+        # Phase 3: diversification — if many findings of same type, switch attack class
+        if len(reported) >= 3:
+            from collections import Counter
+            type_counts = Counter(f.get("finding_type", "") for f in reported)
+            dominant = type_counts.most_common(1)[0] if type_counts else ("", 0)
+            if dominant[1] >= 3:
+                suggestions.insert(0, (
+                    f"You have {dominant[1]}x '{dominant[0]}' findings — ENOUGH. "
+                    f"Switch attack class: try XSS, SQLi, auth bypass, IDOR, SSRF."
+                ))
+
         if suggestions:
             lines.append("SUGGESTED NEXT:")
-            for i, sug in enumerate(suggestions[:4], 1):
+            for i, sug in enumerate(suggestions[:5], 1):
                 lines.append(f"  {i}. {sug}")
 
         lines.append("═══ Pick a NEW action you haven't tried. Do NOT repeat previous calls. ═══")

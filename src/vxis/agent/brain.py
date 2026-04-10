@@ -764,7 +764,7 @@ class AgentBrain:
     """AI decision engine for autonomous pentesting.
 
     Usage:
-        brain = AgentBrain(max_steps=20)
+        brain = AgentBrain(max_steps=100)
         while not brain.is_done:
             observation = collect_observations()
             actions = brain.think(observation)
@@ -802,7 +802,7 @@ class AgentBrain:
 
     def __init__(
         self,
-        max_steps: int = 20,
+        max_steps: int = 100,
         provider: str | None = None,
         model: str | None = None,
         memory: "AgentMemory | None" = None,
