@@ -1010,6 +1010,135 @@ class AgentBrain:
 
         return actions
 
+    @staticmethod
+    def _build_smart_history(
+        messages: list[dict[str, Any]],
+        long_context: bool = False,
+    ) -> list[str]:
+        """Build a 3-tier compacted history for think_in_loop.
+
+        Tier 1 (FULL):    last 3 iterations — full detail for current reasoning
+        Tier 2 (COMPACT): older iterations — tool:name + summary only
+        Tier 3 (PINNED):  high-value messages regardless of age — dashboard,
+                          critic, system hints, finding reports, verify results
+
+        Returns a list of formatted history lines.
+        """
+        if long_context:
+            # Long-context mode: full history, light compaction
+            lines: list[str] = []
+            for m in messages[-500:]:
+                role = m.get("role", "?")
+                content = m.get("content", "")
+                if isinstance(content, dict):
+                    name = content.get("name", "?")
+                    result = content.get("result", {})
+                    summary = result.get("summary", "") if isinstance(result, dict) else str(result)
+                    lines.append(f"[tool:{name}] {summary}")
+                else:
+                    lines.append(f"[{role}] {str(content)[:800]}")
+            return lines
+
+        # Determine iteration boundaries
+        current_iter = 0
+        for m in reversed(messages):
+            if m.get("iter"):
+                current_iter = int(m["iter"])
+                break
+        recent_cutoff = max(0, current_iter - 3)  # last 3 iterations = full
+
+        # Classify messages into tiers
+        pinned_keywords = {
+            "SCAN DASHBOARD", "CRITIC REVIEW", "SYSTEM HINT",
+            "AUTO-RECON", "BELIEF STATE", "STICKY HINT",
+        }
+        pinned_tools = {"report_finding", "verify_finding", "fingerprint_target"}
+
+        lines: list[str] = []
+        for m in messages:
+            role = m.get("role", "?")
+            content = m.get("content", "")
+            msg_iter = int(m.get("iter", 0) or 0)
+            is_recent = msg_iter >= recent_cutoff and msg_iter > 0
+
+            if isinstance(content, dict):
+                # Tool message
+                name = str(content.get("name", "?"))
+                result = content.get("result", {})
+                summary = result.get("summary", "") if isinstance(result, dict) else str(result)[:200]
+                args = content.get("args", {})
+                ok = result.get("ok", True) if isinstance(result, dict) else True
+
+                if is_recent:
+                    # Tier 1: full detail — include args summary + result
+                    args_str = ""
+                    if isinstance(args, dict):
+                        # Compact args: show key=value for important fields only
+                        key_fields = ["url", "command", "code", "name",
+                                      "title", "severity", "finding_type",
+                                      "affected_component", "selector",
+                                      "form_selector", "expression"]
+                        parts = []
+                        for k in key_fields:
+                            if k in args and args[k]:
+                                v = str(args[k])[:80]
+                                parts.append(f"{k}={v}")
+                        if parts:
+                            args_str = f"({', '.join(parts)})"
+
+                    # Include data preview for important tools
+                    data_preview = ""
+                    if isinstance(result, dict) and name in ("browser_navigate", "browser_analyze_dom",
+                                                              "fingerprint_target", "shell_exec", "python_exec"):
+                        data = result.get("data", {})
+                        if isinstance(data, dict):
+                            # Pick key fields based on tool
+                            if name == "browser_navigate":
+                                preview_fields = ["title", "form_count", "link_count", "inputs"]
+                            elif name == "browser_analyze_dom":
+                                preview_fields = ["login_forms", "api_endpoints", "hidden_inputs"]
+                            elif name == "fingerprint_target":
+                                preview_fields = ["is_spa", "recommended_playbooks"]
+                            elif name in ("shell_exec", "python_exec"):
+                                preview_fields = ["stdout"]
+                            else:
+                                preview_fields = []
+                            parts = []
+                            for pf in preview_fields:
+                                if pf in data:
+                                    v = str(data[pf])[:200]
+                                    parts.append(f"{pf}={v}")
+                            if parts:
+                                data_preview = f" | {'; '.join(parts)}"
+
+                    status = "✓" if ok else "✗"
+                    lines.append(f"[iter{msg_iter} tool:{name}{args_str}] {status} {summary[:200]}{data_preview}")
+
+                elif name in pinned_tools:
+                    # Tier 3: pinned tool — always show regardless of age
+                    lines.append(f"[iter{msg_iter} PINNED:{name}] {'✓' if ok else '✗'} {summary[:150]}")
+
+                else:
+                    # Tier 2: compact — tool name + 1-line summary
+                    lines.append(f"[iter{msg_iter} {name}] {'✓' if ok else '✗'} {summary[:100]}")
+
+            else:
+                # User/system message
+                text = str(content)
+                is_pinned = any(kw in text[:100] for kw in pinned_keywords)
+
+                if is_recent or is_pinned:
+                    # Full for recent or pinned
+                    lines.append(f"[iter{msg_iter} {role}] {text[:600]}")
+                elif role == "system":
+                    # System messages always kept (compact)
+                    lines.append(f"[iter{msg_iter} {role}] {text[:200]}")
+                else:
+                    # Old user messages: ultra-compact
+                    lines.append(f"[iter{msg_iter} {role}] {text[:100]}")
+
+        return lines
+
     async def think_in_loop(
         self,
         messages: list[dict[str, Any]],
@@ -1033,22 +1162,23 @@ class AgentBrain:
         body_prompt = AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)
         system_prompt = LOOP_PROMPT_ADAPTER + "\n" + body_prompt
 
-        # Phase C: in long-context mode, Brain sees the FULL message history
-        # (up to 500 entries) instead of the last 20. For 1M context models
-        # this is the point — no information loss across long scans.
+        # Phase D: smart history compaction.
+        # Instead of a flat window of the last N messages, build a 3-tier
+        # history that maximizes signal per token:
+        #
+        # Tier 1 (ALWAYS FULL): last 3 iterations — full detail so Brain
+        #   can reason about its current chain of thought.
+        # Tier 2 (COMPACT): older iterations — tool name + 1-line summary
+        #   only. No raw output, no evidence blobs. Just enough to know
+        #   "I already tried X and got Y".
+        # Tier 3 (PINNED): high-value messages regardless of age —
+        #   dashboard, critic reviews, system hints, finding reports.
+        #
+        # This gives Brain the equivalent of 200+ messages of context
+        # within a 50-message token budget.
         import os as _os
-        _history_window = 500 if _os.environ.get("VXIS_LONG_CONTEXT") == "1" else 50
-        history_lines: list[str] = []
-        for m in messages[-_history_window:]:
-            role = m.get("role", "?")
-            content = m.get("content", "")
-            if isinstance(content, dict):
-                name = content.get("name", "?")
-                result = content.get("result", {})
-                summary = result.get("summary", "") if isinstance(result, dict) else str(result)
-                history_lines.append(f"[tool:{name}] {summary}")
-            else:
-                history_lines.append(f"[{role}] {str(content)[:500]}")
+        _long_ctx = _os.environ.get("VXIS_LONG_CONTEXT") == "1"
+        history_lines: list[str] = self._build_smart_history(messages, long_context=_long_ctx)
 
         user_prompt = (
             "## Conversation history (most recent last)\n"
