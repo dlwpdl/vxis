@@ -840,26 +840,85 @@ class ScanAgentLoop:
                 except Exception:
                     logger.exception("auto-browser-recon failed")
 
+            # Auto-ffuf: directory bruteforce at iter 10
+            if (
+                not getattr(self, '_auto_ffuf_done', False)
+                and self.state.iteration >= 10
+                and "shell_exec" in self.registry.list_tools()
+            ):
+                ffuf_ran = any(
+                    m.get("role") == "tool"
+                    and isinstance(m.get("content"), dict)
+                    and m["content"].get("name") == "shell_exec"
+                    and "ffuf" in str(m["content"].get("args", ""))
+                    for m in self.state.messages
+                )
+                if not ffuf_ran:
+                    self._auto_ffuf_done = True
+                    try:
+                        # Get baseline size for SPA filtering
+                        bs_filter = ""
+                        if _baseline_size is not None:
+                            bs_filter = f"-fs {_baseline_size} "
+                        ffuf_cmd = (
+                            f"ffuf -u {self.state.target}/FUZZ "
+                            f"-w /usr/share/dirb/wordlists/common.txt "
+                            f"{bs_filter}"
+                            f"-mc 200,301,302,403 "
+                            f"-t 20 -timeout 5 -s 2>&1 | head -30"
+                        )
+                        logger.info("auto-ffuf starting at iter %d", self.state.iteration)
+                        fr = await self.registry.dispatch("shell_exec", {
+                            "command": ffuf_cmd, "timeout": 60,
+                        })
+                        if fr.ok:
+                            stdout = str(fr.data.get("stdout", "")) if fr.data else ""
+                            if stdout.strip():
+                                self.state.add_message("tool", {
+                                    "name": "shell_exec",
+                                    "args": {"command": "ffuf directory scan"},
+                                    "result": {"ok": True, "summary": fr.summary, "data": fr.data},
+                                })
+                                self.state.add_message("user", (
+                                    "AUTO-RECON: ffuf found these paths:\n"
+                                    + stdout[:1500] + "\n\n"
+                                    "Navigate to each path with browser_navigate or "
+                                    "http_request and assess for vulnerabilities."
+                                ))
+                            logger.info("auto-ffuf completed at iter %d (%d bytes)",
+                                       self.state.iteration, len(stdout))
+                    except Exception:
+                        logger.exception("auto-ffuf failed")
+
             # Auto-nuclei: if Brain hasn't run nuclei by iter 12, fire it
             if (
                 not _auto_nuclei_done
                 and self.state.iteration >= 12
                 and "shell_exec" in self.registry.list_tools()
             ):
-                # Check if Brain already ran nuclei by scanning messages
+                # Check if Brain or auto already ran nuclei — look for
+                # actual shell_exec tool calls with "nuclei" in args only
                 nuclei_ran = any(
-                    "nuclei" in str(m.get("content", ""))
+                    m.get("role") == "tool"
+                    and isinstance(m.get("content"), dict)
+                    and m["content"].get("name") == "shell_exec"
+                    and "nuclei" in str(m["content"].get("args", ""))
                     for m in self.state.messages
                 )
                 if not nuclei_ran:
                     _auto_nuclei_done = True
+                    logger.info("auto-nuclei: firing at iter %d", self.state.iteration)
                     try:
                         nuclei_cmd = (
                             f"nuclei -u {self.state.target} "
-                            "-t /root/nuclei-templates/ "
+                            "-t /root/nuclei-templates/http/exposures/ "
+                            "-t /root/nuclei-templates/http/default-logins/ "
+                            "-t /root/nuclei-templates/http/exposed-panels/ "
+                            "-t /root/nuclei-templates/http/cves/ "
+                            "-t /root/nuclei-templates/http/misconfiguration/ "
                             "-severity critical,high,medium "
                             "-silent -nc -timeout 5 -retries 1 "
-                            "-rate-limit 50"
+                            "-rate-limit 100"
                         )
                         nr = await self.registry.dispatch("shell_exec", {
                             "command": nuclei_cmd, "timeout": 120,
@@ -883,6 +942,83 @@ class ScanAgentLoop:
                                        self.state.iteration, len(stdout))
                     except Exception:
                         logger.exception("auto-nuclei failed")
+
+            # Auto-sqlmap: at iter 18+, if findings exist with 500 errors
+            # and Brain hasn't run sqlmap, auto-fire on the best target
+            if (
+                not getattr(self, '_auto_sqlmap_done', False)
+                and self.state.iteration >= 18
+                and "shell_exec" in self.registry.list_tools()
+            ):
+                try:
+                    from vxis.agent.tools.finding_tools import _get_findings
+                    current_findings = _get_findings()
+                except Exception:
+                    current_findings = []
+
+                # Find endpoints with error responses (500s = likely injectable)
+                sqlmap_targets = []
+                for f in current_findings:
+                    comp = f.get("affected_component", "")
+                    title = f.get("title", "")
+                    if ("500" in title or "error" in f.get("finding_type", "")) and comp.startswith("http"):
+                        sqlmap_targets.append(comp)
+
+                sqlmap_ran = any(
+                    m.get("role") == "tool"
+                    and isinstance(m.get("content"), dict)
+                    and m["content"].get("name") == "shell_exec"
+                    and "sqlmap" in str(m["content"].get("args", ""))
+                    for m in self.state.messages
+                )
+
+                if sqlmap_targets and not sqlmap_ran:
+                    self._auto_sqlmap_done = True
+                    target_url = sqlmap_targets[0]
+                    # Add query param if none exists (sqlmap needs injectable param)
+                    if "?" not in target_url:
+                        target_url += "?q=test"
+                    try:
+                        sqlmap_cmd = (
+                            f"sqlmap -u '{target_url}' "
+                            "--batch --level=2 --risk=2 "
+                            "--threads=4 --timeout=10 "
+                            "--output-dir=/tmp/sqlmap_auto "
+                            "2>&1 | tail -50"
+                        )
+                        logger.info("auto-sqlmap firing on %s", target_url)
+                        sr = await self.registry.dispatch("shell_exec", {
+                            "command": sqlmap_cmd, "timeout": 180,
+                        })
+                        if sr.ok:
+                            stdout = str(sr.data.get("stdout", "")) if sr.data else ""
+                            self.state.add_message("tool", {
+                                "name": "shell_exec",
+                                "args": {"command": f"sqlmap -u '{target_url}' --batch"},
+                                "result": {"ok": True, "summary": sr.summary, "data": sr.data},
+                            })
+                            # Parse sqlmap output for injectable params
+                            is_injectable = any(
+                                kw in stdout.lower()
+                                for kw in ["is vulnerable", "injectable", "payload:", "type:"]
+                            )
+                            if is_injectable:
+                                self.state.add_message("user", (
+                                    f"AUTO-EXPLOIT: sqlmap confirmed SQL injection on {target_url}!\n"
+                                    f"Output:\n{stdout[:2000]}\n\n"
+                                    "Report this as a CRITICAL sql_injection finding with the "
+                                    "sqlmap output as evidence."
+                                ))
+                                logger.info("auto-sqlmap FOUND injection on %s", target_url)
+                            else:
+                                self.state.add_message("user", (
+                                    f"AUTO-EXPLOIT: sqlmap ran on {target_url} but did not "
+                                    f"confirm injection. Output:\n{stdout[:1000]}\n\n"
+                                    "Try different endpoints or parameters."
+                                ))
+                            logger.info("auto-sqlmap completed at iter %d", self.state.iteration)
+                    except Exception:
+                        logger.exception("auto-sqlmap failed")
 
             # Dual Brain critic check: every N iterations, ask a stronger
             # model to review progress and inject strategic guidance.

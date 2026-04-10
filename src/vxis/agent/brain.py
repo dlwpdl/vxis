@@ -623,7 +623,7 @@ fingerprint only sees the shell HTML — the browser shows you the REAL applicat
 ## SANDBOX CHEAT SHEET
 
 - Wordlist: /usr/share/dirb/wordlists/common.txt (inside vxis-sandbox)
-- Nuclei templates pre-installed at /root/nuclei-templates/
+- Nuclei templates at /root/nuclei-templates/http/{exposures,cves,default-logins,exposed-panels,misconfiguration}/
 - shell_exec default timeout 300s, max 600s
 - vxis-sandbox runs --network host, so localhost ports reachable
 
