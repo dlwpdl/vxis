@@ -303,6 +303,16 @@ class ScanAgentLoop:
 
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
+            # LLM memory compression: when history grows beyond token
+            # threshold, older messages are summarized by the LLM. Recent
+            # messages preserved verbatim. Strix pattern.
+            try:
+                from vxis.agent.memory_compressor import compress_history
+                self.state.messages = await compress_history(
+                    self.state.messages, self.brain
+                )
+            except Exception:
+                pass  # compression is best-effort
             actions = await self._decide(self.state)
             if not actions:
                 _consecutive_empty += 1
@@ -326,6 +336,11 @@ class ScanAgentLoop:
                 logger.warning("iter %d: no actions returned, stopping", self.state.iteration)
                 break
             _consecutive_empty = 0  # Reset on successful action batch
+            # Strix pattern: 1 tool call per message. Only execute the FIRST
+            # action. Brain must see the result before deciding the next step.
+            # This prevents "spray and pray" multi-action batches where Brain
+            # fires 5 tools without reading any results.
+            actions = actions[:1]
             for name, args in actions:
                 # Compute a stable hash key for the (tool, args) pair
                 try:
