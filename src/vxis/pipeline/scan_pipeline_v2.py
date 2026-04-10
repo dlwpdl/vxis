@@ -128,12 +128,221 @@ def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str
     )
 
 
-def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
-    """Compute a simple VXIS score from finding counts. Returns (score, grade).
+# ── finding_type → VXIS vector ID auto-mapping ────────────────────────────
+# Maps Brain-reported finding_type strings to canonical VXIS vector IDs.
+# When a finding has no explicit vector_id the scoring engine would see 0%
+# vector coverage. This mapping infers the vector from the finding_type so
+# every Brain finding contributes to the 5-dimension score automatically.
+_FINDING_TYPE_TO_VECTOR_ID: dict[str, str] = {
+    # SQL Injection
+    "sql_injection": "WEB-SQLI-001",
+    "sqli": "WEB-SQLI-001",
+    "sql_injection_union": "WEB-SQLI-001",
+    "sql_injection_blind": "WEB-SQLI-002",
+    "sql_injection_boolean_blind": "WEB-SQLI-002",
+    "sql_injection_time": "WEB-SQLI-003",
+    "sql_injection_time_based": "WEB-SQLI-003",
+    "sql_injection_error": "WEB-SQLI-004",
+    "sql_injection_error_based": "WEB-SQLI-004",
+    "sql_injection_oob": "WEB-SQLI-005",
+    "sql_injection_second_order": "WEB-SQLI-006",
+    # NoSQL
+    "nosql_injection": "WEB-NOSQL-001",
+    "nosql": "WEB-NOSQL-001",
+    # Command Injection
+    "command_injection": "WEB-CMDI-001",
+    "os_command_injection": "WEB-CMDI-001",
+    "rce": "WEB-CMDI-001",
+    "remote_code_execution": "WEB-CMDI-001",
+    "command_injection_blind": "WEB-CMDI-002",
+    # LDAP / XPath
+    "ldap_injection": "WEB-LDAP-001",
+    "xpath_injection": "WEB-XPATH-001",
+    # SSTI
+    "ssti": "WEB-SSTI-001",
+    "template_injection": "WEB-SSTI-001",
+    "server_side_template_injection": "WEB-SSTI-001",
+    # XSS
+    "xss": "WEB-XSS-001",
+    "xss_reflected": "WEB-XSS-001",
+    "reflected_xss": "WEB-XSS-001",
+    "cross_site_scripting": "WEB-XSS-001",
+    "xss_stored": "WEB-XSS-002",
+    "stored_xss": "WEB-XSS-002",
+    "xss_dom": "WEB-XSS-003",
+    "dom_xss": "WEB-XSS-003",
+    "xss_mutation": "WEB-XSS-004",
+    # SSRF
+    "ssrf": "WEB-SSRF-001",
+    "server_side_request_forgery": "WEB-SSRF-001",
+    "ssrf_blind": "WEB-SSRF-002",
+    # Authentication
+    "auth_bypass": "WEB-AUTH-001",
+    "authentication_bypass": "WEB-AUTH-001",
+    "brute_force": "WEB-AUTH-001",
+    "default_credentials": "WEB-AUTH-002",
+    "weak_credentials": "WEB-AUTH-002",
+    "jwt_vulnerability": "WEB-AUTH-003",
+    "jwt_alg_confusion": "WEB-AUTH-003",
+    "jwt_none_algorithm": "WEB-AUTH-004",
+    "session_fixation": "WEB-AUTH-005",
+    "session_hijacking": "WEB-AUTH-006",
+    "oauth_vulnerability": "WEB-AUTH-007",
+    "password_reset_poisoning": "WEB-AUTH-008",
+    "saml_bypass": "WEB-AUTH-011",
+    "saml_replay": "WEB-AUTH-012",
+    "oauth_csrf": "WEB-AUTH-013",
+    # Access Control / IDOR
+    "idor": "WEB-AC-001",
+    "insecure_direct_object_reference": "WEB-AC-001",
+    "privilege_escalation": "WEB-AC-002",
+    "horizontal_privilege_escalation": "WEB-AC-002",
+    "vertical_privilege_escalation": "WEB-AC-003",
+    "directory_traversal": "WEB-AC-004",
+    "path_traversal": "WEB-AC-004",
+    "forced_browsing": "WEB-AC-005",
+    "directory_listing": "WEB-AC-005",
+    "directory": "WEB-AC-005",
+    # Misconfiguration
+    "debug_endpoint": "WEB-MISCONF-001",
+    "debug_endpoints_exposed": "WEB-MISCONF-001",
+    "security_misconfiguration": "WEB-MISCONF-002",
+    "default_configuration": "WEB-MISCONF-002",
+    "cve": "WEB-MISCONF-002",
+    "information_disclosure": "WEB-MISCONF-003",
+    "stack_trace_disclosure": "WEB-MISCONF-003",
+    "verbose_error": "WEB-MISCONF-003",
+    "missing_security_headers": "WEB-MISCONF-004",
+    "cors_misconfiguration": "WEB-MISCONF-005",
+    "cors": "WEB-MISCONF-005",
+    "open_redirect": "WEB-MISCONF-006",
+    # Cryptographic
+    "weak_tls": "WEB-CRYPTO-001",
+    "tls_vulnerability": "WEB-CRYPTO-001",
+    "weak_hashing": "WEB-CRYPTO-002",
+    "hardcoded_secrets": "WEB-CRYPTO-003",
+    "hardcoded_credentials": "WEB-CRYPTO-003",
+    "secrets_in_code": "WEB-CRYPTO-003",
+    "insecure_randomness": "WEB-CRYPTO-004",
+    # Complex Web Attacks
+    "xxe": "WEB-XXE-001",
+    "xml_external_entity": "WEB-XXE-001",
+    "insecure_deserialization": "WEB-DESER-001",
+    "deserialization": "WEB-DESER-001",
+    "file_upload": "WEB-UPLOAD-001",
+    "unrestricted_file_upload": "WEB-UPLOAD-001",
+    "race_condition": "WEB-RACE-001",
+    "csrf": "WEB-CSRF-001",
+    "cross_site_request_forgery": "WEB-CSRF-001",
+    "websocket_injection": "WEB-WSS-001",
+    # API
+    "mass_assignment": "WEB-API-001",
+    "rate_limiting": "WEB-API-002",
+    "rate_limit_bypass": "WEB-API-002",
+    "graphql_introspection": "WEB-API-003",
+    "graphql_dos": "WEB-API-004",
+    "http_verb_tampering": "WEB-API-005",
+    "bopla": "WEB-API-008",
+    "bfla": "WEB-API-009",
+    # Modern Injection
+    "prototype_pollution": "WEB-INJECT-022",
+    "csp_bypass": "WEB-INJECT-023",
+    "cache_poisoning": "WEB-INJECT-024",
+}
 
-    Phase A uses a severity-weighted heuristic. Phase B will use the full
-    scoring module once findings carry richer metadata.
+
+def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
+    """Compute the full 5-dimension VXIS score using ScoringEngine.
+
+    Auto-maps finding_type → vector_id when vector_id is absent so that
+    vector coverage reflects real scan findings rather than always returning
+    0. Falls back to severity-weighted heuristic when scoring modules are
+    unavailable.
     """
+    try:
+        from vxis.scoring.engine import ScoringEngine
+        from vxis.scoring.tracker import AttackChain, ScoreTracker
+    except Exception as exc:
+        logger.debug("scoring modules unavailable, using heuristic: %s", exc)
+        return _compute_vxis_score_heuristic(ctx)
+
+    target_type = str(getattr(ctx, "target_type", "web") or "web").lower()
+    if target_type not in ("web", "game", "mobile"):
+        target_type = "web"
+
+    tracker = ScoreTracker(target_type=target_type)
+
+    # Feed findings into tracker — auto-map vector_id from finding_type if absent
+    finding_dicts = _get_finding_dicts()
+    for d in finding_dicts:
+        fid = d.get("id", "")
+        vid = str(d.get("vector_id", "") or "")
+        if not vid:
+            ftype = str(d.get("finding_type", "") or "").lower().strip()
+            vid = _FINDING_TYPE_TO_VECTOR_ID.get(ftype, "")
+        level_raw = d.get("exploitation_level", 1)
+        try:
+            level = max(0, min(4, int(level_raw or 1)))
+        except (TypeError, ValueError):
+            level = 1
+        if vid:
+            try:
+                tracker.record_vector_attempt(vid)
+                tracker.record_finding(fid, vid, level)
+            except Exception as exc:
+                logger.debug("tracker record_finding failed for %s: %s", fid, exc)
+
+    # Feed attack chains into tracker for Chain Intelligence dimension
+    for chain_dict in getattr(ctx, "attack_chains", []) or []:
+        try:
+            if not isinstance(chain_dict, dict):
+                continue
+            raw = chain_dict.get("raw", chain_dict)
+            finding_ids = list(raw.get("finding_ids", []))
+            if len(finding_ids) < 2:
+                continue
+            chain = AttackChain(
+                chain_id=str(raw.get("id", f"CHAIN-{len(tracker.attack_chains) + 1:03d}")),
+                description_en=str(raw.get("rationale", "Attack chain")),
+                description_ko=str(raw.get("rationale", "공격 체인")),
+                final_impact=str(raw.get("crown_jewel", "")),
+            )
+            for i, fid in enumerate(finding_ids):
+                vid_step = tracker.finding_vectors.get(fid, "WEB-AC-001")
+                lvl_step = tracker.exploitation_levels.get(fid, 1)
+                chain.add_step(
+                    vector_id=vid_step,
+                    finding_id=fid,
+                    level=lvl_step,
+                    description_en=f"Step {i + 1}: {fid}",
+                    description_ko=f"단계 {i + 1}: {fid}",
+                )
+            tracker.record_chain(chain)
+        except Exception as exc:
+            logger.debug("chain recording failed: %s", exc)
+
+    # Record scan_loop phase as completed for Completeness dimension
+    try:
+        tracker.record_phase_complete(
+            phase_name="scan_loop",
+            duration_ms=int(getattr(ctx, "duration_seconds", 0) * 1000),
+            findings_count=len(ctx.findings),
+            vectors_attempted=list(tracker.vectors_attempted),
+        )
+    except Exception as exc:
+        logger.debug("phase record failed: %s", exc)
+
+    engine = ScoringEngine(target_type=target_type)
+    try:
+        score = engine.calculate(tracker, finding_dicts, scan_id=getattr(ctx, "scan_id", ""))
+        return score.total, score.grade
+    except Exception as exc:
+        logger.warning("ScoringEngine.calculate failed, using heuristic: %s", exc)
+        return _compute_vxis_score_heuristic(ctx)
+
+
+def _compute_vxis_score_heuristic(ctx: Any) -> tuple[float, str]:
+    """Severity-weighted fallback score when ScoringEngine is unavailable."""
     sev_weights = {
         "critical": 200,
         "high": 100,
@@ -372,7 +581,7 @@ class ScanPipeline:
         # summary line for operators.
         try:
             from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            mitre = coverage_report(_get_finding_dicts())
             logger.info(
                 "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
                 len(mitre["techniques_covered"]),
