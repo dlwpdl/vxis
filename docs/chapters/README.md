@@ -15,6 +15,8 @@
 | 05 | [Phase B Day 2 — sqlmap/critic stabilization](05-phase-b-day2-sqlmap-critic-stabilization.md) | 2026-04-09 | sqlmap integration + dual-brain critic + JSON recovery hardening |
 | 06 | [Phase C — Verifier, Belief State, Egress Filter](06-phase-c-verifier-belief-egress.md) | 2026-04-10 | Adversarial verifier + rubric rebalance + belief tracking + enterprise egress guardrail |
 
+**Phase D and E changes** (scan dashboard, 3-tier smart history, 7 browser tools, auto-orchestration safety net, 1-tool-per-message, LLM memory compression) are documented inline in the code and in `ARCHITECTURE.md` / `PHASE_STATUS.md`. Add chapter 07+ when these phases close out.
+
 ## What these chapters are for
 
 - **When you come back after a break**: read chapters in order, get context in ~10 min

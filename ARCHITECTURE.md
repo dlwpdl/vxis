@@ -1,22 +1,26 @@
 # VXIS Architecture — Brain-First Single-Loop
 
-> How VXIS reasons, decides, and acts. Read this after `README.md`.
+> How VXIS reasons, decides, and acts. Read this after `README.md`. Updated 2026-04-10.
 
 ## The one-line design statement
 
-**A single persistent ReAct loop, driven by an LLM Brain, owns the entire scan — from recon to exploitation to reporting — via a dynamic tool catalog and a Docker sandbox.**
+**A single persistent ReAct loop, driven by an LLM Brain, owns the entire scan — from recon to exploitation to reporting — via 23 dynamic tools, a Docker sandbox, adversarial verification, and Strix-pattern history management.**
 
-This is architecturally equivalent to Strix (the open-source Kali-in-a-box autonomous pentest tool) but extended with:
-- Multi-domain runtimes (planned Phase D — Game / Mobile / Hardware)
-- Persistent Collective KB across scans (planned Phase B)
-- Enterprise deferred-mutation approval gate (already in place)
-- Bilingual NCC-style HTML reports (already in place)
+Extended beyond Strix with:
+- Adversarial verifier (stronger model refutes findings before confirmation)
+- MITRE ATT&CK mapping (16 techniques, auto-inferred)
+- 3-tier smart history + LLM memory compression at 90K tokens
+- Auto-orchestration safety net (auto-login, auto-ffuf, auto-nuclei, auto-sqlmap)
+- Enterprise egress filter for customer-production scans
+- Bilingual NCC-style HTML reports with verification summary + MITRE coverage table
+- Multi-domain runtimes (planned — Game / Mobile / Hardware)
+- Persistent Collective KB across scans
 
 ## Why Brain-First?
 
-The preceding VXIS architecture (14-Phase `ScanPipeline` in `pipeline.py`, 5234 lines) treated the Brain as a **bag of LLM helpers** — each phase dispatched hardcoded scanner logic and only called the Brain to interpret individual probe results. Task 1 of the Phase A migration captured this directly as a measurement: `brain_decision_count = 0` across a full benchmark scan, despite `llm_call_count = 10+` — proof that the "Brain-First" principle in `CLAUDE.md` was violated at the code level.
+The preceding VXIS architecture (14-Phase `ScanPipeline` in `pipeline.py`, 5234 lines) treated the Brain as a **bag of LLM helpers** — each phase dispatched hardcoded scanner logic and only called the Brain to interpret individual probe results. `brain_decision_count = 0` across a full benchmark scan, despite `llm_call_count = 10+` — proof that the "Brain-First" principle was violated at the code level.
 
-Phase A rebuilt VXIS so the Brain **owns the top of the stack**. Every tool call flows through `AgentBrain.think_in_loop()`, which is a true ReAct decision. Baseline 0 → Phase A result 20.
+Phase A rebuilt VXIS so the Brain **owns the top of the stack**. Every tool call flows through `AgentBrain.think_in_loop()`, which is a true ReAct decision. Current state: `brain_decisions=50, llm_calls=55` on Juice Shop.
 
 ## Layered view
 
@@ -29,7 +33,7 @@ Phase A rebuilt VXIS so the Brain **owns the top of the stack**. Every tool call
                           ↓
 ┌──────────────────────────────────────────────────────────────┐
 │                   ScanPipeline (v2)                          │
-│    src/vxis/pipeline/scan_pipeline_v2.py  (~360 lines)       │
+│    src/vxis/pipeline/scan_pipeline_v2.py  (~505 lines)       │
 │                                                              │
 │  • Build ScanContext                                         │
 │  • Ghost activation                                          │
@@ -37,47 +41,66 @@ Phase A rebuilt VXIS so the Brain **owns the top of the stack**. Every tool call
 │  • Run ScanAgentLoop                                         │
 │  • Copy findings/chains → ctx                                │
 │  • Deferred approval gate (enterprise)                       │
-│  • Generate HTML report (NCC style)                          │
+│  • Generate HTML report (NCC style + verification + MITRE)   │
 │  • Compute VXIS score                                        │
 └─────────────────────────┬────────────────────────────────────┘
                           ↓
 ┌──────────────────────────────────────────────────────────────┐
 │                   ScanAgentLoop                              │
-│          src/vxis/agent/scan_loop.py                         │
+│          src/vxis/agent/scan_loop.py  (~1127 lines)          │
 │                                                              │
-│  while not completed and iteration < max_iters:              │
-│      actions = await brain.think_in_loop(messages, catalog)  │
-│      for (name, args) in actions:                            │
-│          result = await registry.dispatch(name, args)        │
-│          messages.append({tool: name, args, result})         │
+│  while not completed and iteration < max_iters (300):        │
+│      compress_history(messages, brain)  # at 90K tokens      │
+│      dashboard = _build_scan_dashboard()                     │
+│      actions = brain.think_in_loop(messages + dashboard)     │
+│      actions = actions[:1]  # Strix: 1 tool per message      │
+│      result = registry.dispatch(name, args)                  │
+│      auto-orchestration safety net (login/ffuf/nuclei/sqlmap)│
 │      if finish_scan: break                                   │
+│                                                              │
+│  Auto-orchestration triggers:                                │
+│    • iter 5+  → auto-login (SQLi creds on forms)             │
+│    • iter 10  → auto-ffuf (directory bruteforce)             │
+│    • iter 12  → auto-nuclei (if Brain hasn't run it)         │
+│    • iter 18+ → auto-sqlmap (on 500-error endpoints)         │
 └─────────────────────────┬────────────────────────────────────┘
                           ↓
 ┌──────────────────────────────────────────────────────────────┐
 │                     AgentBrain                               │
-│            src/vxis/agent/brain.py                           │
+│            src/vxis/agent/brain.py  (~2186 lines)            │
 │                                                              │
 │  • think_in_loop(messages, tool_catalog)                     │
-│      - increment brain_decision_count                        │
-│      - build system = LOOP_PROMPT_ADAPTER + AGENT_SYSTEM_    │
-│        PROMPT.format(available_tools=…)                      │
-│      - build user = recent messages digest                   │
-│      - _call_llm_with_fallback (API fallback chain)          │
+│      - _build_smart_history: 3-tier compacted view           │
+│        T1 FULL (last 3 iters), T2 COMPACT (older),          │
+│        T3 PINNED (dashboard/critic/findings/verify)          │
+│      - LOOP_PROMPT_ADAPTER + AGENT_SYSTEM_PROMPT             │
+│      - _call_llm_with_fallback (provider chain)              │
 │      - _parse_response → list[(tool, args)]                  │
-│  • think() — LEGACY, untouched                               │
+│  • max_steps=300                                             │
+│  • think_first pattern enforced in system prompt             │
 └─────────────────────────┬────────────────────────────────────┘
                           ↓
 ┌──────────────────────────────────────────────────────────────┐
-│                   ToolRegistry + BrainTools                  │
+│                  ToolRegistry — 23 BrainTools                │
 │          src/vxis/agent/tool_registry.py                     │
 │          src/vxis/agent/tools/                               │
 │                                                              │
-│  Control:   finish_scan  think  wait                         │
-│  Primitive: http_request  browser_render  intercept_proxy    │
-│  Strix-pw:  shell_exec  python_exec    (→ vxis-sandbox)      │
-│  Finding:   report_finding  query_findings  link_chain       │
-└──────────────┬────────────────────────────┬──────────────────┘
-               ↓                            ↓
+│  Control (3):  finish_scan  think  wait                      │
+│  Recon (1):    fingerprint_target                            │
+│  Browser (7):  browser_navigate  browser_analyze_dom         │
+│                browser_click  browser_fill_form              │
+│                browser_screenshot  browser_eval_js            │
+│                browser_get_cookies                            │
+│  Strix-pw (2): shell_exec  python_exec  (→ vxis-sandbox)    │
+│  Playbook (2): list_playbooks  load_playbook                 │
+│  Finding (3):  report_finding  query_findings  link_chain    │
+│  Verify (1):   verify_finding  (adversarial, stronger model) │
+│  Memory (1):   query_scan_memory                             │
+│  HTTP (1):     http_request                                  │
+│  Proxy (1):    intercept_proxy                               │
+│  Legacy (1):   browser_render (thin wrapper, Phase A compat) │
+└──────────┬────────────────────────────┬──────────────────────┘
+           ↓                            ↓
 ┌──────────────────────────┐   ┌────────────────────────────────┐
 │   VXIS Primitives        │   │   vxis/sandbox Docker image    │
 │  src/vxis/interaction/   │   │   docker/sandbox/              │
@@ -89,69 +112,87 @@ Phase A rebuilt VXIS so the Brain **owns the top of the stack**. Every tool call
 └──────────────────────────┘   └────────────────────────────────┘
 ```
 
-## Three Brain backends (only one is live)
+## LLM memory compression — Strix pattern
+
+`src/vxis/agent/memory_compressor.py`: when message history exceeds 90K tokens (estimated at 4 chars/token), older messages are chunked (groups of 10) and summarized by the LLM. The 15 most recent messages are always preserved verbatim. Summaries retain:
+- Discovered vulnerabilities, endpoints, attack vectors
+- Credentials, tokens, API keys, session cookies
+- Failed attempts (dedup prevention)
+- Architecture insights (tech stack, routing)
+
+This lets scans run 300+ iterations without losing critical context.
+
+## Smart 3-tier history — Phase D
+
+`AgentBrain._build_smart_history()` builds a compacted view of conversation history:
+
+| Tier | What | Detail level |
+|---|---|---|
+| T1 — FULL | Last 3 iterations | Complete tool calls, args, results |
+| T2 — COMPACT | Older iterations | `tool:name` + summary only |
+| T3 — PINNED | High-value messages (any age) | Dashboard, critic reviews, finding reports, verify results, system hints |
+
+This replaces the naive flat window that caused Brain amnesia at high iteration counts.
+
+## Adversarial verifier — Phase C
+
+`verify_finding` tool (`src/vxis/agent/tools/verifier_tools.py`): when Brain reports a finding via `report_finding`, the scan loop auto-intercepts and calls `verify_finding` with a stronger model that attempts to refute the claim. Verdicts:
+
+- **CONFIRMED** — evidence supports the finding, included in report
+- **UNCONFIRMED** — insufficient evidence, flagged for review
+- **REFUTED** — false positive, excluded from report
+
+Verdict counts tracked in `ScanLoopState.verdict_counts`. Report includes a Verification Summary section.
+
+## MITRE ATT&CK mapping
+
+`src/vxis/agent/tools/mitre_data.py`: 16 web-focused techniques mapped to finding_types. `infer_techniques(finding_type, title, affected_component)` auto-maps findings. Coverage summary (techniques/tactics/percentage) included in the HTML report.
+
+## Enterprise egress filter — Phase C
+
+`src/vxis/agent/egress.py`: when `VXIS_EGRESS_STRICT=1`, an allowlist is built from the target URL. `shell_exec` commands that would reach non-target hosts are blocked. This prevents the sandbox from making unintended outbound connections during customer-production scans.
+
+## Auto-orchestration safety net
+
+The scan loop includes safety-net triggers that fire if Brain hasn't executed certain critical actions by specific iteration thresholds:
+
+| Trigger | Fires at | What it does |
+|---|---|---|
+| auto-login | iter 5+ (form with password field detected) | Try SQLi bypass creds on login forms |
+| auto-ffuf | iter 10 | Directory bruteforce with common wordlist |
+| auto-nuclei | iter 12 | Run nuclei with web templates if Brain hasn't |
+| auto-sqlmap | iter 18+ | Test endpoints that returned 500 errors |
+
+These compensate for weaker models that may not autonomously reach for the right scanner at the right time.
+
+## Three Brain backends (only AgentBrain is live)
 
 1. **`AgentBrain`** (`agent/brain.py`) — **LIVE** path, uses LLM API (OpenAI/Anthropic/Gemini/DeepSeek via fallback chain)
 2. `InteractiveBrain` (`agent/brain_interactive.py`) — stdin/stdout NDJSON; Claude Code via `vxis scan --interactive` (legacy)
 3. `FileBasedBrain` (`agent/brain_filebased.py`) — file protocol, rarely used
 
-All three increment the **unified `brain_decision_count`** counter on every `think()` / `think_in_loop()` entry, giving Phase A a single apples-to-apples metric.
-
-## LOOP_PROMPT_ADAPTER — the surgical fix
-
-The 200-line `AGENT_SYSTEM_PROMPT` was written for legacy scanner-tool names (Controller / Hands / Eyes / X-Ray in mandatory checklists). When reused verbatim in `think_in_loop`, the LLM would emit those legacy names — which are not in the new tool catalog. The audit (Task 3.5) identified this risk with zero BREAKING issues but 7 CONFUSING references.
-
-**Fix β3**: prepend a ~25-line `LOOP_PROMPT_ADAPTER` constant that explicitly maps legacy names to Phase A tool names:
-
-```
-Controller → cpr_recon or http_request
-Hands      → http_request
-Eyes       → browser_render
-X-Ray      → intercept_proxy
-Knowledge  → report_finding / query_findings
-Chain      → chain_synthesis / link_chain
-finishing  → finish_scan
-```
-
-**Critical gotcha preserved in code**: `AGENT_SYSTEM_PROMPT.format(available_tools=…)` must run FIRST (body template uses `{{…}}` for literal JSON braces), THEN concatenate the adapter. Never pass the adapter through `.format()`. A regression test (`test_think_in_loop_adapter_concatenation_no_brace_explosion`) guards this.
-
-## Strix-power sandbox (Task 7–8)
-
-The Brain's real power comes from **unrestricted shell + python inside a Docker sandbox**:
-
-- `shell_exec(command)`: arbitrary shell inside `vxis-sandbox` container. Brain can run `sqlmap -u http://juice:3000/rest/products?q=1 --risk=3 --batch` or any other scanner.
-- `python_exec(code)`: writes code to `/workspace/_python_exec_<uuid>.py` on the host-mounted volume, runs `docker exec vxis-sandbox python3 …`. For asyncio payload sprays, custom PoC scripts, post-exploitation automation.
-
-**Sandbox lifecycle**: lazy-init via `_ensure_sandbox_running()` in `shell_tools.py`. Container is started on first call and reused warm across scans (Strix convention). Workspace is a bind mount at `/tmp/vxis-workspace` ↔ `/workspace` so `shell_exec` output files are available to `python_exec` and vice versa.
-
-**Enterprise gate caveat**: `shell_exec` bypasses the Hands-layer deferred mutation queue because sqlmap/nuclei make their own HTTP requests. For Phase A this is intentional (local Docker targets, "real hacker simulation"). Phase C will add a second-layer egress filter for customer-production scans.
+All three increment the **unified `brain_decision_count`** counter.
 
 ## Counters and instrumentation
 
-The post-Task-1 instrumentation commits added four metrics so every change can be evaluated:
-
 | Metric | Source | Meaning |
 |---|---|---|
-| `peak_context_bytes` | `ScanContext.update_peak_size()` per phase boundary | Peak in-memory state size — watches for context explosion |
-| `llm_call_count` | `_call_llm_direct` entry hook | Authoritative API call count on the AgentBrain path |
-| `brain_decision_count` | Entry of every `think()` / `think_in_loop()` on all 3 brain backends | **PRIMARY** apples-to-apples "Brain is actually deciding" metric |
-| `findings_count` | `len(ctx.findings)` after the scan | Simple count of discovered vulnerabilities |
+| `peak_context_bytes` | `ScanLoopState.sample_peak_size()` per iteration | Peak in-memory state size |
+| `llm_call_count` | `_call_llm_direct` entry hook | API call count |
+| `brain_decision_count` | Entry of every `think()` / `think_in_loop()` | **PRIMARY** "Brain is deciding" metric |
+| `findings_count` | `len(ctx.findings)` after scan | Discovered vulnerabilities |
 
-All four are printed to stdout at scan end as a single grep-parseable line:
+Printed at scan end: `VXIS_BENCHMARK peak_context_bytes=<N> llm_call_count=<N> brain_decision_count=<N> findings_count=<N>`
 
-```
-VXIS_BENCHMARK peak_context_bytes=<N> llm_call_count=<N> brain_decision_count=<N> findings_count=<N>
-```
+## Docker sandbox
 
-## Phase roadmap and trade-offs
+`docker/sandbox/Dockerfile` — `vxis-sandbox` container with: sqlmap, ffuf, nuclei, gobuster, nikto, dirb, python3, httpx, curl, nmap. Lazy-started on first `shell_exec` call, reused warm across scans. Workspace bind-mount: `/tmp/vxis-workspace` (host) ↔ `/workspace` (container).
 
-- **Phase A** (in progress — almost complete): replace phase pipeline with single loop. Accept temporary finding-count regression while tuning. See [`PHASE_STATUS.md`](PHASE_STATUS.md).
-- **Phase B** (next): prompt tuning for `shell_exec` usage, scanner integration depth, episodic memory across scans.
-- **Phase C**: adversarial validation agent, structured belief state, 1M context mode, enterprise egress filter.
-- **Phase D**: domain-specific runtimes (Game memory hacking, Mobile APK Frida, Firmware/Hardware benches).
+## Phase roadmap
 
-## Design references
-
-- Strix: single `while` loop, ~100K token compression, per-agent subprocess spawn (`agents/base_agent.py`)
-- PentestGPT / Reflexion: strategic guidance, explicit self-critique (future Phase B)
-- XBOW (commercial): large RAG corpus + ensemble validation (future Phase C)
+- **Phase A** ✅ — single loop migration
+- **Phase B** ✅ — prompt tuning, playbooks, fingerprinting, memory
+- **Phase C** ✅ — adversarial verifier, belief state, egress filter, MITRE mapping
+- **Phase D** 🔥 90% — scan dashboard, smart history, browser tools, auto-orchestration
+- **Phase E** 🔧 — Strix patterns (1 tool/msg, compression, hybrid brain)
+- **Future** — domain expansion (Game/Mobile/Hardware/Cloud)

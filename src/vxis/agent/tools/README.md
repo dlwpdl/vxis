@@ -1,72 +1,107 @@
-# `src/vxis/agent/tools/` — 11 BrainTool Implementations
+# `src/vxis/agent/tools/` — 23 BrainTool Implementations
 
-> The tools the Brain can call during a scan. `build_default_registry()` registers all 11 into a `ToolRegistry` that `ScanAgentLoop` passes to `think_in_loop` as the tool catalog.
+> The tools the Brain can call during a scan. `build_default_registry()` registers all 23 into a `ToolRegistry` that `ScanAgentLoop` passes to `think_in_loop` as the tool catalog.
 
 ## Registration entry point
 
 ```python
 from vxis.agent.tools import build_default_registry
-reg = build_default_registry()
-# → 11 tools registered
+reg = build_default_registry(brain=agent_brain)
+# → 23 tools registered
 ```
 
-## Tool catalog (11 tools, grouped by layer)
+## Tool catalog (23 tools, grouped by layer)
 
-### Control tools (`control_tools.py` — Task 5)
+### Control tools (`control_tools.py`) — 3 tools
 
-Tools the Brain uses to manage the loop itself. Minimal wrappers, no external dependencies.
+Tools the Brain uses to manage the loop itself.
 
 | Tool | What it does |
 |---|---|
-| `finish_scan` | Signal end of scan. Required input: none. ScanAgentLoop stops when this returns `ok=True`. |
-| `think` | Scratchpad. Logs a reasoning step. No side effects. Input: `thought: string`. |
+| `finish_scan` | Signal end of scan. ScanAgentLoop stops when this returns `ok=True`. |
+| `think` | Scratchpad. Logs a reasoning step. No side effects. Input: `thought: string`. Think-first pattern: Brain should call this when uncertain. |
 | `wait` | Brief pause (max 5s, clamped). Input: `seconds: number`. Useful for rate-limit backoff. |
 
-### Primitive tools (`hands_tools.py` — Task 6)
+### Fingerprint tool (`fingerprint_tools.py`) — 1 tool
 
-Thin wrappers over the `vxis.interaction` primitives. Module-level singletons preserve state across tool calls within a scan.
+| Tool | What it does |
+|---|---|
+| `fingerprint_target` | Detect target technology stack (framework, language, server, security features). Returns structured fingerprint with stack hints for playbook selection. |
+
+### Browser tools (`browser_tools.py`) — 7 tools
+
+Phase C/D Eyes integration. Playwright-backed headless browser for rendered-page visibility. All tools gracefully fail if Playwright is not installed.
+
+| Tool | What it does |
+|---|---|
+| `browser_navigate` | Navigate to a URL, return page title + status. |
+| `browser_analyze_dom` | Deep DOM analysis: forms, links, scripts, hidden fields, meta tags. |
+| `browser_click` | Click an element by CSS selector. |
+| `browser_fill_form` | Fill and submit a form (selector + field values). |
+| `browser_screenshot` | Take a PNG screenshot of the current page. |
+| `browser_eval_js` | Execute arbitrary JavaScript in the page context. Returns result. |
+| `browser_get_cookies` | Get all cookies for the current page. |
+
+### Legacy browser tool (`hands_tools.py`) — 1 tool
+
+| Tool | What it does |
+|---|---|
+| `browser_render` | Legacy Phase A one-shot browser render (navigate → snapshot → stop). Kept for backward compatibility. Prefer the browser_* tools above. |
+
+### HTTP + Proxy tools (`hands_tools.py`) — 2 tools
+
+Thin wrappers over `vxis.interaction` primitives. Module-level singletons preserve auth state across calls.
 
 | Tool | Wraps | Notes |
 |---|---|---|
-| `http_request` | `SessionManager.get_session().request()` (`interaction/hands.py`) | Singleton session manager → auth cookies / CSRF tokens persist across calls. Returns parsed `AnalyzedResponse` (status, body, links, forms). |
-| `browser_render` | `BrowserEngine + BrowserPage.navigate() + snapshot()` (`interaction/eyes.py`) | One-shot lifecycle per call (start → new_page → navigate → snapshot → stop). Graceful fail if Playwright is not installed. |
-| `intercept_proxy` | `MitmProxy + FlowAnalyzer` (`interaction/xray.py`) | Action-based: `start` / `stop` / `flows`. Graceful fail if mitmproxy not installed. |
+| `http_request` | `SessionManager.get_session().request()` | Singleton session manager → auth cookies / CSRF tokens persist. Returns `AnalyzedResponse` (status, body, links, forms). |
+| `intercept_proxy` | `MitmProxy + FlowAnalyzer` | Action-based: `start` / `stop` / `flows`. Graceful fail if mitmproxy not installed. |
 
-### Strix-power tools (`shell_tools.py` + `python_tools.py` — Tasks 7–8)
+### Strix-power tools (`shell_tools.py` + `python_tools.py`) — 2 tools
 
-The two tools that give the Brain **real hacker power**. Both run inside the shared `vxis-sandbox` Docker container (`docker/sandbox/Dockerfile`). Lifecycle managed by `_ensure_sandbox_running()` in `shell_tools.py` — container is lazy-started on first call and reused warm across scans (Strix convention).
-
-| Tool | What it does |
-|---|---|
-| `shell_exec` | **Unrestricted shell** inside `vxis-sandbox`. Input: `command: string`, optional `timeout: number (default 120, max 600)`. Returns `{exit_code, stdout, stderr}`. Use for sqlmap / nuclei / ffuf / gobuster / dirb / curl. **No command whitelist.** |
-| `python_exec` | **Multi-line Python 3** inside the same sandbox. Input: `code: string`, optional `timeout`. Writes code to `/workspace/_python_exec_<uuid>.py` (bind-mounted at `/tmp/vxis-workspace` on host), dispatches `docker exec vxis-sandbox python3 <path>`, cleans up on both success and error paths. Use for asyncio/aiohttp payload sprays, custom PoC scripts, post-exploitation automation. |
-
-**Security note**: `shell_exec` bypasses the Hands-layer deferred mutation queue because sqlmap / nuclei make their own HTTP requests. For Phase A (local Docker targets) this is intentional — "real hacker simulation". Phase C will add a second-layer egress filter on the sandbox for enterprise scans against customer production.
-
-**Shared workspace**: `/tmp/vxis-workspace` on host ↔ `/workspace` inside container. Files written by `shell_exec` are visible to `python_exec` and vice versa. State persists across tool calls within a scan.
-
-### Finding CRUD (`finding_tools.py` — Task 9)
-
-Module-level in-memory store for Phase A. Phase B may swap for a persistent episodic memory DB.
+Both run inside the shared `vxis-sandbox` Docker container. Lifecycle: lazy-started on first call, reused warm across scans.
 
 | Tool | What it does |
 |---|---|
-| `report_finding` | Brain submits a discovered vulnerability. Required: `title`, `severity` (critical/high/medium/low/informational), `finding_type` (snake_case), `affected_component`, `description`. Optional: `evidence`, `remediation`, `cwe`. Auto-assigns `VXIS-0001`, `VXIS-0002`, … IDs. |
-| `query_findings` | Search the current scan's findings. Filters: `severity`, `finding_type`, `component_contains`, `text_contains` (matches title + description). Default limit 20. |
-| `link_chain` | Assert a causal attack chain between ≥2 previously-reported findings. Required: `finding_ids: list[str]` (≥2), `rationale: string`. Optional: `crown_jewel: string`. Rejects unknown IDs. |
+| `shell_exec` | **Unrestricted shell** inside `vxis-sandbox`. Input: `command`, optional `timeout` (default 120, max 600). Returns `{exit_code, stdout, stderr}`. Use for sqlmap / nuclei / ffuf / gobuster / nmap / curl. **No command whitelist.** |
+| `python_exec` | **Multi-line Python 3** inside the same sandbox. Input: `code`, optional `timeout`. For custom PoC scripts, payload sprays, post-exploitation automation. |
 
-**Accessors for integration** (used by `ScanPipelineV2`):
+**Security**: `shell_exec` bypasses the Hands-layer deferred mutation queue. Enterprise egress filter (`VXIS_EGRESS_STRICT=1`) constrains sandbox outbound traffic.
 
-```python
-from vxis.agent.tools.finding_tools import _get_findings, _get_chains, _reset_for_tests
-_reset_for_tests()          # Clear between scans
-findings = _get_findings()  # list[dict] — copy into ctx.findings as Finding objects
-chains = _get_chains()      # list[dict] — copy into ctx.attack_chains
-```
+**Shared workspace**: `/tmp/vxis-workspace` (host) ↔ `/workspace` (container).
 
-## Forward-compatibility convention
+### Playbook tools (`playbook_tools.py`) — 2 tools
 
-Several `build_default_registry_*` tests use `assert len(names) >= N` instead of `== N` so adding tools in future tasks doesn't break existing tests. This pattern was established in commits `3f3b908` and the corresponding fix in `402ba14`.
+| Tool | What it does |
+|---|---|
+| `list_playbooks` | List all available playbook names (injection_vectors, auth_bypass, xss, etc.). |
+| `load_playbook` | Load a specific playbook by name. Returns stack-specific attack techniques and patterns. |
+
+### Finding CRUD (`finding_tools.py`) — 3 tools
+
+In-memory store per scan. Auto-assigns `VXIS-0001`, `VXIS-0002`, ... IDs.
+
+| Tool | What it does |
+|---|---|
+| `report_finding` | Submit a discovered vulnerability. Required: `title`, `severity`, `finding_type`, `affected_component`, `description`. Optional: `evidence`, `remediation`, `cwe`. |
+| `query_findings` | Search current scan's findings. Filters: `severity`, `finding_type`, `component_contains`, `text_contains`. |
+| `link_chain` | Assert causal attack chain between 2+ findings. Required: `finding_ids: list[str]`, `rationale`. Optional: `crown_jewel`. |
+
+### Verifier tool (`verifier_tools.py`) — 1 tool
+
+| Tool | What it does |
+|---|---|
+| `verify_finding` | **Adversarial verifier.** Uses a stronger model to attempt to refute a claimed finding. Input: finding details + evidence. Returns verdict: `CONFIRMED` / `UNCONFIRMED` / `REFUTED` with reasoning. Injected with `brain` instance for provider fallback chain reuse. |
+
+### Memory tool (`memory_tools.py`) — 1 tool
+
+| Tool | What it does |
+|---|---|
+| `query_scan_memory` | Query the cross-scan episodic memory KB. Returns relevant past findings, techniques, and failed attempts from similar targets. |
+
+### MITRE data (`mitre_data.py`) — not a tool, support module
+
+16 web-focused MITRE ATT&CK techniques. `infer_techniques(finding_type, title, affected_component)` returns matching technique IDs. `compute_mitre_coverage(findings)` returns coverage summary for the report.
 
 ## Adding a new tool
 
@@ -75,3 +110,7 @@ Several `build_default_registry_*` tests use `assert len(names) >= N` instead of
 3. Write tests in `tests/agent/tools/test_<new>_tools.py` — at minimum: protocol conformance, happy path, one failure mode, registry integration.
 4. If the tool manages state, include a `_reset_for_tests()` module-level helper.
 5. Update this README's tool table.
+
+## Forward-compatibility convention
+
+Several tests use `assert len(names) >= N` instead of `== N` so adding tools doesn't break existing tests.

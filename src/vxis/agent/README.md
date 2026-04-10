@@ -1,90 +1,112 @@
 # `src/vxis/agent/` — Brain + Single Loop + Tool Registry
 
-> The heart of Phase A. This module contains everything that makes VXIS a Brain-First agent: the ReAct loop, the LLM brain with provider fallback, the tool registry, and the 11 BrainTool implementations.
+> The heart of VXIS. This module contains everything that makes VXIS a Brain-First agent: the ReAct loop, the LLM brain with provider fallback, the tool registry, 23 BrainTool implementations, adversarial verifier, memory compression, and auto-orchestration safety net.
 
-## Key files (Phase A live)
+## Key files
 
 | File | Role |
 |---|---|
-| **`brain.py`** (1800+ lines) | `AgentBrain` class. Contains `think()` (legacy) and **`think_in_loop()`** (Phase A sibling). Owns `AGENT_SYSTEM_PROMPT`, `LOOP_PROMPT_ADAPTER`, `TOOL_DESCRIPTIONS`, the provider fallback chain (`_call_llm_with_fallback`), `_parse_response` JSON parser, and the three unified counters (`brain_decision_count`, `llm_call_count`). |
-| **`scan_loop.py`** (~90 lines) | `ScanAgentLoop` class. Strix-equivalent single `while` loop. Owns `ScanLoopState.messages[]` across iterations. Delegates decision-making to `brain.think_in_loop(messages, catalog)` and dispatches returned actions through the `ToolRegistry`. |
-| **`tool_registry.py`** (~45 lines) | `BrainTool` runtime-checkable Protocol, `ToolResult` dataclass, and `ToolRegistry` async dispatcher. The registry's `describe_all()` output is what the Brain sees as its "available tools" catalog. |
-| **`tools/`** | Subpackage with 11 BrainTool implementations. See [`tools/README.md`](tools/README.md). |
+| **`brain.py`** (~2186 lines) | `AgentBrain` class. Contains `think()` (legacy) and **`think_in_loop()`** (live). Owns `AGENT_SYSTEM_PROMPT`, `LOOP_PROMPT_ADAPTER`, `_build_smart_history()` (3-tier compaction), the provider fallback chain (`_call_llm_with_fallback`), `_parse_response` JSON parser. `max_steps=300`. |
+| **`scan_loop.py`** (~1127 lines) | `ScanAgentLoop` class. Strix-equivalent single `while` loop. Owns `ScanLoopState` (messages, verdict_counts, belief state). Includes scan dashboard injection, auto-orchestration safety net (login/ffuf/nuclei/sqlmap), egress filter integration, LLM memory compression trigger, and 1-tool-per-message enforcement. |
+| **`tool_registry.py`** | `BrainTool` runtime-checkable Protocol, `ToolResult` dataclass, and `ToolRegistry` async dispatcher. `describe_all()` output is the Brain's tool catalog. |
+| **`memory_compressor.py`** | LLM-based memory compression — Strix pattern. At 90K tokens, older messages are chunked and summarized. 15 most recent messages always preserved verbatim. |
+| **`egress.py`** | Enterprise egress filter. When `VXIS_EGRESS_STRICT=1`, builds an allowlist from the target URL and blocks sandbox outbound to non-target hosts. |
+| **`tools/`** | Subpackage with 23 BrainTool implementations. See [`tools/README.md`](tools/README.md). |
 
-## Brain backends (three, only AgentBrain is live in Phase A)
+## Brain backends (three, only AgentBrain is live)
 
 | File | Backend | Status |
 |---|---|---|
-| `brain.py` → `AgentBrain` | LLM API (OpenAI / Anthropic / Gemini / DeepSeek fallback chain) | **LIVE** — Phase A default |
+| `brain.py` → `AgentBrain` | LLM API (OpenAI / Anthropic / Gemini / DeepSeek fallback chain) | **LIVE** |
 | `brain_interactive.py` → `InteractiveBrain` | stdin/stdout NDJSON — external Claude Code process | Legacy (`vxis scan --interactive`) |
 | `brain_filebased.py` → `FileBasedBrain` | File-based protocol | Rarely used |
 
-All three implement `think()` which increments the unified `_BRAIN_DECISION_COUNT` counter via `_increment_brain_decision_count()`. This gives Phase A a single apples-to-apples "Brain is deciding" metric regardless of backend.
+All three implement `think()` which increments the unified `_BRAIN_DECISION_COUNT` counter. `brain_protocol.py` defines the shared Protocol.
 
-`brain_protocol.py` defines the shared Protocol that all three implement.
-
-## The ReAct loop (Phase A happy path)
+## The ReAct loop (live happy path)
 
 ```python
-# ScanAgentLoop.run() — scan_loop.py
-while not completed and iteration < max_iters:
+# ScanAgentLoop.run() — scan_loop.py (simplified)
+while not completed and iteration < max_iters:  # max_iters=300
     iteration += 1
-    actions = await brain.think_in_loop(state.messages, registry.describe_all())
+    messages = await compress_history(messages, brain)  # at 90K tokens
+    dashboard = _build_scan_dashboard()  # compact progress summary
+    actions = await brain.think_in_loop(messages + [dashboard], registry.describe_all())
+    actions = actions[:1]  # Strix pattern: 1 tool per message
     for (tool_name, args) in actions:
         result = await registry.dispatch(tool_name, args)
         state.add_message("tool", {"name": tool_name, "args": args, "result": result})
         if tool_name == "finish_scan" and result.ok:
-            completed = True
-            break
+            completed = True; break
+    # Auto-orchestration safety net fires here (login/ffuf/nuclei/sqlmap)
+    # Egress filter checks here (enterprise mode)
 ```
 
-## `think_in_loop` — how the prompt is assembled
+## Smart 3-tier history (`_build_smart_history`)
 
-1. `AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)` — uses the dynamic catalog from `registry.describe_all()`. The template uses `{{…}}` for literal JSON braces and `{available_tools}` as the only real placeholder.
-2. `LOOP_PROMPT_ADAPTER + "\n" + formatted_body` — **concatenate after format**, never before (the adapter uses single braces and cannot go through `.format()`). This is guarded by `test_think_in_loop_adapter_concatenation_no_brace_explosion`.
-3. User prompt: last 20 messages' digest + JSON output schema reminder.
+Instead of a flat window of the last N messages, `AgentBrain` builds a compacted view:
+
+| Tier | Content | Detail |
+|---|---|---|
+| T1 — FULL | Last 3 iterations | Complete tool calls, args, results |
+| T2 — COMPACT | Older iterations | `tool:name` + summary only |
+| T3 — PINNED | High-value messages (any age) | Dashboard, critic, findings, verify, system hints |
+
+Pinned tools: `report_finding`, `verify_finding`, `fingerprint_target`.
+Pinned keywords: `SCAN DASHBOARD`, `CRITIC REVIEW`, `SYSTEM HINT`, `AUTO-RECON`, `BELIEF STATE`, `STICKY HINT`.
+
+## Auto-orchestration safety net
+
+Triggers in `scan_loop.py` that fire when Brain hasn't reached for critical tools:
+
+| Trigger | Fires at | What |
+|---|---|---|
+| auto-login | iter 5+ (password form detected) | SQLi bypass creds on login forms |
+| auto-ffuf | iter 10 | Directory bruteforce with common wordlist |
+| auto-nuclei | iter 12 | nuclei with web templates |
+| auto-sqlmap | iter 18+ | Test endpoints that returned 500 errors |
+
+## `think_in_loop` — prompt assembly
+
+1. `AGENT_SYSTEM_PROMPT.format(available_tools=tools_text)` — dynamic catalog from `registry.describe_all()`. Template uses `{{…}}` for literal JSON braces.
+2. `LOOP_PROMPT_ADAPTER + "\n" + formatted_body` — **concatenate after format**, never before (adapter uses single braces). Guarded by regression test.
+3. User prompt: smart 3-tier history digest + scan dashboard + JSON output schema.
 4. `_call_llm_with_fallback(system, user)` through `asyncio.to_thread`.
-5. `_parse_response(text)` returns `list[AgentAction]`, mapped to `list[(tool_name, args_dict)]`.
+5. `_parse_response(text)` returns `list[AgentAction]` → `list[(tool_name, args_dict)]`.
 
-## Legacy / supporting files (still present, some used by old pipeline)
+## LLM memory compression
+
+`memory_compressor.py`: when history exceeds 90K tokens (~360K chars), messages are chunked in groups of 10 and summarized by the LLM. Summaries preserve vulnerabilities, credentials, failed attempts, and architecture insights. 15 most recent messages are always verbatim. Compression is best-effort (failure falls through silently).
+
+## Legacy / supporting files (still present)
 
 | File | Role |
 |---|---|
 | `agents/` | Sub-package with legacy 63-agent fleet from old pipeline |
 | `base.py` | Base `AgentObservation`, `AgentAction`, `AgentStep` dataclasses |
-| `business_logic.py` | Legacy business-logic attack agent |
 | `context.py` | `AgentContext` (legacy, separate from `ScanContext`) |
 | `director.py` | Legacy `DirectorAgent` for phase dispatch |
-| `evidence.py` | Evidence aggregation (legacy) |
 | `executor.py` | Legacy action executor (pre-ScanAgentLoop) |
 | `memory.py` | Memory store (legacy knowledge base per scan) |
-| `registry.py` | Legacy agent registry |
-| `report_writer.py` | Report drafting helpers |
 | `runner.py` | Legacy `AgentRunner` with 63-agent orchestration |
-| `sandbox.py` | Legacy sandbox (pre-Docker) |
-| `threat_modeling.py` | Threat model synthesis |
-| `waf_bypass.py` | WAF bypass technique catalog |
 
-These will be pruned in Phase B cleanup once ScanAgentLoop is fully established and nothing else imports them.
-
-## Phase A brain-related instrumentation
+## Instrumentation
 
 Three module-level counters in `brain.py`, all thread-safe:
 
 ```python
 get_llm_call_count()         # Incremented at entry of _call_llm_direct
 get_brain_decision_count()   # Incremented at entry of every think() / think_in_loop()
-# (peak_context_bytes lives on ScanContext, not brain.py)
-
 reset_llm_call_count()
 reset_brain_decision_count()
 ```
 
-`ScanPipelineV2` resets both before each scan and prints them in the `VXIS_BENCHMARK` line at the end.
+`ScanLoopState` also tracks: `peak_context_bytes`, `verdict_counts` (CONFIRMED/UNCONFIRMED/REFUTED), `refuted_findings`, `confirmed_findings`.
 
 ## Critical rules for future edits
 
 - **Do NOT modify `AgentBrain.think()`** — it is legacy but still referenced. Add siblings instead.
 - **Do NOT modify `AGENT_SYSTEM_PROMPT` body** — use `LOOP_PROMPT_ADAPTER` for overrides.
 - **Never pass `LOOP_PROMPT_ADAPTER` through `.format()`** — brace escape bug (see regression test).
+- **1 tool per message** — `actions[:1]` in scan_loop.py. Do not remove this.
 - Counter increments must happen AFTER the `is_done` / `max_steps` early-return (don't count skipped steps).

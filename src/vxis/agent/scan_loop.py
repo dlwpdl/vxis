@@ -44,24 +44,42 @@ class ScanLoopState:
             self.peak_context_bytes = current
         return current
 
-CRITIC_PROMPT_TEMPLATE = """\
-You are a senior pentest strategist reviewing an in-progress scan.
-Do NOT emit tool calls. Output a SHORT critique (2-5 sentences) covering:
-1. What has been discovered so far (summarize findings)
-2. What is missing or unexplored (be specific — name endpoints/techniques)
-3. Concrete next action(s) the executor agent should take
-4. Whether to continue probing OR call finish_scan
+DIRECTOR_PROMPT_TEMPLATE = """\
+You are the STRATEGIC DIRECTOR of a pentesting scan. The executor agent
+(a weaker model) is stuck repeating the same actions. YOUR job: decide
+the EXACT next tool call the executor should make.
+
+Output ONLY a JSON object — no prose, no explanation:
+{{"tool": "<tool_name>", "args": {{...}}}}
+
+Available tools: fingerprint_target, browser_navigate, browser_analyze_dom,
+browser_fill_form, browser_click, browser_eval_js, browser_get_cookies,
+browser_screenshot, shell_exec, python_exec, http_request, load_playbook,
+report_finding, query_findings, link_chain, think, finish_scan.
+
+shell_exec runs inside Docker with: sqlmap, nuclei, ffuf, nmap, curl.
+Nuclei templates: /root/nuclei-templates/http/{{cves,exposures,default-logins,misconfiguration}}/
+Wordlist: /usr/share/dirb/wordlists/common.txt
 
 TARGET: {target}
 ITERATION: {iteration}/{max_iters}
-FINDINGS SO FAR: {finding_count}
+FINDINGS: {finding_count}
+
+ATTACK VECTOR STATUS:
+{vector_status}
+
 RECENT ACTIONS (last 10):
 {recent_actions}
 
 CURRENT FINDINGS:
 {findings_list}
 
-Your critique:"""
+Pick the MOST VALUABLE untested action. Prefer:
+1. shell_exec with sqlmap/nuclei on known endpoints
+2. browser_fill_form with SQLi/XSS payloads on forms
+3. browser_eval_js to check tokens/storage
+4. python_exec for custom fuzzing scripts
+Do NOT pick browser_get_cookies or browser_navigate to the same URL again."""
 
 
 class ScanAgentLoop:
@@ -187,17 +205,18 @@ class ScanAgentLoop:
         lines.append("═══ Pick a NEW action you haven't tried. Do NOT repeat previous calls. ═══")
         return "\n".join(lines)
 
-    async def _critic_review(self) -> str | None:
-        """Dual Brain critic: every N iterations, ask a stronger model to
-        review progress and suggest next direction. Returns the critique
-        text to inject as a user message, or None if unavailable.
+    async def _director_decide(self) -> tuple[str, dict[str, Any]] | None:
+        """Strategic Director: stronger model decides the EXACT next tool call.
 
-        Uses the same brain instance but calls _call_llm_with_fallback
-        directly with the critic prompt (no tool catalog). If gpt-5.4 full
-        is available via OPENAI_API_KEY, it will be used instead of the
-        loop's mini model for the critique.
+        Called every critic_interval iterations. Unlike the old critic (which
+        gave prose advice Brain ignored), the director outputs executable JSON
+        that the scan loop dispatches directly. This is the hybrid pattern:
+        gpt-5.4 full for strategy, gpt-5.4-mini for routine execution.
+
+        Returns (tool_name, args) or None if unavailable.
         """
         import asyncio
+        import json as _jd
         if self.brain is None or not hasattr(self.brain, "_call_llm_with_fallback"):
             return None
         try:
@@ -205,7 +224,8 @@ class ScanAgentLoop:
             current_findings = _get_findings()
         except Exception:
             current_findings = []
-        # Build a compact recent-action summary
+
+        # Build recent action summary
         recent: list[str] = []
         for m in self.state.messages[-20:]:
             c = m.get("content")
@@ -213,21 +233,26 @@ class ScanAgentLoop:
                 name = c.get("name", "?")
                 summary = (c.get("result") or {}).get("summary", "")[:100]
                 recent.append(f"  {name}: {summary}")
+
         findings_summary = "\n".join(
             f"  [{f['severity']}] {f['finding_type']}: {f.get('title','')[:80]}"
             for f in current_findings[:10]
         ) or "  (none yet)"
-        prompt = CRITIC_PROMPT_TEMPLATE.format(
+
+        # Build vector status from dashboard
+        vector_status = self._build_scan_dashboard()
+
+        prompt = DIRECTOR_PROMPT_TEMPLATE.format(
             target=self.state.target,
             iteration=self.state.iteration,
             max_iters=self.state.max_iters,
             finding_count=len(current_findings),
+            vector_status=vector_status,
             recent_actions="\n".join(recent[-10:]) or "  (no actions)",
             findings_list=findings_summary,
         )
-        # Temporarily switch to gpt-5.4 full for the critic call if OpenAI is
-        # the current provider. This gives stronger reasoning at negligible cost
-        # (one call per critic_interval iterations).
+
+        # Use gpt-5.4 full for strategic decision
         import os
         orig_model = getattr(self.brain, "_model", None)
         use_stronger = False
@@ -237,23 +262,44 @@ class ScanAgentLoop:
             and orig_model
             and "mini" in str(orig_model)
         ):
-            self.brain._model = "gpt-5.4"  # upgrade for critic only
+            self.brain._model = "gpt-5.4"
             use_stronger = True
+
         try:
             response = await asyncio.to_thread(
                 self.brain._call_llm_with_fallback,
-                "You are a senior pentest strategist. Output prose only, no JSON, no tool calls.",
+                "Output ONLY a JSON object: {\"tool\": \"...\", \"args\": {...}}. No prose.",
                 prompt,
             )
         except Exception as e:
-            logger.warning("critic review failed: %s", e)
+            logger.warning("director_decide failed: %s", e)
             return None
         finally:
             if use_stronger and orig_model is not None:
                 self.brain._model = orig_model
+
         if not response:
             return None
-        return response.strip()[:1500]
+
+        # Parse the JSON tool call
+        try:
+            # Try to extract JSON from response
+            text = response.strip()
+            # Handle markdown fences
+            if "```" in text:
+                import re
+                m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+                if m:
+                    text = m.group(1)
+            data = _jd.loads(text)
+            tool = str(data.get("tool", ""))
+            args = data.get("args", {})
+            if tool and tool in self.registry.list_tools():
+                logger.info("director: decided %s(%s)", tool, str(args)[:100])
+                return (tool, args if isinstance(args, dict) else {})
+        except Exception:
+            logger.debug("director: failed to parse response: %s", response[:200])
+        return None
 
     async def run(self) -> dict[str, Any]:
         import json as _json
@@ -1067,10 +1113,10 @@ class ScanAgentLoop:
                     except Exception:
                         logger.exception("auto-sqlmap failed")
 
-            # Dual Brain critic check: every N iterations, ask a stronger
-            # model to review progress and inject strategic guidance.
-            # Only fires if we have made enough iterations since last check
-            # AND the loop hasn't naturally completed.
+            # Strategic Director: every N iterations, a stronger model (gpt-5.4)
+            # decides the EXACT next tool call and the scan loop executes it
+            # directly. This is the hybrid brain pattern — strong model for
+            # strategy, weak model for routine.
             if (
                 not self.state.completed
                 and self.critic_interval > 0
@@ -1079,23 +1125,31 @@ class ScanAgentLoop:
             ):
                 self._last_critic_iter = self.state.iteration
                 try:
-                    critique = await self._critic_review()
+                    director_action = await self._director_decide()
                 except Exception:
-                    logger.exception("critic_review raised")
-                    critique = None
-                if critique:
-                    self.state.add_message(
-                        "user",
-                        (
-                            "CRITIC REVIEW (strategic guidance from the senior "
-                            f"strategist, iter {self.state.iteration}):\n\n{critique}\n\n"
-                            "Incorporate this guidance in your next action."
-                        ),
-                    )
-                    logger.info(
-                        "iter %d: critic review injected (%d chars)",
-                        self.state.iteration, len(critique),
-                    )
+                    logger.exception("director_decide raised")
+                    director_action = None
+                if director_action:
+                    d_name, d_args = director_action
+                    # Execute the director's decision directly
+                    try:
+                        d_result = await self.registry.dispatch(d_name, d_args)
+                        self.state.add_message("tool", {
+                            "name": d_name,
+                            "args": d_args,
+                            "result": {
+                                "ok": d_result.ok,
+                                "summary": f"[DIRECTOR] {d_result.summary}",
+                                "data": d_result.data,
+                            },
+                        })
+                        logger.info(
+                            "iter %d: director executed %s → %s",
+                            self.state.iteration, d_name,
+                            "ok" if d_result.ok else "fail",
+                        )
+                    except Exception:
+                        logger.exception("director action dispatch failed")
         return {
             "target": self.state.target,
             "completed": self.state.completed,
