@@ -316,6 +316,62 @@ class ScanPipeline:
         except Exception:
             ctx.attack_chains = []
 
+        # 7.1 Populate ctx.score_tracker from findings that now carry vector_id.
+        # This enables the full VXIS scoring engine (vector coverage, exploitation
+        # reach, chain intelligence) instead of the simplified severity heuristic.
+        try:
+            from vxis.scoring.tracker import AttackChain as _AttackChain
+            for fd in finding_dicts:
+                vid = str(fd.get("vector_id", "")).strip()
+                fid = str(fd.get("id", "")).strip()
+                sev = str(fd.get("severity", "medium")).lower()
+                level = {"critical": 3, "high": 2, "medium": 1, "low": 0, "informational": 0}.get(sev, 1)
+                if vid:
+                    try:
+                        ctx.score_tracker.record_vector_attempt(vid)
+                        ctx.score_tracker.record_finding(fid, vid, level)
+                    except Exception:
+                        logger.exception("score_tracker.record_finding failed for %s", fid)
+            # Record chains in the tracker so chain_intelligence dimension is scored.
+            for idx, cd in enumerate(chain_dicts):
+                chain_fids = list(cd.get("finding_ids", []))
+                if len(chain_fids) >= 2:
+                    try:
+                        sc = _AttackChain(
+                            chain_id=str(cd.get("id", f"CHAIN-{idx:03d}")),
+                            description_en=str(cd.get("rationale", "")),
+                            description_ko=str(cd.get("rationale", "")),
+                            final_impact=str(cd.get("crown_jewel", "")),
+                        )
+                        for step_i, step_fid in enumerate(chain_fids):
+                            # Look up vector_id for this finding
+                            step_vid = next(
+                                (str(f.get("vector_id", "")) for f in finding_dicts if f.get("id") == step_fid),
+                                "",
+                            )
+                            step_sev = next(
+                                (str(f.get("severity", "medium")) for f in finding_dicts if f.get("id") == step_fid),
+                                "medium",
+                            )
+                            step_level = {"critical": 3, "high": 2, "medium": 1, "low": 0}.get(step_sev.lower(), 1)
+                            sc.add_step(
+                                vector_id=step_vid or "UNKNOWN",
+                                finding_id=step_fid,
+                                level=step_level,
+                                description_en=f"Step {step_i + 1} of attack chain",
+                                description_ko=f"공격 체인 {step_i + 1}단계",
+                            )
+                        ctx.score_tracker.record_chain(sc)
+                    except Exception:
+                        logger.exception("score_tracker.record_chain failed for chain %d", idx)
+            ctx.score_tracker.record_phase_complete(
+                "scan_loop",
+                findings_count=len(finding_dicts),
+                vectors_attempted=list(ctx.score_tracker.vectors_attempted),
+            )
+        except Exception:
+            logger.exception("score_tracker population failed — scoring will fall back to heuristic")
+
         # 7.5 Shutdown browser if Eyes was used during the scan
         try:
             from vxis.agent.tools.browser_tools import shutdown_browser
@@ -333,9 +389,34 @@ class ScanPipeline:
         except Exception:
             logger.exception("Report generation failed — continuing")
 
-        # 10. Compute VXIS score
-        score_value, grade = _compute_vxis_score(ctx)
-        ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
+        # 10. Compute VXIS score — use the full 5-dimension ScoringEngine when
+        # score_tracker has vector data; fall back to the severity heuristic otherwise.
+        try:
+            from vxis.scoring.engine import ScoringEngine
+            if ctx.score_tracker.vectors_attempted:
+                engine = ScoringEngine(target_type=ctx.target_type)
+                vxis_full = engine.calculate(ctx.score_tracker, finding_dicts, scan_id=ctx.scan_id)
+                ctx.vxis_score = vxis_full  # VXISScore exposes .total and .grade
+                logger.info(
+                    "VXIS_FULL_SCORE total=%.1f grade=%s vectors=%d/%d chains=%d",
+                    vxis_full.total, vxis_full.grade,
+                    len(ctx.score_tracker.vectors_attempted),
+                    len(ctx.score_tracker.vectors_found),
+                    len(ctx.score_tracker.attack_chains),
+                )
+                print(
+                    f"VXIS_FULL_SCORE total={vxis_full.total:.1f} grade={vxis_full.grade} "
+                    f"vector_coverage={vxis_full.vector_coverage.score:.1f} "
+                    f"exploitation_reach={vxis_full.exploitation_reach.score:.1f} "
+                    f"chain_intelligence={vxis_full.chain_intelligence.score:.1f}"
+                )
+            else:
+                score_value, grade = _compute_vxis_score(ctx)
+                ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
+        except Exception:
+            logger.exception("Full VXIS scoring failed — falling back to heuristic")
+            score_value, grade = _compute_vxis_score(ctx)
+            ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
 
         # 11. Populate phase logs (duration_seconds is a computed @property on ctx)
         try:
@@ -372,7 +453,7 @@ class ScanPipeline:
         # summary line for operators.
         try:
             from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            mitre = coverage_report(_get_finding_dicts())
             logger.info(
                 "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
                 len(mitre["techniques_covered"]),
