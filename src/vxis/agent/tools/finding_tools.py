@@ -23,6 +23,142 @@ _chains: list[dict[str, Any]] = []
 
 _VALID_SEVERITIES = ("critical", "high", "medium", "low", "informational")
 
+# Automatic finding_type → VXIS vector ID mapping.
+# Enables vector coverage scoring even when Brain omits vector_id.
+# Keys are snake_case finding_type values; values are canonical vector IDs.
+_FINDING_TYPE_TO_VECTOR: dict[str, str] = {
+    # SQL Injection
+    "sql_injection": "WEB-SQLI-001",
+    "sqli": "WEB-SQLI-001",
+    "blind_sql_injection": "WEB-SQLI-002",
+    "time_based_sql_injection": "WEB-SQLI-003",
+    "union_sql_injection": "WEB-SQLI-004",
+    "error_based_sql_injection": "WEB-SQLI-005",
+    "second_order_sql_injection": "WEB-SQLI-006",
+    "nosql_injection": "WEB-NOSQL-001",
+    "mongodb_injection": "WEB-NOSQL-001",
+    "nosql_operator_injection": "WEB-NOSQL-002",
+    # Command Injection
+    "command_injection": "WEB-CMDI-001",
+    "os_command_injection": "WEB-CMDI-001",
+    "remote_command_execution": "WEB-CMDI-002",
+    "rce": "WEB-CMDI-002",
+    "ldap_injection": "WEB-LDAP-001",
+    "xpath_injection": "WEB-XPATH-001",
+    "ssti": "WEB-SSTI-001",
+    "template_injection": "WEB-SSTI-001",
+    # XSS
+    "xss_reflected": "WEB-XSS-001",
+    "reflected_xss": "WEB-XSS-001",
+    "xss": "WEB-XSS-001",
+    "xss_stored": "WEB-XSS-002",
+    "stored_xss": "WEB-XSS-002",
+    "persistent_xss": "WEB-XSS-002",
+    "xss_dom": "WEB-XSS-003",
+    "dom_xss": "WEB-XSS-003",
+    "mutation_xss": "WEB-XSS-004",
+    # Access Control
+    "idor": "WEB-AC-001",
+    "insecure_direct_object_reference": "WEB-AC-001",
+    "broken_object_level_authorization": "WEB-AC-001",
+    "horizontal_privilege_escalation": "WEB-AC-002",
+    "vertical_privilege_escalation": "WEB-AC-003",
+    "privilege_escalation": "WEB-AC-003",
+    "broken_access_control": "WEB-AC-001",
+    "directory_traversal": "WEB-AC-004",
+    "path_traversal": "WEB-AC-004",
+    "forced_browsing": "WEB-AC-005",
+    # API Security
+    "mass_assignment": "WEB-API-001",
+    "rate_limiting": "WEB-API-002",
+    "missing_rate_limit": "WEB-API-002",
+    "graphql_introspection": "WEB-API-003",
+    "graphql_batching": "WEB-API-004",
+    "http_verb_tampering": "WEB-API-005",
+    "grpc_reflection": "WEB-API-006",
+    "grpc_method_exposure": "WEB-API-007",
+    "bopla": "WEB-API-008",
+    "bfla": "WEB-API-009",
+    "broken_function_level_authorization": "WEB-API-009",
+    # Authentication
+    "brute_force": "WEB-AUTH-001",
+    "credential_brute_force": "WEB-AUTH-001",
+    "default_credentials": "WEB-AUTH-002",
+    "jwt_vulnerability": "WEB-AUTH-003",
+    "jwt_none_algorithm": "WEB-AUTH-003",
+    "jwt_flaws": "WEB-AUTH-003",
+    "session_fixation": "WEB-AUTH-004",
+    "session_hijacking": "WEB-AUTH-005",
+    "weak_password_policy": "WEB-AUTH-006",
+    "password_reset_flaw": "WEB-AUTH-007",
+    "oauth_bypass": "WEB-AUTH-008",
+    "saml_bypass": "WEB-AUTH-009",
+    # Business Logic
+    "negative_value_abuse": "WEB-BIZ-001",
+    "state_transition_bypass": "WEB-BIZ-002",
+    "race_condition_business": "WEB-BIZ-003",
+    "replay_attack": "WEB-BIZ-004",
+    "workflow_bypass": "WEB-BIZ-005",
+    # Cryptography
+    "weak_tls": "WEB-CRYPTO-001",
+    "weak_hashing": "WEB-CRYPTO-002",
+    "hardcoded_secret": "WEB-CRYPTO-003",
+    "hardcoded_credentials": "WEB-CRYPTO-003",
+    "weak_randomness": "WEB-CRYPTO-004",
+    # CSRF / SSRF / XXE
+    "csrf": "WEB-CSRF-001",
+    "cross_site_request_forgery": "WEB-CSRF-001",
+    "deserialization": "WEB-DESER-001",
+    "insecure_deserialization": "WEB-DESER-001",
+    "ssrf": "WEB-SSRF-001",
+    "server_side_request_forgery": "WEB-SSRF-001",
+    "blind_ssrf": "WEB-SSRF-002",
+    "ssrf_internal_network": "WEB-SSRF-003",
+    "xxe": "WEB-XXE-001",
+    "xml_external_entity": "WEB-XXE-001",
+    "xml_injection": "WEB-XXE-001",
+    # File / WebSocket / Race
+    "file_upload": "WEB-UPLOAD-001",
+    "unrestricted_file_upload": "WEB-UPLOAD-001",
+    "race_condition": "WEB-RACE-001",
+    "websocket": "WEB-WSS-001",
+    "websocket_vulnerability": "WEB-WSS-001",
+    # Misconfiguration
+    "debug_endpoint": "WEB-MISCONF-001",
+    "debug_mode": "WEB-MISCONF-001",
+    "default_configuration": "WEB-MISCONF-002",
+    "verbose_errors": "WEB-MISCONF-003",
+    "information_disclosure": "WEB-MISCONF-003",
+    "missing_security_headers": "WEB-MISCONF-004",
+    "cors": "WEB-MISCONF-005",
+    "cors_misconfiguration": "WEB-MISCONF-005",
+    "open_redirect": "WEB-MISCONF-006",
+    # Modern Injection
+    "llm_injection": "WEB-INJECT-018",
+    "ai_injection": "WEB-INJECT-018",
+    "prompt_injection": "WEB-INJECT-021",
+    "prototype_pollution": "WEB-INJECT-022",
+    "csp_bypass": "WEB-INJECT-023",
+    "cache_poisoning": "WEB-INJECT-024",
+    # Infrastructure
+    "subdomain_takeover": "WEB-INFRA-001",
+    "dns_zone_transfer": "WEB-INFRA-002",
+    "cloud_misconfiguration": "WEB-INFRA-003",
+    "exposed_git": "WEB-INFRA-004",
+    "cve_exploitation": "WEB-INFRA-005",
+    "exposed_env_file": "WEB-INFRA-006",
+}
+
+
+def _infer_vector_id(finding_type: str) -> str | None:
+    """Infer a VXIS vector ID from a finding_type string.
+
+    Returns the matching vector ID or None if no mapping exists.
+    Case-insensitive; normalises hyphens to underscores before lookup.
+    """
+    normalised = finding_type.lower().strip().replace("-", "_").replace(" ", "_")
+    return _FINDING_TYPE_TO_VECTOR.get(normalised)
+
 
 def _reset_for_tests() -> None:
     """Reset module-level state. Called from test fixtures, NOT from production."""
@@ -59,6 +195,13 @@ class ReportFindingTool:
             "evidence": {"type": "string", "description": "Raw evidence: HTTP req/resp, payload, log excerpt"},
             "remediation": {"type": "string"},
             "cwe": {"type": "string", "description": "e.g. 'CWE-89'"},
+            "vector_id": {
+                "type": "string",
+                "description": (
+                    "VXIS attack vector ID (e.g. 'WEB-SQLI-001', 'WEB-XSS-002'). "
+                    "Optional — auto-inferred from finding_type when omitted."
+                ),
+            },
         },
         "required": ["title", "severity", "finding_type", "affected_component", "description"],
     }
@@ -156,6 +299,10 @@ class ReportFindingTool:
                     ),
                 )
 
+        # Resolve vector_id: explicit > auto-infer from finding_type
+        explicit_vid = str(kwargs.get("vector_id", "")).strip()
+        vector_id = explicit_vid or (_infer_vector_id(str(kwargs["finding_type"])) or "")
+
         finding_id = f"VXIS-{len(_findings) + 1:04d}"
         finding = {
             "id": finding_id,
@@ -167,9 +314,14 @@ class ReportFindingTool:
             "evidence": str(kwargs.get("evidence", "")),
             "remediation": str(kwargs.get("remediation", "")),
             "cwe": str(kwargs.get("cwe", "")),
+            "vector_id": vector_id,
         }
         _findings.append(finding)
-        logger.info("[Finding] %s [%s] %s — %s", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80])
+        logger.info(
+            "[Finding] %s [%s] %s — %s (vector=%s)",
+            finding_id, severity.upper(), kwargs["finding_type"],
+            str(kwargs["title"])[:80], vector_id or "none",
+        )
 
         return ToolResult(
             ok=True,
