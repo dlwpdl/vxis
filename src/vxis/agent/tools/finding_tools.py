@@ -46,7 +46,14 @@ class ReportFindingTool:
     description = (
         "Submit a discovered vulnerability. Returns the assigned finding ID. "
         "Include enough detail (title, severity, component, evidence, description) "
-        "for a penetration test report. The ID is stable and can be used in link_chain."
+        "for a penetration test report. The ID is stable and can be used in link_chain. "
+        "IMPORTANT: always supply vector_id to enable scoring — e.g. WEB-SQLI-001 for SQL injection, "
+        "WEB-XSS-001 for reflected XSS, WEB-AC-002 for IDOR, WEB-AUTH-001 for broken auth, "
+        "WEB-SSRF-001 for SSRF, WEB-CMDI-001 for command injection, WEB-MISCONF-001 for misconfig. "
+        "Full list: WEB-SQLI-{001-006}, WEB-NOSQL-{001-002}, WEB-CMDI-{001-002}, WEB-XSS-{001-004}, "
+        "WEB-SSRF-{001-003}, WEB-AUTH-{001-013}, WEB-AC-{001-005}, WEB-MISCONF-{001-006}, "
+        "WEB-CRYPTO-{001-004}, WEB-XXE-001, WEB-DESER-001, WEB-UPLOAD-001, WEB-RACE-001, "
+        "WEB-CSRF-001, WEB-API-{001-009}, WEB-BIZ-{001-005}, WEB-SSTI-001, WEB-LDAP-001."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -59,6 +66,18 @@ class ReportFindingTool:
             "evidence": {"type": "string", "description": "Raw evidence: HTTP req/resp, payload, log excerpt"},
             "remediation": {"type": "string"},
             "cwe": {"type": "string", "description": "e.g. 'CWE-89'"},
+            "vector_id": {
+                "type": "string",
+                "description": (
+                    "VXIS attack vector registry ID — links this finding to the scoring system. "
+                    "Always supply when known. Examples: WEB-SQLI-001 (SQL union), WEB-SQLI-002 (blind), "
+                    "WEB-XSS-001 (reflected), WEB-XSS-002 (stored), WEB-XSS-003 (DOM), "
+                    "WEB-SSRF-001, WEB-CMDI-001, WEB-AUTH-001 (broken auth), WEB-AUTH-002 (brute force), "
+                    "WEB-AC-001 (unauth access), WEB-AC-002 (IDOR), WEB-MISCONF-001 (headers), "
+                    "WEB-CRYPTO-001 (TLS), WEB-API-001 (mass assignment), WEB-RACE-001, WEB-CSRF-001, "
+                    "WEB-SSTI-001, WEB-XXE-001, WEB-DESER-001, WEB-UPLOAD-001, WEB-BIZ-001."
+                ),
+            },
         },
         "required": ["title", "severity", "finding_type", "affected_component", "description"],
     }
@@ -168,8 +187,13 @@ class ReportFindingTool:
             "remediation": str(kwargs.get("remediation", "")),
             "cwe": str(kwargs.get("cwe", "")),
         }
+        # Store vector_id when provided — links finding to the VXIS scoring registry
+        # so score_compute can call tracker.record_vector_attempt(vector_id).
+        raw_vid = kwargs.get("vector_id", "")
+        if raw_vid:
+            finding["vector_id"] = str(raw_vid).strip()
         _findings.append(finding)
-        logger.info("[Finding] %s [%s] %s — %s", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80])
+        logger.info("[Finding] %s [%s] %s — %s (vector=%s)", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80], finding.get("vector_id", "—"))
 
         return ToolResult(
             ok=True,
