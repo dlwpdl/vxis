@@ -129,11 +129,84 @@ def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str
 
 
 def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
-    """Compute a simple VXIS score from finding counts. Returns (score, grade).
+    """Compute VXIS score via the full ScoringEngine with vector-coverage tracking.
 
-    Phase A uses a severity-weighted heuristic. Phase B will use the full
-    scoring module once findings carry richer metadata.
+    Reads vector_id and exploitation_level from the raw finding dicts (stored by
+    report_finding) to populate ScoreTracker, then runs ScoringEngine for all 5
+    dimensions (vector_coverage, exploitation_reach, chain_intelligence,
+    finding_precision, completeness).
+
+    Falls back to a severity-weighted heuristic when scoring modules are
+    unavailable — preserving the pre-existing behaviour so no scan breaks.
     """
+    finding_dicts = _get_finding_dicts()
+    chain_dicts = _get_chain_dicts()
+    target_type = getattr(ctx, "target_type", "web")
+    scan_id = getattr(ctx, "scan_id", "")
+
+    try:
+        from vxis.scoring.engine import ScoringEngine
+        from vxis.scoring.tracker import AttackChain, ScoreTracker
+
+        tracker = ScoreTracker(target_type=target_type)
+
+        for f in finding_dicts:
+            fid = str(f.get("id", ""))
+            vid = str(f.get("vector_id", ""))
+            level = max(0, min(4, int(f.get("exploitation_level", 1) or 1)))
+            if vid and fid:
+                try:
+                    tracker.record_vector_attempt(vid)
+                    tracker.record_finding(fid, vid, level)
+                except Exception:
+                    pass
+
+        for chain in chain_dicts:
+            try:
+                ac = AttackChain(chain_id=str(chain.get("id", "")))
+                for fid in chain.get("finding_ids", []):
+                    f_data = next((f for f in finding_dicts if f.get("id") == fid), {})
+                    vid = str(f_data.get("vector_id", ""))
+                    level = max(0, min(4, int(f_data.get("exploitation_level", 1) or 1)))
+                    if vid:
+                        ac.add_step(
+                            vector_id=vid,
+                            finding_id=str(fid),
+                            level=level,
+                            description_en=str(chain.get("rationale", "")),
+                            description_ko=str(chain.get("rationale", "")),
+                        )
+                if ac.depth >= 2:
+                    tracker.record_chain(ac)
+            except Exception:
+                pass
+
+        engine = ScoringEngine(target_type=target_type)
+        engine_findings = [
+            {"id": str(f.get("id", "")), "severity": str(f.get("severity", "medium"))}
+            for f in finding_dicts
+        ]
+        score = engine.calculate(tracker, engine_findings, scan_id=scan_id)
+
+        logger.info(
+            "VXIS_SCORE total=%.1f grade=%s vector_coverage=%.1f%% vectors=%d/%d",
+            score.total,
+            score.grade,
+            score.vector_coverage.percentage * 100,
+            len(tracker.vectors_attempted),
+            engine._total_vectors,
+        )
+        print(
+            f"VXIS_SCORE total={score.total:.1f} grade={score.grade} "
+            f"vector_coverage={score.vector_coverage.percentage * 100:.1f}% "
+            f"vectors={len(tracker.vectors_attempted)}/{engine._total_vectors}"
+        )
+        return score.total, score.grade
+
+    except Exception as exc:
+        logger.debug("ScoringEngine unavailable, falling back to heuristic: %s", exc)
+
+    # Heuristic fallback — preserves pre-existing behaviour
     sev_weights = {
         "critical": 200,
         "high": 100,
@@ -142,22 +215,22 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         "info": 5,
         "informational": 5,
     }
-    score = 0.0
+    score_val = 0.0
     for f in ctx.findings:
         sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
-        score += sev_weights.get(sev, 5)
-    score = min(1000.0, score)
-    if score >= 700:
+        score_val += sev_weights.get(sev, 5)
+    score_val = min(1000.0, score_val)
+    if score_val >= 700:
         grade = "A"
-    elif score >= 400:
+    elif score_val >= 400:
         grade = "B"
-    elif score >= 200:
+    elif score_val >= 200:
         grade = "C"
-    elif score > 0:
+    elif score_val > 0:
         grade = "D"
     else:
         grade = "F"
-    return score, grade
+    return score_val, grade
 
 
 class _SimpleScore:
@@ -372,7 +445,7 @@ class ScanPipeline:
         # summary line for operators.
         try:
             from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            mitre = coverage_report(_get_finding_dicts())
             logger.info(
                 "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
                 len(mitre["techniques_covered"]),

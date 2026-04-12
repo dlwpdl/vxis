@@ -59,6 +59,27 @@ class ReportFindingTool:
             "evidence": {"type": "string", "description": "Raw evidence: HTTP req/resp, payload, log excerpt"},
             "remediation": {"type": "string"},
             "cwe": {"type": "string", "description": "e.g. 'CWE-89'"},
+            "vector_id": {
+                "type": "string",
+                "description": (
+                    "VXIS attack vector ID that this finding maps to. "
+                    "Examples: WEB-SQLI-001 (SQL injection), WEB-XSS-001 (reflected XSS), "
+                    "WEB-AUTH-001 (brute force), WEB-SSRF-001 (SSRF), WEB-AC-001 (IDOR), "
+                    "WEB-API-001 (mass assignment), WEB-MISCONF-001 (debug endpoint). "
+                    "Providing this enables vector-coverage scoring."
+                ),
+            },
+            "exploitation_level": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4,
+                "description": (
+                    "How deeply the vector was exploited: "
+                    "0=recon only, 1=vulnerability confirmed, "
+                    "2=exploit successful, 3=post-exploit (pivot/privesc), "
+                    "4=crown-jewel access. Defaults to 1."
+                ),
+            },
         },
         "required": ["title", "severity", "finding_type", "affected_component", "description"],
     }
@@ -157,6 +178,11 @@ class ReportFindingTool:
                 )
 
         finding_id = f"VXIS-{len(_findings) + 1:04d}"
+        raw_level = kwargs.get("exploitation_level")
+        try:
+            exploitation_level = max(0, min(4, int(raw_level))) if raw_level is not None else 1
+        except (TypeError, ValueError):
+            exploitation_level = 1
         finding = {
             "id": finding_id,
             "title": str(kwargs["title"]),
@@ -167,6 +193,8 @@ class ReportFindingTool:
             "evidence": str(kwargs.get("evidence", "")),
             "remediation": str(kwargs.get("remediation", "")),
             "cwe": str(kwargs.get("cwe", "")),
+            "vector_id": str(kwargs.get("vector_id", "")),
+            "exploitation_level": exploitation_level,
         }
         _findings.append(finding)
         logger.info("[Finding] %s [%s] %s — %s", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80])
