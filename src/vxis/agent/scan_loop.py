@@ -1106,6 +1106,16 @@ class ScanAgentLoop:
                                 for kw in ["is vulnerable", "injectable", "payload:", "type:"]
                             )
                             if is_injectable:
+                                # Detect sqlmap injection type to pick the most precise vector ID
+                                _stdout_lower = stdout.lower()
+                                if "time-based" in _stdout_lower or "time based" in _stdout_lower:
+                                    _sqli_vector = "WEB-SQLI-003"
+                                elif "boolean-based" in _stdout_lower or "boolean based" in _stdout_lower:
+                                    _sqli_vector = "WEB-SQLI-002"
+                                elif "error-based" in _stdout_lower or "error based" in _stdout_lower:
+                                    _sqli_vector = "WEB-SQLI-004"
+                                else:
+                                    _sqli_vector = "WEB-SQLI-001"  # union-based default
                                 # Auto-report — don't ask Brain, it won't do it
                                 await self.registry.dispatch("report_finding", {
                                     "title": f"SQL Injection confirmed by sqlmap on {target_url.split('?')[0]}",
@@ -1118,6 +1128,7 @@ class ScanAgentLoop:
                                         f"Evidence:\n{stdout[:1500]}"
                                     ),
                                     "evidence": stdout[:2000],
+                                    "vector_id": _sqli_vector,
                                 })
                                 self.state.add_message("user", (
                                     f"AUTO-EXPLOIT: sqlmap confirmed SQL injection on {target_url}!\n"
