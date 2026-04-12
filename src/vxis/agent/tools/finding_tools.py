@@ -59,6 +59,23 @@ class ReportFindingTool:
             "evidence": {"type": "string", "description": "Raw evidence: HTTP req/resp, payload, log excerpt"},
             "remediation": {"type": "string"},
             "cwe": {"type": "string", "description": "e.g. 'CWE-89'"},
+            "vector_id": {
+                "type": "string",
+                "description": (
+                    "VXIS attack vector ID from the registry, e.g. 'WEB-SQLI-001', "
+                    "'WEB-XSS-001', 'MOB-NET-001'. Include when you know the specific "
+                    "vector being exploited — this drives vector coverage scoring."
+                ),
+            },
+            "exploitation_level": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4,
+                "description": (
+                    "Exploitation depth: 0=recon, 1=confirmed, 2=exploited, "
+                    "3=post-exploit/pivot, 4=crown-jewel. Defaults to 1."
+                ),
+            },
         },
         "required": ["title", "severity", "finding_type", "affected_component", "description"],
     }
@@ -157,6 +174,13 @@ class ReportFindingTool:
                 )
 
         finding_id = f"VXIS-{len(_findings) + 1:04d}"
+
+        try:
+            exploitation_level = int(kwargs.get("exploitation_level") or 1)
+            exploitation_level = max(0, min(4, exploitation_level))
+        except (TypeError, ValueError):
+            exploitation_level = 1
+
         finding = {
             "id": finding_id,
             "title": str(kwargs["title"]),
@@ -167,6 +191,8 @@ class ReportFindingTool:
             "evidence": str(kwargs.get("evidence", "")),
             "remediation": str(kwargs.get("remediation", "")),
             "cwe": str(kwargs.get("cwe", "")),
+            "vector_id": str(kwargs.get("vector_id") or ""),
+            "exploitation_level": exploitation_level,
         }
         _findings.append(finding)
         logger.info("[Finding] %s [%s] %s — %s", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80])

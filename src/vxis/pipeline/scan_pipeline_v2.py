@@ -306,6 +306,28 @@ class ScanPipeline:
             except Exception:
                 logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
 
+        # 6.5 Wire finding_dicts into ctx.score_tracker so the full ScoringEngine
+        # can calculate vector coverage, exploitation reach, and chain intelligence.
+        # Findings that include a vector_id (set by the Brain via report_finding's
+        # new optional field) drive vector coverage; others are recorded without one.
+        for d in finding_dicts:
+            try:
+                fid = str(d.get("id", ""))
+                vid = str(d.get("vector_id") or "")
+                try:
+                    level = int(d.get("exploitation_level") or 1)
+                    level = max(0, min(4, level))
+                except (TypeError, ValueError):
+                    level = 1
+                if vid:
+                    ctx.score_tracker.record_vector_attempt(vid)
+                    ctx.score_tracker.record_finding(fid, vid, level)
+                    logger.debug(
+                        "[SCORE-WIRE] finding=%s vector=%s level=%d", fid, vid, level
+                    )
+            except Exception:
+                logger.debug("score_tracker wire-up failed for finding %s", d.get("id", "?"))
+
         # 7. Copy chains into ctx.attack_chains (stored as list[dict] per ScanContext typing)
         chain_dicts = _get_chain_dicts()
         try:
@@ -333,9 +355,29 @@ class ScanPipeline:
         except Exception:
             logger.exception("Report generation failed — continuing")
 
-        # 10. Compute VXIS score
-        score_value, grade = _compute_vxis_score(ctx)
-        ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
+        # 10. Compute VXIS score using the full ScoringEngine (5-dimension).
+        # Falls back to the simple heuristic if the engine is unavailable.
+        try:
+            from vxis.scoring.engine import ScoringEngine
+            engine = ScoringEngine(target_type=ctx.target_type)
+            vxis_score_obj = engine.calculate(
+                ctx.score_tracker,
+                ctx.findings,
+                scan_id=ctx.scan_id,
+            )
+            ctx.vxis_score = vxis_score_obj  # type: ignore[attr-defined]
+            logger.info(
+                "[SCORE] Full engine: total=%.1f grade=%s vc=%.0f er=%.0f ci=%.0f",
+                vxis_score_obj.total,
+                vxis_score_obj.grade,
+                vxis_score_obj.vector_coverage.score,
+                vxis_score_obj.exploitation_reach.score,
+                vxis_score_obj.chain_intelligence.score,
+            )
+        except Exception:
+            logger.exception("ScoringEngine failed — falling back to heuristic")
+            score_value, grade = _compute_vxis_score(ctx)
+            ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
 
         # 11. Populate phase logs (duration_seconds is a computed @property on ctx)
         try:
@@ -372,7 +414,7 @@ class ScanPipeline:
         # summary line for operators.
         try:
             from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            mitre = coverage_report(_get_finding_dicts())
             logger.info(
                 "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
                 len(mitre["techniques_covered"]),
