@@ -50,6 +50,8 @@ PAYLOADS: list[dict] = [
     # NoSQL
     {"type": "nosql", "payload": "{'$ne': null}", "detect": []},
     {"type": "nosql", "payload": "[$ne]=1", "detect": []},
+    {"type": "sqli", "payload": "' OR ''='", "detect": ["' OR ''='", 'syntax error', 'unexpected token', 'database error']},  # auto-added
+    {"type": "sqli", "payload": "$$' OR 1=1--$$", "detect": ['OR 1=1', 'syntax error', 'database error', 'unexpected end of input']},  # auto-added
     # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
 ]
 
