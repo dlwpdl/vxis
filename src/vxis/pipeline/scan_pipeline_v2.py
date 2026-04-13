@@ -11,11 +11,12 @@ Flow:
     5. Run the loop
     6. Copy findings from finding_tools._get_findings() into ctx.findings as
        Finding objects (using minimal valid field set)
-    7. Copy chains from finding_tools._get_chains() into ctx.attack_chains
-    8. If deferred actions accumulated, run _execute_deferred_actions
-    9. Generate the HTML report via ReportGenerator
-    10. Compute a simple VXIS score
-    11. Return ctx
+    7. Feed findings into ctx.score_tracker (vector_id + exploitation level)
+    8. Copy chains from finding_tools._get_chains() into ctx.attack_chains
+    9. If deferred actions accumulated, run _execute_deferred_actions
+    10. Generate the HTML report via ReportGenerator
+    11. Compute VXIS score via ScoringEngine (fallback: severity heuristic)
+    12. Return ctx
 
 Preserves the ScanPipeline constructor signature for backward compatibility
 with cli/main.py:590.
@@ -54,6 +55,172 @@ from vxis.agent.tools.memory_tools import record_scan_result as _record_scan_mem
 from vxis.pipeline.context import ScanContext
 
 logger = logging.getLogger(__name__)
+
+# ── Vector ID inference: finding_type → VXIS vector ID ────────────────────────
+# Used when the Brain doesn't supply an explicit vector_id.
+# Keys are snake_case finding_type values commonly emitted by the Brain.
+
+_WEB_TYPE_VECTOR: dict[str, str] = {
+    "sql_injection": "WEB-SQLI-001",
+    "sql_injection_union": "WEB-SQLI-001",
+    "sql_injection_boolean_blind": "WEB-SQLI-002",
+    "sql_injection_time_blind": "WEB-SQLI-003",
+    "sql_injection_error_based": "WEB-SQLI-004",
+    "sql_injection_second_order": "WEB-SQLI-006",
+    "nosql_injection": "WEB-NOSQL-001",
+    "command_injection": "WEB-CMDI-001",
+    "os_command_injection": "WEB-CMDI-001",
+    "rce": "WEB-CMDI-001",
+    "remote_code_execution": "WEB-CMDI-001",
+    "ldap_injection": "WEB-LDAP-001",
+    "xpath_injection": "WEB-XPATH-001",
+    "ssti": "WEB-SSTI-001",
+    "server_side_template_injection": "WEB-SSTI-001",
+    "xss": "WEB-XSS-001",
+    "xss_reflected": "WEB-XSS-001",
+    "cross_site_scripting": "WEB-XSS-001",
+    "xss_stored": "WEB-XSS-002",
+    "xss_dom": "WEB-XSS-003",
+    "ssrf": "WEB-SSRF-001",
+    "server_side_request_forgery": "WEB-SSRF-001",
+    "auth_bypass": "WEB-AUTH-001",
+    "authentication_bypass": "WEB-AUTH-001",
+    "broken_authentication": "WEB-AUTH-001",
+    "jwt_vulnerability": "WEB-AUTH-003",
+    "jwt_weak_secret": "WEB-AUTH-003",
+    "weak_password": "WEB-AUTH-005",
+    "default_credentials": "WEB-AUTH-006",
+    "idor": "WEB-AC-001",
+    "insecure_direct_object_reference": "WEB-AC-001",
+    "broken_access_control": "WEB-AC-001",
+    "privilege_escalation": "WEB-AC-004",
+    "misconfiguration": "WEB-MISCONF-001",
+    "security_misconfiguration": "WEB-MISCONF-001",
+    "directory_listing": "WEB-MISCONF-004",
+    "exposed_debug_endpoint": "WEB-MISCONF-005",
+    "weak_tls": "WEB-CRYPTO-001",
+    "weak_cipher": "WEB-CRYPTO-001",
+    "xxe": "WEB-XXE-001",
+    "xml_external_entity": "WEB-XXE-001",
+    "deserialization": "WEB-DESER-001",
+    "insecure_deserialization": "WEB-DESER-001",
+    "file_upload": "WEB-UPLOAD-001",
+    "unrestricted_file_upload": "WEB-UPLOAD-001",
+    "race_condition": "WEB-RACE-001",
+    "csrf": "WEB-CSRF-001",
+    "cross_site_request_forgery": "WEB-CSRF-001",
+    "websocket_vulnerability": "WEB-WSS-001",
+    "api_vulnerability": "WEB-API-001",
+    "api_broken_auth": "WEB-API-003",
+    "graphql_injection": "WEB-API-007",
+    "business_logic": "WEB-BIZ-001",
+    "business_logic_flaw": "WEB-BIZ-001",
+    "supply_chain": "WEB-SUPPLY-001",
+}
+
+_GAME_TYPE_VECTOR: dict[str, str] = {
+    "server_validation_bypass": "GAME-SV-001",
+    "speed_hack": "GAME-SV-002",
+    "memory_tampering": "GAME-CLIENT-001",
+    "economy_manipulation": "GAME-ECON-001",
+    "currency_duplication": "GAME-ECON-002",
+    "protocol_vulnerability": "GAME-PROTO-001",
+    "anti_cheat_bypass": "GAME-DRM-001",
+    "drm_bypass": "GAME-DRM-001",
+    "business_logic": "GAME-LOGIC-001",
+}
+
+_MOBILE_TYPE_VECTOR: dict[str, str] = {
+    "hardcoded_secrets": "MOB-STATIC-001",
+    "hardcoded_credentials": "MOB-STATIC-001",
+    "insecure_data_storage": "MOB-STORE-001",
+    "cleartext_storage": "MOB-STORE-001",
+    "ssl_pinning_bypass": "MOB-NET-001",
+    "insecure_communication": "MOB-NET-001",
+    "certificate_pinning_bypass": "MOB-NET-002",
+    "api_vulnerability": "MOB-API-001",
+    "api_broken_auth": "MOB-API-002",
+    "dynamic_analysis": "MOB-DYN-001",
+    "runtime_manipulation": "MOB-DYN-001",
+    "binary_vulnerability": "MOB-BINARY-001",
+    "reverse_engineering": "MOB-BINARY-001",
+    "privacy_violation": "MOB-PRIV-001",
+    "excessive_permissions": "MOB-PRIV-002",
+    "platform_vulnerability": "MOB-PLAT-001",
+    "intent_injection": "MOB-PLAT-002",
+}
+
+_TYPE_VECTOR_BY_TARGET: dict[str, dict[str, str]] = {
+    "web": _WEB_TYPE_VECTOR,
+    "game": _GAME_TYPE_VECTOR,
+    "mobile": _MOBILE_TYPE_VECTOR,
+}
+
+# Severity → exploitation level (0-4) for ScoreTracker.record_finding()
+_SEVERITY_TO_LEVEL: dict[str, int] = {
+    "informational": 0,
+    "info": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+}
+
+
+def _infer_vector_id(finding_type: str, target_type: str) -> str:
+    """Infer the VXIS attack vector ID from finding_type + target_type.
+
+    Returns an empty string if no mapping is found.
+    벡터 ID를 finding_type에서 추론한다. 매핑이 없으면 빈 문자열 반환.
+    """
+    mapping = _TYPE_VECTOR_BY_TARGET.get(target_type, {})
+    return mapping.get(finding_type.lower().strip(), "")
+
+
+def _populate_score_tracker(
+    finding_dicts: list[dict[str, Any]],
+    ctx: Any,
+) -> None:
+    """Feed scan findings into ctx.score_tracker for vector coverage scoring.
+
+    Resolves vector_id from the finding dict (explicit > inferred from type).
+    Records each vector attempt + finding at the appropriate exploitation level.
+
+    스캔 결과를 score_tracker에 기록하여 벡터 커버리지 점수를 활성화한다.
+    """
+    tracker = getattr(ctx, "score_tracker", None)
+    if tracker is None:
+        return
+    target_type = getattr(ctx, "target_type", "web")
+
+    for d in finding_dicts:
+        finding_id = str(d.get("id", ""))
+        finding_type = str(d.get("finding_type", ""))
+        severity = str(d.get("severity", "medium")).lower()
+
+        # Resolve vector_id: explicit field takes priority, then infer from type
+        vector_id = str(d.get("vector_id", "")).strip()
+        if not vector_id:
+            vector_id = _infer_vector_id(finding_type, target_type)
+
+        if not vector_id:
+            logger.debug(
+                "[SCORE] No vector_id for finding %s (type=%s) — skipping tracker",
+                finding_id, finding_type,
+            )
+            continue
+
+        level = _SEVERITY_TO_LEVEL.get(severity, 2)
+
+        try:
+            tracker.record_vector_attempt(vector_id)
+            if finding_id:
+                tracker.record_finding(finding_id, vector_id, level)
+        except Exception:
+            logger.debug(
+                "[SCORE] tracker record failed for %s / %s", finding_id, vector_id,
+                exc_info=True,
+            )
 
 
 def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str) -> Any:
@@ -129,11 +296,30 @@ def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str
 
 
 def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
-    """Compute a simple VXIS score from finding counts. Returns (score, grade).
+    """Compute a VXIS score. Returns (score, grade).
 
-    Phase A uses a severity-weighted heuristic. Phase B will use the full
-    scoring module once findings carry richer metadata.
+    Tries the full ScoringEngine first (uses ctx.score_tracker data for
+    5-dimensional scoring). Falls back to a severity-weighted heuristic when
+    the tracker has no vector data (e.g. test stubs).
+
+    ScoringEngine를 우선 시도하고, 벡터 데이터가 없을 때 heuristic으로 폴백한다.
     """
+    tracker = getattr(ctx, "score_tracker", None)
+    target_type = getattr(ctx, "target_type", "web")
+    scan_id = getattr(ctx, "scan_id", "")
+
+    # Attempt full ScoringEngine when the tracker has vector data
+    if tracker is not None and (tracker.vectors_attempted or tracker.vectors_found):
+        try:
+            from vxis.scoring.engine import ScoringEngine
+
+            engine = ScoringEngine(target_type=target_type)
+            vxis_score = engine.calculate(tracker, ctx.findings, scan_id=scan_id)
+            return vxis_score.total, vxis_score.grade
+        except Exception:
+            logger.debug("[SCORE] ScoringEngine failed — falling back to heuristic", exc_info=True)
+
+    # Severity-weighted heuristic fallback
     sev_weights = {
         "critical": 200,
         "high": 100,
@@ -287,7 +473,12 @@ class ScanPipeline:
             except Exception:
                 logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
 
-        # 7. Copy chains into ctx.attack_chains (stored as list[dict] per ScanContext typing)
+        # 7. Feed findings into ctx.score_tracker for 5-dimensional VXIS scoring.
+        # Must run after findings are collected so vector_ids are available.
+        # score_tracker에 findings를 기록하여 벡터 커버리지 점수를 활성화한다.
+        _populate_score_tracker(finding_dicts, ctx)
+
+        # 8. Copy chains into ctx.attack_chains (stored as list[dict] per ScanContext typing)
         chain_dicts = _get_chain_dicts()
         try:
             ctx.attack_chains = [
@@ -297,21 +488,21 @@ class ScanPipeline:
         except Exception:
             ctx.attack_chains = []
 
-        # 8. Deferred actions gate (Phase A: usually empty, but plumbing preserved)
+        # 9. Deferred actions gate (Phase A: usually empty, but plumbing preserved)
         if self.enable_deferred_approval and getattr(ctx, "deferred_actions", None):
             await self._run_deferred_gate(ctx)
 
-        # 9. Generate the HTML report
+        # 10. Generate the HTML report
         try:
             await self._generate_report(ctx)
         except Exception:
             logger.exception("Report generation failed — continuing")
 
-        # 10. Compute VXIS score
+        # 11. Compute VXIS score (uses ScoringEngine when tracker has vector data)
         score_value, grade = _compute_vxis_score(ctx)
         ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
 
-        # 11. Populate phase logs (duration_seconds is a computed @property on ctx)
+        # 12. Populate phase logs (duration_seconds is a computed @property on ctx)
         try:
             ctx.phase_logs = [
                 {
