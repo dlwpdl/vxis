@@ -179,8 +179,34 @@ jobs:
           if total == 0:
               exit(0)
 
-          # Load proposal details for the message
+          # Load proposal details — human-readable format
           from pathlib import Path
+
+          # Map internal types to readable descriptions
+          type_labels = {
+              "vector_add": "New scoring vector",
+              "skill_payload_add": "New attack payload",
+              "kb_pattern_add": "New knowledge pattern",
+              "guide_advice_append": "Phase guide update",
+          }
+
+          def format_proposal(d):
+              ct = d.get("change_type", "?")
+              label = type_labels.get(ct, ct)
+              conf = d.get("confidence", 0)
+              # Extract the actual useful info
+              cd = d.get("change_data", {})
+              if ct == "skill_payload_add":
+                  tech = cd.get("technique", "?")
+                  payload = cd.get("payload", "")[:40]
+                  return f"  {label} [{tech}]: {payload} ({conf:.0%})"
+              elif ct == "vector_add":
+                  name = cd.get("name_en", "")[:50]
+                  return f"  {label}: {name} ({conf:.0%})"
+              else:
+                  rationale = d.get("rationale_en", "")[:50]
+                  return f"  {label}: {rationale} ({conf:.0%})"
+
           applied_details = []
           pending_details = []
           applied_dir = Path(".vxis/signals/applied")
@@ -188,44 +214,35 @@ jobs:
           if applied_dir.exists():
               for f in sorted(applied_dir.glob("*.json"))[-5:]:
                   try:
-                      d = json.loads(f.read_text())
-                      ct = d.get("change_type", "?")
-                      rationale = d.get("rationale_en", "")[:60]
-                      conf = d.get("confidence", 0)
-                      applied_details.append(f"  [{conf:.0%}] {ct}: {rationale}")
+                      applied_details.append(format_proposal(json.loads(f.read_text())))
                   except Exception:
                       pass
           if pending_dir.exists():
               for f in sorted(pending_dir.glob("*.json"))[-5:]:
                   try:
-                      d = json.loads(f.read_text())
-                      ct = d.get("change_type", "?")
-                      rationale = d.get("rationale_en", "")[:60]
-                      conf = d.get("confidence", 0)
-                      src = d.get("source_url", "")[:50]
-                      pending_details.append(f"  [{conf:.0%}] {ct}: {rationale}")
+                      pending_details.append(format_proposal(json.loads(f.read_text())))
                   except Exception:
                       pass
 
-          lines = ["VXIS Growth Pipeline"]
+          lines = ["VXIS Growth"]
 
           if skills > 0:
-              lines.append(f"\nNEW PAYLOADS: {skills} skill file(s) updated")
-              lines.append("Benchmark validation triggered")
+              lines.append(f"\n🟢 {skills} skill file(s) auto-updated")
+              lines.append("→ Benchmark validation triggered")
 
           if auto > 0:
-              lines.append(f"\nAuto-applied ({auto}):")
+              lines.append(f"\n🟢 Auto-applied ({auto}):")
               lines.extend(applied_details[:5])
 
           if pending > 0:
-              lines.append(f"\nPending review ({pending}):")
+              lines.append(f"\n🟡 Review needed ({pending}):")
               lines.extend(pending_details[:5])
 
           if discarded > 0:
-              lines.append(f"\nDiscarded: {discarded} (low confidence)")
+              lines.append(f"\n🔴 Dropped: {discarded} (low confidence)")
 
           if not auto and not pending and not skills:
-              lines.append("\nNo actionable proposals this batch.")
+              lines.append("No actionable items.")
 
           msg = "\n".join(lines)
           url = f"https://api.telegram.org/bot{token}/sendMessage"

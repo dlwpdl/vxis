@@ -102,25 +102,63 @@ jobs:
             git push
           fi
 
-      # Growth Layer integration: export digest to signals/inbox
-      - name: Export to signal inbox
+      # Growth Layer integration: export digest CVEs as JSONL signals
+      - name: Export CVEs to signal inbox
         if: always()
         run: |
           python - <<'PYEOF'
+          import json, re
           from pathlib import Path
           from datetime import datetime, timezone
+
           digests_dir = Path("tools/domain_intel/digests")
           if not digests_dir.exists():
-              print("No domain-intel digests directory")
               exit(0)
           digests = sorted(digests_dir.glob("*.md"), reverse=True)
-          if digests:
-              latest = digests[0]
+          if not digests:
+              exit(0)
+
+          latest = digests[0]
+          content = latest.read_text(encoding="utf-8")
+          now = datetime.now(timezone.utc).isoformat()
+
+          # Extract CVEs and their descriptions from the markdown
+          signals = []
+          # Match patterns like: **CVE-2026-XXXXX** — Description
+          for match in re.finditer(
+              r'\*\*(CVE-\d{4}-\d+)\*\*\s*[—–-]\s*(.+?)(?:\n|$)', content
+          ):
+              cve_id = match.group(1)
+              desc = match.group(2).strip()
+              signals.append({
+                  "signal_id": f"domain-intel-{cve_id}",
+                  "source": {
+                      "name": "domain_intel",
+                      "url": "internal://domain-intel",
+                      "source_type": "internal",
+                      "trust_score": 0.95,
+                  },
+                  "timestamp": now,
+                  "title": f"{cve_id}: {desc[:100]}",
+                  "body": "",
+                  "url": f"https://nvd.nist.gov/vuln/detail/{cve_id}",
+                  "metadata": {
+                      "description": desc,
+                      "source": "domain_intel_digest",
+                      "cve": cve_id,
+                  },
+              })
+
+          if signals:
               inbox = Path(".vxis/signals/inbox")
               inbox.mkdir(parents=True, exist_ok=True)
-              out = inbox / f"domain-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')}.md"
-              out.write_text(latest.read_text(encoding="utf-8"))
-              print(f"Exported {latest.name} to {out}")
+              out = inbox / f"ingest-domain-intel-{datetime.now(timezone.utc).strftime('%Y-%m-%dT%H')}.jsonl"
+              with out.open("w") as f:
+                  for s in signals:
+                      f.write(json.dumps(s, ensure_ascii=False) + "\n")
+              print(f"Exported {len(signals)} CVE signals from {latest.name}")
+          else:
+              print(f"No CVEs found in {latest.name}")
           PYEOF
           git add .vxis/signals/inbox/ 2>/dev/null || true
           if ! git diff --staged --quiet 2>/dev/null; then
