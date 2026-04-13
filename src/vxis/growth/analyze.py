@@ -116,9 +116,13 @@ def analyze_signal(
         from vxis.agent.brain import AgentBrain
 
         brain = AgentBrain()
+        # Use body if available, fall back to metadata description
+        body_text = signal.body
+        if not body_text or len(body_text) < 50:
+            body_text = signal.metadata.get("description", "") if signal.metadata else ""
         prompt = EXTRACTION_PROMPT.format(
             title=signal.title,
-            body=signal.body[:3000],
+            body=body_text[:3000],
             source=signal.source.name,
         )
 
