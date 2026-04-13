@@ -1,0 +1,29 @@
+{
+  "cached_at": "2026-04-13T01:53:41.479028+00:00",
+  "extraction": {
+    "signal_id": "558666a49314efc1",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/03/trueconf-zero-day-exploited-in-attacks.html",
+    "article_title": "TrueConf Zero-Day Exploited in Attacks on Southeast Asian Government Networks",
+    "pub_date": "Tue, 31 Mar 2026 21:33:00 +0530",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [
+      "government"
+    ],
+    "target_technologies": [
+      "trueconf"
+    ],
+    "proposed_vectors": [],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:41.478910+00:00"
+  }
+}

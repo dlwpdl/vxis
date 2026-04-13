@@ -1,0 +1,34 @@
+{
+  "cached_at": "2026-04-13T01:53:42.746958+00:00",
+  "extraction": {
+    "signal_id": "ca77b4ddcf23c495",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/03/citrix-netscaler-under-active-recon-for.html",
+    "article_title": "Citrix NetScaler Under Active Recon for CVE-2026-3055 (CVSS 9.3) Memory Overread Bug",
+    "pub_date": "Sat, 28 Mar 2026 14:41:00 +0530",
+    "trust_score": 0.85,
+    "cves": [
+      "CVE-2026-3055"
+    ],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [
+      "reconnaissance",
+      "memory overread"
+    ],
+    "target_industries": [
+      "enterprises"
+    ],
+    "target_technologies": [
+      "citrix_netscaler"
+    ],
+    "proposed_vectors": [],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:42.746886+00:00"
+  }
+}

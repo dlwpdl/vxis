@@ -1,0 +1,34 @@
+{
+  "cached_at": "2026-04-13T01:53:32.335813+00:00",
+  "extraction": {
+    "signal_id": "b9d10acab58045d0",
+    "source_name": "bleepingcomputer",
+    "article_url": "https://www.bleepingcomputer.com/news/security/microsoft-links-medusa-ransomware-affiliate-to-zero-day-attacks/",
+    "article_title": "Microsoft links Medusa ransomware affiliate to zero-day attacks",
+    "pub_date": "Mon, 06 Apr 2026 12:56:01 -0400",
+    "trust_score": 0.9,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [
+      "medusa"
+    ],
+    "malware_families": [
+      "medusa ransomware"
+    ],
+    "ttps": [],
+    "attack_chain": [
+      "zero-day attacks",
+      "ransomware affiliate"
+    ],
+    "target_industries": [],
+    "target_technologies": [
+      "microsoft"
+    ],
+    "proposed_vectors": [],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:32.335239+00:00"
+  }
+}

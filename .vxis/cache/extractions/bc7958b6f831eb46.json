@@ -1,0 +1,25 @@
+{
+  "cached_at": "2026-04-13T01:53:46.835149+00:00",
+  "extraction": {
+    "signal_id": "bc7958b6f831eb46",
+    "source_name": "securityweek",
+    "article_url": "https://www.securityweek.com/fortinet-rushes-emergency-fixes-for-exploited-zero-day/",
+    "article_title": "Fortinet Rushes Emergency Fixes for Exploited Zero-Day",
+    "pub_date": "Mon, 06 Apr 2026 09:37:28 +0000",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [],
+    "target_technologies": [],
+    "proposed_vectors": [],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:46.835062+00:00"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "cached_at": "2026-04-13T01:52:41.636641+00:00",
+  "extraction": {
+    "signal_id": "37b62066c44801f5",
+    "source_name": "securityaffairs",
+    "article_url": "https://securityaffairs.com/190392/hacking/cve-2026-35616-fortinet-fixes-actively-exploited-high-severity-flaw.html",
+    "article_title": "CVE-2026-35616: Fortinet fixes actively exploited high-severity flaw",
+    "pub_date": "Mon, 06 Apr 2026 05:10:29 +0000",
+    "trust_score": 0.9,
+    "cves": [
+      "CVE-2026-35616"
+    ],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [],
+    "target_technologies": [
+      "fortinet"
+    ],
+    "proposed_vectors": [],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [
+      {
+        "if": "article mentions a CVE affecting Fortinet and states it is actively exploited",
+        "then": "classify as an actively exploited Fortinet vulnerability and prioritize patching/mitigation guidance"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:52:41.636459+00:00"
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "cached_at": "2026-04-13T01:53:39.293957+00:00",
+  "extraction": {
+    "signal_id": "b2e419aa1a244512",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/cisco-patches-98-cvss-imc-and-ssm-flaws.html",
+    "article_title": "Cisco Patches 9.8 CVSS IMC and SSM Flaws Allowing Remote System Compromise",
+    "pub_date": "Thu, 02 Apr 2026 20:51:00 +0530",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [],
+    "target_technologies": [],
+    "proposed_vectors": [],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:39.293895+00:00"
+  }
+}

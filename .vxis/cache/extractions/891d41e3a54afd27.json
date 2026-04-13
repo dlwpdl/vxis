@@ -1,0 +1,47 @@
+{
+  "cached_at": "2026-04-13T01:53:50.662293+00:00",
+  "extraction": {
+    "signal_id": "891d41e3a54afd27",
+    "source_name": "securityweek",
+    "article_url": "https://www.securityweek.com/react2shell-exploited-in-large-scale-credential-harvesting-campaign/",
+    "article_title": "React2Shell Exploited in Large-Scale Credential Harvesting Campaign",
+    "pub_date": "Fri, 03 Apr 2026 10:55:13 +0000",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [],
+    "target_technologies": [
+      "react"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-PHISH-001",
+        "name_en": "Malicious React application compromise",
+        "name_ko": "악성 React 애플리케이션 침해",
+        "phase": "P4_cpr",
+        "risk": "medium"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [
+      {
+        "technique": "rce",
+        "payload": "__proto__",
+        "detect": [
+          "React2Shell",
+          "credential harvesting",
+          "large-scale"
+        ],
+        "description": "Generic placeholder pattern for testing React-related exploitation markers in HTTP responses.",
+        "severity": "high"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:50.662139+00:00"
+  }
+}

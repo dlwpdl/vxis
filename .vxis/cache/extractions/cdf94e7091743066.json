@@ -1,0 +1,51 @@
+{
+  "cached_at": "2026-04-13T01:53:48.976065+00:00",
+  "extraction": {
+    "signal_id": "cdf94e7091743066",
+    "source_name": "securityweek",
+    "article_url": "https://www.securityweek.com/trueconf-zero-day-exploited-in-asian-government-attacks/",
+    "article_title": "TrueConf Zero-Day Exploited in Asian Government Attacks",
+    "pub_date": "Fri, 03 Apr 2026 12:47:16 +0000",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [
+      "asian_government"
+    ],
+    "target_technologies": [
+      "trueconf"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-PHISH-001",
+        "name_en": "Targeted government phishing lure",
+        "name_ko": "정부 기관 표적 피싱 유도",
+        "phase": "P4_cpr",
+        "risk": "low"
+      }
+    ],
+    "proposed_phase_updates": [
+      {
+        "phase_id": "P4_cpr",
+        "field": "strategic_advice_ko",
+        "append": "아시아 지역 정부 기관을 대상으로 한 표적형 공격 가능성을 고려해, 외부 협력사 및 메신저/회의 솔루션 계정을 노린 피싱 방어와 계정 보호 강화가 필요합니다."
+      }
+    ],
+    "proposed_kb_patterns": [
+      {
+        "technique": "auth_bypass",
+        "payload": "",
+        "detect": [],
+        "description": "Article only states a zero-day exploitation in TrueConf; no exploitable payload disclosed.",
+        "severity": "medium"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:48.975777+00:00"
+  }
+}

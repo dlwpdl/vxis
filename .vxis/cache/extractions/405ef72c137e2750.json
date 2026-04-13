@@ -1,0 +1,37 @@
+{
+  "cached_at": "2026-04-13T01:53:54.372528+00:00",
+  "extraction": {
+    "signal_id": "405ef72c137e2750",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/new-gpubreach-attack-enables-full-cpu.html",
+    "article_title": "New GPUBreach Attack Enables Full CPU Privilege Escalation via GDDR6 Bit-Flips",
+    "pub_date": "Tue, 07 Apr 2026 14:08:00 +0530",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [],
+    "target_technologies": [
+      "gddr6",
+      "gpu",
+      "cpu"
+    ],
+    "proposed_vectors": [],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [
+      {
+        "technique": "rce",
+        "payload": "",
+        "detect": [],
+        "description": "Article discusses a GPU-based fault injection / privilege escalation concept rather than an application-layer exploit; no web attack payload applies.",
+        "severity": "low"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:54.372458+00:00"
+  }
+}

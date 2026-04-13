@@ -1,0 +1,29 @@
+{
+  "cached_at": "2026-04-13T01:53:36.658905+00:00",
+  "extraction": {
+    "signal_id": "0eb7edb323058c6b",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/fortinet-patches-actively-exploited-cve.html",
+    "article_title": "Fortinet Patches Actively Exploited CVE-2026-35616 in FortiClient EMS",
+    "pub_date": "Sun, 05 Apr 2026 10:02:00 +0530",
+    "trust_score": 0.85,
+    "cves": [
+      "CVE-2026-35616"
+    ],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [],
+    "target_technologies": [
+      "FortiClient EMS"
+    ],
+    "proposed_vectors": [],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:36.658765+00:00"
+  }
+}

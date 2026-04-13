@@ -1,0 +1,56 @@
+{
+  "cached_at": "2026-04-13T01:53:52.980515+00:00",
+  "extraction": {
+    "signal_id": "a83dd1f94b7cd4d4",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/flowise-ai-agent-builder-under-active.html",
+    "article_title": "Flowise AI Agent Builder Under Active CVSS 10.0 RCE Exploitation; 12,000+ Instances Exposed",
+    "pub_date": "Tue, 07 Apr 2026 11:26:00 +0530",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [
+      "rce",
+      "internet_exposed_service"
+    ],
+    "target_industries": [],
+    "target_technologies": [
+      "flowise"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-PHISH-001",
+        "name_en": "Exposed Flowise AI Agent Builder Remote Code Execution",
+        "name_ko": "노출된 Flowise AI Agent Builder 원격 코드 실행",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [
+      {
+        "phase_id": "P4_cpr",
+        "field": "strategic_advice_ko",
+        "append": "Flowise AI Agent Builder의 인터넷 노출 인스턴스는 CVSS 10.0 수준의 RCE 악용 위험이 있으므로, 외부 접근 차단, 최신 보안 패치 적용, 불필요한 인스턴스 비활성화, 관리자 인터페이스 인증 강화 및 자산 식별 후 긴급 점검이 필요하다."
+      }
+    ],
+    "proposed_kb_patterns": [
+      {
+        "technique": "rce",
+        "payload": ";id",
+        "detect": [
+          "uid=",
+          "gid=",
+          "root"
+        ],
+        "description": "Command injection/RCE validation via simple system command execution output",
+        "severity": "critical"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:52.980338+00:00"
+  }
+}

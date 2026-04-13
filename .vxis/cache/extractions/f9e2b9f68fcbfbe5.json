@@ -1,0 +1,59 @@
+{
+  "cached_at": "2026-04-13T01:53:35.316700+00:00",
+  "extraction": {
+    "signal_id": "f9e2b9f68fcbfbe5",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/36-malicious-npm-packages-exploited.html",
+    "article_title": "36 Malicious npm Packages Exploited Redis, PostgreSQL to Deploy Persistent Implants",
+    "pub_date": "Sun, 05 Apr 2026 10:37:00 +0530",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [
+      "malicious_npm_packages",
+      "persistence",
+      "implant_deployment"
+    ],
+    "target_industries": [],
+    "target_technologies": [
+      "npm",
+      "redis",
+      "postgresql"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-PHISH-001",
+        "name_en": "Malicious npm package supply-chain infiltration",
+        "name_ko": "악성 npm 패키지 공급망 침투",
+        "phase": "P4_cpr",
+        "risk": "medium"
+      }
+    ],
+    "proposed_phase_updates": [
+      {
+        "phase_id": "P4_cpr",
+        "field": "strategic_advice_ko",
+        "append": "오픈소스 패키지 생태계에서 악성 npm 패키지를 통한 공급망 침투가 확인되므로, 패키지 검증(서명/평판/유지관리자 이력)과 의존성 고정, 내부 레지스트리 화이트리스트 적용을 강화하십시오. Redis 및 PostgreSQL와 연계된 비정상 프로세스 생성, 지속성 설정 변경, 임플란트 설치 징후를 모니터링해야 합니다."
+      }
+    ],
+    "proposed_kb_patterns": [
+      {
+        "technique": "cmdi",
+        "payload": "; id",
+        "detect": [
+          "uid=",
+          "gid=",
+          "root"
+        ],
+        "description": "Command injection verification via shell metacharacters to test whether input is executed by a backend process.",
+        "severity": "high"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:35.316518+00:00"
+  }
+}

