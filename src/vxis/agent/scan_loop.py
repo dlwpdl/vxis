@@ -369,10 +369,21 @@ class ScanAgentLoop:
         _tools_used: set[str] = set()
         # Phase E: skill auto-execution sequence
         _skill_sequence = [
-            ("enumerate_endpoints", 3, {}),    # iter 3: map all paths
-            ("test_sensitive_files", 5, {}),    # iter 5: check exposed files
-            ("attempt_auth", 7, {}),            # iter 7: try to log in
-            # post_auth_enum + test_injection + test_idor run after auth
+            # Phase 1: Recon
+            ("enumerate_endpoints", 3, {}),
+            ("test_sensitive_files", 5, {}),
+            ("test_infra", 6, {}),
+            # Phase 2: Auth
+            ("attempt_auth", 8, {}),
+            # post_auth_enum + test_idor chained after auth success
+            # Phase 3: Injection
+            ("test_misconfig", 12, {}),
+            ("test_csrf", 14, {}),
+            ("test_crypto", 16, {}),
+            ("test_api_security", 18, {}),
+            ("test_business_logic", 20, {}),
+            # test_injection + test_xss + test_ssrf chained after enumerate
+            # test_auth_deep chained after auth (needs token)
         ]
         _skills_completed: set[str] = set()
         _auth_token: str | None = None
@@ -854,6 +865,7 @@ class ScanAgentLoop:
                                         _skill_sequence.extend([
                                             ("post_auth_enum", self.state.iteration + 2, {"token": _auth_token}),
                                             ("test_idor", self.state.iteration + 4, {"token": _auth_token}),
+                                            ("test_auth_deep", self.state.iteration + 5, {"token": _auth_token}),
                                         ])
                                         self.state.add_message("user", (
                                             f"SKILL CHAIN: Auth bypass confirmed via {method}! "
@@ -888,17 +900,16 @@ class ScanAgentLoop:
 
                                 # Auto-report enumeration results
                                 if skill_name == "enumerate_endpoints" and sr.data:
-                                    # Queue injection test on search/query endpoints
+                                    # Queue injection/XSS/SSRF on search/query endpoints
                                     accessible = sr.data.get("accessible", [])
                                     for ep in accessible:
                                         path = ep.get("path", "")
                                         if "?" in path or "search" in path.lower():
-                                            _skill_sequence.append((
-                                                "test_injection",
-                                                self.state.iteration + 2,
-                                                {"url": self.state.target.rstrip("/") + path},
-                                            ))
-                                            break  # one injection target is enough for now
+                                            full_url = self.state.target.rstrip("/") + path
+                                            _skill_sequence.append(("test_injection", self.state.iteration + 2, {"url": full_url}))
+                                            _skill_sequence.append(("test_xss", self.state.iteration + 3, {"url": full_url}))
+                                            _skill_sequence.append(("test_ssrf", self.state.iteration + 4, {"url": full_url}))
+                                            break
                                     # Report error endpoints
                                     for ep in (sr.data.get("errors") or [])[:5]:
                                         await self.registry.dispatch("report_finding", {

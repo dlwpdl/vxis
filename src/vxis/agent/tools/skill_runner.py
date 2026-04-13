@@ -26,13 +26,22 @@ class RunSkillTool:
         "  post_auth_enum — with token, test all authenticated endpoints\n"
         "  test_sensitive_files — scan 60+ sensitive file/config paths\n"
         "  test_idor — iterate IDs on an endpoint, detect access control issues\n"
+        "  test_xss — XSS (reflected/stored/DOM) with 20+ payloads on URL+param\n"
+        "  test_auth_deep — JWT alg:none, RS256->HS256, session fixation, reset poisoning\n"
+        "  test_csrf — CSRF token validation + SameSite cookie checks\n"
+        "  test_ssrf — SSRF: internal IPs, cloud metadata, file://, DNS rebinding\n"
+        "  test_api_security — mass assignment, rate limiting, verb tampering\n"
+        "  test_misconfig — security headers, CORS, debug endpoints, verbose errors\n"
+        "  test_business_logic — negative qty, price manipulation, state skip, race conditions\n"
+        "  test_crypto — TLS versions, hardcoded secrets in JS, weak hashes\n"
+        "  test_infra — exposed .git/.env, cloud metadata, Firebase, subdomains\n"
     )
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
             "skill": {
                 "type": "string",
-                "description": "Skill name: enumerate_endpoints, test_injection, attempt_auth, post_auth_enum, test_sensitive_files, test_idor",
+                "description": "Skill name: enumerate_endpoints, test_injection, attempt_auth, post_auth_enum, test_sensitive_files, test_idor, test_xss, test_auth_deep, test_csrf, test_ssrf, test_api_security, test_misconfig, test_business_logic, test_crypto, test_infra",
             },
             "target_url": {
                 "type": "string",
@@ -88,6 +97,12 @@ class RunSkillTool:
             elif skill_name == "test_injection":
                 # For injection, target_url should include the param
                 result = await fn(url=target_url, **params)
+            elif skill_name in ("test_xss", "test_ssrf"):
+                # These use url= with query params
+                result = await fn(url=target_url, **params)
+            elif skill_name in ("test_auth_deep", "test_csrf", "test_api_security", "test_business_logic"):
+                # These accept optional token
+                result = await fn(target_url=target_url, token=params.get("token"), **{k: v for k, v in params.items() if k != "token"})
             else:
                 result = await fn(target_url=target_url, **params)
         except Exception as e:
@@ -136,6 +151,18 @@ class RunSkillTool:
                 f"{len(result.get('accessible_ids', []))} accessible, "
                 f"{len(result.get('auth_bypass_ids', []))} without auth"
             )
+
+        elif skill_name in ("test_xss", "test_ssrf", "test_auth_deep", "test_csrf",
+                             "test_api_security", "test_misconfig", "test_business_logic",
+                             "test_crypto", "test_infra"):
+            findings = result.get("findings", result.get("exposed", []))
+            vuln = result.get("vulnerable", len(findings) > 0)
+            summary_parts.append(f"{'VULNERABLE' if vuln else 'clean'} — {len(findings)} finding(s), {result.get('tested', 0)} tested")
+            for f in findings[:3]:
+                ftype = f.get("type", "unknown")
+                fpayload = f.get("payload", f.get("path", ""))[:40]
+                fsev = f.get("severity", "medium")
+                summary_parts.append(f"  {ftype}: {fpayload} ({fsev})")
 
         return ToolResult(
             ok=True,
