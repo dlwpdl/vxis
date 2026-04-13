@@ -14,33 +14,48 @@ from vxis.growth.schemas import NewsIntelligence, RawSignal
 
 logger = logging.getLogger(__name__)
 
-EXTRACTION_PROMPT = """You are a threat intelligence analyst. Extract structured data from this security article.
+EXTRACTION_PROMPT = """You are a threat intelligence analyst specializing in web application security.
 
-Return ONLY a JSON object (no markdown, no explanation) with these fields:
+PHASE 1 — Extract what the article describes:
+Read the article and identify any web attack techniques, vulnerabilities, or bypass methods.
+
+PHASE 2 — Design concrete payloads:
+For each technique found, DESIGN actual testable payloads that a pentester could use.
+Do NOT just copy text from the article. THINK about how the technique works and
+create payloads that exploit it.
+
+Example: if the article says "Unicode normalization bypass for WAF evasion",
+you should design: payload = "＇ OR 1=1--" (fullwidth apostrophe U+FF07)
+and detect = ["sql", "syntax error"] because NFKC normalization converts it to a real quote.
+
+Return ONLY a JSON object:
 {{
-  "cves": ["CVE-YYYY-NNNNN", ...],
-  "threat_actors": ["lazarus", "kimsuky", ...],
-  "malware_families": ["xenorat", ...],
-  "ttps": [{{"mitre_id": "T1566.001", "description": "..."}}],
-  "attack_chain": ["phishing", "powershell", "c2"],
-  "target_industries": ["south_korean_enterprises"],
-  "target_technologies": ["windows", "react"],
+  "cves": ["CVE-YYYY-NNNNN"],
+  "threat_actors": [],
+  "malware_families": [],
+  "ttps": [{{"mitre_id": "T1190", "description": "..."}}],
+  "attack_chain": [],
+  "target_industries": [],
+  "target_technologies": ["express", "angular", "spring", ...],
   "proposed_vectors": [
-    {{"id": "WEB-PHISH-XXX", "name_en": "...", "name_ko": "...", "phase": "P4_cpr", "risk": "low"}}
+    {{"id": "WEB-XXX", "name_en": "...", "name_ko": "...", "phase": "P4_cpr", "risk": "low"}}
   ],
-  "proposed_phase_updates": [
-    {{"phase_id": "P4_cpr", "field": "strategic_advice_ko", "append": "..."}}
-  ],
+  "proposed_phase_updates": [],
   "proposed_kb_patterns": [
     {{
-      "technique": "sqli|xss|rce|ssrf|path_traversal|auth_bypass|idor|cmdi|xxe",
-      "payload": "the actual attack payload string (e.g. ' OR 1=1--, <script>alert(1)</script>)",
-      "detect": ["signature strings to detect success in HTTP response"],
-      "description": "what this payload tests",
+      "technique": "sqli|xss|rce|ssrf|path_traversal|auth_bypass|idor|cmdi|xxe|csrf|jwt|ssti|nosql",
+      "attack_description": "HOW the attack works — the mechanism, not just the name",
+      "payload": "CONCRETE testable payload string YOU designed based on the technique",
+      "detect": ["response signatures that indicate the payload worked"],
+      "affected_tech": ["express", "angular", "mysql", ...],
       "severity": "critical|high|medium|low"
     }}
   ]
 }}
+
+IMPORTANT: proposed_kb_patterns should contain payloads YOU DESIGNED, not quoted from the article.
+If the article describes a technique but no specific exploit, design one yourself.
+If the article is not about web vulnerabilities, return empty proposed_kb_patterns.
 
 Article:
 Title: {title}
@@ -111,15 +126,38 @@ def analyze_signal(
         cache.set(signal.signal_id, dc.asdict(intel))
         return intel
 
-    # Step 4: LLM extraction
+    # Step 3.5: Fetch full article body if we only have a short summary.
+    # RSS feeds typically give 200-400 char descriptions. The actual article
+    # has the technical details needed for payload design.
+    body_text = signal.body
+    if not body_text or len(body_text) < 200:
+        body_text = signal.metadata.get("description", "") if signal.metadata else ""
+    if len(body_text) < 500 and signal.url and signal.url.startswith("http"):
+        try:
+            import httpx
+            r = httpx.get(signal.url, timeout=10, follow_redirects=True,
+                          headers={"User-Agent": "VXIS-Growth/1.0"})
+            if r.status_code == 200 and len(r.text) > 500:
+                # Extract text from HTML — simple approach
+                import re
+                html = r.text
+                # Remove script/style tags
+                html = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.I)
+                # Remove HTML tags
+                text = re.sub(r"<[^>]+>", " ", html)
+                # Collapse whitespace
+                text = re.sub(r"\s+", " ", text).strip()
+                if len(text) > len(body_text):
+                    body_text = text
+                    logger.info("Fetched article body: %d chars from %s", len(text), signal.url)
+        except Exception as e:
+            logger.debug("Article fetch failed for %s: %s", signal.url, e)
+
+    # Step 4: LLM extraction — Phase 1 (understand) + Phase 2 (design payloads)
     try:
         from vxis.agent.brain import AgentBrain
 
         brain = AgentBrain()
-        # Use body if available, fall back to metadata description
-        body_text = signal.body
-        if not body_text or len(body_text) < 50:
-            body_text = signal.metadata.get("description", "") if signal.metadata else ""
         prompt = EXTRACTION_PROMPT.format(
             title=signal.title,
             body=body_text[:3000],

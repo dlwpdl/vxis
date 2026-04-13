@@ -95,8 +95,14 @@ def generate_proposals(intel: NewsIntelligence) -> list[Proposal]:
             "xss": "src/vxis/agent/skills/test_injection.py",
             "rce": "src/vxis/agent/skills/test_injection.py",
             "ssrf": "src/vxis/agent/skills/test_injection.py",
+            "ssti": "src/vxis/agent/skills/test_injection.py",
+            "cmdi": "src/vxis/agent/skills/test_injection.py",
+            "nosql": "src/vxis/agent/skills/test_injection.py",
+            "xxe": "src/vxis/agent/skills/test_injection.py",
             "path_traversal": "src/vxis/agent/skills/test_sensitive_files.py",
             "auth_bypass": "src/vxis/agent/skills/attempt_auth.py",
+            "jwt": "src/vxis/agent/skills/attempt_auth.py",
+            "csrf": "src/vxis/agent/skills/test_injection.py",
             "idor": "src/vxis/agent/skills/test_idor.py",
         }
         target_file = skill_map.get(technique, "")
@@ -187,7 +193,14 @@ def _apply_skill_payload(proposal: Proposal) -> bool:
     else:
         return False
 
-    target.write_text("\n".join(lines), encoding="utf-8")
+    new_content = "\n".join(lines)
+    # Syntax validation — reject if insertion breaks Python
+    try:
+        compile(new_content, str(target), "exec")
+    except SyntaxError:
+        logger.warning("Payload insertion would break syntax in %s — skipped", target)
+        return False
+    target.write_text(new_content, encoding="utf-8")
     return True
 
 

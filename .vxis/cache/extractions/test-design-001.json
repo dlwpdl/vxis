@@ -1,0 +1,131 @@
+{
+  "cached_at": "2026-04-13T04:37:06.105854+00:00",
+  "extraction": {
+    "signal_id": "test-design-001",
+    "source_name": "bleepingcomputer",
+    "article_url": "https://www.bleepingcomputer.com/news/security/hackers-exploit-react2shell-in-automated-credential-theft-campaign/",
+    "article_title": "Hackers Exploit React2Shell in automated credential theft campaign",
+    "pub_date": "2026-04-13T05:00:00Z",
+    "trust_score": 0.95,
+    "cves": [
+      "CVE-2025-55182"
+    ],
+    "iocs": {},
+    "threat_actors": [
+      "UAT-10608"
+    ],
+    "malware_families": [],
+    "ttps": [
+      {
+        "mitre_id": "T1190",
+        "description": "Exploit public-facing application vulnerability in vulnerable Next.js applications to gain initial access."
+      },
+      {
+        "mitre_id": "T1005",
+        "description": "Harvest sensitive data from local files, environment variables, and application secrets after compromise."
+      },
+      {
+        "mitre_id": "T1552",
+        "description": "Search for and collect credentials, API keys, SSH private keys, cloud tokens, and other secrets stored on disk or in environment variables."
+      }
+    ],
+    "attack_chain": [
+      "Automated scanning for vulnerable public-facing Next.js applications",
+      "Initial compromise via React2Shell (CVE-2025-55182)",
+      "Deployment of a temporary-directory script to enumerate secrets",
+      "Extraction of environment variables, database credentials, SSH keys, API keys, and cloud tokens",
+      "Exfiltration of harvested credentials to attacker-controlled infrastructure"
+    ],
+    "target_industries": [],
+    "target_technologies": [
+      "Next.js",
+      "React",
+      "Node.js",
+      "AWS",
+      "GCP",
+      "Azure",
+      "GitHub",
+      "GitLab",
+      "SSH"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Public-facing Next.js RCE / secret harvesting",
+        "name_ko": "공개 Next.js 원격 코드 실행 / 비밀정보 수집",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [
+      {
+        "technique": "rce",
+        "attack_description": "A remotely reachable flaw in a Next.js application is used to execute attacker-controlled code, which then enumerates local environment variables, config files, and key material for exfiltration.",
+        "payload": "bash -lc 'echo START; env | sort | sed -n \"1,40p\"; [ -f .env ] && cat .env; [ -f /proc/self/environ ] && tr \"\\0\" \"\\n\" < /proc/self/environ | sed -n \"1,40p\"; echo END'",
+        "detect": [
+          "Response contains START/END markers",
+          "Response includes environment variable names such as AWS_ACCESS_KEY_ID, DATABASE_URL, GITHUB_TOKEN, or SSH_AUTH_SOCK",
+          "Unexpected command output or shell errors in application response"
+        ],
+        "affected_tech": [
+          "Next.js",
+          "Node.js",
+          "React",
+          "Linux"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "ssrf",
+        "attack_description": "If the vulnerable app can be induced to fetch attacker-supplied URLs, the request can target cloud metadata services or internal endpoints to retrieve instance credentials or internal secrets.",
+        "payload": "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+        "detect": [
+          "Response includes an IAM role name or credential JSON",
+          "Application server makes outbound request to link-local metadata IP",
+          "Unexpected metadata-related strings such as AccessKeyId or Token"
+        ],
+        "affected_tech": [
+          "Next.js",
+          "Node.js",
+          "AWS"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "path_traversal",
+        "attack_description": "A compromised web app or script can read files outside the intended directory by manipulating path inputs, enabling access to configuration files and private keys.",
+        "payload": "../../../../../../etc/passwd",
+        "detect": [
+          "Response contains passwd-style account entries",
+          "Error messages indicate successful file read or path resolution outside the document root",
+          "Private file contents such as PEM headers or .env values appear in the response"
+        ],
+        "affected_tech": [
+          "Next.js",
+          "Node.js",
+          "Linux"
+        ],
+        "severity": "high"
+      },
+      {
+        "technique": "idor",
+        "attack_description": "If harvested credentials grant access to internal panels or object storage, predictable identifiers may allow unauthorized retrieval of additional secrets or assets.",
+        "payload": "GET /api/secrets/1",
+        "detect": [
+          "Response returns another user's secret or object",
+          "Status 200 on an identifier that should be unauthorized",
+          "Different IDs return sensitive records without access control enforcement"
+        ],
+        "affected_tech": [
+          "Next.js",
+          "REST API"
+        ],
+        "severity": "high"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T04:37:06.105692+00:00"
+  }
+}
