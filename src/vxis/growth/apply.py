@@ -125,6 +125,72 @@ def generate_proposals(intel: NewsIntelligence) -> list[Proposal]:
     return [classify_proposal(p) for p in proposals]
 
 
+_AUTO_MARKER = "# --- AUTO-UPDATED"
+
+
+def _apply_skill_payload(proposal: Proposal) -> bool:
+    """Actually insert a payload into a skill Python file.
+
+    Finds the AUTO-UPDATED marker line and inserts the new payload
+    entry just before it. Returns True if successful.
+    """
+    import re
+
+    target = Path(proposal.target_file)
+    if not target.exists():
+        return False
+
+    data = proposal.change_data
+    if not isinstance(data, dict):
+        return False
+
+    payload = data.get("payload", "")
+    technique = data.get("technique", "").lower()
+    if not payload:
+        return False
+
+    content = target.read_text(encoding="utf-8")
+    if _AUTO_MARKER not in content:
+        return False
+
+    # Build the new entry based on file type
+    if "test_injection" in str(target):
+        # PAYLOADS list format: {"type": "...", "payload": "...", "detect": [...]}
+        detect = data.get("detect", [])
+        if not detect:
+            detect = ["sql"] if "sql" in technique else []
+        escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
+        new_line = f'    {{"type": "{technique}", "payload": "{escaped}", "detect": {detect}}},  # auto-added'
+    elif "test_sensitive_files" in str(target):
+        # SENSITIVE_PATHS format: ("path", "severity", "description")
+        severity = data.get("severity", "medium")
+        desc = data.get("description", f"Auto-added {technique} path")[:60]
+        new_line = f'    ("{payload}", "{severity}", "{desc}"),  # auto-added'
+    elif "attempt_auth" in str(target):
+        # SQLI_CREDS format: ("email_payload", "password")
+        pwd = data.get("password", "x")
+        escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
+        new_line = f'    ("{escaped}", "{pwd}"),  # auto-added'
+    else:
+        return False
+
+    # Check for duplicates
+    if payload in content:
+        return False  # already exists
+
+    # Insert before the marker line
+    lines = content.split("\n")
+    for i, line in enumerate(lines):
+        if _AUTO_MARKER in line:
+            lines.insert(i, new_line)
+            break
+    else:
+        return False
+
+    target.write_text("\n".join(lines), encoding="utf-8")
+    return True
+
+
 def save_proposal(proposal: Proposal, directory: Path) -> Path:
     """Persist proposal as JSON|||제안 JSON 저장."""
     directory.mkdir(parents=True, exist_ok=True)
@@ -155,6 +221,18 @@ def apply_proposals(proposals: list[Proposal]) -> dict:
 
     for proposal in proposals:
         if should_auto_apply(proposal, config):
+            # For skill_payload_add, actually modify the Python file
+            if proposal.change_type == "skill_payload_add" and not config["apply"]["dry_run"]:
+                applied = _apply_skill_payload(proposal)
+                if applied:
+                    log.record(
+                        "skill_payload_applied",
+                        {
+                            "proposal_id": proposal.proposal_id,
+                            "target_file": proposal.target_file,
+                            "payload": str(proposal.change_data.get("payload", ""))[:60],
+                        },
+                    )
             save_proposal(proposal, APPLIED_DIR)
             proposal.status = "auto_applied"
             proposal.applied_at = datetime.now(timezone.utc).isoformat()

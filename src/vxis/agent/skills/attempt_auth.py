@@ -21,6 +21,7 @@ SQLI_CREDS = [
     ("admin'--", "x"),
     ("' OR '1'='1", "x"),
     ("admin' OR '1'='1'--", "x"),
+    # --- AUTO-UPDATED CREDS BELOW (managed by growth pipeline) ---
 ]
 
 # Common login endpoint patterns

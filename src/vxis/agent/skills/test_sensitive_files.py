@@ -72,6 +72,7 @@ SENSITIVE_PATHS = [
     ("/.well-known/security.txt", "informational", "Security contact"),
     ("/crossdomain.xml", "low", "Flash cross-domain policy"),
     ("/security.txt", "informational", "Security contact"),
+    # --- AUTO-UPDATED PATHS BELOW (managed by growth pipeline) ---
 ]
 
 

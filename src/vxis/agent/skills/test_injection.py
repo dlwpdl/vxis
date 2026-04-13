@@ -50,6 +50,7 @@ PAYLOADS: list[dict] = [
     # NoSQL
     {"type": "nosql", "payload": "{'$ne': null}", "detect": []},
     {"type": "nosql", "payload": "[$ne]=1", "detect": []},
+    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
 ]
 
 
