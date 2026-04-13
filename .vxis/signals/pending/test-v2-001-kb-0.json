@@ -1,0 +1,27 @@
+{
+  "proposal_id": "test-v2-001-kb-0",
+  "source_signal_id": "test-v2-001",
+  "change_type": "kb_pattern_add",
+  "target_file": "~/.vxis/knowledge_store.json",
+  "change_data": {
+    "technique": "sqli",
+    "payload": "' OR ''='",
+    "detect": [
+      "' OR ''='",
+      "syntax error",
+      "unexpected token",
+      "database error"
+    ],
+    "description": "Tests for SQL injection bypass in parameterized query handling by forcing a tautology-like condition.",
+    "severity": "critical"
+  },
+  "confidence": 0.76,
+  "risk": "low",
+  "rationale_en": "KB pattern from bleepingcomputer",
+  "rationale_ko": "bleepingcomputer에서 도출된 KB 패턴",
+  "source_url": "http://test/sqli",
+  "status": "pending",
+  "applied_at": "",
+  "rolled_back_at": "",
+  "effectiveness_score": 0.0
+}

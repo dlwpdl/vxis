@@ -1,0 +1,27 @@
+{
+  "proposal_id": "test-v2-001-skill-0",
+  "source_signal_id": "test-v2-001",
+  "change_type": "skill_payload_add",
+  "target_file": "src/vxis/agent/skills/test_injection.py",
+  "change_data": {
+    "technique": "sqli",
+    "payload": "' OR ''='",
+    "detect": [
+      "' OR ''='",
+      "syntax error",
+      "unexpected token",
+      "database error"
+    ],
+    "description": "Tests for SQL injection bypass in parameterized query handling by forcing a tautology-like condition.",
+    "severity": "critical"
+  },
+  "confidence": 0.76,
+  "risk": "high",
+  "rationale_en": "New sqli payload from bleepingcomputer: ' OR ''='",
+  "rationale_ko": "bleepingcomputer에서 새 sqli 페이로드: ' OR ''='",
+  "source_url": "http://test/sqli",
+  "status": "pending",
+  "applied_at": "",
+  "rolled_back_at": "",
+  "effectiveness_score": 0.0
+}

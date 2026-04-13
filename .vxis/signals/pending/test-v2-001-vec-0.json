@@ -1,0 +1,22 @@
+{
+  "proposal_id": "test-v2-001-vec-0",
+  "source_signal_id": "test-v2-001",
+  "change_type": "vector_add",
+  "target_file": "src/vxis/scoring/vectors.py",
+  "change_data": {
+    "id": "WEB-PHISH-001",
+    "name_en": "SQL injection bypass in Express.js parameterized queries",
+    "name_ko": "Express.js 매개변수화 쿼리 SQL 인젝션 우회",
+    "phase": "P4_cpr",
+    "risk": "high"
+  },
+  "confidence": 0.855,
+  "risk": "low",
+  "rationale_en": "New vector from bleepingcomputer: SQL injection bypass in Express.js parameterized queries",
+  "rationale_ko": "bleepingcomputer에서 도출된 새 벡터: Express.js 매개변수화 쿼리 SQL 인젝션 우회",
+  "source_url": "http://test/sqli",
+  "status": "pending",
+  "applied_at": "",
+  "rolled_back_at": "",
+  "effectiveness_score": 0.0
+}

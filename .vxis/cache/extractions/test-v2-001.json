@@ -1,0 +1,73 @@
+{
+  "cached_at": "2026-04-13T04:07:10.991453+00:00",
+  "extraction": {
+    "signal_id": "test-v2-001",
+    "source_name": "bleepingcomputer",
+    "article_url": "http://test/sqli",
+    "article_title": "New SQL injection bypass in Express.js CVE-2026-99901",
+    "pub_date": "2026-04-13T04:10:00Z",
+    "trust_score": 0.95,
+    "cves": [
+      "CVE-2026-99901"
+    ],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [
+      "sql injection",
+      "authentication bypass"
+    ],
+    "target_industries": [],
+    "target_technologies": [
+      "express.js",
+      "node.js",
+      "postgresql"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-PHISH-001",
+        "name_en": "SQL injection bypass in Express.js parameterized queries",
+        "name_ko": "Express.js 매개변수화 쿼리 SQL 인젝션 우회",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [
+      {
+        "phase_id": "P4_cpr",
+        "field": "strategic_advice_ko",
+        "append": "Express.js의 매개변수화 쿼리 사용 시 입력 검증과 이스케이프 처리만으로는 우회가 가능할 수 있으므로, ORM/드라이버 수준의 안전한 쿼리 구성, 최소권한 DB 계정 사용, 비정상적인 SQL 패턴(예: `' OR ''='`, `$$' OR 1=1--$$`) 탐지 및 차단 규칙을 강화하세요."
+      }
+    ],
+    "proposed_kb_patterns": [
+      {
+        "technique": "sqli",
+        "payload": "' OR ''='",
+        "detect": [
+          "' OR ''='",
+          "syntax error",
+          "unexpected token",
+          "database error"
+        ],
+        "description": "Tests for SQL injection bypass in parameterized query handling by forcing a tautology-like condition.",
+        "severity": "critical"
+      },
+      {
+        "technique": "sqli",
+        "payload": "$$' OR 1=1--$$",
+        "detect": [
+          "OR 1=1",
+          "syntax error",
+          "database error",
+          "unexpected end of input"
+        ],
+        "description": "Tests PostgreSQL dollar-quoted string handling for SQL injection bypass.",
+        "severity": "critical"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T04:07:10.991353+00:00"
+  }
+}
