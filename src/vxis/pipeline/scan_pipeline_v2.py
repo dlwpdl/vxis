@@ -138,30 +138,169 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         from vxis.scoring.engine import ScoringEngine
         from vxis.scoring.tracker import ScoreTracker
 
-        tracker = ScoreTracker(target_type="web")
+        # Use the actual scan target type — not hardcoded "web".
+        # ScanContext.target_type defaults to "web" but can be "game" or "mobile".
+        target_type = getattr(ctx, "target_type", "web") or "web"
+        tracker = ScoreTracker(target_type=target_type)
 
-        # Map finding types to vector IDs
-        _type_to_vector = {
+        # Map finding types to vector IDs — split by target type so scoring
+        # uses the correct vector registry (82 web / 37 game / 51 mobile).
+        _web_type_to_vector: dict[str, str] = {
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
+            "nosql_injection": "WEB-NOSQL-001",
+            "command_injection": "WEB-CMDI-001",
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            "ssti": "WEB-SSTI-001",
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
             "xss": "WEB-XSS-001",
             "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
+            "ssrf_blind": "WEB-SSRF-002",
+            "idor": "WEB-AC-001",
+            "broken_access_control": "WEB-AC-002",
+            "privilege_escalation": "WEB-AC-003",
+            "path_traversal": "WEB-AC-004",
+            "information_disclosure": "WEB-MISCONF-003",
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "default_credentials": "WEB-AUTH-002",
+            "jwt_confusion": "WEB-AUTH-003",
+            "jwt_none_algorithm": "WEB-AUTH-004",
+            "session_fixation": "WEB-AUTH-005",
+            "oauth_bypass": "WEB-AUTH-007",
+            "password_reset_poisoning": "WEB-AUTH-008",
+            "saml_bypass": "WEB-AUTH-011",
             "csrf": "WEB-CSRF-001",
             "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
-            "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "rce": "WEB-DESER-001",
+            "deserialization": "WEB-DESER-001",
+            "file_upload": "WEB-UPLOAD-001",
+            "race_condition": "WEB-RACE-001",
+            "websocket_injection": "WEB-WSS-001",
+            "mass_assignment": "WEB-API-001",
+            "rate_limit_bypass": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "verb_tampering": "WEB-API-005",
+            "misconfiguration": "WEB-MISCONF-002",
+            "security_headers": "WEB-MISCONF-004",
+            "cors_misconfiguration": "WEB-MISCONF-005",
+            "open_redirect": "WEB-MISCONF-006",
+            "weak_tls": "WEB-CRYPTO-001",
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "weak_hashing": "WEB-CRYPTO-002",
+            "hardcoded_secrets": "WEB-CRYPTO-003",
+            "subdomain_takeover": "WEB-INFRA-001",
+            "cloud_misconfiguration": "WEB-INFRA-003",
+            "exposed_git": "WEB-INFRA-005",
+            "prototype_pollution": "WEB-INJECT-022",
+            "cache_poisoning": "WEB-INJECT-024",
+            "llm_prompt_injection": "WEB-INJECT-021",
+            "supply_chain": "WEB-SUPPLY-001",
+            "business_logic": "WEB-BIZ-001",
+            "negative_value": "WEB-BIZ-001",
+            "transaction_replay": "WEB-BIZ-004",
         }
+
+        _game_type_to_vector: dict[str, str] = {
+            "negative_currency": "GAME-SV-001",
+            "negative_value": "GAME-SV-001",
+            "integer_overflow": "GAME-SV-002",
+            "zero_price_purchase": "GAME-SV-003",
+            "speed_hack": "GAME-SV-004",
+            "teleport_bypass": "GAME-SV-005",
+            "idor": "GAME-SV-006",
+            "player_data_access": "GAME-SV-006",
+            "input_truncation": "GAME-SV-007",
+            "item_duplication": "GAME-ECON-001",
+            "currency_manipulation": "GAME-ECON-002",
+            "transaction_replay": "GAME-ECON-002",
+            "trade_abuse": "GAME-ECON-003",
+            "gift_abuse": "GAME-ECON-004",
+            "marketplace_manipulation": "GAME-ECON-005",
+            "iap_bypass": "GAME-ECON-006",
+            "receipt_forgery": "GAME-ECON-006",
+            "protocol_integrity": "GAME-PROTO-001",
+            "replay_attack": "GAME-PROTO-002",
+            "packet_injection": "GAME-PROTO-003",
+            "state_desync": "GAME-PROTO-004",
+            "memory_manipulation": "GAME-CLIENT-001",
+            "reverse_engineering": "GAME-CLIENT-002",
+            "save_file_tampering": "GAME-CLIENT-003",
+            "config_tampering": "GAME-CLIENT-004",
+            "anti_cheat_bypass": "GAME-AC-002",
+            "leaderboard_manipulation": "GAME-LOGIC-001",
+            "matchmaking_abuse": "GAME-LOGIC-002",
+            "cooldown_bypass": "GAME-LOGIC-003",
+            "rng_manipulation": "GAME-LOGIC-004",
+            "gm_command_injection": "GAME-LOGIC-005",
+            "referral_abuse": "GAME-LOGIC-006",
+            "chat_injection": "GAME-SOCIAL-001",
+            "xss": "GAME-SOCIAL-002",
+            "xss_stored": "GAME-SOCIAL-002",
+            "in_game_phishing": "GAME-SOCIAL-003",
+            "guild_privilege_escalation": "GAME-SOCIAL-004",
+            "drm_bypass": "GAME-DRM-001",
+            "cloud_save_manipulation": "GAME-DRM-002",
+            "business_logic": "GAME-ECON-001",
+        }
+
+        _mobile_type_to_vector: dict[str, str] = {
+            "hardcoded_secrets": "MOB-STATIC-001",
+            "hardcoded_api_key": "MOB-STATIC-001",
+            "weak_crypto": "MOB-STATIC-002",
+            "over_privileged": "MOB-STATIC-003",
+            "exported_component": "MOB-STATIC-004",
+            "debug_enabled": "MOB-STATIC-005",
+            "backup_enabled": "MOB-STATIC-006",
+            "firebase_config_exposed": "MOB-STATIC-007",
+            "no_pie": "MOB-BINARY-001",
+            "no_stack_canary": "MOB-BINARY-002",
+            "no_obfuscation": "MOB-BINARY-003",
+            "native_lib_secrets": "MOB-BINARY-004",
+            "ssl_pinning_missing": "MOB-NET-001",
+            "ssl_pinning_weak": "MOB-NET-002",
+            "cleartext_traffic": "MOB-NET-003",
+            "cert_validation_bypass": "MOB-NET-004",
+            "auth_flaw": "MOB-API-001",
+            "weak_auth": "MOB-API-001",
+            "auth_bypass": "MOB-API-001",
+            "idor": "MOB-API-002",
+            "rate_limit_bypass": "MOB-API-003",
+            "graphql_introspection": "MOB-API-004",
+            "insecure_storage": "MOB-STORE-001",
+            "sqlite_plaintext": "MOB-STORE-001",
+            "shared_preferences_exposure": "MOB-STORE-002",
+            "keychain_misconfiguration": "MOB-STORE-003",
+            "cache_leakage": "MOB-STORE-004",
+            "clipboard_exposure": "MOB-STORE-005",
+            "screenshot_not_blocked": "MOB-STORE-006",
+            "root_detection_bypass": "MOB-DYN-001",
+            "emulator_detection_bypass": "MOB-DYN-002",
+            "anti_tamper_bypass": "MOB-DYN-003",
+            "debugger_detection_bypass": "MOB-DYN-004",
+            "dynamic_code_loading": "MOB-DYN-005",
+            "iap_bypass": "MOB-BIZ-001",
+            "receipt_validation_flaw": "MOB-BIZ-001",
+            "subscription_spoofing": "MOB-BIZ-002",
+            "deep_link_hijacking": "MOB-BIZ-003",
+            "feature_flag_manipulation": "MOB-BIZ-004",
+            "offline_mode_abuse": "MOB-BIZ-005",
+            "intent_injection": "MOB-PLAT-001",
+            "content_provider_exposure": "MOB-PLAT-002",
+            "broadcast_abuse": "MOB-PLAT-003",
+            "task_hijacking": "MOB-PLAT-004",
+            "business_logic": "MOB-BIZ-001",
+            "information_disclosure": "MOB-STATIC-001",
+        }
+
+        _type_to_vector_by_target: dict[str, dict[str, str]] = {
+            "web": _web_type_to_vector,
+            "game": _game_type_to_vector,
+            "mobile": _mobile_type_to_vector,
+        }
+        _type_to_vector = _type_to_vector_by_target.get(target_type, _web_type_to_vector)
 
         # Severity → exploitation level
         _sev_to_level = {
@@ -177,7 +316,8 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
-            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            _prefix = {"web": "WEB", "game": "GAME", "mobile": "MOB"}.get(target_type, "WEB")
+            vector_id = _type_to_vector.get(ftype, f"{_prefix}-{ftype.upper()[:8]}-001")
             level = _sev_to_level.get(sev, 0)
 
             tracker.record_vector_attempt(vector_id)
@@ -228,7 +368,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             findings_count=len(ctx.findings),
         )
 
-        engine = ScoringEngine("web")
+        engine = ScoringEngine(target_type)
         vxis_score = engine.calculate(tracker, ctx.findings, scan_id=ctx.scan_id)
 
         # Print detailed score
@@ -236,7 +376,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         return vxis_score.total, vxis_score.grade
 
-    except Exception as e:
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
@@ -296,6 +436,7 @@ class ScanPipeline:
         app_context_en: str = "",
         app_context_ko: str = "",
         resume_from: str | None = None,  # Phase A: ignored, kept for signature compat
+        target_type: str = "web",  # "web" | "game" | "mobile"
     ) -> ScanContext:
         """Run a Strix-parity single-loop scan against the target."""
         started = time.monotonic()
@@ -303,6 +444,7 @@ class ScanPipeline:
         # 1. Build context
         ctx = ScanContext(
             target=target,
+            target_type=target_type,
             app_context_en=app_context_en,
             app_context_ko=app_context_ko,
             scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",
@@ -462,7 +604,7 @@ class ScanPipeline:
         # summary line for operators.
         try:
             from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            mitre = coverage_report(_get_finding_dicts())
             logger.info(
                 "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
                 len(mitre["techniques_covered"]),
