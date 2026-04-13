@@ -362,11 +362,20 @@ class ScanAgentLoop:
             logger.info("egress filter ENABLED — allowlist=%s", sorted(_egress_allowlist))
 
         _consecutive_empty = 0  # Track consecutive empty-action iterations
-        # Phase C auto-orchestration flags — code does what Brain should
+        # Phase C auto-orchestration flags
         _auto_browser_done = False
         _auto_nuclei_done = False
         _auto_login_done = False
         _tools_used: set[str] = set()
+        # Phase E: skill auto-execution sequence
+        _skill_sequence = [
+            ("enumerate_endpoints", 3, {}),    # iter 3: map all paths
+            ("test_sensitive_files", 5, {}),    # iter 5: check exposed files
+            ("attempt_auth", 7, {}),            # iter 7: try to log in
+            # post_auth_enum + test_injection + test_idor run after auth
+        ]
+        _skills_completed: set[str] = set()
+        _auth_token: str | None = None
 
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
@@ -797,6 +806,138 @@ class ScanAgentLoop:
             # Sample messages[] byte size at the end of each iteration.
             # Phase B fix: populates peak_context_bytes metric that was 0 in Task 11.
             self.state.update_peak_size()
+
+            # ── Phase E: skill auto-execution ────────────────────────────
+            # Skills run on schedule. Brain sees the results and decides
+            # what to report. This is the "skills for known attacks,
+            # Brain for creative thinking" pattern.
+            if "run_skill" in self.registry.list_tools():
+                for skill_name, trigger_iter, extra_params in _skill_sequence:
+                    if (
+                        skill_name not in _skills_completed
+                        and self.state.iteration >= trigger_iter
+                    ):
+                        _skills_completed.add(skill_name)
+                        try:
+                            params = {**extra_params}
+                            sr = await self.registry.dispatch("run_skill", {
+                                "skill": skill_name,
+                                "target_url": self.state.target,
+                                "params": params,
+                            })
+                            if sr.ok:
+                                self.state.add_message("tool", {
+                                    "name": "run_skill",
+                                    "args": {"skill": skill_name},
+                                    "result": {"ok": True, "summary": sr.summary, "data": sr.data},
+                                })
+                                logger.info("skill %s completed: %s", skill_name, sr.summary[:100])
+
+                                # Chain: if auth succeeded, queue post-auth skills
+                                if skill_name == "attempt_auth" and sr.data:
+                                    if sr.data.get("authenticated"):
+                                        _auth_token = sr.data.get("token", "")
+                                        method = sr.data.get("method", "?")
+                                        creds = sr.data.get("credentials_used", {})
+                                        # Auto-report auth finding
+                                        severity = "critical" if "sqli" in method else "high"
+                                        ftype = "sql_injection" if "sqli" in method else "weak_auth"
+                                        await self.registry.dispatch("report_finding", {
+                                            "title": f"Authentication bypass via {method}",
+                                            "severity": severity,
+                                            "finding_type": ftype,
+                                            "affected_component": sr.data.get("login_endpoint", self.state.target),
+                                            "description": f"Auth bypass via {method}. Credentials: {creds}",
+                                            "evidence": f"Token: {_auth_token[:60]}...\nUser: {sr.data.get('user_info', {})}",
+                                        })
+                                        # Queue post-auth skills
+                                        _skill_sequence.extend([
+                                            ("post_auth_enum", self.state.iteration + 2, {"token": _auth_token}),
+                                            ("test_idor", self.state.iteration + 4, {"token": _auth_token}),
+                                        ])
+                                        self.state.add_message("user", (
+                                            f"SKILL CHAIN: Auth bypass confirmed via {method}! "
+                                            f"Token acquired. Post-auth skills queued."
+                                        ))
+
+                                # Auto-report sensitive files
+                                if skill_name == "test_sensitive_files" and sr.data:
+                                    for exposed in (sr.data.get("exposed") or [])[:10]:
+                                        sev = exposed.get("severity", "medium")
+                                        if sev in ("critical", "high"):
+                                            await self.registry.dispatch("report_finding", {
+                                                "title": f"Sensitive file exposed: {exposed['path']}",
+                                                "severity": sev,
+                                                "finding_type": "information_disclosure",
+                                                "affected_component": self.state.target + exposed["path"],
+                                                "description": exposed.get("description", ""),
+                                                "evidence": exposed.get("preview", "")[:500],
+                                            })
+
+                                # Auto-report injection findings
+                                if skill_name == "test_injection" and sr.data:
+                                    for finding in (sr.data.get("findings") or []):
+                                        await self.registry.dispatch("report_finding", {
+                                            "title": f"{finding['type'].upper()} on {sr.data.get('param', '?')}",
+                                            "severity": finding.get("severity", "medium"),
+                                            "finding_type": finding["type"],
+                                            "affected_component": sr.data.get("url", self.state.target),
+                                            "description": f"Payload: {finding['payload'][:80]}",
+                                            "evidence": finding.get("response_preview", finding.get("evidence", ""))[:500],
+                                        })
+
+                                # Auto-report enumeration results
+                                if skill_name == "enumerate_endpoints" and sr.data:
+                                    # Queue injection test on search/query endpoints
+                                    accessible = sr.data.get("accessible", [])
+                                    for ep in accessible:
+                                        path = ep.get("path", "")
+                                        if "?" in path or "search" in path.lower():
+                                            _skill_sequence.append((
+                                                "test_injection",
+                                                self.state.iteration + 2,
+                                                {"url": self.state.target.rstrip("/") + path},
+                                            ))
+                                            break  # one injection target is enough for now
+                                    # Report error endpoints
+                                    for ep in (sr.data.get("errors") or [])[:5]:
+                                        await self.registry.dispatch("report_finding", {
+                                            "title": f"HTTP 500 on {ep['path']}",
+                                            "severity": "medium",
+                                            "finding_type": "error_oracle",
+                                            "affected_component": self.state.target + ep["path"],
+                                            "description": f"Endpoint returns HTTP 500 ({ep.get('size', '?')}B)",
+                                            "evidence": ep.get("error_preview", "")[:300],
+                                        })
+
+                                # IDOR results
+                                if skill_name == "test_idor" and sr.data:
+                                    if sr.data.get("vulnerable"):
+                                        ids = sr.data.get("accessible_ids", [])
+                                        await self.registry.dispatch("report_finding", {
+                                            "title": f"IDOR on {sr.data.get('url_pattern', '?')}",
+                                            "severity": "high",
+                                            "finding_type": "idor",
+                                            "affected_component": sr.data.get("url_pattern", ""),
+                                            "description": f"{len(ids)} IDs accessible",
+                                            "evidence": f"Accessible IDs: {ids[:10]}\nSamples: {sr.data.get('data_samples', [])[:2]}",
+                                        })
+
+                                # Post-auth enum results
+                                if skill_name == "post_auth_enum" and sr.data:
+                                    user_data = sr.data.get("user_data_exposed", [])
+                                    if user_data:
+                                        await self.registry.dispatch("report_finding", {
+                                            "title": f"Sensitive user data exposed on {len(user_data)} endpoint(s)",
+                                            "severity": "high",
+                                            "finding_type": "broken_access_control",
+                                            "affected_component": self.state.target,
+                                            "description": f"Endpoints exposing user data: {[e['path'] for e in user_data[:5]]}",
+                                            "evidence": str(user_data[:3])[:500],
+                                        })
+
+                        except Exception:
+                            logger.exception("skill %s failed", skill_name)
 
             # ── Phase C auto-orchestration ──────────────────────────────
             # Code enforcement: if Brain hasn't done key actions by certain
