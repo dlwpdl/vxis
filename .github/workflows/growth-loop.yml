@@ -605,20 +605,37 @@ jobs:
               git pull --rebase origin main || true
               git push || true
             fi
-            # 🔴 Immediate regression alert
-            python - <<'ALERT'
-          import os, urllib.request, urllib.parse
+            # Smart rollback: isolate problematic payloads instead of removing all
+            python - <<'SMART_ROLLBACK'
+          import asyncio, os, urllib.request, urllib.parse
+          from vxis.growth.payload_validator import isolate_regression
+          from vxis.growth.rollback import rollback_proposal
+
+          bad = asyncio.run(isolate_regression())
+          if bad:
+              for pid in bad:
+                  rollback_proposal(pid, reason="regression_isolated")
+              msg = f"REGRESSION — {len(bad)} payload(s) isolated and rolled back:\n"
+              msg += "\n".join(f"  - {pid}" for pid in bad[:5])
+          else:
+              # Can't isolate — fall back to full rollback
+              from vxis.growth.rollback import rollback_since
+              from datetime import datetime, timezone, timedelta
+              cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+              count = rollback_since(cutoff)
+              msg = f"REGRESSION — couldn't isolate. Rolled back {count} proposal(s) from last 24h."
+
+          print(msg)
           token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
           chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
           if token and chat_id:
-              msg = "REGRESSION DETECTED\n\nBenchmark failed after signal-driven skill updates.\nAuto-rollback executed. Check growth-loop logs."
               url = f"https://api.telegram.org/bot{token}/sendMessage"
-              data = urllib.parse.urlencode({"chat_id": chat_id, "text": msg}).encode()
+              data = urllib.parse.urlencode({"chat_id": chat_id, "text": "🔴 " + msg}).encode()
               try:
                   urllib.request.urlopen(url, data=data, timeout=10)
               except Exception:
                   pass
-          ALERT
+          SMART_ROLLBACK
           else
             echo "No regression — signal-driven changes retained"
           fi
