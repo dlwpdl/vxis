@@ -129,35 +129,125 @@ def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str
 
 
 def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
-    """Compute a simple VXIS score from finding counts. Returns (score, grade).
+    """Compute VXIS score using the full 5-dimension ScoringEngine.
 
-    Phase A uses a severity-weighted heuristic. Phase B will use the full
-    scoring module once findings carry richer metadata.
+    Populates a ScoreTracker from scan findings, then runs ScoringEngine.
+    Falls back to simple severity sum if ScoringEngine fails.
     """
-    sev_weights = {
-        "critical": 200,
-        "high": 100,
-        "medium": 50,
-        "low": 20,
-        "info": 5,
-        "informational": 5,
-    }
-    score = 0.0
-    for f in ctx.findings:
-        sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
-        score += sev_weights.get(sev, 5)
-    score = min(1000.0, score)
-    if score >= 700:
-        grade = "A"
-    elif score >= 400:
-        grade = "B"
-    elif score >= 200:
-        grade = "C"
-    elif score > 0:
-        grade = "D"
-    else:
-        grade = "F"
-    return score, grade
+    try:
+        from vxis.scoring.engine import ScoringEngine
+        from vxis.scoring.tracker import ScoreTracker
+
+        tracker = ScoreTracker(target_type="web")
+
+        # Map finding types to vector IDs
+        _type_to_vector = {
+            "sql_injection": "WEB-SQLI-001",
+            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
+            "xss": "WEB-XSS-001",
+            "ssrf": "WEB-SSRF-001",
+            "idor": "WEB-IDOR-001",
+            "broken_access_control": "WEB-BAC-001",
+            "information_disclosure": "WEB-INFO-001",
+            "path_traversal": "WEB-TRAV-001",
+            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
+            "csrf": "WEB-CSRF-001",
+            "xxe": "WEB-XXE-001",
+            "rce": "WEB-RCE-001",
+            "command_injection": "WEB-CMDI-001",
+            "error_oracle": "WEB-INFO-002",
+            "misconfiguration": "WEB-MISC-001",
+            "open_redirect": "WEB-REDIR-001",
+            "jwt_confusion": "WEB-JWT-001",
+            "weak_crypto": "WEB-CRYPTO-001",
+            "business_logic": "WEB-LOGIC-001",
+        }
+
+        # Severity → exploitation level
+        _sev_to_level = {
+            "critical": 3,  # exploit successful + post-exploit
+            "high": 2,      # exploit successful
+            "medium": 1,    # vulnerability confirmed
+            "low": 0,       # recon only
+            "informational": 0,
+        }
+
+        for f in ctx.findings:
+            ftype = f.finding_type if hasattr(f, "finding_type") else str(getattr(f, "finding_type", ""))
+            sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+            fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
+
+            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            level = _sev_to_level.get(sev, 0)
+
+            tracker.record_vector_attempt(vector_id)
+            if level >= 1:
+                tracker.vectors_found.add(vector_id)
+            tracker.exploitation_levels[fid] = level
+            tracker.finding_vectors[fid] = vector_id
+
+            # Evidence count from finding
+            evidence_count = 0
+            if hasattr(f, "evidence") and f.evidence:
+                evidence_count = len(f.evidence) if isinstance(f.evidence, list) else 1
+            tracker.evidence_counts[fid] = evidence_count
+
+        # Verifier verdicts → precision
+        confirmed = getattr(ctx, "confirmed_findings", []) or []
+        refuted = getattr(ctx, "refuted_findings", []) or []
+        for cf in confirmed:
+            fid = cf.get("title", "")[:20]
+            tracker.analyst_verdicts[fid] = True
+        for rf in refuted:
+            fid = rf.get("title", "")[:20]
+            tracker.analyst_verdicts[fid] = False
+
+        # Attack chains
+        chains = getattr(ctx, "attack_chains", []) or []
+        if chains:
+            from vxis.scoring.tracker import AttackChain
+            for i, chain in enumerate(chains):
+                ac = AttackChain(chain_id=f"chain-{i}")
+                ids = chain.get("finding_ids", chain) if isinstance(chain, dict) else chain
+                if isinstance(ids, list):
+                    for j, fid in enumerate(ids):
+                        ac.add_step(
+                            vector_id="WEB-CHAIN",
+                            finding_id=str(fid),
+                            level=min(j + 1, 4),
+                            description_en=f"Chain step {j+1}",
+                            description_ko=f"체인 단계 {j+1}",
+                        )
+                tracker.attack_chains.append(ac)
+
+        # Phase completion — single scan_loop phase
+        from vxis.scoring.tracker import PhaseResult, PhaseStatus
+        tracker.phase_results["scan_loop"] = PhaseResult(
+            phase_name="scan_loop",
+            status=PhaseStatus.completed,
+            findings_count=len(ctx.findings),
+        )
+
+        engine = ScoringEngine("web")
+        vxis_score = engine.calculate(tracker, ctx.findings, scan_id=ctx.scan_id)
+
+        # Print detailed score
+        print(vxis_score.summary_text())
+
+        return vxis_score.total, vxis_score.grade
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
+        # Fallback: simple severity sum
+        sev_weights = {"critical": 200, "high": 100, "medium": 50, "low": 20, "informational": 5}
+        score = 0.0
+        for f in ctx.findings:
+            sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
+            score += sev_weights.get(sev, 5)
+        score = min(1000.0, score)
+        grade = "A" if score >= 700 else "B" if score >= 400 else "C" if score >= 200 else "D" if score > 0 else "F"
+        return score, grade
 
 
 class _SimpleScore:
