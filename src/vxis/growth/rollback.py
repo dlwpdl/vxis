@@ -30,6 +30,10 @@ def rollback_proposal(proposal_id: str, reason: str = "") -> bool:
     data["rolled_back_at"] = datetime.now(timezone.utc).isoformat()
     data["rollback_reason"] = reason
 
+    # If this was a skill_payload_add, remove the payload from the skill file
+    if data.get("change_type") == "skill_payload_add":
+        _revert_skill_payload(data)
+
     rejected_path.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -41,6 +45,28 @@ def rollback_proposal(proposal_id: str, reason: str = "") -> bool:
         {"proposal_id": proposal_id, "reason": reason},
     )
     return True
+
+
+def _revert_skill_payload(proposal_data: dict) -> bool:
+    """Remove an auto-added payload line from a skill file."""
+    target_file = Path(proposal_data.get("target_file", ""))
+    change_data = proposal_data.get("change_data", {})
+    payload = change_data.get("payload", "") if isinstance(change_data, dict) else ""
+
+    if not target_file.exists() or not payload:
+        return False
+
+    content = target_file.read_text(encoding="utf-8")
+    lines = content.split("\n")
+    new_lines = [
+        line for line in lines
+        if not (payload in line and "# auto-added" in line)
+    ]
+
+    if len(new_lines) < len(lines):
+        target_file.write_text("\n".join(new_lines), encoding="utf-8")
+        return True
+    return False
 
 
 def rollback_since(timestamp_iso: str) -> int:

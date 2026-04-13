@@ -115,14 +115,19 @@ jobs:
           print(f"Moved {batch_count} inbox files to processed/")
           PYEOF
 
-      - name: Commit proposals + changelog
+      - name: Commit proposals + skill updates
+        id: commit
         if: always()
         run: |
           git config user.name "vxis-growth[bot]"
           git config user.email "vxis-growth@users.noreply.github.com"
+          # Stage both signal state AND skill file changes
           git add .vxis/ 2>/dev/null || true
+          git add src/vxis/agent/skills/ 2>/dev/null || true
+          SKILL_CHANGES=$(git diff --staged --name-only -- 'src/vxis/agent/skills/' | wc -l | tr -d ' ')
+          echo "skill_changes=$SKILL_CHANGES" >> "$GITHUB_OUTPUT"
           if ! git diff --staged --quiet; then
-            git commit -m "chore(growth): analyze batch $(date -u +%Y-%m-%dT%H:%M)"
+            git commit -m "chore(growth): analyze batch $(date -u +%Y-%m-%dT%H:%M) [skills: $SKILL_CHANGES updated]"
             for i in 1 2 3; do
               git fetch origin main
               if git rebase origin/main; then
@@ -133,6 +138,17 @@ jobs:
               sleep 5
             done
           fi
+
+      - name: Trigger growth-loop benchmark if skills changed
+        if: steps.commit.outputs.skill_changes != '0' && steps.commit.outputs.skill_changes != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Skills changed (${{ steps.commit.outputs.skill_changes }} files) — triggering growth-loop validation"
+          gh api repos/${{ github.repository }}/dispatches \
+            -f event_type=growth-loop-validate \
+            -f client_payload='{"trigger":"signal-analyze","skill_changes":"${{ steps.commit.outputs.skill_changes }}"}' \
+            || echo "dispatch failed (may need PAT with repo scope)"
 
       - name: Send Telegram digest
         if: always()
