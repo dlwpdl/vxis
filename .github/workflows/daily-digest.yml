@@ -1,0 +1,108 @@
+name: Daily Growth Digest
+
+on:
+  schedule:
+    - cron: "0 9 * * *"  # 09:00 UTC daily
+  workflow_dispatch: {}
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+permissions:
+  contents: read
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and send daily digest
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python3 - <<'PYEOF'
+          import json, os, urllib.request, urllib.parse
+          from pathlib import Path
+          from datetime import datetime, timezone, timedelta
+
+          cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
+
+          # Count auto-applied proposals from last 24h
+          applied_dir = Path(".vxis/signals/applied")
+          auto_applied = []
+          if applied_dir.exists():
+              for f in applied_dir.glob("*.json"):
+                  try:
+                      data = json.loads(f.read_text())
+                      if data.get("applied_at", "") >= cutoff:
+                          auto_applied.append(data)
+                  except Exception:
+                      pass
+
+          # Count pending PRs
+          pending_dir = Path(".vxis/signals/pending")
+          pending = []
+          if pending_dir.exists():
+              for f in pending_dir.glob("*.json"):
+                  try:
+                      data = json.loads(f.read_text())
+                      pending.append(data)
+                  except Exception:
+                      pass
+
+          # Count rolled back
+          rejected_dir = Path(".vxis/signals/rejected")
+          rolled_back = []
+          if rejected_dir.exists():
+              for f in rejected_dir.glob("*.json"):
+                  try:
+                      data = json.loads(f.read_text())
+                      if data.get("rolled_back_at", "") >= cutoff:
+                          rolled_back.append(data)
+                  except Exception:
+                      pass
+
+          # Count inbox remaining
+          inbox_dir = Path(".vxis/signals/inbox")
+          inbox_count = len(list(inbox_dir.glob("*.jsonl"))) if inbox_dir.exists() else 0
+
+          # Build digest
+          skills_added = [a for a in auto_applied if a.get("change_type") == "skill_payload_add"]
+
+          lines = [
+              "VXIS Daily Digest",
+              f"Date: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}",
+              "",
+              f"Auto-applied (24h): {len(auto_applied)}",
+          ]
+          if skills_added:
+              lines.append(f"  Skill payloads added: {len(skills_added)}")
+              for s in skills_added[:5]:
+                  payload = s.get("change_data", {}).get("payload", "")[:40]
+                  lines.append(f"    {s.get('change_type','?')}: {payload}")
+
+          lines.append(f"Pending review: {len(pending)}")
+          if rolled_back:
+              lines.append(f"Rolled back (24h): {len(rolled_back)}")
+          lines.append(f"Inbox backlog: {inbox_count} files")
+
+          if not auto_applied and not rolled_back:
+              lines.append("\nNo changes in the last 24 hours.")
+
+          msg = "\n".join(lines)
+          print(msg)
+
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+          if token and chat_id:
+              url = f"https://api.telegram.org/bot{token}/sendMessage"
+              data = urllib.parse.urlencode({"chat_id": chat_id, "text": msg}).encode()
+              try:
+                  urllib.request.urlopen(url, data=data, timeout=10)
+                  print("digest sent")
+              except Exception as e:
+                  print(f"send failed: {e}")
+          PYEOF

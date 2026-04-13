@@ -150,7 +150,7 @@ jobs:
             -f client_payload='{"trigger":"signal-analyze","skill_changes":"${{ steps.commit.outputs.skill_changes }}"}' \
             || echo "dispatch failed (may need PAT with repo scope)"
 
-      - name: Send Telegram digest
+      - name: Send Telegram notification (tiered)
         if: always()
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -159,21 +159,47 @@ jobs:
           if [ -f _analyze_result.json ]; then
             python - <<'PYEOF'
           import json, os, urllib.request, urllib.parse
+
           try:
               result = json.load(open("_analyze_result.json"))
           except Exception:
               exit(0)
+
           token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
           chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
           if not token or not chat_id:
               exit(0)
-          msg = (
-              f"🌱 VXIS Signal Analyze\n"
-              f"Total proposals: {result.get('total', 0)}\n"
-              f"Auto-applied: {result.get('auto_applied', 0)}\n"
-              f"Pending review: {result.get('pending_review', 0)}\n"
-              f"Dry-run: {result.get('dry_run', True)}"
-          )
+
+          auto = result.get("auto_applied", 0)
+          pending = result.get("pending_review", 0)
+          discarded = result.get("discarded", 0)
+          skills = result.get("skill_files_modified", 0)
+          total = result.get("total", 0)
+          dry_run = result.get("dry_run", True)
+
+          # Only notify if something happened
+          if total == 0:
+              exit(0)
+
+          lines = ["VXIS Growth Pipeline"]
+          if dry_run:
+              lines.append("[DRY-RUN MODE]")
+
+          if skills > 0:
+              lines.append(f"  Skills updated: {skills} file(s)")
+              lines.append(f"  Benchmark validation triggered")
+
+          lines.append(f"  Auto-applied: {auto}")
+          if pending > 0:
+              lines.append(f"  Pending review: {pending} (check PRs)")
+          if discarded > 0:
+              lines.append(f"  Discarded (low confidence): {discarded}")
+
+          # Immediate alert for skill changes
+          if skills > 0:
+              lines.insert(0, "NEW PAYLOADS DEPLOYED")
+
+          msg = "\n".join(lines)
           url = f"https://api.telegram.org/bot{token}/sendMessage"
           data = urllib.parse.urlencode({"chat_id": chat_id, "text": msg}).encode()
           try:

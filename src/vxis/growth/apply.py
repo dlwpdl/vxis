@@ -203,64 +203,79 @@ def save_proposal(proposal: Proposal, directory: Path) -> Path:
 
 
 def apply_proposals(proposals: list[Proposal]) -> dict:
-    """Apply proposals under bootstrap rules|||Bootstrap 규칙에 따라 제안 적용.
+    """Apply proposals with confidence-tiered strategy.
 
-    Dry-run: everything lands in pending/.
-    Active: low-risk + high-confidence → applied/, else pending/.
-    Even 'auto_applied' only means recorded — bootstrap never mutates code.
+    🟢 HIGH (≥ auto_apply_threshold): auto-apply + daily digest
+    🟡 MEDIUM (≥ pr_review_threshold): save to pending/ for PR review
+    🔴 LOW (< pr_review_threshold): discard silently
+
+    Dry-run mode: everything goes to pending/ regardless of confidence.
     """
     config = load_bootstrap_config()
     log = ChangeLog()
+    is_dry_run = bool(config["apply"]["dry_run"])
+    auto_threshold = float(config["apply"].get("auto_apply_threshold", 0.9))
+    pr_threshold = float(config["apply"].get("pr_review_threshold", 0.7))
 
     results = {
         "total": len(proposals),
         "auto_applied": 0,
         "pending_review": 0,
-        "dry_run": bool(config["apply"]["dry_run"]),
+        "discarded": 0,
+        "skill_files_modified": 0,
+        "dry_run": is_dry_run,
     }
 
     for proposal in proposals:
-        if should_auto_apply(proposal, config):
-            # For skill_payload_add, actually modify the Python file
-            if proposal.change_type == "skill_payload_add" and not config["apply"]["dry_run"]:
+        if is_dry_run:
+            # Dry-run: everything to pending
+            save_proposal(proposal, PENDING_DIR)
+            results["pending_review"] += 1
+            continue
+
+        if proposal.confidence >= auto_threshold and should_auto_apply(proposal, config):
+            # 🟢 HIGH confidence: auto-apply
+            if proposal.change_type == "skill_payload_add":
                 applied = _apply_skill_payload(proposal)
                 if applied:
-                    log.record(
-                        "skill_payload_applied",
-                        {
-                            "proposal_id": proposal.proposal_id,
-                            "target_file": proposal.target_file,
-                            "payload": str(proposal.change_data.get("payload", ""))[:60],
-                        },
-                    )
+                    results["skill_files_modified"] += 1
+                    log.record("skill_payload_applied", {
+                        "proposal_id": proposal.proposal_id,
+                        "target_file": proposal.target_file,
+                        "payload": str(proposal.change_data.get("payload", ""))[:60],
+                    })
+
             save_proposal(proposal, APPLIED_DIR)
             proposal.status = "auto_applied"
             proposal.applied_at = datetime.now(timezone.utc).isoformat()
-            log.record(
-                "proposal_auto_applied",
-                {
-                    "proposal_id": proposal.proposal_id,
-                    "change_type": proposal.change_type,
-                    "confidence": proposal.confidence,
-                },
-            )
+            log.record("proposal_auto_applied", {
+                "proposal_id": proposal.proposal_id,
+                "change_type": proposal.change_type,
+                "confidence": proposal.confidence,
+                "tier": "high",
+            })
             results["auto_applied"] += 1
-        else:
+
+        elif proposal.confidence >= pr_threshold:
+            # 🟡 MEDIUM confidence: pending for PR review
             save_proposal(proposal, PENDING_DIR)
-            log.record(
-                "proposal_pending",
-                {
-                    "proposal_id": proposal.proposal_id,
-                    "change_type": proposal.change_type,
-                    "risk": proposal.risk,
-                    "reason": (
-                        "dry_run"
-                        if config["apply"]["dry_run"]
-                        else "manual_review"
-                    ),
-                },
-            )
+            proposal.status = "pending_review"
+            log.record("proposal_pending_review", {
+                "proposal_id": proposal.proposal_id,
+                "change_type": proposal.change_type,
+                "confidence": proposal.confidence,
+                "tier": "medium",
+            })
             results["pending_review"] += 1
+
+        else:
+            # 🔴 LOW confidence: discard
+            log.record("proposal_discarded", {
+                "proposal_id": proposal.proposal_id,
+                "confidence": proposal.confidence,
+                "tier": "low",
+            })
+            results["discarded"] += 1
 
     return results
 

@@ -18,11 +18,24 @@ trust_threshold_for_llm = 0.8
 batch_size = 100
 
 [apply]
-# DRY-RUN MODE — first 30 days, nothing auto-applies to code
-# Proposals are stored in .vxis/signals/pending/ for manual review
-dry_run = true
+# ACTIVE MODE — confidence-tiered auto-apply
+dry_run = false
+# 🟢 HIGH: auto-apply + daily digest (confidence >= this)
 auto_apply_threshold = 0.9
+# 🟡 MEDIUM: create PR + immediate notify (confidence >= this but < auto)
+pr_review_threshold = 0.7
+# 🔴 Below 0.7: discard silently
 require_benchmark_validation = true
+
+[notifications]
+# Daily digest: one message summarizing all auto-applied changes
+daily_digest = true
+daily_digest_hour_utc = 9
+# Immediate alerts for: regression, critical CVE, rollback
+immediate_on_regression = true
+immediate_on_critical_cve = true
+# Channel
+telegram_enabled = true
 
 [tiers]
 # LLM routing priority: zero-cost first

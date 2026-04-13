@@ -605,6 +605,20 @@ jobs:
               git pull --rebase origin main || true
               git push || true
             fi
+            # 🔴 Immediate regression alert
+            python - <<'ALERT'
+          import os, urllib.request, urllib.parse
+          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+          if token and chat_id:
+              msg = "REGRESSION DETECTED\n\nBenchmark failed after signal-driven skill updates.\nAuto-rollback executed. Check growth-loop logs."
+              url = f"https://api.telegram.org/bot{token}/sendMessage"
+              data = urllib.parse.urlencode({"chat_id": chat_id, "text": msg}).encode()
+              try:
+                  urllib.request.urlopen(url, data=data, timeout=10)
+              except Exception:
+                  pass
+          ALERT
           else
             echo "No regression — signal-driven changes retained"
           fi
