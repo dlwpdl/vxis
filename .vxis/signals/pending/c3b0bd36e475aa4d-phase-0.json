@@ -1,0 +1,20 @@
+{
+  "proposal_id": "c3b0bd36e475aa4d-phase-0",
+  "source_signal_id": "c3b0bd36e475aa4d",
+  "change_type": "guide_advice_append",
+  "target_file": "src/vxis/phases/guides/p4_cpr.py",
+  "change_data": {
+    "phase_id": "P4_cpr",
+    "field": "strategic_advice_ko",
+    "append": "해당 취약점은 F5 BIG-IP APM 관련 활성 악용 사례가 보고된 만큼, 인터넷 노출 장비의 패치 우선순위를 최상위로 두고 KEV 목록을 기준으로 신속히 조치하세요. 관리 인터페이스 접근 통제, 불필요한 외부 노출 제거, 침해 징후 모니터링을 병행해야 합니다."
+  },
+  "confidence": 0.7224999999999999,
+  "risk": "low",
+  "rationale_en": "Phase update from thehackernews",
+  "rationale_ko": "thehackernews에서 도출된 Phase 업데이트",
+  "source_url": "https://thehackernews.com/2026/03/cisa-adds-cve-2025-53521-to-kev-after.html",
+  "status": "pending",
+  "applied_at": "",
+  "rolled_back_at": "",
+  "effectiveness_score": 0.0
+}

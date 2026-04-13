@@ -1,0 +1,19 @@
+{
+  "proposal_id": "d167761d85a532a9-kb-0",
+  "source_signal_id": "d167761d85a532a9",
+  "change_type": "kb_pattern_add",
+  "target_file": "~/.vxis/knowledge_store.json",
+  "change_data": {
+    "if": "article mentions F5 BIG-IP APM instances exposed on the internet and exploitation of an RCE flaw",
+    "then": "map to exposed appliance exploitation risk and recommend immediate patching, exposure reduction, and verification of management access controls"
+  },
+  "confidence": 0.7200000000000001,
+  "risk": "low",
+  "rationale_en": "KB pattern from securityaffairs",
+  "rationale_ko": "securityaffairs에서 도출된 KB 패턴",
+  "source_url": "https://securityaffairs.com/190384/security/attackers-exploit-rce-flaw-as-14000-f5-big-ip-apm-instances-remain-exposed.html",
+  "status": "pending",
+  "applied_at": "",
+  "rolled_back_at": "",
+  "effectiveness_score": 0.0
+}

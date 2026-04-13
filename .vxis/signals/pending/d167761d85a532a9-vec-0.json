@@ -1,0 +1,22 @@
+{
+  "proposal_id": "d167761d85a532a9-vec-0",
+  "source_signal_id": "d167761d85a532a9",
+  "change_type": "vector_add",
+  "target_file": "src/vxis/scoring/vectors.py",
+  "change_data": {
+    "id": "WEB-PHISH-001",
+    "name_en": "Exposed Internet-Facing Appliance Exploitation",
+    "name_ko": "인터넷 노출 어플라이언스 악용",
+    "phase": "P4_cpr",
+    "risk": "high"
+  },
+  "confidence": 0.81,
+  "risk": "low",
+  "rationale_en": "New vector from securityaffairs: Exposed Internet-Facing Appliance Exploitation",
+  "rationale_ko": "securityaffairs에서 도출된 새 벡터: 인터넷 노출 어플라이언스 악용",
+  "source_url": "https://securityaffairs.com/190384/security/attackers-exploit-rce-flaw-as-14000-f5-big-ip-apm-instances-remain-exposed.html",
+  "status": "pending",
+  "applied_at": "",
+  "rolled_back_at": "",
+  "effectiveness_score": 0.0
+}

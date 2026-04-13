@@ -1,0 +1,20 @@
+{
+  "proposal_id": "d167761d85a532a9-phase-0",
+  "source_signal_id": "d167761d85a532a9",
+  "change_type": "guide_advice_append",
+  "target_file": "src/vxis/phases/guides/p4_cpr.py",
+  "change_data": {
+    "phase_id": "P4_cpr",
+    "field": "strategic_advice_ko",
+    "append": "인터넷에 노출된 F5 BIG-IP APM 장비는 정기적으로 자산 식별 및 패치 상태를 점검하고, 알려진 RCE 취약점에 대한 긴급 패치와 접근 제어 강화, 관리 인터페이스 외부 노출 최소화를 우선 적용해야 한다."
+  },
+  "confidence": 0.765,
+  "risk": "low",
+  "rationale_en": "Phase update from securityaffairs",
+  "rationale_ko": "securityaffairs에서 도출된 Phase 업데이트",
+  "source_url": "https://securityaffairs.com/190384/security/attackers-exploit-rce-flaw-as-14000-f5-big-ip-apm-instances-remain-exposed.html",
+  "status": "pending",
+  "applied_at": "",
+  "rolled_back_at": "",
+  "effectiveness_score": 0.0
+}

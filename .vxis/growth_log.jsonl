@@ -1,1 +1,12 @@
 {"timestamp": "2026-04-13T01:49:11.065637+00:00", "event_type": "proposal_rolled_back", "proposal_id": "rollback-test-1", "reason": "test rollback"}
+{"timestamp": "2026-04-13T02:28:41.758031+00:00", "event_type": "proposal_pending", "proposal_id": "d167761d85a532a9-vec-0", "change_type": "vector_add", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.758236+00:00", "event_type": "proposal_pending", "proposal_id": "d167761d85a532a9-phase-0", "change_type": "guide_advice_append", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.758409+00:00", "event_type": "proposal_pending", "proposal_id": "d167761d85a532a9-kb-0", "change_type": "kb_pattern_add", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.758753+00:00", "event_type": "proposal_pending", "proposal_id": "37b62066c44801f5-kb-0", "change_type": "kb_pattern_add", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.758955+00:00", "event_type": "proposal_pending", "proposal_id": "f9e2b9f68fcbfbe5-vec-0", "change_type": "vector_add", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.759122+00:00", "event_type": "proposal_pending", "proposal_id": "f9e2b9f68fcbfbe5-phase-0", "change_type": "guide_advice_append", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.759296+00:00", "event_type": "proposal_pending", "proposal_id": "f9e2b9f68fcbfbe5-kb-0", "change_type": "kb_pattern_add", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.759468+00:00", "event_type": "proposal_pending", "proposal_id": "6bf5f6a4b56f7354-kb-0", "change_type": "kb_pattern_add", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.759631+00:00", "event_type": "proposal_pending", "proposal_id": "c3b0bd36e475aa4d-vec-0", "change_type": "vector_add", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.759829+00:00", "event_type": "proposal_pending", "proposal_id": "c3b0bd36e475aa4d-phase-0", "change_type": "guide_advice_append", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T02:28:41.760028+00:00", "event_type": "proposal_pending", "proposal_id": "c3b0bd36e475aa4d-kb-0", "change_type": "kb_pattern_add", "risk": "low", "reason": "dry_run"}
