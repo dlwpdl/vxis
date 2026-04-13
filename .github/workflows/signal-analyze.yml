@@ -177,27 +177,56 @@ jobs:
           total = result.get("total", 0)
           dry_run = result.get("dry_run", True)
 
-          # Only notify if something happened
           if total == 0:
               exit(0)
 
+          # Load proposal details for the message
+          from pathlib import Path
+          applied_details = []
+          pending_details = []
+          applied_dir = Path(".vxis/signals/applied")
+          pending_dir = Path(".vxis/signals/pending")
+          if applied_dir.exists():
+              for f in sorted(applied_dir.glob("*.json"))[-5:]:
+                  try:
+                      d = json.loads(f.read_text())
+                      ct = d.get("change_type", "?")
+                      rationale = d.get("rationale_en", "")[:60]
+                      conf = d.get("confidence", 0)
+                      applied_details.append(f"  [{conf:.0%}] {ct}: {rationale}")
+                  except Exception:
+                      pass
+          if pending_dir.exists():
+              for f in sorted(pending_dir.glob("*.json"))[-5:]:
+                  try:
+                      d = json.loads(f.read_text())
+                      ct = d.get("change_type", "?")
+                      rationale = d.get("rationale_en", "")[:60]
+                      conf = d.get("confidence", 0)
+                      src = d.get("source_url", "")[:50]
+                      pending_details.append(f"  [{conf:.0%}] {ct}: {rationale}")
+                  except Exception:
+                      pass
+
           lines = ["VXIS Growth Pipeline"]
-          if dry_run:
-              lines.append("[DRY-RUN MODE]")
 
           if skills > 0:
-              lines.append(f"  Skills updated: {skills} file(s)")
-              lines.append(f"  Benchmark validation triggered")
+              lines.append(f"\nNEW PAYLOADS: {skills} skill file(s) updated")
+              lines.append("Benchmark validation triggered")
 
-          lines.append(f"  Auto-applied: {auto}")
+          if auto > 0:
+              lines.append(f"\nAuto-applied ({auto}):")
+              lines.extend(applied_details[:5])
+
           if pending > 0:
-              lines.append(f"  Pending review: {pending} (check PRs)")
-          if discarded > 0:
-              lines.append(f"  Discarded (low confidence): {discarded}")
+              lines.append(f"\nPending review ({pending}):")
+              lines.extend(pending_details[:5])
 
-          # Immediate alert for skill changes
-          if skills > 0:
-              lines.insert(0, "NEW PAYLOADS DEPLOYED")
+          if discarded > 0:
+              lines.append(f"\nDiscarded: {discarded} (low confidence)")
+
+          if not auto and not pending and not skills:
+              lines.append("\nNo actionable proposals this batch.")
 
           msg = "\n".join(lines)
           url = f"https://api.telegram.org/bot{token}/sendMessage"
