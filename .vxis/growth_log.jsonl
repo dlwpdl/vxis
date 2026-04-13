@@ -10,3 +10,12 @@
 {"timestamp": "2026-04-13T02:28:41.759631+00:00", "event_type": "proposal_pending", "proposal_id": "c3b0bd36e475aa4d-vec-0", "change_type": "vector_add", "risk": "low", "reason": "dry_run"}
 {"timestamp": "2026-04-13T02:28:41.759829+00:00", "event_type": "proposal_pending", "proposal_id": "c3b0bd36e475aa4d-phase-0", "change_type": "guide_advice_append", "risk": "low", "reason": "dry_run"}
 {"timestamp": "2026-04-13T02:28:41.760028+00:00", "event_type": "proposal_pending", "proposal_id": "c3b0bd36e475aa4d-kb-0", "change_type": "kb_pattern_add", "risk": "low", "reason": "dry_run"}
+{"timestamp": "2026-04-13T03:41:25.191364+00:00", "event_type": "proposal_discarded", "proposal_id": "405ef72c137e2750-kb-0", "confidence": 0.68, "tier": "low"}
+{"timestamp": "2026-04-13T03:41:25.191679+00:00", "event_type": "proposal_pending_review", "proposal_id": "a83dd1f94b7cd4d4-vec-0", "change_type": "vector_add", "confidence": 0.765, "tier": "medium"}
+{"timestamp": "2026-04-13T03:41:25.191868+00:00", "event_type": "proposal_pending_review", "proposal_id": "a83dd1f94b7cd4d4-phase-0", "change_type": "guide_advice_append", "confidence": 0.7224999999999999, "tier": "medium"}
+{"timestamp": "2026-04-13T03:41:25.191915+00:00", "event_type": "proposal_discarded", "proposal_id": "a83dd1f94b7cd4d4-kb-0", "confidence": 0.68, "tier": "low"}
+{"timestamp": "2026-04-13T03:41:25.191953+00:00", "event_type": "proposal_discarded", "proposal_id": "a83dd1f94b7cd4d4-skill-0", "confidence": 0.68, "tier": "low"}
+{"timestamp": "2026-04-13T03:41:25.192168+00:00", "event_type": "proposal_pending_review", "proposal_id": "f9e2b9f68fcbfbe5-vec-0", "change_type": "vector_add", "confidence": 0.765, "tier": "medium"}
+{"timestamp": "2026-04-13T03:41:25.192359+00:00", "event_type": "proposal_pending_review", "proposal_id": "f9e2b9f68fcbfbe5-phase-0", "change_type": "guide_advice_append", "confidence": 0.7224999999999999, "tier": "medium"}
+{"timestamp": "2026-04-13T03:41:25.192439+00:00", "event_type": "proposal_discarded", "proposal_id": "f9e2b9f68fcbfbe5-kb-0", "confidence": 0.68, "tier": "low"}
+{"timestamp": "2026-04-13T03:41:25.192491+00:00", "event_type": "proposal_discarded", "proposal_id": "6bf5f6a4b56f7354-kb-0", "confidence": 0.68, "tier": "low"}

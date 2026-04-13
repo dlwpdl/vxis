@@ -1,0 +1,22 @@
+{
+  "proposal_id": "a83dd1f94b7cd4d4-vec-0",
+  "source_signal_id": "a83dd1f94b7cd4d4",
+  "change_type": "vector_add",
+  "target_file": "src/vxis/scoring/vectors.py",
+  "change_data": {
+    "id": "WEB-PHISH-001",
+    "name_en": "Exposed Flowise AI Agent Builder Remote Code Execution",
+    "name_ko": "노출된 Flowise AI Agent Builder 원격 코드 실행",
+    "phase": "P4_cpr",
+    "risk": "high"
+  },
+  "confidence": 0.765,
+  "risk": "low",
+  "rationale_en": "New vector from thehackernews: Exposed Flowise AI Agent Builder Remote Code Execution",
+  "rationale_ko": "thehackernews에서 도출된 새 벡터: 노출된 Flowise AI Agent Builder 원격 코드 실행",
+  "source_url": "https://thehackernews.com/2026/04/flowise-ai-agent-builder-under-active.html",
+  "status": "pending",
+  "applied_at": "",
+  "rolled_back_at": "",
+  "effectiveness_score": 0.0
+}
