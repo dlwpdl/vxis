@@ -1,0 +1,122 @@
+{
+  "cached_at": "2026-04-13T13:21:51.901305+00:00",
+  "extraction": {
+    "signal_id": "ebf33d646b3ca4d1",
+    "source_name": "securityaffairs",
+    "article_url": "https://securityaffairs.com/190623/hacking/cve-2026-39987-marimo-rce-exploited-in-hours-after-disclosure.html",
+    "article_title": "CVE-2026-39987: Marimo RCE exploited in hours after disclosure",
+    "pub_date": "Sat, 11 Apr 2026 09:44:44 +0000",
+    "trust_score": 0.9,
+    "cves": [
+      "CVE-2026-39987"
+    ],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [
+      {
+        "mitre_id": "T1190",
+        "description": "Exploit public-facing web application: remote code execution against an exposed Marimo web service."
+      },
+      {
+        "mitre_id": "T1059.006",
+        "description": "Command and Scripting Interpreter: likely Python code execution through notebook/app execution features."
+      },
+      {
+        "mitre_id": "T1003",
+        "description": "OS Credential Dumping: article indicates credential theft shortly after exploitation."
+      }
+    ],
+    "attack_chain": [
+      "Internet-facing Marimo instance is identified",
+      "A malicious request triggers the RCE condition in the web application",
+      "Arbitrary code executes in the Marimo process context",
+      "Attacker retrieves secrets/credentials from memory, config, or filesystem",
+      "Credential theft enables further access or pivoting"
+    ],
+    "target_industries": [
+      "technology",
+      "education",
+      "research",
+      "finance",
+      "healthcare"
+    ],
+    "target_technologies": [
+      "marimo",
+      "python",
+      "jupyter-like notebook apps",
+      "fastapi",
+      "uvicorn"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Unauthenticated notebook execution RCE",
+        "name_ko": "인증되지 않은 노트북 실행 RCE",
+        "phase": "P4_cpr",
+        "risk": "critical"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [
+      {
+        "technique": "rce",
+        "attack_description": "A web-exposed notebook or app endpoint accepts attacker-controlled input that is later evaluated as Python code or passed into an execution primitive, allowing arbitrary server-side command execution.",
+        "payload": "print(__import__('os').popen('id').read())",
+        "detect": [
+          "uid=",
+          "gid=",
+          "www-data",
+          "apache",
+          "python"
+        ],
+        "affected_tech": [
+          "marimo",
+          "python",
+          "fastapi",
+          "uvicorn"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "rce",
+        "attack_description": "If the application builds shell commands from user input, command separators can break out of the intended argument and execute a second command.",
+        "payload": ";id;#",
+        "detect": [
+          "uid=",
+          "gid=",
+          "command not found",
+          "sh: 1:"
+        ],
+        "affected_tech": [
+          "marimo",
+          "python",
+          "bash",
+          "sh"
+        ],
+        "severity": "high"
+      },
+      {
+        "technique": "rce",
+        "attack_description": "A deserialization or template-evaluation flaw may allow Python object traversal to reach dangerous builtins and invoke system commands without explicitly calling eval.",
+        "payload": "{{ ''.__class__.__mro__[1].__subclasses__()[40]('id',shell=True,stdout=-1).communicate()[0].decode() }}",
+        "detect": [
+          "uid=",
+          "gid=",
+          "jinja2",
+          "template",
+          "subclasses"
+        ],
+        "affected_tech": [
+          "python",
+          "jinja2",
+          "marimo"
+        ],
+        "severity": "critical"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:21:51.901190+00:00"
+  }
+}

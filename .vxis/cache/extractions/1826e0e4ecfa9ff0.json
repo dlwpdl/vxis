@@ -1,0 +1,32 @@
+{
+  "cached_at": "2026-04-13T13:23:25.811436+00:00",
+  "extraction": {
+    "signal_id": "1826e0e4ecfa9ff0",
+    "source_name": "darkreading",
+    "article_url": "https://www.darkreading.com/cybersecurity-operations/full-sail-university-ibm-cyber-defense-range-aws-cloud-range",
+    "article_title": "Full Sail University to Open IBM Cyber Defense Range Powered by AWS and Cloud Range on Campus",
+    "pub_date": "Wed, 08 Apr 2026 14:43:49 GMT",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [
+      "education",
+      "higher_education"
+    ],
+    "target_technologies": [
+      "AWS",
+      "Cloud Range",
+      "IBM Cyber Defense Range"
+    ],
+    "proposed_vectors": [],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:23:25.811364+00:00"
+  }
+}

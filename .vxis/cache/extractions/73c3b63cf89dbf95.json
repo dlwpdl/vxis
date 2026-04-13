@@ -1,0 +1,39 @@
+{
+  "cached_at": "2026-04-13T13:23:08.754264+00:00",
+  "extraction": {
+    "signal_id": "73c3b63cf89dbf95",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/the-state-of-trusted-open-source-report.html",
+    "article_title": "The State of Trusted Open Source Report",
+    "pub_date": "Thu, 02 Apr 2026 17:00:00 +0530",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [],
+    "attack_chain": [],
+    "target_industries": [],
+    "target_technologies": [
+      "python",
+      "postgresql",
+      "container images",
+      "ai development",
+      "devsecops"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Container image supply-chain exposure via vulnerable base images",
+        "name_ko": "취약한 베이스 이미지로 인한 컨테이너 공급망 노출",
+        "phase": "P4_cpr",
+        "risk": "medium"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:23:08.754187+00:00"
+  }
+}

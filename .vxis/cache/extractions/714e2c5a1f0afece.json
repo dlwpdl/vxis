@@ -1,0 +1,45 @@
+{
+  "cached_at": "2026-04-13T13:23:22.109595+00:00",
+  "extraction": {
+    "signal_id": "714e2c5a1f0afece",
+    "source_name": "darkreading",
+    "article_url": "https://www.darkreading.com/vulnerabilities-threats/bluehammer-windows-exploit-microsoft-bug-disclosure-issues",
+    "article_title": "'BlueHammer' Windows Zero-Day Exploit Signals Microsoft Bug Disclosure Issues",
+    "pub_date": "Thu, 09 Apr 2026 20:13:34 GMT",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [
+      "Chaotic Eclipse"
+    ],
+    "malware_families": [],
+    "ttps": [
+      {
+        "mitre_id": "T1068",
+        "description": "Exploitation for Privilege Escalation: the article describes a Windows zero-day that allows a local user to achieve system takeover, consistent with abuse of a local privilege escalation flaw."
+      }
+    ],
+    "attack_chain": [
+      "Local user executes a proof-of-concept exploit against a Windows zero-day",
+      "Exploit triggers privilege escalation and system-level takeover"
+    ],
+    "target_industries": [],
+    "target_technologies": [
+      "Windows"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-000",
+        "name_en": "Not applicable",
+        "name_ko": "해당 없음",
+        "phase": "P4_cpr",
+        "risk": "low"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:23:22.109525+00:00"
+  }
+}

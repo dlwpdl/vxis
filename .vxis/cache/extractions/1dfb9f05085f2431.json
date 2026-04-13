@@ -1,0 +1,90 @@
+{
+  "cached_at": "2026-04-13T13:22:17.916389+00:00",
+  "extraction": {
+    "signal_id": "1dfb9f05085f2431",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/adobe-patches-actively-exploited.html",
+    "article_title": "Adobe Patches Actively Exploited Acrobat Reader Flaw CVE-2026-34621",
+    "pub_date": "Sun, 12 Apr 2026 09:55:00 +0530",
+    "trust_score": 0.85,
+    "cves": [
+      "CVE-2026-34621"
+    ],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [
+      {
+        "mitre_id": "T1203",
+        "description": "Exploitation for Client Execution via malicious PDF content that triggers JavaScript execution in Adobe Acrobat Reader"
+      },
+      {
+        "mitre_id": "T1064",
+        "description": "Scripting: abuse of embedded JavaScript handling in a PDF reader"
+      }
+    ],
+    "attack_chain": [
+      "Attacker crafts a malicious PDF document containing specially structured object data and embedded JavaScript-triggering content.",
+      "Victim opens the PDF in Adobe Acrobat Reader, causing the parser to process attacker-controlled objects.",
+      "A prototype pollution condition alters JavaScript object behavior inside the application runtime.",
+      "Polluted object properties influence code flow and can lead to arbitrary JavaScript execution and potentially further code execution.",
+      "Attacker delivers a payload through social engineering, phishing, or document distribution."
+    ],
+    "target_industries": [],
+    "target_technologies": [
+      "adobe acrobat reader",
+      "adobe acrobat dc",
+      "pdf",
+      "javascript"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Malicious PDF object pollution leading to script execution",
+        "name_ko": "악성 PDF 객체 오염을 통한 스크립트 실행",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [
+      "Add detection for suspicious PDF JavaScript objects, malformed array/object fields, and unexpected property inheritance patterns in PDFs opened by Acrobat Reader.",
+      "Add telemetry for PDF documents that trigger script execution immediately upon open without user interaction."
+    ],
+    "proposed_kb_patterns": [
+      {
+        "technique": "xss",
+        "attack_description": "This is not a classic browser XSS, but a client-side script execution primitive in a PDF viewer. A crafted PDF can inject JavaScript-bearing structures or manipulate object prototypes so that the viewer's JavaScript context resolves attacker-controlled properties and executes code paths on document open.",
+        "payload": "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /OpenAction 2 0 R >>\nendobj\n2 0 obj\n<< /S /JavaScript /JS (app.alert('POC: PDF JS executed');) >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF",
+        "detect": [
+          "Alert dialog or any visible script execution when the PDF is opened",
+          "Reader process spawns unexpected child processes or accesses scripting APIs",
+          "Document open event triggers JavaScript without user interaction"
+        ],
+        "affected_tech": [
+          "adobe acrobat reader",
+          "pdf javascript"
+        ],
+        "severity": "high"
+      },
+      {
+        "technique": "rce",
+        "attack_description": "Prototype pollution can be used to alter runtime object behavior and redirect execution into attacker-controlled JavaScript. In a vulnerable PDF parser/viewer, malformed nested objects or inherited properties may cause the engine to read poisoned values that alter control flow and potentially enable code execution.",
+        "payload": "%PDF-1.7\n1 0 obj\n<< /Type /Catalog /Names 2 0 R >>\nendobj\n2 0 obj\n<< /JavaScript << /Names [(foo) 3 0 R] >> >>\nendobj\n3 0 obj\n<< /S /JavaScript /JS (var o={}; o.__proto__.polluted='yes'; app.alert(o.polluted);) >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF",
+        "detect": [
+          "Unexpected access to poisoned prototype-derived properties",
+          "JavaScript executes on open and displays 'yes' or similar proof text",
+          "Crashes, memory corruption, or abnormal reader behavior after document load"
+        ],
+        "affected_tech": [
+          "adobe acrobat reader",
+          "pdf parser",
+          "javascript runtime"
+        ],
+        "severity": "critical"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:22:17.916305+00:00"
+  }
+}

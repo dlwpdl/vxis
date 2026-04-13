@@ -1,0 +1,69 @@
+{
+  "cached_at": "2026-04-13T13:22:45.366468+00:00",
+  "extraction": {
+    "signal_id": "f61e5a1d1b39e051",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/anthropics-claude-mythos-finds.html",
+    "article_title": "Anthropic's Claude Mythos Finds Thousands of Zero-Day Flaws Across Major Systems",
+    "pub_date": "Wed, 08 Apr 2026 14:46:00 +0530",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [
+      {
+        "mitre_id": "T1190",
+        "description": "Exploit public-facing application by chaining software vulnerabilities to escape sandboxing or browser isolation."
+      },
+      {
+        "mitre_id": "T1068",
+        "description": "Privilege escalation via multi-stage exploit chains that move from browser renderer compromise to sandbox escape."
+      }
+    ],
+    "attack_chain": [
+      "Initial compromise of a browser renderer or application process",
+      "Exploit chaining to bypass sandbox boundaries",
+      "Escape into higher-privilege OS context",
+      "Potential follow-on execution or lateral movement"
+    ],
+    "target_industries": [
+      "technology",
+      "financial services",
+      "cloud services",
+      "software development"
+    ],
+    "target_technologies": [
+      "web browsers",
+      "browser sandboxes",
+      "operating systems",
+      "virtual machine monitors",
+      "ffmpeg",
+      "openbsd"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Browser renderer-to-sandbox escape chain",
+        "name_ko": "브라우저 렌더러에서 샌드박스 탈출 체인",
+        "phase": "P4_cpr",
+        "risk": "high"
+      },
+      {
+        "id": "WEB-002",
+        "name_en": "Memory corruption in media parsing",
+        "name_ko": "미디어 파싱 메모리 손상",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [
+      "Add browser exploit-chain detection for renderer compromise followed by sandbox escape indicators.",
+      "Add validation for memory corruption in media-processing pipelines and virtualized components."
+    ],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:22:45.366371+00:00"
+  }
+}

@@ -1,0 +1,204 @@
+{
+  "cached_at": "2026-04-13T13:22:11.267728+00:00",
+  "extraction": {
+    "signal_id": "c842990b17a144c7",
+    "source_name": "bleepingcomputer",
+    "article_url": "https://www.bleepingcomputer.com/news/security/smart-slider-updates-hijacked-to-push-malicious-wordpress-joomla-versions/",
+    "article_title": "Smart Slider updates hijacked to push malicious WordPress, Joomla versions",
+    "pub_date": "Thu, 09 Apr 2026 12:15:26 -0400",
+    "trust_score": 0.9,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [
+      {
+        "mitre_id": "T1190",
+        "description": "Exploit public-facing web application by abusing a compromised plugin update channel to implant backdoors in WordPress/Joomla deployments."
+      },
+      {
+        "mitre_id": "T1505.003",
+        "description": "Server software component: malicious functionality embedded into a legitimate CMS plugin update to persist on the target system."
+      },
+      {
+        "mitre_id": "T1059.004",
+        "description": "Unix shell command execution through web-request-controlled inputs, including crafted HTTP headers."
+      },
+      {
+        "mitre_id": "T1059.006",
+        "description": "PHP execution via authenticated backdoor using eval-style code execution."
+      },
+      {
+        "mitre_id": "T1136.001",
+        "description": "Create a hidden administrative user in a WordPress/Joomla environment to maintain privileged access."
+      }
+    ],
+    "attack_chain": [
+      "Compromise plugin update mechanism",
+      "Distribute trojanized Smart Slider Pro update",
+      "Plant multiple backdoors in plugin files",
+      "Create hidden admin user",
+      "Exfiltrate sensitive data and enable remote command execution"
+    ],
+    "target_industries": [
+      "Web hosting",
+      "Media and publishing",
+      "Small and medium businesses",
+      "E-commerce"
+    ],
+    "target_technologies": [
+      "WordPress",
+      "Joomla",
+      "PHP",
+      "Apache",
+      "Nginx",
+      "MySQL"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Trojanized CMS plugin update / supply-chain implant",
+        "name_ko": "악성 CMS 플러그인 업데이트 / 공급망 임플란트",
+        "phase": "P4_cpr",
+        "risk": "high"
+      },
+      {
+        "id": "WEB-002",
+        "name_en": "Header-triggered unauthenticated command execution backdoor",
+        "name_ko": "헤더 기반 비인증 명령 실행 백도어",
+        "phase": "P4_cpr",
+        "risk": "critical"
+      },
+      {
+        "id": "WEB-003",
+        "name_en": "Authenticated PHP eval / OS command execution backdoor",
+        "name_ko": "인증 기반 PHP eval / OS 명령 실행 백도어",
+        "phase": "P4_cpr",
+        "risk": "critical"
+      },
+      {
+        "id": "WEB-004",
+        "name_en": "Hidden administrator account creation",
+        "name_ko": "숨겨진 관리자 계정 생성",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [
+      {
+        "phase": "P4_cpr",
+        "update": "Add detection for malicious plugin-update implants that preserve normal functionality while injecting backdoors into CMS main files."
+      },
+      {
+        "phase": "P4_cpr",
+        "update": "Add HTTP-header-triggered execution checks for WordPress/Joomla plugin callbacks and admin-ajax/admin endpoints."
+      }
+    ],
+    "proposed_kb_patterns": [
+      {
+        "technique": "cmdi",
+        "attack_description": "A hidden backdoor reads attacker-controlled values from HTTP headers and passes them to an OS command execution sink. If the application concatenates header content into a shell command, an attacker can trigger command execution without authentication.",
+        "payload": "User-Agent: () { :;}; /bin/sh -c 'id > /tmp/wp_hdr_poc.txt'",
+        "detect": [
+          "Out-of-band file creation or command execution evidence on the server",
+          "Unexpected process spawning from the web server user",
+          "HTTP 200/500 paired with a new file containing uid/gid output"
+        ],
+        "affected_tech": [
+          "WordPress",
+          "Joomla",
+          "PHP",
+          "Apache",
+          "Nginx",
+          "Linux"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "cmdi",
+        "attack_description": "An authenticated backdoor accepts a parameter and passes it directly to a shell command. Command separators can be used to append arbitrary commands if the input is not sanitized.",
+        "payload": "cmd=ping+127.0.0.1%3B+echo+PWNED+%3E+/tmp/wp_cmdi_poc.txt",
+        "detect": [
+          "Presence of /tmp/wp_cmdi_poc.txt or equivalent server-side artifact",
+          "Delayed response consistent with command execution",
+          "Server logs showing the injected parameter reaching a command handler"
+        ],
+        "affected_tech": [
+          "PHP",
+          "WordPress",
+          "Joomla",
+          "Linux"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "rce",
+        "attack_description": "A malicious plugin update can introduce PHP code execution through eval, assert, or dynamic include on attacker-controlled input. Supplying PHP code as data can result in direct server-side execution.",
+        "payload": "payload=<?php file_put_contents('/tmp/wp_eval_poc.txt','ok'); echo 'done'; ?>",
+        "detect": [
+          "Server-side creation of /tmp/wp_eval_poc.txt",
+          "Unexpected output marker 'done' in HTTP response",
+          "WAF or application logs showing PHP tags in request parameters"
+        ],
+        "affected_tech": [
+          "PHP",
+          "WordPress",
+          "Joomla"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "auth_bypass",
+        "attack_description": "A backdoor or implant may expose privileged functions without proper session validation. Attackers can replay a crafted request to reach admin-only code paths if the plugin trusts a header, cookie, or static token.",
+        "payload": "X-Plugin-Auth: admin\nX-Request-Action: create_user\nX-Request-Role: administrator",
+        "detect": [
+          "Unexpected 200/302 from endpoints that should require authentication",
+          "Creation of an administrator user without a valid login session",
+          "Audit logs showing admin actions from unauthenticated requests"
+        ],
+        "affected_tech": [
+          "WordPress",
+          "Joomla",
+          "PHP"
+        ],
+        "severity": "high"
+      },
+      {
+        "technique": "idor",
+        "attack_description": "If the malicious or vulnerable plugin exposes object identifiers for users, posts, or configuration items, changing the numeric ID can access or modify another tenant's data without authorization.",
+        "payload": "GET /wp-admin/admin-ajax.php?action=get_user&id=1 HTTP/1.1",
+        "detect": [
+          "Disclosure of another user's profile or metadata",
+          "Same response content for multiple guessed IDs",
+          "Authorization checks missing in server-side code paths"
+        ],
+        "affected_tech": [
+          "WordPress",
+          "Joomla",
+          "PHP"
+        ],
+        "severity": "medium"
+      },
+      {
+        "technique": "auth_bypass",
+        "attack_description": "A hidden administrative user can be created by abusing an installer or maintenance endpoint that lacks CSRF or session checks. If the endpoint trusts form fields directly, attacker-supplied role values can produce a privileged account.",
+        "payload": "username=poc_hidden_admin&email=poc@example.com&role=administrator&password=Passw0rd!23",
+        "detect": [
+          "New administrator user appears in the CMS user list",
+          "Database record for a user created by an unexpected source IP or no session",
+          "Role set to administrator without a valid admin workflow"
+        ],
+        "affected_tech": [
+          "WordPress",
+          "Joomla",
+          "PHP",
+          "MySQL"
+        ],
+        "severity": "high"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:22:11.267580+00:00"
+  }
+}

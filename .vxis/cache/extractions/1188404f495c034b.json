@@ -1,0 +1,137 @@
+{
+  "cached_at": "2026-04-13T13:22:37.168016+00:00",
+  "extraction": {
+    "signal_id": "1188404f495c034b",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/threatsday-bulletin-hybrid-p2p-botnet.html",
+    "article_title": "ThreatsDay Bulletin: Hybrid P2P Botnet, 13-Year-Old Apache RCE and 18 More Stories",
+    "pub_date": "Thu, 09 Apr 2026 18:27:00 +0530",
+    "trust_score": 0.85,
+    "cves": [
+      "CVE-2024-32114"
+    ],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [
+      "Phorpiex"
+    ],
+    "ttps": [
+      {
+        "mitre_id": "T1190",
+        "description": "Exploit public-facing applications via chained web/service flaws leading to remote code execution or unauthorized access."
+      },
+      {
+        "mitre_id": "T1133",
+        "description": "External Remote Services abuse via exposed application management interfaces and service endpoints."
+      },
+      {
+        "mitre_id": "T1040",
+        "description": "Network Sniffing/Traffic Analysis behavior may be implied by botnet command delivery and payload routing, but not central to the web attack content."
+      }
+    ],
+    "attack_chain": [
+      "Initial access via exposed Apache ActiveMQ Classic endpoint",
+      "Chain with older flaw to bypass protections and reach code execution",
+      "Potential follow-on payload delivery through malicious request bodies or crafted protocol messages"
+    ],
+    "target_industries": [
+      "Cross-industry"
+    ],
+    "target_technologies": [
+      "Apache ActiveMQ Classic",
+      "HTTP",
+      "TCP",
+      "UDP"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Exposed Apache ActiveMQ management/service endpoint chain to RCE",
+        "name_ko": "Apache ActiveMQ 관리/서비스 엔드포인트 체인 기반 RCE",
+        "phase": "P4_cpr",
+        "risk": "high"
+      },
+      {
+        "id": "WEB-002",
+        "name_en": "LFI probe from malware-driven scanning behavior",
+        "name_ko": "멀웨어 기반 LFI 탐지 스캐닝",
+        "phase": "P4_cpr",
+        "risk": "medium"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [
+      {
+        "technique": "rce",
+        "attack_description": "Exploit a publicly reachable service interface by chaining a legacy flaw with a newer bypass so that attacker-controlled input reaches a command execution sink. In practice this often means leveraging a malformed request to evade validation, then supplying a command payload that the backend evaluates or deserializes.",
+        "payload": "POST /api/../admin HTTP/1.1\r\nHost: target\r\nContent-Type: application/json\r\n\r\n{\"cmd\":\"id\"}",
+        "detect": [
+          "HTTP 200/500 from an endpoint that normally rejects unauthenticated access",
+          "response body contains system user markers such as uid=, gid=, or Windows identity output",
+          "server-side logs show unexpected admin/service path access or command execution errors"
+        ],
+        "affected_tech": [
+          "Apache ActiveMQ Classic",
+          "Java servlet containers",
+          "reverse proxies"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "rce",
+        "attack_description": "Use a protocol-smuggling style request to reach an internal admin action that should not be exposed externally. The idea is to test whether URL normalization, proxy rewriting, or legacy routing allows an attacker to hit a sensitive action path and trigger execution indirectly.",
+        "payload": "POST /;param=/admin/exec HTTP/1.1\r\nHost: target\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\ncommand=whoami",
+        "detect": [
+          "unexpected routing to admin functionality",
+          "response includes command output or stack traces referencing execution handlers",
+          "WAF or proxy logs show path normalization anomalies such as encoded semicolons, dot segments, or duplicate slashes"
+        ],
+        "affected_tech": [
+          "Apache ActiveMQ Classic",
+          "Java",
+          "load balancers",
+          "WAFs"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "lfi",
+        "attack_description": "Probe for Local File Inclusion by supplying traversal sequences to parameters that are likely used to read files, load templates, or fetch modules. Successful LFI often returns file contents, error fragments, or timing differences when a sensitive local file is accessed.",
+        "payload": "GET /view?file=../../../../../../etc/passwd HTTP/1.1\r\nHost: target",
+        "detect": [
+          "response contains passwd-like entries such as root:x:0:0",
+          "error messages reference file open/read failures on the target path",
+          "different response size or timing compared with a benign file parameter"
+        ],
+        "affected_tech": [
+          "PHP",
+          "Java",
+          "Node.js",
+          "Python web apps",
+          "file-include wrappers"
+        ],
+        "severity": "high"
+      },
+      {
+        "technique": "lfi",
+        "attack_description": "Bypass naive path filters using encoded traversal and mixed separators to see if normalization is performed after validation. This is a common way to test whether a scanner or malware-derived probe can reach restricted local files.",
+        "payload": "GET /download?path=..%2f..%2f..%2f..%2f..%2fwindows%2fwin.ini HTTP/1.1\r\nHost: target",
+        "detect": [
+          "response includes recognizable system file content such as [fonts] or Windows INI sections",
+          "application logs show decoded traversal attempts",
+          "403 on direct traversal but 200 on encoded traversal"
+        ],
+        "affected_tech": [
+          "IIS",
+          "Apache",
+          "nginx",
+          "custom file-serving endpoints"
+        ],
+        "severity": "medium"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:22:37.167902+00:00"
+  }
+}

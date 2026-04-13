@@ -1,0 +1,72 @@
+{
+  "cached_at": "2026-04-13T13:22:41.736701+00:00",
+  "extraction": {
+    "signal_id": "73b53f46418958fb",
+    "source_name": "thehackernews",
+    "article_url": "https://thehackernews.com/2026/04/adobe-reader-zero-day-exploited-via.html",
+    "article_title": "Adobe Reader Zero-Day Exploited via Malicious PDFs Since December 2025",
+    "pub_date": "Thu, 09 Apr 2026 16:45:00 +0530",
+    "trust_score": 0.85,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [],
+    "malware_families": [],
+    "ttps": [
+      {
+        "mitre_id": "T1204",
+        "description": "User Execution: attackers rely on social engineering via malicious PDF invoices and topical lures to get victims to open a weaponized document."
+      },
+      {
+        "mitre_id": "T1056.001",
+        "description": "Input Capture: malicious PDF JavaScript and Acrobat API abuse can be used to collect sensitive local information from the host or reader environment."
+      },
+      {
+        "mitre_id": "T1105",
+        "description": "Ingress Tool Transfer: the PDF can contact an external server to retrieve additional JavaScript or payload stages."
+      },
+      {
+        "mitre_id": "T1027",
+        "description": "Obfuscated Files or Information: the embedded JavaScript is described as obfuscated to hinder analysis."
+      },
+      {
+        "mitre_id": "T1203",
+        "description": "Exploitation for Client Execution: a zero-day in Adobe Reader is used to trigger privileged Acrobat APIs and potentially follow-on code execution."
+      }
+    ],
+    "attack_chain": [
+      "Deliver malicious PDF with invoice-style or current-events lure.",
+      "Victim opens the PDF in Adobe Reader.",
+      "Embedded obfuscated JavaScript executes and abuses privileged Acrobat APIs.",
+      "Payload harvests local/system information and fingerprints the environment.",
+      "Payload exfiltrates collected data to a remote server.",
+      "Server may return additional JavaScript or next-stage exploit content.",
+      "Potential follow-on stage aims for RCE and sandbox escape."
+    ],
+    "target_industries": [
+      "energy",
+      "oil and gas",
+      "enterprise",
+      "government"
+    ],
+    "target_technologies": [
+      "Adobe Reader",
+      "PDF",
+      "Acrobat JavaScript",
+      "Acrobat APIs"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Malicious PDF document lure with embedded Acrobat JavaScript",
+        "name_ko": "악성 PDF 문서 유인과 내장 Acrobat JavaScript",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T13:22:41.736624+00:00"
+  }
+}
