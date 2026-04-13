@@ -138,30 +138,221 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         from vxis.scoring.engine import ScoringEngine
         from vxis.scoring.tracker import ScoreTracker
 
-        tracker = ScoreTracker(target_type="web")
+        target_type = getattr(ctx, "target_type", "web") or "web"
+        tracker = ScoreTracker(target_type=target_type)
 
-        # Map finding types to vector IDs
-        _type_to_vector = {
+        # Map finding types → registered vector IDs (all IDs verified against vectors.py)
+        # Web vectors: injections, XSS, SSRF, auth, access control, misconfig, crypto, API,
+        #              infrastructure, supply chain, business logic
+        _web_type_to_vector: dict[str, str] = {
+            # ── SQL Injection ──
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "sql_union": "WEB-SQLI-001",
+            "sql_blind": "WEB-SQLI-002",
+            "sql_boolean_blind": "WEB-SQLI-002",
+            "sql_time_blind": "WEB-SQLI-003",
+            "sql_error": "WEB-SQLI-004",
+            "sql_oob": "WEB-SQLI-005",
+            "sql_second_order": "WEB-SQLI-006",
+            # ── NoSQL / LDAP / XPath / SSTI ──
+            "nosql_injection": "WEB-NOSQL-001",
+            "nosql": "WEB-NOSQL-001",
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            "ssti": "WEB-SSTI-001",
+            "template_injection": "WEB-SSTI-001",
+            # ── Command Injection / RCE ──
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "os_command_injection": "WEB-CMDI-001",
+            "rce": "WEB-CMDI-001",
+            "remote_code_execution": "WEB-CMDI-001",
+            "blind_command_injection": "WEB-CMDI-002",
+            "blind_rce": "WEB-CMDI-002",
+            # ── Complex Injections ──
+            "xxe": "WEB-XXE-001",
+            "xml_external_entity": "WEB-XXE-001",
+            "deserialization": "WEB-DESER-001",
+            "insecure_deserialization": "WEB-DESER-001",
+            "file_upload": "WEB-UPLOAD-001",
+            "unrestricted_file_upload": "WEB-UPLOAD-001",
+            "websocket_injection": "WEB-WSS-001",
+            "prototype_pollution": "WEB-INJECT-022",
+            "csp_bypass": "WEB-INJECT-023",
+            "cache_poisoning": "WEB-INJECT-024",
+            "web_cache_deception": "WEB-INJECT-024",
+            "prompt_injection": "WEB-INJECT-021",
+            "llm_prompt_injection": "WEB-INJECT-021",
+            "ai_llm_injection": "WEB-INJECT-018",
+            "langflow_rce": "WEB-INJECT-018",
+            "laravel_rce": "WEB-INJECT-019",
+            "livewire_rce": "WEB-INJECT-019",
+            "cms_injection": "WEB-INJECT-020",
+            "craft_cms_rce": "WEB-INJECT-020",
+            # ── XSS ──
+            "xss": "WEB-XSS-001",
+            "xss_reflected": "WEB-XSS-001",
+            "reflected_xss": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "stored_xss": "WEB-XSS-002",
+            "persistent_xss": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
+            "dom_xss": "WEB-XSS-003",
+            "mxss": "WEB-XSS-004",
+            # ── SSRF ──
+            "ssrf": "WEB-SSRF-001",
+            "ssrf_blind": "WEB-SSRF-002",
+            "blind_ssrf": "WEB-SSRF-002",
+            "ssrf_dns_rebinding": "WEB-SSRF-003",
+            # ── Authentication ──
+            "auth_bypass": "WEB-AUTH-001",
+            "brute_force": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "default_credentials": "WEB-AUTH-002",
+            "jwt_confusion": "WEB-AUTH-003",
+            "jwt_algorithm_confusion": "WEB-AUTH-003",
+            "jwt_none_algorithm": "WEB-AUTH-004",
+            "jwt_weak_secret": "WEB-AUTH-004",
+            "session_fixation": "WEB-AUTH-005",
+            "session_hijacking": "WEB-AUTH-006",
+            "cookie_theft": "WEB-AUTH-006",
+            "oauth_redirect": "WEB-AUTH-007",
+            "password_reset_poisoning": "WEB-AUTH-008",
+            "magic_link_bypass": "WEB-AUTH-010",
+            "saml_bypass": "WEB-AUTH-011",
+            "saml_replay": "WEB-AUTH-012",
+            "oauth_csrf": "WEB-AUTH-013",
+            "csrf": "WEB-CSRF-001",
+            # ── Access Control ──
+            "idor": "WEB-AC-001",
+            "bola": "WEB-AC-001",
+            "broken_object_level_authorization": "WEB-AC-001",
+            "broken_access_control": "WEB-AC-002",
+            "horizontal_privilege_escalation": "WEB-AC-002",
+            "privilege_escalation": "WEB-AC-003",
+            "vertical_privilege_escalation": "WEB-AC-003",
+            "path_traversal": "WEB-AC-004",
+            "directory_traversal": "WEB-AC-004",
+            "forced_browsing": "WEB-AC-005",
+            "hidden_endpoint": "WEB-AC-005",
+            # ── Misconfiguration ──
+            "misconfiguration": "WEB-MISCONF-001",
+            "debug_endpoint": "WEB-MISCONF-001",
+            "default_config": "WEB-MISCONF-002",
+            "information_disclosure": "WEB-MISCONF-003",
+            "error_oracle": "WEB-MISCONF-003",
+            "stack_trace_disclosure": "WEB-MISCONF-003",
+            "missing_security_headers": "WEB-MISCONF-004",
+            "cors_misconfiguration": "WEB-MISCONF-005",
+            "cors": "WEB-MISCONF-005",
+            "open_redirect": "WEB-MISCONF-006",
+            # ── Cryptographic Failures ──
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "weak_tls": "WEB-CRYPTO-001",
+            "weak_hash": "WEB-CRYPTO-002",
+            "weak_hashing": "WEB-CRYPTO-002",
+            "hardcoded_secrets": "WEB-CRYPTO-003",
+            "secrets_in_code": "WEB-CRYPTO-003",
+            "predictable_token": "WEB-CRYPTO-004",
+            "insecure_randomness": "WEB-CRYPTO-004",
+            # ── Logic ──
+            "race_condition": "WEB-RACE-001",
+            "toctou": "WEB-RACE-001",
+            # ── API ──
+            "mass_assignment": "WEB-API-001",
+            "rate_limiting": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "graphql": "WEB-API-003",
+            "graphql_dos": "WEB-API-004",
+            "http_verb_tampering": "WEB-API-005",
+            "grpc_reflection": "WEB-API-006",
+            "grpc_injection": "WEB-API-007",
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # ── Infrastructure ──
+            "subdomain_takeover": "WEB-INFRA-001",
+            "dns_zone_transfer": "WEB-INFRA-002",
+            "s3_bucket_public": "WEB-INFRA-003",
+            "cloud_misconfiguration": "WEB-INFRA-003",
+            "firebase_public": "WEB-INFRA-004",
+            "exposed_git": "WEB-INFRA-005",
+            "f5_rce": "WEB-INFRA-006",
+            # ── Supply Chain ──
+            "supply_chain": "WEB-SUPPLY-001",
+            "dependency_confusion": "WEB-SUPPLY-001",
+            "cicd_compromise": "WEB-SUPPLY-002",
+            # ── Business Logic ──
+            "business_logic": "WEB-BIZ-001",
+            "negative_value": "WEB-BIZ-001",
+            "state_skip": "WEB-BIZ-002",
+            "payment_race": "WEB-BIZ-003",
+            "transaction_replay": "WEB-BIZ-004",
+            "state_privilege_escalation": "WEB-BIZ-005",
         }
+
+        # Game vectors
+        _game_type_to_vector: dict[str, str] = {
+            "negative_amount": "GAME-SV-001",
+            "negative_currency": "GAME-SV-001",
+            "integer_overflow": "GAME-SV-002",
+            "zero_price": "GAME-SV-003",
+            "speed_hack": "GAME-SV-004",
+            "teleport": "GAME-SV-005",
+            "position_bypass": "GAME-SV-005",
+            "game_idor": "GAME-SV-006",
+            "input_truncation": "GAME-SV-007",
+            "item_duplication": "GAME-ECON-001",
+            "currency_manipulation": "GAME-ECON-002",
+            "purchase_limit_bypass": "GAME-ECON-003",
+            "refund_abuse": "GAME-ECON-004",
+            "auction_manipulation": "GAME-ECON-005",
+            "economy_bypass": "GAME-ECON-006",
+            "protocol_replay": "GAME-PROTO-002",
+            "packet_tampering": "GAME-PROTO-003",
+            "client_memory_hack": "GAME-CLIENT-001",
+            "game_client_bypass": "GAME-CLIENT-002",
+            "anti_cheat_bypass": "GAME-AC-001",
+            "anti_cheat_detection": "GAME-AC-001",
+            "game_logic_bypass": "GAME-LOGIC-001",
+        }
+
+        # Mobile vectors
+        _mobile_type_to_vector: dict[str, str] = {
+            "hardcoded_secrets": "MOB-STATIC-001",
+            "apk_secrets": "MOB-STATIC-001",
+            "weak_obfuscation": "MOB-STATIC-002",
+            "debug_build": "MOB-STATIC-003",
+            "exported_component": "MOB-STATIC-004",
+            "manifest_misconfiguration": "MOB-STATIC-004",
+            "binary_analysis": "MOB-BINARY-001",
+            "reverse_engineering": "MOB-BINARY-002",
+            "ssl_pinning_bypass": "MOB-NET-001",
+            "certificate_pinning_bypass": "MOB-NET-001",
+            "network_interception": "MOB-NET-002",
+            "insecure_http": "MOB-NET-003",
+            "improper_authentication": "MOB-API-001",
+            "api_auth_bypass": "MOB-API-001",
+            "api_authorization": "MOB-API-002",
+            "insecure_storage": "MOB-STORE-001",
+            "sqlite_exposure": "MOB-STORE-002",
+            "shared_prefs_exposure": "MOB-STORE-003",
+            "log_exposure": "MOB-STORE-004",
+            "dynamic_analysis": "MOB-DYN-001",
+            "frida_hook": "MOB-DYN-002",
+            "runtime_manipulation": "MOB-DYN-003",
+            "mobile_business_logic": "MOB-BIZ-001",
+            "platform_vulnerability": "MOB-PLAT-001",
+        }
+
+        # Select mapping based on target type
+        if target_type == "game":
+            _type_to_vector = _game_type_to_vector
+            _fallback_prefix = "GAME"
+        elif target_type == "mobile":
+            _type_to_vector = _mobile_type_to_vector
+            _fallback_prefix = "MOB"
+        else:
+            _type_to_vector = _web_type_to_vector
+            _fallback_prefix = "WEB"
 
         # Severity → exploitation level
         _sev_to_level = {
@@ -177,20 +368,31 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
-            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            # Look up registered vector; skip fabricated fallback IDs that aren't in registry
+            vector_id = _type_to_vector.get(ftype)
+            if vector_id is None:
+                # Attempt normalised key (replace hyphens, lowercase)
+                vector_id = _type_to_vector.get(ftype.replace("-", "_").lower())
+            if vector_id is None:
+                # Unknown type — skip to avoid polluting tracker with invalid IDs
+                continue
+
             level = _sev_to_level.get(sev, 0)
 
-            tracker.record_vector_attempt(vector_id)
-            if level >= 1:
-                tracker.vectors_found.add(vector_id)
-            tracker.exploitation_levels[fid] = level
-            tracker.finding_vectors[fid] = vector_id
+            try:
+                tracker.record_vector_attempt(vector_id)
+                if level >= 1:
+                    tracker.vectors_found.add(vector_id)
+                tracker.exploitation_levels[fid] = level
+                tracker.finding_vectors[fid] = vector_id
 
-            # Evidence count from finding
-            evidence_count = 0
-            if hasattr(f, "evidence") and f.evidence:
-                evidence_count = len(f.evidence) if isinstance(f.evidence, list) else 1
-            tracker.evidence_counts[fid] = evidence_count
+                # Evidence count from finding
+                evidence_count = 0
+                if hasattr(f, "evidence") and f.evidence:
+                    evidence_count = len(f.evidence) if isinstance(f.evidence, list) else 1
+                tracker.evidence_counts[fid] = evidence_count
+            except Exception:
+                logger.debug("score_tracker: skipping finding %s (record error)", fid)
 
         # Verifier verdicts → precision
         confirmed = getattr(ctx, "confirmed_findings", []) or []
@@ -202,7 +404,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             fid = rf.get("title", "")[:20]
             tracker.analyst_verdicts[fid] = False
 
-        # Attack chains
+        # Attack chains — use first recorded vector for each chain step
         chains = getattr(ctx, "attack_chains", []) or []
         if chains:
             from vxis.scoring.tracker import AttackChain
@@ -211,13 +413,17 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
                 ids = chain.get("finding_ids", chain) if isinstance(chain, dict) else chain
                 if isinstance(ids, list):
                     for j, fid in enumerate(ids):
-                        ac.add_step(
-                            vector_id="WEB-CHAIN",
-                            finding_id=str(fid),
-                            level=min(j + 1, 4),
-                            description_en=f"Chain step {j+1}",
-                            description_ko=f"체인 단계 {j+1}",
-                        )
+                        step_vector = tracker.finding_vectors.get(str(fid), "WEB-AC-001")
+                        try:
+                            ac.add_step(
+                                vector_id=step_vector,
+                                finding_id=str(fid),
+                                level=min(j + 1, 4),
+                                description_en=f"Attack chain step {j + 1}|||공격 체인 단계 {j + 1}",
+                                description_ko=f"공격 체인 단계 {j + 1}",
+                            )
+                        except Exception:
+                            logger.debug("score_tracker: skipping chain step %d", j)
                 tracker.attack_chains.append(ac)
 
         # Phase completion — single scan_loop phase
@@ -228,7 +434,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             findings_count=len(ctx.findings),
         )
 
-        engine = ScoringEngine("web")
+        engine = ScoringEngine(target_type)
         vxis_score = engine.calculate(tracker, ctx.findings, scan_id=ctx.scan_id)
 
         # Print detailed score
@@ -236,7 +442,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         return vxis_score.total, vxis_score.grade
 
-    except Exception as e:
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
