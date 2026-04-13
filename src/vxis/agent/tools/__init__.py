@@ -26,6 +26,7 @@ from vxis.agent.tools.playbook_tools import (
 from vxis.agent.tools.fingerprint_tools import FingerprintTargetTool
 from vxis.agent.tools.memory_tools import QueryScanMemoryTool
 from vxis.agent.tools.verifier_tools import VerifyFindingTool
+from vxis.agent.tools.skill_runner import RunSkillTool
 from vxis.agent.tools.browser_tools import (
     BrowserNavigateTool,
     BrowserAnalyzeDomTool,
@@ -95,4 +96,5 @@ def build_default_registry(brain: object | None = None) -> ToolRegistry:
     reg.register(BrowserScreenshotTool())
     reg.register(BrowserEvalJsTool())
     reg.register(BrowserGetCookiesTool())
+    reg.register(RunSkillTool())
     return reg
