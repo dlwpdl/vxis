@@ -15,7 +15,7 @@ signal_ingest_interval_hours = 6
 [filtering]
 regex_prefilter_enabled = true
 trust_threshold_for_llm = 0.8
-batch_size = 20
+batch_size = 100
 
 [apply]
 # DRY-RUN MODE — first 30 days, nothing auto-applies to code

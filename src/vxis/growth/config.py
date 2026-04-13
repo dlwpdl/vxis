@@ -19,7 +19,7 @@ DEFAULT_BOOTSTRAP_CONFIG: dict = {
     "filtering": {
         "regex_prefilter_enabled": True,
         "trust_threshold_for_llm": 0.8,
-        "batch_size": 20,
+        "batch_size": 100,
     },
     "apply": {
         "dry_run": True,

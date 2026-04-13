@@ -12,6 +12,14 @@ from vxis.growth.schemas import RawSignal, SignalSource
 from vxis.growth.trust import TrustRegistry
 
 INBOX_DIR = Path(".vxis/signals/inbox")
+PROCESSED_DIR = Path(".vxis/signals/processed")
+
+
+def mark_processed(batch_file: Path) -> None:
+    """Move a processed inbox file to processed/ directory|||처리된 inbox 파일을 processed/로 이동."""
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    dest = PROCESSED_DIR / batch_file.name
+    batch_file.rename(dest)
 
 
 def _signal_id(content: str) -> str:

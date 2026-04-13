@@ -56,14 +56,16 @@ jobs:
           from vxis.growth.analyze import analyze_batch
           from vxis.growth.apply import generate_proposals, apply_proposals
 
-          # Load recent signals from inbox (last 3 batches)
+          import shutil
+
+          # Load ALL signals from inbox
           if not INBOX_DIR.exists():
               print("No inbox directory yet")
               exit(0)
 
           inbox_files = sorted(INBOX_DIR.glob("ingest-*.jsonl"))
           signals = []
-          for f in inbox_files[-3:]:
+          for f in inbox_files:
               try:
                   with f.open() as fh:
                       for line in fh:
@@ -77,15 +79,18 @@ jobs:
               except Exception:
                   continue
 
-          print(f"Loaded {len(signals)} signals")
+          print(f"Loaded {len(signals)} signals from {len(inbox_files)} files")
           if not signals:
               print("No signals to analyze")
               with open("_analyze_result.json", "w") as f:
                   json.dump({"total": 0, "auto_applied": 0, "pending_review": 0, "dry_run": True}, f)
               exit(0)
 
-          # Analyze (dry-run by default in bootstrap config)
-          intels = analyze_batch(signals[:20])
+          # Analyze with configured batch_size (dry-run by default in bootstrap config)
+          from vxis.growth.config import load_bootstrap_config
+          config = load_bootstrap_config()
+          batch_size = int(config["filtering"]["batch_size"])
+          intels = analyze_batch(signals[:batch_size])
           print(f"Extracted {len(intels)} intelligence records")
 
           # Generate proposals
@@ -100,6 +105,14 @@ jobs:
 
           with open("_analyze_result.json", "w") as f:
               json.dump(result, f)
+
+          # Move processed inbox files to processed/
+          processed_dir = Path(".vxis/signals/processed")
+          processed_dir.mkdir(parents=True, exist_ok=True)
+          batch_count = min(len(inbox_files), batch_size)
+          for f in inbox_files[:batch_count]:
+              shutil.move(str(f), str(processed_dir / f.name))
+          print(f"Moved {batch_count} inbox files to processed/")
           PYEOF
 
       - name: Commit proposals + changelog

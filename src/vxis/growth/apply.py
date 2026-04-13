@@ -82,6 +82,46 @@ def generate_proposals(intel: NewsIntelligence) -> list[Proposal]:
             )
         )
 
+    # Skill payload proposals — map KB patterns to skill files
+    for i, kb in enumerate(intel.proposed_kb_patterns):
+        technique = kb.get("technique", "").lower()
+        payload = kb.get("payload", "")
+        if not payload:
+            continue
+
+        skill_map = {
+            "sqli": "src/vxis/agent/skills/test_injection.py",
+            "sql_injection": "src/vxis/agent/skills/test_injection.py",
+            "xss": "src/vxis/agent/skills/test_injection.py",
+            "rce": "src/vxis/agent/skills/test_injection.py",
+            "ssrf": "src/vxis/agent/skills/test_injection.py",
+            "path_traversal": "src/vxis/agent/skills/test_sensitive_files.py",
+            "auth_bypass": "src/vxis/agent/skills/attempt_auth.py",
+            "idor": "src/vxis/agent/skills/test_idor.py",
+        }
+        target_file = skill_map.get(technique, "")
+        if target_file:
+            proposals.append(
+                Proposal(
+                    proposal_id=f"{intel.signal_id}-skill-{i}",
+                    source_signal_id=intel.signal_id,
+                    change_type="skill_payload_add",
+                    target_file=target_file,
+                    change_data=kb,
+                    confidence=intel.trust_score * 0.8,
+                    risk="low",
+                    rationale_en=(
+                        f"New {technique} payload from "
+                        f"{intel.source_name}: {payload[:60]}"
+                    ),
+                    rationale_ko=(
+                        f"{intel.source_name}에서 새 {technique} "
+                        f"페이로드: {payload[:60]}"
+                    ),
+                    source_url=intel.article_url,
+                )
+            )
+
     return [classify_proposal(p) for p in proposals]
 
 
