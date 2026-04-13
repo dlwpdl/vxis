@@ -22,6 +22,20 @@ def mark_processed(batch_file: Path) -> None:
     batch_file.rename(dest)
 
 
+def cleanup_processed(max_age_days: int = 30) -> int:
+    """Remove processed files older than max_age_days. Returns count removed."""
+    if not PROCESSED_DIR.exists():
+        return 0
+    import time
+    cutoff = time.time() - (max_age_days * 86400)
+    removed = 0
+    for f in PROCESSED_DIR.glob("*"):
+        if f.stat().st_mtime < cutoff:
+            f.unlink()
+            removed += 1
+    return removed
+
+
 def _signal_id(content: str) -> str:
     """Short SHA256 id|||짧은 SHA256 해시."""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import dataclasses as dc
 import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from vxis.growth.changelog import ChangeLog
 from vxis.growth.classifier import classify_proposal, should_auto_apply
@@ -159,21 +162,29 @@ def _apply_skill_payload(proposal: Proposal) -> bool:
     if _AUTO_MARKER not in content:
         return False
 
+    # Sanitize payload: must be single-line, no unescaped quotes
+    payload = payload.replace("\n", " ").replace("\r", "").strip()
+    # Truncate overly long payloads
+    if len(payload) > 200:
+        payload = payload[:200]
+
     # Build the new entry based on file type
     if "test_injection" in str(target):
         # PAYLOADS list format: {"type": "...", "payload": "...", "detect": [...]}
         detect = data.get("detect", [])
         if not detect:
             detect = ["sql"] if "sql" in technique else []
+        # Ensure detect is a list of simple strings
+        if isinstance(detect, list):
+            detect = [str(d)[:60] for d in detect[:5]]
         escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
         new_line = f'    {{"type": "{technique}", "payload": "{escaped}", "detect": {detect}}},  # auto-added'
     elif "test_sensitive_files" in str(target):
-        # SENSITIVE_PATHS format: ("path", "severity", "description")
         severity = data.get("severity", "medium")
-        desc = data.get("description", f"Auto-added {technique} path")[:60]
-        new_line = f'    ("{payload}", "{severity}", "{desc}"),  # auto-added'
+        desc = str(data.get("description", f"Auto-added {technique} path"))[:60].replace('"', "'")
+        path_val = payload.replace('"', "")
+        new_line = f'    ("{path_val}", "{severity}", "{desc}"),  # auto-added'
     elif "attempt_auth" in str(target):
-        # SQLI_CREDS format: ("email_payload", "password")
         pwd = data.get("password", "x")
         escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
         new_line = f'    ("{escaped}", "{pwd}"),  # auto-added'

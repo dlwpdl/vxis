@@ -149,6 +149,84 @@ jobs:
             -f client_payload='{"trigger":"signal-analyze","skill_changes":"${{ steps.commit.outputs.skill_changes }}"}' \
             || echo "dispatch failed (may need PAT with repo scope)"
 
+      - name: Create PR for pending proposals
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python - <<'PYEOF'
+          import json, subprocess
+          from pathlib import Path
+
+          pending_dir = Path(".vxis/signals/pending")
+          if not pending_dir.exists():
+              exit(0)
+
+          pending_files = sorted(pending_dir.glob("*.json"))
+          if not pending_files:
+              exit(0)
+
+          # Only create PR for skill_payload_add proposals
+          skill_proposals = []
+          for f in pending_files:
+              try:
+                  d = json.loads(f.read_text())
+                  if d.get("change_type") == "skill_payload_add":
+                      skill_proposals.append(d)
+              except Exception:
+                  pass
+
+          if not skill_proposals:
+              print(f"No skill proposals in {len(pending_files)} pending — skip PR")
+              exit(0)
+
+          # Apply the pending proposals to a branch
+          branch = f"growth/pending-skills-{len(skill_proposals)}"
+          subprocess.run(["git", "checkout", "-b", branch], check=True)
+
+          from vxis.growth.apply import _apply_skill_payload
+          from vxis.growth.schemas import Proposal
+          import dataclasses as dc
+
+          applied = 0
+          body_lines = ["## Pending Skill Payload Proposals\n"]
+          body_lines.append("These payloads were designed by LLM from threat intelligence signals.")
+          body_lines.append("Review and merge if they look correct.\n")
+
+          for d in skill_proposals:
+              try:
+                  p = Proposal(**{k: v for k, v in d.items() if k in [f.name for f in dc.fields(Proposal)]})
+                  result = _apply_skill_payload(p)
+                  if result:
+                      applied += 1
+                      cd = d.get("change_data", {})
+                      body_lines.append(f"- **{cd.get('technique', '?')}**: `{cd.get('payload', '')[:60]}`")
+                      body_lines.append(f"  - Source: {d.get('source_url', '?')[:80]}")
+                      body_lines.append(f"  - Confidence: {d.get('confidence', 0):.0%}")
+                      body_lines.append(f"  - Target: `{d.get('target_file', '?')}`\n")
+              except Exception:
+                  pass
+
+          if applied == 0:
+              print("No proposals applied — skip PR")
+              exit(0)
+
+          subprocess.run(["git", "add", "src/vxis/agent/skills/"], check=True)
+          subprocess.run(["git", "commit", "-m",
+              f"feat(growth): {applied} pending skill payload(s) for review"], check=True)
+          subprocess.run(["git", "push", "-u", "origin", branch], check=True)
+
+          body = "\n".join(body_lines)
+          subprocess.run([
+              "gh", "pr", "create",
+              "--title", f"[Growth] {applied} new attack payload(s) for review",
+              "--body", body,
+              "--label", "growth-loop",
+              "--base", "main",
+          ])
+          print(f"PR created with {applied} payloads on branch {branch}")
+          PYEOF
+
       - name: Send Telegram notification (tiered)
         if: always()
         env:
