@@ -44,8 +44,6 @@ jobs:
       - name: Run analysis + proposal generation
         id: analyze
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           VXIS_BRAIN_MODE: api
         run: |
