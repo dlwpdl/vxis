@@ -1,0 +1,156 @@
+{
+  "cached_at": "2026-04-14T02:14:49.575679+00:00",
+  "extraction": {
+    "signal_id": "3abecb25bed7c667",
+    "source_name": "krebsonsecurity",
+    "article_url": "https://krebsonsecurity.com/2026/03/canisterworm-springs-wiper-attack-targeting-iran/",
+    "article_title": "‘CanisterWorm’ Springs Wiper Attack Targeting Iran",
+    "pub_date": "Mon, 23 Mar 2026 15:43:04 +0000",
+    "trust_score": 0.9,
+    "cves": [],
+    "iocs": {},
+    "threat_actors": [
+      "TeamPCP"
+    ],
+    "malware_families": [
+      "CanisterWorm"
+    ],
+    "ttps": [
+      {
+        "mitre_id": "T1190",
+        "description": "Exploit public-facing cloud and web-adjacent services such as exposed Docker APIs, Kubernetes control planes, and Redis instances to gain initial access."
+      },
+      {
+        "mitre_id": "T1078",
+        "description": "Use stolen or harvested credentials, SSH keys, cloud credentials, Kubernetes tokens, and wallet-related secrets for access and lateral movement."
+      },
+      {
+        "mitre_id": "T1105",
+        "description": "Transfer malicious payloads through official release or CI/CD distribution channels to seed downstream infections."
+      },
+      {
+        "mitre_id": "T1490",
+        "description": "Inhibit system recovery by wiping data on local hosts or Kubernetes nodes."
+      }
+    ],
+    "attack_chain": [
+      "Compromise exposed cloud control planes and services",
+      "Harvest credentials and tokens from infected environments",
+      "Propagate via self-spreading worm behavior",
+      "Deploy wiper logic conditioned on locale/timezone checks",
+      "Destroy local data or cluster-wide data when Iran indicators are present"
+    ],
+    "target_industries": [
+      "cloud services",
+      "technology",
+      "software development",
+      "infrastructure providers"
+    ],
+    "target_technologies": [
+      "docker",
+      "kubernetes",
+      "redis",
+      "azure",
+      "aws",
+      "github actions",
+      "trivy",
+      "react2shell"
+    ],
+    "proposed_vectors": [
+      {
+        "id": "WEB-001",
+        "name_en": "Exposed Docker Remote API Abuse",
+        "name_ko": "노출된 Docker 원격 API 악용",
+        "phase": "P4_cpr",
+        "risk": "high"
+      },
+      {
+        "id": "WEB-002",
+        "name_en": "Kubernetes Control Plane Misconfiguration",
+        "name_ko": "쿠버네티스 제어 평면 오구성",
+        "phase": "P4_cpr",
+        "risk": "high"
+      },
+      {
+        "id": "WEB-003",
+        "name_en": "Redis Unauthenticated Access Abuse",
+        "name_ko": "Redis 인증 우회/미인증 접근 악용",
+        "phase": "P4_cpr",
+        "risk": "high"
+      },
+      {
+        "id": "WEB-004",
+        "name_en": "Supply Chain Malware Injection",
+        "name_ko": "공급망 악성코드 주입",
+        "phase": "P4_cpr",
+        "risk": "critical"
+      }
+    ],
+    "proposed_phase_updates": [],
+    "proposed_kb_patterns": [
+      {
+        "technique": "auth_bypass",
+        "attack_description": "Abuse an exposed service that should be restricted by network controls or authentication, allowing the attacker to issue administrative actions without valid credentials.",
+        "payload": "GET /containers/json HTTP/1.1\r\nHost: TARGET:2375\r\nConnection: close\r\n\r\n",
+        "detect": [
+          "HTTP/1.1 200 OK",
+          "JSON array of containers",
+          "Docker engine metadata or container IDs returned"
+        ],
+        "affected_tech": [
+          "docker",
+          "docker-api"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "auth_bypass",
+        "attack_description": "Query a Kubernetes API endpoint that is exposed without proper authentication or authorization, enabling enumeration of cluster resources and follow-on destructive actions.",
+        "payload": "GET /api/v1/nodes HTTP/1.1\r\nHost: TARGET:6443\r\nAuthorization: Bearer invalid\r\nConnection: close\r\n\r\n",
+        "detect": [
+          "HTTP/1.1 200 OK",
+          "node objects returned despite invalid token",
+          "cluster resource listing visible"
+        ],
+        "affected_tech": [
+          "kubernetes",
+          "kube-apiserver"
+        ],
+        "severity": "critical"
+      },
+      {
+        "technique": "auth_bypass",
+        "attack_description": "Access a Redis instance with no authentication or weak network controls and leverage server commands to inspect or alter persistence-related state.",
+        "payload": "*1\r\n$4\r\nINFO\r\n",
+        "detect": [
+          "+OK",
+          "redis_version",
+          "keyspace information returned"
+        ],
+        "affected_tech": [
+          "redis"
+        ],
+        "severity": "high"
+      },
+      {
+        "technique": "ssti",
+        "attack_description": "If a web app or automation wrapper renders attacker-controlled strings into a template context, use expression syntax to trigger server-side evaluation and confirm code execution context.",
+        "payload": "{{7*7}}",
+        "detect": [
+          "49 returned in rendered output",
+          "template markers resolved",
+          "unexpected server-side evaluation"
+        ],
+        "affected_tech": [
+          "templating engines",
+          "nodejs",
+          "python"
+        ],
+        "severity": "high"
+      }
+    ],
+    "proposed_waf_variants": [],
+    "proposed_actor_updates": [],
+    "extracted_at": "2026-04-14T02:14:49.575563+00:00"
+  }
+}
