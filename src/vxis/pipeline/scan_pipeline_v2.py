@@ -140,27 +140,49 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
+        # Map finding types to vector IDs (must match AttackVector.id in vectors.py)
         _type_to_vector = {
+            # ── Injection ──
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "nosql_injection": "WEB-NOSQL-001",
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            "ssti": "WEB-SSTI-001",
+            "xxe": "WEB-XXE-001",
+            "deserialization": "WEB-DESER-001",
+            "rce": "WEB-DESER-001",           # Closest registry match: insecure deser → RCE
+            "file_upload": "WEB-UPLOAD-001",
+            # ── XSS ──
+            "xss": "WEB-XSS-001",
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
+            # ── SSRF ──
+            "ssrf": "WEB-SSRF-001",
+            # ── Auth ──
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "session_hijacking": "WEB-AUTH-006",  # Session Hijacking — Cookie Theft
+            "jwt_confusion": "WEB-AUTH-003",      # JWT — Algorithm Confusion (RS256→HS256)
+            "csrf": "WEB-CSRF-001",
+            # ── Access Control ──
+            "idor": "WEB-AC-001",                  # IDOR — Direct Object Reference
+            "broken_access_control": "WEB-AC-002", # Privilege Escalation — Horizontal
+            "privilege_escalation": "WEB-AC-003",  # Privilege Escalation — Vertical
+            "path_traversal": "WEB-AC-004",        # Directory Traversal / Path Traversal
+            # ── Misconfiguration ──
+            "misconfiguration": "WEB-MISCONF-001", # Debug Endpoints Exposed
+            "information_disclosure": "WEB-MISCONF-003",  # Verbose Error Messages
+            "error_oracle": "WEB-MISCONF-003",     # Same: response-based info leak
+            "cors": "WEB-MISCONF-005",             # CORS Misconfiguration
+            "open_redirect": "WEB-MISCONF-006",    # Open Redirect
+            # ── Crypto ──
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "sensitive_data_exposure": "WEB-CRYPTO-003",  # Hardcoded Secrets
+            # ── Business Logic ──
+            "business_logic": "WEB-BIZ-001",       # Business Logic — Negative Value Injection
+            "race_condition": "WEB-RACE-001",
         }
 
         # Severity → exploitation level
