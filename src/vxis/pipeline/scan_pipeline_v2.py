@@ -138,30 +138,195 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         from vxis.scoring.engine import ScoringEngine
         from vxis.scoring.tracker import ScoreTracker
 
-        tracker = ScoreTracker(target_type="web")
+        # Detect actual target_type from ctx (defaults to "web")
+        target_type = getattr(ctx, "target_type", "web")
+        if target_type not in ("web", "game", "mobile"):
+            target_type = "web"
 
-        # Map finding types to vector IDs
-        _type_to_vector = {
-            "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
-            "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
-            "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
-        }
+        tracker = ScoreTracker(target_type=target_type)
+
+        # Map finding types to valid vector IDs per target type.
+        # Only IDs present in vectors.py are listed — unknown finding types
+        # are silently skipped (invalid IDs score 0 in the engine anyway).
+        _type_to_vector: dict[str, str] = {}
+
+        if target_type == "web":
+            _type_to_vector = {
+                # Injection
+                "sql_injection": "WEB-SQLI-001",
+                "sql_injection_blind": "WEB-SQLI-002",
+                "sql_injection_time": "WEB-SQLI-003",
+                "sql_injection_error": "WEB-SQLI-004",
+                "sql_injection_oob": "WEB-SQLI-005",
+                "sql_injection_second_order": "WEB-SQLI-006",
+                "nosql_injection": "WEB-NOSQL-001",
+                "nosql_js_injection": "WEB-NOSQL-002",
+                "command_injection": "WEB-CMDI-001",
+                "command_injection_blind": "WEB-CMDI-002",
+                "ldap_injection": "WEB-LDAP-001",
+                "xpath_injection": "WEB-XPATH-001",
+                "ssti": "WEB-SSTI-001",
+                "template_injection": "WEB-SSTI-001",
+                # XSS
+                "xss_reflected": "WEB-XSS-001",
+                "xss": "WEB-XSS-001",
+                "xss_stored": "WEB-XSS-002",
+                "xss_dom": "WEB-XSS-003",
+                "xss_mutation": "WEB-XSS-004",
+                # SSRF
+                "ssrf": "WEB-SSRF-001",
+                "ssrf_blind": "WEB-SSRF-002",
+                "ssrf_dns_rebinding": "WEB-SSRF-003",
+                # Auth
+                "brute_force": "WEB-AUTH-001",
+                "default_credentials": "WEB-AUTH-002",
+                "auth_bypass": "WEB-AUTH-001",
+                "weak_auth": "WEB-AUTH-001",
+                "jwt_confusion": "WEB-AUTH-003",
+                "jwt_algorithm_confusion": "WEB-AUTH-003",
+                "jwt_none": "WEB-AUTH-004",
+                "session_fixation": "WEB-AUTH-005",
+                "session_hijacking": "WEB-AUTH-006",
+                "oauth_redirect": "WEB-AUTH-007",
+                "password_reset_poisoning": "WEB-AUTH-008",
+                # Access Control
+                "idor": "WEB-AC-001",
+                "broken_access_control": "WEB-AC-001",
+                "privilege_escalation_horizontal": "WEB-AC-002",
+                "privilege_escalation_vertical": "WEB-AC-003",
+                "privilege_escalation": "WEB-AC-003",
+                "path_traversal": "WEB-AC-004",
+                "directory_traversal": "WEB-AC-004",
+                "forced_browsing": "WEB-AC-005",
+                # Misconfig
+                "debug_endpoint": "WEB-MISCONF-001",
+                "misconfiguration": "WEB-MISCONF-002",
+                "verbose_error": "WEB-MISCONF-003",
+                "information_disclosure": "WEB-MISCONF-003",
+                "error_disclosure": "WEB-MISCONF-003",
+                # Crypto
+                "weak_crypto": "WEB-CRYPTO-001",
+                "weak_tls": "WEB-CRYPTO-002",
+                "certificate_issue": "WEB-CRYPTO-003",
+                # Other web
+                "xxe": "WEB-XXE-001",
+                "deserialization": "WEB-DESER-001",
+                "insecure_upload": "WEB-UPLOAD-001",
+                "race_condition": "WEB-RACE-001",
+                "csrf": "WEB-CSRF-001",
+                "websocket": "WEB-WSS-001",
+                # API
+                "api_excessive_data": "WEB-API-001",
+                "api_broken_auth": "WEB-API-002",
+                "api_injection": "WEB-API-003",
+                # Business logic
+                "business_logic": "WEB-BIZ-001",
+                "price_manipulation": "WEB-BIZ-002",
+                "workflow_bypass": "WEB-BIZ-003",
+            }
+
+        elif target_type == "game":
+            _type_to_vector = {
+                # Server-side validation
+                "server_validation_bypass": "GAME-SV-001",
+                "anti_cheat_bypass": "GAME-SV-002",
+                "server_authority_bypass": "GAME-SV-003",
+                "game_state_manipulation": "GAME-SV-004",
+                "replay_attack": "GAME-SV-005",
+                "packet_injection": "GAME-SV-006",
+                "speed_hack": "GAME-SV-007",
+                # Economy
+                "currency_manipulation": "GAME-ECON-001",
+                "game_economy_manipulation": "GAME-ECON-001",
+                "negative_amount": "GAME-ECON-002",
+                "item_duplication": "GAME-ECON-003",
+                "race_condition": "GAME-ECON-004",
+                "transaction_rollback": "GAME-ECON-005",
+                "price_manipulation": "GAME-ECON-006",
+                # Protocol
+                "protocol_manipulation": "GAME-PROTO-001",
+                "websocket_abuse": "GAME-PROTO-002",
+                "binary_protocol": "GAME-PROTO-003",
+                "packet_tampering": "GAME-PROTO-004",
+                # Client
+                "client_tampering": "GAME-CLIENT-001",
+                "memory_manipulation": "GAME-CLIENT-002",
+                "code_injection": "GAME-CLIENT-003",
+                "dll_injection": "GAME-CLIENT-004",
+                "cheat_engine": "GAME-CLIENT-005",
+                # Access Control
+                "idor": "GAME-AC-001",
+                "broken_access_control": "GAME-AC-001",
+                "privilege_escalation": "GAME-AC-002",
+                "admin_access": "GAME-AC-003",
+                # Logic
+                "game_logic_bypass": "GAME-LOGIC-001",
+                "matchmaking_manipulation": "GAME-LOGIC-002",
+                "leaderboard_manipulation": "GAME-LOGIC-003",
+                "quest_exploit": "GAME-LOGIC-004",
+                "cooldown_bypass": "GAME-LOGIC-005",
+                "boundary_exploit": "GAME-LOGIC-006",
+                # Social / DRM
+                "chat_injection": "GAME-SOCIAL-001",
+                "social_engineering": "GAME-SOCIAL-002",
+                "drm_bypass": "GAME-DRM-001",
+                "license_bypass": "GAME-DRM-002",
+            }
+
+        elif target_type == "mobile":
+            _type_to_vector = {
+                # Static analysis
+                "hardcoded_secret": "MOB-STATIC-001",
+                "hardcoded_credentials": "MOB-STATIC-001",
+                "api_key_exposure": "MOB-STATIC-002",
+                "insecure_code": "MOB-STATIC-003",
+                "reverse_engineering": "MOB-BINARY-001",
+                "obfuscation_bypass": "MOB-BINARY-002",
+                "binary_patch": "MOB-BINARY-003",
+                "tampering": "MOB-BINARY-004",
+                # Network
+                "ssl_pinning_bypass": "MOB-NET-001",
+                "certificate_validation": "MOB-NET-002",
+                "insecure_communication": "MOB-NET-003",
+                "man_in_the_middle": "MOB-NET-004",
+                # API
+                "api_broken_auth": "MOB-API-001",
+                "api_key_abuse": "MOB-API-002",
+                "api_injection": "MOB-API-003",
+                "api_excessive_data": "MOB-API-004",
+                "broken_access_control": "MOB-API-005",
+                # Storage
+                "insecure_storage": "MOB-STORE-001",
+                "plaintext_storage": "MOB-STORE-002",
+                "sqlite_injection": "MOB-STORE-003",
+                "shared_preferences": "MOB-STORE-004",
+                "external_storage": "MOB-STORE-005",
+                "backup_exposure": "MOB-STORE-006",
+                # Dynamic
+                "runtime_manipulation": "MOB-DYN-001",
+                "frida_hook": "MOB-DYN-002",
+                "dynamic_code": "MOB-DYN-003",
+                "intent_injection": "MOB-DYN-004",
+                "deep_link_hijacking": "MOB-DYN-005",
+                # Business logic
+                "business_logic": "MOB-BIZ-001",
+                "in_app_purchase_bypass": "MOB-BIZ-002",
+                "price_manipulation": "MOB-BIZ-003",
+                # Platform
+                "root_detection_bypass": "MOB-PLAT-001",
+                "jailbreak_bypass": "MOB-PLAT-002",
+                "permission_abuse": "MOB-PLAT-003",
+                "webview_injection": "MOB-PLAT-004",
+                # Cloud / SDK
+                "cloud_misconfiguration": "MOB-CLOUD-001",
+                "firebase_exposure": "MOB-CLOUD-002",
+                "sdk_vulnerability": "MOB-SDK-001",
+                "third_party_sdk": "MOB-SDK-002",
+                # Privacy
+                "data_exfiltration": "MOB-PRIV-001",
+                "pii_exposure": "MOB-PRIV-002",
+                "tracking": "MOB-PRIV-003",
+            }
 
         # Severity → exploitation level
         _sev_to_level = {
@@ -177,20 +342,26 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
-            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            vector_id = _type_to_vector.get(ftype)
+            if not vector_id:
+                # Skip unmapped finding types — invalid IDs score 0 anyway
+                continue
             level = _sev_to_level.get(sev, 0)
 
-            tracker.record_vector_attempt(vector_id)
-            if level >= 1:
-                tracker.vectors_found.add(vector_id)
-            tracker.exploitation_levels[fid] = level
-            tracker.finding_vectors[fid] = vector_id
+            try:
+                tracker.record_vector_attempt(vector_id)
+                if level >= 1:
+                    tracker.vectors_found.add(vector_id)
+                tracker.exploitation_levels[fid] = level
+                tracker.finding_vectors[fid] = vector_id
 
-            # Evidence count from finding
-            evidence_count = 0
-            if hasattr(f, "evidence") and f.evidence:
-                evidence_count = len(f.evidence) if isinstance(f.evidence, list) else 1
-            tracker.evidence_counts[fid] = evidence_count
+                # Evidence count from finding
+                evidence_count = 0
+                if hasattr(f, "evidence") and f.evidence:
+                    evidence_count = len(f.evidence) if isinstance(f.evidence, list) else 1
+                tracker.evidence_counts[fid] = evidence_count
+            except Exception:
+                logger.debug("Failed to record finding %s for scoring", fid)
 
         # Verifier verdicts → precision
         confirmed = getattr(ctx, "confirmed_findings", []) or []
@@ -212,10 +383,10 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
                 if isinstance(ids, list):
                     for j, fid in enumerate(ids):
                         ac.add_step(
-                            vector_id="WEB-CHAIN",
+                            vector_id=f"{target_type.upper()}-CHAIN",
                             finding_id=str(fid),
                             level=min(j + 1, 4),
-                            description_en=f"Chain step {j+1}",
+                            description_en=f"Chain step {j+1}|||체인 단계 {j+1}",
                             description_ko=f"체인 단계 {j+1}",
                         )
                 tracker.attack_chains.append(ac)
@@ -228,7 +399,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             findings_count=len(ctx.findings),
         )
 
-        engine = ScoringEngine("web")
+        engine = ScoringEngine(target_type)
         vxis_score = engine.calculate(tracker, ctx.findings, scan_id=ctx.scan_id)
 
         # Print detailed score
@@ -236,7 +407,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         return vxis_score.total, vxis_score.grade
 
-    except Exception as e:
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
@@ -462,7 +633,7 @@ class ScanPipeline:
         # summary line for operators.
         try:
             from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            mitre = coverage_report(_get_finding_dicts())
             logger.info(
                 "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
                 len(mitre["techniques_covered"]),
