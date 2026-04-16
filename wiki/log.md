@@ -10,3 +10,6 @@
 
 ## [2026-04-16] ingest | Phase 6 tooling: lint.py + log_ingest.py delivered
 - wiki/scripts/ 세 파일 생성 완료
+
+## [2026-04-16] ingest | Phase 2 concept pages (8) seeded
+- brain_first / chain_intelligence / payload_rotation / severity_oracle / scoring_model / plan_review_workflow / vxis_architecture / ai_context_hygiene

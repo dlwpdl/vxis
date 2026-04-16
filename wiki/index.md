@@ -22,7 +22,15 @@
 ---
 
 ## Concepts
-_(Phase 2 시드 예정 — brain_first, chain_intelligence, payload_rotation, severity_oracle, scoring_model, plan_review_workflow, vxis_architecture, ai_context_hygiene)_
+
+- [Brain-First Architecture](concepts/brain_first.md) — VXIS 절대 원칙 / 하드코딩 금지 이유 / Brain이 공격 주체여야 하는 근거 / claude -p 우선 조건
+- [Chain Intelligence](concepts/chain_intelligence.md) — chain nudge 재주입 주기 / _desired 계산식 / finish_scan 거부 조건 / 체인 부족 시 동작
+- [Payload Rotation](concepts/payload_rotation.md) — payload rotation 동작 / 새 페이로드 추가 위치 / WAF 우회 round 매핑 / clean 결과 re-queue
+- [Severity Oracle (Content-Aware)](concepts/severity_oracle.md) — 정적 severity vs body-aware 조정 / Spring Actuator masked 판단 / raw secret critical 격상
+- [VXIS Scoring Model — 5 Dimensions](concepts/scoring_model.md) — 5차원 가중치 / 벡터 ID 매핑 / 새 skill 추가 시 scoring 연결 / 등급 기준
+- [Plan-Review and Code-Review Workflow](concepts/plan_review_workflow.md) — 비자명 작업 시작 절차 / 8 subagent 역할 / phased commit 규칙 / CLAUDE.md 길이 제한 근거
+- [VXIS Architecture — Brain / Hands / Eyes / X-Ray](concepts/vxis_architecture.md) — 모듈 역할 분담 / raw httpx 금지 근거 / 어느 컴포넌트가 무엇 담당 / 파이프라인 진입점
+- [AI Context Hygiene — 4 Principles](concepts/ai_context_hygiene.md) — context window 관리 원칙 / tool 결과 dump 금지 / wiki 가 RAG 구현인 이유 / 5-Loop 매핑
 
 ## Entities
 
