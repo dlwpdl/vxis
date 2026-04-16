@@ -80,7 +80,14 @@
 - [P18 Collective KB](entities/pipelines/P18_collective_kb.md) — 취약점 지식 베이스 / remediation·CWE·OWASP 매핑 / static lookup / 에이전트 추천
 
 ## Decisions
-_(Phase 5 시드 예정 — agpl_forbidden, claude_p_first, no_raw_httpx, ncc_group_report_format, dynamic_not_static)_
+
+- [ADR-001 — No AGPL Forking](decisions/001_agpl_forbidden.md) — 외부 코드 참고 경계 / Strix·PentAGI 사용 금지 이유 / VXIS 라이센스 전략 / AGPL 오염 위험
+- [ADR-002 — Brain LLM claude -p First](decisions/002_claude_p_first.md) — Brain LLM 호출 우선순위 / claude -p 서브프로세스 vs API / 다른 모델 벤치마크 예외
+- [ADR-003 — No Raw httpx](decisions/003_no_raw_httpx.md) — HTTP 요청 작성 방법 / raw httpx 금지 이유 / Hands·X-Ray·Controller·Finding 모듈 사용 근거
+- [ADR-004 — NCC Group Report Format](decisions/004_ncc_group_report_format.md) — 리포트 포맷 규칙 / Finding 필드 구조 / bilingual ||| 사용법 / WEBGOAT_FINDINGS 템플릿
+- [ADR-005 — Dynamic Attack Only](decisions/005_dynamic_not_static.md) — 코드 grep 커버리지 측정 금지 이유 / 동적 스캔 필수 근거 / 스코어링 원칙
+- [ADR-006 — Code Freeze + Data-Only Updates](decisions/006_code_freeze_data_only_updates.md) — 코드 수정 검토 / 데이터 vs 로직 분리 / 회귀 방지 / AI 할루시네이션 방지
+- [ADR-007 (DRAFT) — Payloads as External Data Files](decisions/draft_007_payloads_yaml_refactor.md) — 페이로드 추가 위치 / skills 코드 freeze 전략 / round 로테이션 JSON화 / growth loop 재배선
 
 ## Sources
 
@@ -91,4 +98,7 @@ _(유기적 추가 — 새 스캔 리포트 요약)_
 _(유기적 추가 — 외부 논문/블로그/CVE)_
 
 ### Incidents
-_(Phase 5 시드 예정 — 2026_04_16_seven_disconnections, auto_login_fix, payload_rotation_and_sweep)_
+
+- [2026-04-16 Seven Disconnections](sources/incidents/2026_04_16_seven_disconnections.md) — scan_loop 동작 이상 / chain 연쇄 안 됨 / skill cache 꼬임 / severity 정적 고정 / IDOR 자동 큐잉 누락
+- [2026-04-16 Auto-login Fix](sources/incidents/2026_04_16_auto_login_fix.md) — auto-login 전체 실패 / BrowserPage.fill TypeError / Enter 키 미전달 / login pivot 메시지
+- [2026-04-16 Payload Rotation + Sweep](sources/incidents/2026_04_16_payload_rotation_and_sweep.md) — payload rotation R2/R3 동작 / skill sweep 트리거 / _real_skills_completed / round re-queue alias

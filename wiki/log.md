@@ -19,3 +19,6 @@
 
 ## [2026-04-16] ingest | Phase 4 modules (7) + pipelines (14) seeded
 - scan_loop / skill_runner / brain / hands / eyes / xray / report_generator + P0~P18 (14 active pipelines). 각 페이지 code_anchors 로 소스 추적 가능.
+
+## [2026-04-16] ingest | Phase 5 incidents (3) + ADRs (6+draft_007) seeded
+- ADR-001~006 + 2026-04-16 3 postmortems + draft_007 (payloads yaml refactor plan). code_freeze 원칙 ADR-006 으로 격상.
