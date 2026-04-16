@@ -2,6 +2,7 @@
 
 > CLAUDE.md는 얇게. 상세한 규칙은 해당 코드의 주석에.
 > 여기엔 **워크플로우 · 절대 원칙 · 커맨드**만.
+> 개념·스킬·모듈·결정 등 누적 지식은 → **`wiki/`** ([wiki/CLAUDE.md](wiki/CLAUDE.md) 참조).
 
 ## 절대 원칙 — Brain-First
 
