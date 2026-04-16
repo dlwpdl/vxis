@@ -13,3 +13,6 @@
 
 ## [2026-04-16] ingest | Phase 2 concept pages (8) seeded
 - brain_first / chain_intelligence / payload_rotation / severity_oracle / scoring_model / plan_review_workflow / vxis_architecture / ai_context_hygiene
+
+## [2026-04-16] ingest | Phase 3 skill entity pages (15) seeded
+- SKILL_REGISTRY 15개 각 1 페이지. rotation 지원 (test_injection, test_xss) 은 Payload Rounds 섹션 포함. 나머지 13은 Params/Known Limitations/Source Files 만.

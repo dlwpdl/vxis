@@ -35,7 +35,22 @@
 ## Entities
 
 ### Skills
-_(Phase 3 시드 예정 — SKILL_REGISTRY 15개)_
+
+- [test_injection](entities/skills/test_injection.md) — SQLi/XSS/SSTI/CMDi payload rotation 동작 / round 구분 / time-based 감지 임계값
+- [test_xss](entities/skills/test_xss.md) — XSS 전용 payload rotation / 필터 우회 / DOM/mXSS 페이로드 위치
+- [enumerate_endpoints](entities/skills/enumerate_endpoints.md) — 120+ common paths blast / SPA baseline detection / accessible/auth_required 분류
+- [attempt_auth](entities/skills/attempt_auth.md) — 로그인 우회 / default creds / SQLi bypass / password reset 체크 순서
+- [post_auth_enum](entities/skills/post_auth_enum.md) — 인증 후 접근 가능 경로 / broken access control / IDOR 후보 탐지
+- [test_sensitive_files](entities/skills/test_sensitive_files.md) — 노출 파일·백업·키 탐지 / body-aware severity 조정 / actuator masking
+- [test_idor](entities/skills/test_idor.md) — IDOR sequential ID / auth bypass 탐지 / url_pattern {id} 템플릿
+- [test_auth_deep](entities/skills/test_auth_deep.md) — JWT alg:none / RS→HS 혼동 / session fixation / password reset host poisoning
+- [test_csrf](entities/skills/test_csrf.md) — CSRF 토큰 없이 state-changing 요청 허용 / SameSite 부재 / invalid token 허용
+- [test_ssrf](entities/skills/test_ssrf.md) — SSRF URL 파라미터 탐지 / 클라우드 metadata / protocol smuggling / IP bypass
+- [test_api_security](entities/skills/test_api_security.md) — Mass assignment / rate limiting / verb tampering / param pollution
+- [test_misconfig](entities/skills/test_misconfig.md) — 보안 헤더 부재 / CORS / debug endpoint / verbose error / server version
+- [test_business_logic](entities/skills/test_business_logic.md) — 음수 수량·가격 0·정수 overflow·coupon 재사용·state skip·race condition
+- [test_crypto](entities/skills/test_crypto.md) — TLS 약한 버전 / JS 번들 하드코드 시크릿 / MD5/SHA1 해시 노출
+- [test_infra](entities/skills/test_infra.md) — .git / .env 노출 / 클라우드 metadata / 서브도메인 DNS / Firebase public
 
 ### Modules
 _(Phase 4 시드 예정 — scan_loop, skill_runner, report_generator, brain, hands, eyes, xray)_
