@@ -76,6 +76,58 @@ SENSITIVE_PATHS = [
 ]
 
 
+def _adjust_severity(path: str, body: str, declared: str) -> tuple[str, str | None]:
+    """Content-aware severity adjustment.
+
+    Many defaults (Spring Boot /actuator/env with sanitized "******" values,
+    empty Prometheus /metrics, etc.) are flagged as critical in the static
+    list but carry far less risk in practice. This looks at the actual
+    response body to downgrade when appropriate and upgrade when we spot
+    unsanitized secrets.
+
+    Returns (severity, note). note is a short reason string or None.
+    """
+    lo = body.lower() if body else ""
+    # Spring Boot actuator env — downgrade when all values are masked
+    if path.startswith("/actuator/env"):
+        if "******" in body and ('"value":"******"' in body or ": '******'" in body):
+            # Count non-masked values. If everything sensitive-looking is
+            # masked, this is informational.
+            masked_ratio = body.count('"******"') / max(body.count('"value":') or 1, 1)
+            if masked_ratio > 0.6:
+                return ("low", "values masked by Spring Boot sanitizer")
+        # Look for raw secrets anyway
+        for needle in ("secret", "password", "jdbc:", "mongodb://", "postgres://"):
+            if needle in lo and "******" not in lo.split(needle, 1)[-1][:40]:
+                return ("critical", f"unmasked {needle} leaked in env")
+        return (declared, None)
+
+    # Spring Boot actuator root / health — low unless extra endpoints exposed
+    if path == "/actuator/" or path == "/actuator":
+        risky = ("heapdump", "threaddump", "mappings", "beans", "configprops")
+        if any(x in lo for x in risky):
+            return ("high", "risky actuator endpoints enumerable")
+        return ("low", "only safe actuator links")
+    if path == "/actuator/health":
+        if '"status":"up"' in lo and len(body) < 50:
+            return ("informational", "health check only")
+        return (declared, None)
+
+    # .env — confirm it actually looks like env vars rather than a generic 200
+    if path in ("/.env", "/.env.bak"):
+        if "=" not in body[:1000] or "<html" in lo:
+            return ("low", "not a real env file")
+        return (declared, None)
+
+    # /metrics — downgrade empty/tiny responses
+    if path == "/metrics" and len(body) < 200:
+        return ("low", "metrics endpoint nearly empty")
+
+    # robots/sitemap/security.txt — already informational in the list
+
+    return (declared, None)
+
+
 async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
     """Scan for sensitive files and configurations.
 
@@ -111,14 +163,20 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                     if r.status_code == 404 or (baseline_size and size == baseline_size):
                         return
                     if r.status_code == 200 and size > 50:
-                        exposed.append({
+                        body = r.text
+                        final_sev, note = _adjust_severity(path, body, severity)
+                        entry = {
                             "path": path,
-                            "severity": severity,
-                            "description": description,
+                            "severity": final_sev,
+                            "description": description + (f" [{note}]" if note else ""),
                             "status": r.status_code,
                             "size": size,
-                            "preview": r.text[:300],
-                        })
+                            "preview": body[:300],
+                        }
+                        if note:
+                            entry["severity_note"] = note
+                            entry["original_severity"] = severity
+                        exposed.append(entry)
                 except Exception:
                     pass
 

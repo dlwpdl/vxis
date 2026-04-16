@@ -12,6 +12,28 @@ from vxis.agent.tool_registry import ToolResult
 
 logger = logging.getLogger(__name__)
 
+# Per-(skill, args) result cache. When Brain re-runs an identical call, we
+# return the cached result plus a nudge that prompts it to vary the args.
+# This kills pathological loops (e.g. test_idor with the same pattern 16x)
+# without relying solely on the scan-loop dedup gate.
+#
+# Escalation policy (Brain-First: if Brain ignores nudges, ESCALATE):
+#   hit #1  → cached result + "CHANGE ARGS" nudge (soft)
+#   hit #2  → cached result + list of UNTRIED skills  (stronger)
+#   hit #3+ → ok=False, error="stuck_loop" — force Brain to pick another skill
+_skill_cache: dict[str, dict[str, Any]] = {}
+
+# Track every skill ever called (any args) so we can tell Brain what it
+# has NOT tried yet when it's stuck. Separate from _skill_cache because
+# we care about skill diversity, not args identity.
+_skills_ever_called: set[str] = set()
+
+
+def _reset_cache_for_tests() -> None:
+    """Clear the skill cache — production code should not call this."""
+    _skill_cache.clear()
+    _skills_ever_called.clear()
+
 
 class RunSkillTool:
     name = "run_skill"
@@ -80,11 +102,88 @@ class RunSkillTool:
                 error="unknown_skill",
             )
 
+        # Cache hit detection — normalize args so cosmetic differences
+        # (key order, default-vs-explicit) still collide.
+        try:
+            _cache_key = json.dumps(
+                {"s": skill_name, "t": target_url, "p": params},
+                sort_keys=True, default=str,
+            )
+        except Exception:
+            _cache_key = f"{skill_name}:{target_url}:{params!r}"
+
+        _cached = _skill_cache.get(_cache_key)
+        if _cached is not None:
+            _cached["hits"] = _cached.get("hits", 1) + 1
+            _hits = _cached["hits"]
+
+            # Compute untried-skill hint for hits >= 2
+            _untried = sorted(SKILL_REGISTRY.keys() - _skills_ever_called)
+
+            if _hits >= 3:
+                # Hard block — Brain has ignored 2 soft nudges. Refuse the
+                # call entirely. This forces the Brain-First loop: pivot or
+                # finish_scan (which itself is gated by chain requirements).
+                _block_msg = (
+                    f"run_skill BLOCKED — you've called '{skill_name}' with IDENTICAL args "
+                    f"{_hits} times. STOP REPEATING. "
+                )
+                if _untried:
+                    _block_msg += f"UNTRIED SKILLS you have not even invoked once: {', '.join(_untried[:8])}. Pick one. "
+                _block_msg += (
+                    "Or if the whole surface is exhausted, switch to browser-based "
+                    "manual probing (browser_navigate + browser_fill_form with novel inputs). "
+                    "DO NOT call this same skill with these same args again."
+                )
+                logger.warning(
+                    "run_skill BLOCKED: skill=%s hits=%d — forcing pivot",
+                    skill_name, _hits,
+                )
+                return ToolResult(
+                    ok=False,
+                    data={"blocked": True, "hits": _hits, "untried": _untried[:8]},
+                    summary=_block_msg,
+                    error="stuck_loop",
+                )
+            elif _hits == 2:
+                # Escalated nudge — list concrete alternatives
+                _hint = (
+                    f"[CACHED — hit #{_hits}] You already ran this EXACT call. "
+                    f"Next repeat will be BLOCKED. "
+                )
+                if _untried:
+                    _hint += f"UNTRIED skills: {', '.join(_untried[:6])}. "
+                _hint += "Pick one NOW or change args significantly."
+            else:
+                # First repeat — soft nudge
+                _hint = (
+                    f"[CACHED — hit #{_hits}] This exact skill call has "
+                    f"already been run. Cached result returned without re-execution. "
+                    f"CHANGE ARGS to probe something new — e.g. different url_pattern, "
+                    f"different param, different token, or pick another skill."
+                )
+            logger.info(
+                "run_skill cache hit: skill=%s hits=%d — returning cached + nudge",
+                skill_name, _hits,
+            )
+            return ToolResult(
+                ok=True,
+                data=_cached["data"],
+                summary=f"{_cached['summary']} || {_hint}",
+            )
+
+        # Record that this skill has been attempted (fresh args) so the
+        # "untried skills" list stays accurate across retries.
+        _skills_ever_called.add(skill_name)
+
         skill = SKILL_REGISTRY[skill_name]
         fn = skill["fn"]
 
         try:
             # Execute the skill
+            # For skills that take url= (test_injection, test_xss, test_ssrf):
+            # if params already contains 'url', use it instead of target_url
+            # to avoid "got multiple values for keyword argument 'url'"
             if skill_name == "test_idor":
                 # test_idor uses url_pattern, not target_url
                 result = await fn(
@@ -94,12 +193,10 @@ class RunSkillTool:
                 )
             elif skill_name in ("post_auth_enum",):
                 result = await fn(target_url=target_url, token=params.get("token", ""), **{k: v for k, v in params.items() if k != "token"})
-            elif skill_name == "test_injection":
-                # For injection, target_url should include the param
-                result = await fn(url=target_url, **params)
-            elif skill_name in ("test_xss", "test_ssrf"):
-                # These use url= with query params
-                result = await fn(url=target_url, **params)
+            elif skill_name in ("test_injection", "test_xss", "test_ssrf"):
+                # These use url= as first positional arg
+                effective_url = params.pop("url", target_url)
+                result = await fn(url=effective_url, **params)
             elif skill_name in ("test_auth_deep", "test_csrf", "test_api_security", "test_business_logic"):
                 # These accept optional token
                 result = await fn(target_url=target_url, token=params.get("token"), **{k: v for k, v in params.items() if k != "token"})
@@ -164,8 +261,15 @@ class RunSkillTool:
                 fsev = f.get("severity", "medium")
                 summary_parts.append(f"  {ftype}: {fpayload} ({fsev})")
 
+        _summary = " | ".join(summary_parts)
+        # Store in cache so repeat calls short-circuit without re-execution
+        _skill_cache[_cache_key] = {
+            "data": result,
+            "summary": _summary,
+            "hits": 1,
+        }
         return ToolResult(
             ok=True,
             data=result,
-            summary=" | ".join(summary_parts),
+            summary=_summary,
         )

@@ -1,160 +1,103 @@
 # VXIS — AI-Powered Autonomous Pentesting Platform
 
-## 절대 원칙: Brain-First Architecture
+> CLAUDE.md는 얇게. 상세한 규칙은 해당 코드의 주석에.
+> 여기엔 **워크플로우 · 절대 원칙 · 커맨드**만.
 
-**모든 파이프라인(Web/Game/Mobile)의 모든 Phase는 이 구조를 반드시 따른다.**
+## 절대 원칙 — Brain-First
 
-```
-Phase 시작
-  → Brain이 타겟 현재 상태 분석
-  → Brain이 공격 전략 결정
-  → Brain이 페이로드 생성
-  → Hands/Eyes/X-Ray로 실행
-  → 결과를 Brain이 해석
-  → 다음 행동을 Brain이 결정
-  → 발견한 걸 체이닝
-  → 더 깊이 파고들기
-Phase 완료
-```
-
-### 금지
-
-- 하드코딩된 엔드포인트/페이로드로 공격 시도
-- Brain 없이 코드 로직만으로 공격
-- Brain을 "가끔 호출하는 헬퍼"로 취급
-- 정적 코드 분석으로 스코어링
-
-### 필수
-
-- Brain이 매 Phase의 핵심 의사결정자
-- Brain이 동적으로 엔드포인트 발견 + 페이로드 생성
-- Brain이 응답 해석 + 다음 행동 결정
-- Brain이 체이닝하여 Crown Jewel까지 도달
-- 실제 타겟 대상 동적 스캔으로만 점수 측정
-
-### 모듈 역할
+Brain (AI) = 시니어 펜테스터의 두뇌. 하드코딩된 공격 로직 금지.
+Phase = { 분석 → 결정 → 실행 → 해석 → 다음 행동 } 루프. Brain이 체이닝해서 **Crown Jewel** (admin takeover · DB dump · RCE · data exfil) 까지.
+정적 코드 grep 스코어링 금지 — 실제 타겟 동적 공격만.
 
 ```
-Brain  = 시니어 펜테스터의 두뇌 (분석, 판단, 전략)
-Hands  = 손 (HTTP 요청 실행)
-Eyes   = 눈 (브라우저 렌더링, JS 실행)
+Brain  = 두뇌 (분석·판단·전략)
+Hands  = 손  (HTTP 요청)
+Eyes   = 눈  (브라우저·JS)
 X-Ray  = 투시 (트래픽 가로채기)
 ```
 
-## 스코어링 — 동적 스캔 전용
+## Workflow
 
-- AI Brain이 실제 타겟 공격 → 결과 → 점수 → 약점 인식 → 코드 개선 → 재공격 루프
-- CI 벤치마크: Docker 취약앱(DVWA, Juice Shop) 기동 → 실제 스캔 → 점수 비교
-- 정적 코드 grep으로 커버리지 측정하는 것 금지
+1. **Plan mode first.** 비자명한 작업은 계획부터. 스코프와 성공 기준을 명시한 프롬프트로 `/plan` 돌리고 ExitPlanMode 전에 **`/plan-review`** (8개 서브에이전트: architecture, coding-standards, UX, performance, security, testing, ops, docs — 각자 전용 레퍼런스 문서 `postgres_performance.md`, `python_threading.md`, `software_architecture.md` 등 참조).
+2. **Phased commits.** 계획의 각 phase = 1 commit. 커밋마다 **`/code-review`** (같은 8개 에이전트 재사용) → 피드백을 내가 steer.
+3. **TDD.** Brain·scoring·skills·pipeline 변경은 실패하는 테스트부터. `pytest tests/ -x --timeout=30` 로컬 확인.
 
-## 코드 규칙
+## Git Workflow
 
-- `any` 타입 사용 금지 — Zod/Pydantic으로 런타임 검증
-- 모든 텍스트 바이링구얼: `"English|||한국어"`
-- 리포트는 항상 NCC Group 스타일 단일 HTML (VXIS ReportGenerator 사용)
-- AGPL 라이선스 코드 포크 금지 — 100% 자체 구현
-- Hands/X-Ray/Controller/Finding 모듈 사용, raw httpx 금지
-- 100% 공격 벡터 커버리지 필수, Phase 건너뛰기 금지
-- Enterprise 스캔 시 인젝션은 마지막에 승인 후 실행
+- `main` 전용 push. feature 브랜치는 머지 후 삭제.
+- 커밋 메시지: `phase-N: <what>` 또는 `feat(scope): <what>`. 본문에 **why**.
+- `git commit -m` + HEREDOC. `--no-verify`·`--no-gpg-sign` 금지. pre-commit 실패 시 fix → **새** 커밋 (amend 금지).
+- 한 번에 한 배치. PR 템플릿의 Summary / Test plan 채우기.
 
-## 파이프라인 Phase 구조 (14 active)
+## Devex Conventions
 
-```
-Stage 1 — Foundation:     P0 Config → P1 Director
-Stage 2 — Recon:          P4 CPR → P15 Digital Twin → P13 Biometrics
-Stage 3 — Intelligence:   P2 Agents → P3 Hypothesis
-Stage 4 — Exploitation:   P5 Special → P7 Hardware
-Stage 5 — Chain Analysis: P8 Synthesis → P11 Mutation
-Stage 6 — Deferred Actions (승인 후 실행)
-Stage 7 — Report:         P6 NCC Style
-Stage 8 — Learning:       P12 Evolution → P18 Collective KB
-```
+- `Any` 금지 — Pydantic 런타임 검증.
+- 텍스트 바이링구얼: `"English|||한국어"`. 한국어도 영어만큼 상세히.
+- 리포트: NCC Group 스타일 단일 HTML, `ReportGenerator.generate_html_file()`.
+- 네트워크: Hands/X-Ray/Controller/Finding 모듈. raw `httpx` 금지.
+- AGPL 포크 금지 (Strix/PentAGI 등). 100% 자체 구현.
+- 100% 공격 벡터 커버리지. Phase 건너뛰기 금지.
+- Enterprise 스캔 시 인젝션은 **마지막**, yes/no 승인 후 실행.
+- 코드 수정 후 자동 스캔 실행 금지 — 사용자 요청 시만.
 
-### GH Actions 담당 (파이프라인 외부)
+## Project Tool Use
 
-- `cve-watch.yml` — CVE 모니터링 (매시간)
-- `domain-intel.yml` — Forecast + Industry Intel (매일/매주/매월)
-- `upstream-watch.yml` — 공급망 모니터링 (매주)
-- `growth-loop.yml` — 자율 성장 벤치마크 (매주)
+```bash
+# Benchmark 타겟 기동 (Docker)
+docker compose -f infra/benchmarks/juice-shop.yml up -d   # :3000
+docker compose -f infra/benchmarks/webgoat.yml up -d      # :8080
 
-## 리포트 작성 규칙 (MANDATORY — 절대 변경 금지)
+# 풀 스캔
+python -m vxis.cli scan --target http://localhost:3000 --mode enterprise
 
-새 스캔 레포트를 작성할 때 `generate_benchmark_reports.py`의 WEBGOAT_FINDINGS 섹션을 템플릿으로 사용한다.
+# 테스트
+pytest tests/ -x --timeout=30
+pytest tests/agent/test_scan_loop.py -k "not runs_to_finish"  # 스킵 flaky
 
-### Finding 필드 규칙
+# Growth loop (self-improving benchmark)
+python scripts/growth_loop.py --weekly
 
-```python
-Finding(
-    id="XX-NNN",                    # 타겟 약어 + 번호
-    scan_id="scan-id-here",
-    target="http://...",
-    title="English title|||한국어 제목",
-    description="...",              # 아래 섹션 구조 필수
-    severity=Severity.critical,     # critical/high/medium/low/informational
-    finding_type="sql_injection",   # snake_case
-    source_plugin="web_pipeline",
-    affected_component="...",       # 단수 문자열
-    cvss=CVSSVector(vector_string="CVSS:3.1/...", base_score=N.N),
-    cwe_ids=["CWE-NNN"],
-    mitre_attack=MitreAttack(...),  # Critical/High에 권장
-    evidence=[Evidence(evidence_type="http_request_response|log|packet_capture",
-                       title="...", content="raw HTTP/log content")],
-    remediation="English|||한국어",
-    references=[Reference(title="...", url="...")],
-)
+# Smoke: Brain-First 경로
+python scripts/smoke_brain_first.py --target http://localhost:3000
+
+# 리포트 생성 (WebGoat/Juice Shop 벤치마크 템플릿)
+python scripts/generate_benchmark_reports.py
 ```
 
-### description 섹션 순서 (영어 → ||| → 한국어)
+## 파이프라인 구조 (14 active)
 
 ```
-WHAT — Vulnerability Description
-HOW — Step-by-Step Attack Scenario  (Step 1: ... Step N: ...)
-IMPACT — Business Impact             (- bullet list)
-PoC — Proof of Concept               (Request/Response raw)
-ATTACK PATH — Chain Analysis
-|||
-취약점 설명(WHAT)
-공격 시나리오(HOW)                    (1단계: ... N단계: ...)
-비즈니스 영향(IMPACT)                 (- 글머리)
-개념 증명(PoC)
-공격 경로(ATTACK PATH)
+1 Foundation:     P0 Config → P1 Director
+2 Recon:          P4 CPR → P15 Digital Twin → P13 Biometrics
+3 Intelligence:   P2 Agents → P3 Hypothesis
+4 Exploitation:   P5 Special → P7 Hardware
+5 Chain Analysis: P8 Synthesis → P11 Mutation
+6 Deferred (승인)
+7 Report:         P6 NCC Style
+8 Learning:       P12 Evolution → P18 Collective KB
 ```
 
-### remediation 구조
+GH Actions (외부): `cve-watch.yml`, `domain-intel.yml`, `upstream-watch.yml`, `growth-loop.yml`.
 
-```
-Immediate: ...
-Short-term: ...
-Long-term: ...
-|||
-즉시 조치: ...
-단기 조치: ...
-장기 조치: ...
-```
+## 핵심 모듈 포인터 (상세 규칙은 해당 파일 주석)
 
-### ReportData 규칙
+- `src/vxis/agent/scan_loop.py` — Brain 루프, auto-login, 스킬 스케줄·sweep, chain nudge, finish_scan gate.
+- `src/vxis/agent/tools/skill_runner.py` — 캐시 escalation (hit#1=soft nudge → #2=strong+untried list → #3+=BLOCK `ok=False`), `_skill_override` aliasing.
+- `src/vxis/agent/skills/test_sensitive_files.py` — `_adjust_severity()` body-aware 오라클 (masked>60% → low, raw secret → critical).
+- `src/vxis/agent/skills/test_injection.py` — `round=1|2|3` 페이로드 로테이션 (classic / blind+time / WAF-bypass+polyglot).
+- `src/vxis/pipeline/scan_pipeline_v2.py` — `_compute_vxis_score()`, `_skill_to_vectors` 매핑. 새 스킬 추가 시 매핑 필수.
+- `src/vxis/reports/report_generator.py` — NCC 스타일 HTML 렌더.
 
-```python
-ReportData(
-    scan_id="...",
-    client_name="English only — no ||| separator",   # 제목은 영어 고정
-    target="http://...",
-    scan_date="YYYY-MM-DD or ISO8601",
-    findings=FINDINGS_LIST,
-    company_name="VXIS Security",
-    author="VXIS Autonomous Brain",
-    executive_summary="English summary|||한국어 요약",
-    attack_chains=[["ID-001", "ID-002"], ...],       # 체인 공격 경로
-)
-gen = ReportGenerator()
-# gen.generate_html_file(data, Path("reports/filename.html"))  # 파일 저장 시
-# gen.render_html(data)                                         # 문자열 반환 시
-```
+## Report Format (MANDATORY — 변경 금지)
 
-### 절대 금지
+템플릿: `scripts/generate_benchmark_reports.py` 의 `WEBGOAT_FINDINGS`.
 
-- `client_name`에 `|||` 사용 금지 (영어 고정)
-- `evidence`를 문자열로 전달 금지 → 반드시 `list[Evidence]`
-- `affected_components` (복수) 금지 → `affected_component` (단수)
-- `cvss_score` 직접 전달 금지 → `cvss=CVSSVector(...)` 사용
-- `scan_id`, `target` 누락 금지 (Finding 필수 필드)
+- `Finding.id`: `타겟약어-NNN`
+- `Finding.title` · `description` · `remediation`: `"English|||한국어"`
+- `Finding.description` 섹션: **WHAT → HOW → IMPACT → PoC → ATTACK PATH** (한국어도 동일 순서)
+- `Finding.remediation`: **Immediate / Short-term / Long-term** (한국어: 즉시 / 단기 / 장기)
+- `Finding.evidence`: `list[Evidence]` — raw HTTP·log·packet
+- `Finding.severity`: `critical|high|medium|low|informational`
+- `Finding.cvss`: `CVSSVector(vector_string=..., base_score=...)` (절대 `cvss_score` 직접 전달 금지)
+- `ReportData.client_name`: 영어 고정 (`|||` 금지)
+- `ReportData.attack_chains`: `[["ID-001","ID-002"], ...]`

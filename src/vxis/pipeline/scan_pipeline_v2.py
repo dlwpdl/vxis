@@ -172,6 +172,33 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             "informational": 0,
         }
 
+        # Record vectors from ALL executed skills (including clean results)
+        # so that vector_coverage reflects attempted vectors, not just findings.
+        _skill_to_vectors = {
+            "enumerate_endpoints": ["WEB-INFO-001", "WEB-INFO-002"],
+            "test_sensitive_files": ["WEB-INFO-001"],
+            "test_infra": ["WEB-MISC-001", "WEB-INFO-001"],
+            "attempt_auth": ["WEB-AUTH-001"],
+            "post_auth_enum": ["WEB-BAC-001"],
+            "test_injection": ["WEB-SQLI-001", "WEB-CMDI-001"],
+            "test_xss": ["WEB-XSS-001", "WEB-XSS-002"],
+            "test_ssrf": ["WEB-SSRF-001"],
+            "test_idor": ["WEB-IDOR-001"],
+            "test_auth_deep": ["WEB-JWT-001", "WEB-AUTH-001"],
+            "test_csrf": ["WEB-CSRF-001"],
+            "test_misconfig": ["WEB-MISC-001"],
+            "test_api_security": ["WEB-BAC-001", "WEB-IDOR-001"],
+            "test_business_logic": ["WEB-LOGIC-001"],
+            "test_crypto": ["WEB-CRYPTO-001"],
+        }
+        # Get completed skills from scan loop result
+        _completed_skills: set[str] = set(getattr(ctx, "skills_completed", []) or [])
+
+        for skill_name, vector_ids in _skill_to_vectors.items():
+            if skill_name in _completed_skills:
+                for vid in vector_ids:
+                    tracker.record_vector_attempt(vid)
+
         for f in ctx.findings:
             ftype = f.finding_type if hasattr(f, "finding_type") else str(getattr(f, "finding_type", ""))
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
@@ -369,6 +396,7 @@ class ScanPipeline:
         ctx.verdict_counts = verdict_counts  # type: ignore[attr-defined]
         ctx.confirmed_findings = loop_result.get("confirmed_findings", []) or []  # type: ignore[attr-defined]
         ctx.refuted_findings = loop_result.get("refuted_findings", []) or []  # type: ignore[attr-defined]
+        ctx.skills_completed = loop_result.get("skills_completed", []) or []  # type: ignore[attr-defined]
         if verdict_counts:
             print(
                 "VXIS_BELIEF verdicts={} confirmed={} refuted={}".format(
