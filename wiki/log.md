@@ -16,3 +16,6 @@
 
 ## [2026-04-16] ingest | Phase 3 skill entity pages (15) seeded
 - SKILL_REGISTRY 15개 각 1 페이지. rotation 지원 (test_injection, test_xss) 은 Payload Rounds 섹션 포함. 나머지 13은 Params/Known Limitations/Source Files 만.
+
+## [2026-04-16] ingest | Phase 4 modules (7) + pipelines (14) seeded
+- scan_loop / skill_runner / brain / hands / eyes / xray / report_generator + P0~P18 (14 active pipelines). 각 페이지 code_anchors 로 소스 추적 가능.

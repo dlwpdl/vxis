@@ -53,10 +53,31 @@
 - [test_infra](entities/skills/test_infra.md) — .git / .env 노출 / 클라우드 metadata / 서브도메인 DNS / Firebase public
 
 ### Modules
-_(Phase 4 시드 예정 — scan_loop, skill_runner, report_generator, brain, hands, eyes, xray)_
+
+- [scan_loop](entities/modules/scan_loop.md) — Brain ReAct 루프 구조 / skill 스케줄·sweep / auto-login / chain nudge / finish_scan gate 조건
+- [skill_runner](entities/modules/skill_runner.md) — run_skill 호출 캐시 / escalation 정책 / 중복 호출 방지 / _skill_override aliasing / SKILL_REGISTRY 접근점
+- [brain](entities/modules/brain.md) — Brain LLM 호출 choke point / claude -p 우선 조건 / fallback chain / think() 엔트리 / token 카운터
+- [hands](entities/modules/hands.md) — HTTP 세션·쿠키·CSRF 자동 관리 / 폼 파싱 / 멀티스텝 체인 / raw httpx 금지 정책
+- [eyes](entities/modules/eyes.md) — Playwright 브라우저 / JS 실행 / DOM 분석 / SPA 대응 / 스크린샷 / 쿠키·스토리지 접근
+- [xray](entities/modules/xray.md) — 트래픽 인터셉트·변조 / mitmproxy 연동 / 토큰·API 키 자동 추출 / 요청 리플레이 / 패시브 분석
+- [report_generator](entities/modules/report_generator.md) — NCC 스타일 HTML 렌더 / generate_html_file 호출점 / bilingual 필터 / ReportData 스키마
 
 ### Pipelines
-_(Phase 4 시드 예정 — P0/P1/P2/P3/P4/P5/P6/P7/P8/P11/P12/P13/P15/P18)_
+
+- [P0 Config](entities/pipelines/P0_config.md) — 스캔 설정 로드 / scan profile / target·mode·flag 파싱 / Pydantic 검증
+- [P1 Director](entities/pipelines/P1_director.md) — 스캔 오케스트레이션 시작점 / 에이전트 선택 / 가설 큐 관리 / 미션 기반 전략
+- [P2 Agents](entities/pipelines/P2_agents.md) — 60+ 전문 에이전트 레지스트리 / 에이전트 동적 스폰 / 도메인별 공격 특화
+- [P3 Hypothesis](entities/pipelines/P3_hypothesis.md) — 가설 우선순위 큐 / probability·impact 스코어링 / 테스트 상태 FSM
+- [P4 CPR](entities/pipelines/P4_cpr.md) — 초기 recon / Hands·Eyes·X-Ray 통합 / 타겟 인터랙션 entry / 기술 스택 지문
+- [P5 Special](entities/pipelines/P5_special.md) — 특화 공격 스킬 실행 / SKILL_REGISTRY 호출점 / exploitation 본체 / skill_runner 와의 관계
+- [P6 NCC Style](entities/pipelines/P6_ncc_style.md) — NCC 스타일 HTML 리포트 생성 / ReportData 구성 / bilingual 필수 필드 / Finding 직렬화
+- [P7 Hardware](entities/pipelines/P7_hardware.md) — 하드웨어·물리 계층 공격 / DMA·콜드부트·사이드채널 에이전트 / 모바일·IoT 펌웨어
+- [P8 Synthesis](entities/pipelines/P8_synthesis.md) — 공격 체인 합성 / 크로스레이어 연결 / 공격 트리 탐색 / 방어 시뮬레이션
+- [P11 Mutation](entities/pipelines/P11_mutation.md) — 체인 변이 / 대안 경로 증명 / "부분 패치 허상" 검증 / NetworkX 그래프 탐색
+- [P12 Evolution](entities/pipelines/P12_evolution.md) — 자기 진화 에이전트 합성 / 부족 능력 자동 생성 / 안전 검증 / 다음 미션 피드백
+- [P13 Biometrics](entities/pipelines/P13_biometrics.md) — 행동 생체인식 OSINT / 직원 행동 패턴 분석 / GitHub·LinkedIn 공개 정보 / 피싱 타이밍
+- [P15 Digital Twin](entities/pipelines/P15_digital_twin.md) — 사전 공격 리허설 / Docker 기술 스택 재현 / 공격 성공 확률 사전 평가 / 실타겟 소음 최소화
+- [P18 Collective KB](entities/pipelines/P18_collective_kb.md) — 취약점 지식 베이스 / remediation·CWE·OWASP 매핑 / static lookup / 에이전트 추천
 
 ## Decisions
 _(Phase 5 시드 예정 — agpl_forbidden, claude_p_first, no_raw_httpx, ncc_group_report_format, dynamic_not_static)_
