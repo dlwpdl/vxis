@@ -140,27 +140,102 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
-        _type_to_vector = {
-            "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+        # Map finding types to vector IDs — must match vxis.scoring.vectors registry.
+        # Unmapped types are skipped (no fake IDs that waste coverage budget).
+        _type_to_vector: dict[str, str] = {
+            # ── SQL Injection ──
+            "sql_injection": "WEB-SQLI-001",   # union-based (brain / scan_loop)
+            "sqli": "WEB-SQLI-001",             # alias from skills
+            "sqli_blind": "WEB-SQLI-002",       # boolean blind (skills)
+            "sql_time_blind": "WEB-SQLI-003",   # time-based blind
+            "sql_error": "WEB-SQLI-004",        # error-based
+            "sql_second_order": "WEB-SQLI-006", # second order
+            # ── NoSQL Injection ──
+            "nosql": "WEB-NOSQL-001",           # MongoDB operator (skills)
+            "nosql_injection": "WEB-NOSQL-001",
+            # ── Command Injection ──
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "cmdi": "WEB-CMDI-001",             # alias from skills
+            # ── Template Injection ──
+            "ssti": "WEB-SSTI-001",             # skills
+            "server_side_template_injection": "WEB-SSTI-001",
+            # ── Deserialization / RCE ──
+            "rce": "WEB-DESER-001",             # FIX: was fake WEB-RCE-001
+            "deserialization": "WEB-DESER-001",
+            # ── XSS ──
+            "xss": "WEB-XSS-001",
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
+            # ── SSRF ──
+            "ssrf": "WEB-SSRF-001",
+            "ssrf_possible": "WEB-SSRF-001",    # skills
+            "cloud_metadata": "WEB-SSRF-001",   # skills — SSRF to cloud metadata
+            # ── Authentication ──
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "brute_force": "WEB-AUTH-001",
+            "default_credentials": "WEB-AUTH-002",
+            "jwt_confusion": "WEB-AUTH-003",        # FIX: was fake WEB-JWT-001
+            "jwt_alg_confusion": "WEB-AUTH-003",    # skills
+            "jwt_alg_none": "WEB-AUTH-004",         # skills
+            "session_fixation": "WEB-AUTH-005",     # skills
+            "session_hijacking": "WEB-AUTH-006",
+            "oauth_bypass": "WEB-AUTH-007",
+            "password_reset_poisoning": "WEB-AUTH-008",  # skills
+            # ── Access Control ──
+            "idor": "WEB-AC-001",               # FIX: was fake WEB-IDOR-001
+            "broken_access_control": "WEB-AC-002",  # FIX: was fake WEB-BAC-001
+            "privilege_escalation": "WEB-AC-003",
+            "path_traversal": "WEB-AC-004",     # FIX: was fake WEB-TRAV-001
+            "directory_traversal": "WEB-AC-004",
+            "forced_browsing": "WEB-AC-005",
+            # ── Misconfiguration ──
+            "misconfiguration": "WEB-MISCONF-001",   # FIX: was fake WEB-MISC-001
+            "debug_endpoint_exposed": "WEB-MISCONF-001",  # skills
+            "default_config": "WEB-MISCONF-002",
+            "information_disclosure": "WEB-MISCONF-003",  # FIX: was fake WEB-INFO-001
+            "verbose_error": "WEB-MISCONF-003",      # skills
+            "error_oracle": "WEB-MISCONF-003",       # FIX: was fake WEB-INFO-002
+            "server_version_disclosure": "WEB-MISCONF-003",  # skills
+            "tech_disclosure": "WEB-MISCONF-003",    # skills
+            "missing_security_header": "WEB-MISCONF-004",    # skills
+            "cors_misconfiguration": "WEB-MISCONF-005",      # skills
+            "open_redirect": "WEB-MISCONF-006",      # FIX: was fake WEB-REDIR-001
+            # ── Cryptography ──
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "weak_tls": "WEB-CRYPTO-001",
+            "weak_hashing": "WEB-CRYPTO-002",
+            "hardcoded_secret": "WEB-CRYPTO-003",    # skills
+            "env_exposed": "WEB-CRYPTO-003",         # skills — .env = hardcoded secrets
+            "insecure_randomness": "WEB-CRYPTO-004",
+            # ── XXE / File Upload ──
+            "xxe": "WEB-XXE-001",
+            "file_upload": "WEB-UPLOAD-001",
+            # ── Race / CSRF ──
+            "race_condition": "WEB-RACE-001",        # skills
+            "csrf": "WEB-CSRF-001",
+            "csrf_no_protection": "WEB-CSRF-001",    # skills
+            "missing_samesite": "WEB-CSRF-001",      # skills — SameSite → CSRF risk
+            # ── API ──
+            "mass_assignment": "WEB-API-001",        # skills
+            "no_rate_limit": "WEB-API-002",          # skills
+            "rate_limit_bypass": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "verb_tampering": "WEB-API-005",         # skills
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # ── Infrastructure ──
+            "subdomain_takeover": "WEB-INFRA-001",
+            "subdomain_found": "WEB-INFRA-001",      # skills — recon step
+            "firebase_open": "WEB-INFRA-004",        # skills
+            "git_exposed": "WEB-INFRA-005",          # skills
+            # ── Business Logic ──
+            "business_logic": "WEB-BIZ-001",         # FIX: was fake WEB-LOGIC-001
+            "negative_value": "WEB-BIZ-001",
+            "state_skip": "WEB-BIZ-002",
+            "payment_race": "WEB-BIZ-003",
+            "transaction_replay": "WEB-BIZ-004",
         }
 
         # Severity → exploitation level
@@ -177,14 +252,20 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
-            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            vector_id = _type_to_vector.get(ftype)
             level = _sev_to_level.get(sev, 0)
 
-            tracker.record_vector_attempt(vector_id)
-            if level >= 1:
-                tracker.vectors_found.add(vector_id)
-            tracker.exploitation_levels[fid] = level
-            tracker.finding_vectors[fid] = vector_id
+            # Only record vector attempt for known registry IDs — fake/unknown
+            # IDs are silently dropped so they don't dilute coverage scoring.
+            try:
+                if vector_id:
+                    tracker.record_vector_attempt(vector_id)
+                    if level >= 1:
+                        tracker.vectors_found.add(vector_id)
+                tracker.exploitation_levels[fid] = level
+                tracker.finding_vectors[fid] = vector_id or f"UNKNOWN-{ftype}"
+            except Exception as _exc:
+                logger.debug("score tracker update failed for %s: %s", fid, _exc)
 
             # Evidence count from finding
             evidence_count = 0
