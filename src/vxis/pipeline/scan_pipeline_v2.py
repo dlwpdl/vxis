@@ -140,27 +140,124 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
+        # Map finding types to vector IDs (must match vectors.py registry exactly)
         _type_to_vector = {
+            # Injection — SQL
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "sql_injection_boolean": "WEB-SQLI-002",
+            "sql_injection_time": "WEB-SQLI-003",
+            "sql_injection_error": "WEB-SQLI-004",
+            "sql_injection_oob": "WEB-SQLI-005",
+            "sql_injection_second_order": "WEB-SQLI-006",
+            # Injection — NoSQL
+            "nosql_injection": "WEB-NOSQL-001",
+            "nosql_injection_js": "WEB-NOSQL-002",
+            # Injection — Command
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "os_command_injection": "WEB-CMDI-001",
+            "command_injection_blind": "WEB-CMDI-002",
+            # Injection — Other
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            "ssti": "WEB-SSTI-001",
+            "template_injection": "WEB-SSTI-001",
+            "prototype_pollution": "WEB-INJECT-022",
+            "csp_bypass": "WEB-INJECT-023",
+            "cache_poisoning": "WEB-INJECT-024",
+            "rce": "WEB-INJECT-019",                # was WEB-RCE-001 (invalid)
+            "remote_code_execution": "WEB-INJECT-019",
+            "llm_prompt_injection": "WEB-INJECT-021",
+            # XSS
+            "xss": "WEB-XSS-001",
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
+            "xss_mutation": "WEB-XSS-004",
+            # SSRF
+            "ssrf": "WEB-SSRF-001",
+            "blind_ssrf": "WEB-SSRF-002",
+            "ssrf_cloud_metadata": "WEB-SSRF-003",
+            # Auth
+            "auth_bypass": "WEB-AUTH-001",
+            "brute_force": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "default_credentials": "WEB-AUTH-002",
+            "jwt_confusion": "WEB-AUTH-003",         # was WEB-JWT-001 (invalid)
+            "jwt_algorithm_confusion": "WEB-AUTH-003",
+            "jwt_none": "WEB-AUTH-004",
+            "session_fixation": "WEB-AUTH-005",
+            "session_hijacking": "WEB-AUTH-006",
+            "oauth_bypass": "WEB-AUTH-007",
+            "open_redirect_oauth": "WEB-AUTH-007",
+            "password_reset_poisoning": "WEB-AUTH-008",
+            "magic_link_bypass": "WEB-AUTH-010",
+            "saml_bypass": "WEB-AUTH-011",
+            "saml_replay": "WEB-AUTH-012",
+            "oauth_csrf": "WEB-AUTH-013",
+            # Access Control
+            "idor": "WEB-AC-001",                   # was WEB-IDOR-001 (invalid)
+            "broken_access_control": "WEB-AC-001",  # was WEB-BAC-001 (invalid)
+            "bola": "WEB-AC-001",
+            "privilege_escalation_horizontal": "WEB-AC-002",
+            "privilege_escalation": "WEB-AC-003",
+            "privilege_escalation_vertical": "WEB-AC-003",
+            "path_traversal": "WEB-AC-004",         # was WEB-TRAV-001 (invalid)
+            "directory_traversal": "WEB-AC-004",
+            "forced_browsing": "WEB-AC-005",
+            # Misconfiguration
+            "misconfiguration": "WEB-MISCONF-001",   # was WEB-MISC-001 (invalid)
+            "debug_endpoint": "WEB-MISCONF-001",
+            "default_config": "WEB-MISCONF-002",
+            "verbose_error": "WEB-MISCONF-003",
+            "information_disclosure": "WEB-MISCONF-003",  # was WEB-INFO-001 (invalid)
+            "error_oracle": "WEB-MISCONF-003",            # was WEB-INFO-002 (invalid)
+            "missing_security_headers": "WEB-MISCONF-004",
+            "cors_misconfiguration": "WEB-MISCONF-005",
+            "open_redirect": "WEB-MISCONF-006",           # was WEB-REDIR-001 (invalid)
+            # Crypto
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "ssl_tls_misconfiguration": "WEB-CRYPTO-002",
+            "tls_downgrade": "WEB-CRYPTO-003",
+            "hardcoded_secret": "WEB-CRYPTO-004",
+            # Classic vulns
+            "xxe": "WEB-XXE-001",
+            "xml_external_entity": "WEB-XXE-001",
+            "deserialization": "WEB-DESER-001",
+            "insecure_deserialization": "WEB-DESER-001",
+            "file_upload": "WEB-UPLOAD-001",
+            "unrestricted_file_upload": "WEB-UPLOAD-001",
+            "race_condition": "WEB-RACE-001",
+            "csrf": "WEB-CSRF-001",
+            "websocket": "WEB-WSS-001",
+            # API
+            "mass_assignment": "WEB-API-001",
+            "rate_limit_bypass": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "graphql_dos": "WEB-API-004",
+            "http_verb_tampering": "WEB-API-005",
+            "grpc_reflection": "WEB-API-006",
+            "grpc_injection": "WEB-API-007",
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # Business Logic
+            "business_logic": "WEB-BIZ-001",        # was WEB-LOGIC-001 (invalid)
+            "negative_value_injection": "WEB-BIZ-001",
+            "state_transition_skip": "WEB-BIZ-002",
+            "payment_race_condition": "WEB-BIZ-003",
+            "transaction_replay": "WEB-BIZ-004",
+            "privilege_escalation_state": "WEB-BIZ-005",
+            # Infrastructure
+            "subdomain_takeover": "WEB-INFRA-001",
+            "dns_zone_transfer": "WEB-INFRA-002",
+            "cloud_misconfiguration": "WEB-INFRA-003",
+            "s3_public": "WEB-INFRA-003",
+            "firebase_public": "WEB-INFRA-004",
+            "exposed_git": "WEB-INFRA-005",
+            "bigip_rce": "WEB-INFRA-006",
+            # Supply Chain
+            "supply_chain": "WEB-SUPPLY-001",
+            "dependency_confusion": "WEB-SUPPLY-001",
+            "cicd_compromise": "WEB-SUPPLY-002",
         }
 
         # Severity → exploitation level
@@ -236,7 +333,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         return vxis_score.total, vxis_score.grade
 
-    except Exception as e:
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
