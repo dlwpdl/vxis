@@ -6,48 +6,17 @@ import re
 import socket
 from typing import Any
 from urllib.parse import urlparse
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-GIT_PATHS = [
-    ("/.git/HEAD", "ref: refs/heads/"),
-    ("/.git/config", "[core]"),
-    ("/.git/index", "DIRC"),
-    ("/.git/COMMIT_EDITMSG", ""),
-    ("/.git/description", ""),
-    ("/.git/packed-refs", "# pack-refs"),
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+GIT_PATHS = [tuple(_c) for _c in _load_ds("test_infra", "git_paths")]  # ADR-007 Phase 3-9 — data in data/payloads/test_infra.json
 
-ENV_PATHS = [
-    "/.env",
-    "/.env.local",
-    "/.env.production",
-    "/.env.staging",
-    "/.env.backup",
-    "/.env.bak",
-    "/.env.old",
-    "/env.js",
-    "/config.env",
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+ENV_PATHS = _load_ds("test_infra", "env_paths")  # ADR-007 Phase 3-9 — data in data/payloads/test_infra.json
 
-CLOUD_ENDPOINTS = [
-    {"url": "http://169.254.169.254/latest/meta-data/", "detect": "ami-", "desc": "AWS metadata"},
-    {"url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/", "detect": "AccessKeyId", "desc": "AWS IAM creds"},
-    {"url": "http://metadata.google.internal/computeMetadata/v1/project/project-id",
-     "headers": {"Metadata-Flavor": "Google"}, "detect": "", "desc": "GCP metadata"},
-    {"url": "http://169.254.169.254/metadata/instance?api-version=2021-02-01",
-     "headers": {"Metadata": "true"}, "detect": "", "desc": "Azure metadata"},
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+CLOUD_ENDPOINTS = _load_ds("test_infra", "cloud_endpoints")  # ADR-007 Phase 3-9 — data in data/payloads/test_infra.json
 
-SUBDOMAIN_PREFIXES = [
-    "admin", "api", "dev", "staging", "test", "beta", "internal",
-    "mail", "vpn", "git", "ci", "jenkins", "grafana", "monitor",
-    "db", "mysql", "redis", "elastic", "kibana", "prometheus",
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+SUBDOMAIN_PREFIXES = _load_ds("test_infra", "subdomain_prefixes")  # ADR-007 Phase 3-9 — data in data/payloads/test_infra.json
 
 
 async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:

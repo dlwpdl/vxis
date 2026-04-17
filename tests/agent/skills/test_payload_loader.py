@@ -10,8 +10,10 @@ import pytest
 
 from vxis.agent.skills import _payload_loader
 from vxis.agent.skills._payload_loader import (
+    PayloadDatasetMissingError,
     PayloadDataMissingError,
     clear_cache,
+    load_skill_dataset,
     load_skill_payloads,
 )
 
@@ -115,3 +117,67 @@ class TestLoaderContract:
 
         for r in (1, 2, 3, 4):
             assert _payloads_for_round(r) == load_skill_payloads("injection", r)
+
+
+class TestSkillDataset:
+    """ADR-007 Phase 3-9 — non-rotation datasets for 12 skills."""
+
+    def test_missing_dataset_raises_fail_loud(self):
+        with pytest.raises(PayloadDatasetMissingError):
+            load_skill_dataset("attempt_auth", "does_not_exist_key")
+
+    @pytest.mark.parametrize("skill,key,expected_count", [
+        ("attempt_auth", "default_creds", 13),
+        ("attempt_auth", "sqli_creds", 4),
+        ("attempt_auth", "login_paths", 11),
+        ("attempt_auth", "reset_paths", 5),
+        ("enumerate_endpoints", "common_paths", 130),
+        ("post_auth_enum", "auth_paths", 37),
+        ("test_sensitive_files", "sensitive_paths", 54),
+        ("test_auth_deep", "jwt_alg_none_headers", 4),
+        ("test_auth_deep", "reset_paths", 6),
+        ("test_csrf", "state_changing_paths", 14),
+        ("test_ssrf", "ssrf_payloads", 20),
+        ("test_ssrf", "url_params", 11),
+        ("test_api_security", "mass_assign_fields", 8),
+        ("test_api_security", "verb_tamper_paths", 6),
+        ("test_misconfig", "required_headers", 7),
+        ("test_misconfig", "debug_paths", 15),
+        ("test_misconfig", "cors_origins", 3),
+        ("test_business_logic", "logic_tests", 12),
+        ("test_crypto", "secret_patterns", 10),
+        ("test_crypto", "js_paths", 10),
+        ("test_infra", "git_paths", 6),
+        ("test_infra", "env_paths", 9),
+        ("test_infra", "cloud_endpoints", 4),
+        ("test_infra", "subdomain_prefixes", 20),
+    ])
+    def test_dataset_count_pinned(self, skill, key, expected_count):
+        """Pin item counts so growth loop appends are caught in review."""
+        assert len(load_skill_dataset(skill, key)) == expected_count
+
+    def test_skill_module_constant_matches_loader_output(self):
+        """Skill module constants must equal loader output (normalized for tuples)."""
+        def norm(x):
+            if isinstance(x, (list, tuple)):
+                return [norm(i) for i in x]
+            return x
+
+        import importlib
+
+        cases = [
+            ("attempt_auth", "DEFAULT_CREDS", "default_creds"),
+            ("enumerate_endpoints", "COMMON_PATHS", "common_paths"),
+            ("test_sensitive_files", "SENSITIVE_PATHS", "sensitive_paths"),
+            ("test_csrf", "STATE_CHANGING_PATHS", "state_changing_paths"),
+            ("test_ssrf", "SSRF_PAYLOADS", "ssrf_payloads"),
+            ("test_misconfig", "REQUIRED_HEADERS", "required_headers"),
+            ("test_business_logic", "LOGIC_TESTS", "logic_tests"),
+            ("test_crypto", "SECRET_PATTERNS", "secret_patterns"),
+            ("test_infra", "GIT_PATHS", "git_paths"),
+        ]
+        for skill, const, key in cases:
+            mod = importlib.import_module(f"vxis.agent.skills.{skill}")
+            assert norm(getattr(mod, const)) == norm(load_skill_dataset(skill, key)), (
+                f"{skill}.{const} diverges from datasets.{key}"
+            )

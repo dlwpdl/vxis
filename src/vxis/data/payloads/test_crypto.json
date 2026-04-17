@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "skill": "test_crypto",
+  "description": "ADR-007 Phase 3-9: externalized datasets from test_crypto.py",
+  "datasets": {
+    "secret_patterns": [
+      {
+        "pattern": "(?:api[_-]?key|apikey)\\s*[:=]\\s*['\\\"][A-Za-z0-9_\\-]{16,}['\\\"]",
+        "desc": "API key in source"
+      },
+      {
+        "pattern": "(?:secret|password|passwd|pwd)\\s*[:=]\\s*['\\\"][^'\\\"]{6,}['\\\"]",
+        "desc": "Hardcoded secret/password"
+      },
+      {
+        "pattern": "(?:aws_access_key_id|AKIA)[A-Z0-9]{16,}",
+        "desc": "AWS access key"
+      },
+      {
+        "pattern": "(?:aws_secret_access_key)\\s*[:=]\\s*['\\\"][A-Za-z0-9/+=]{30,}['\\\"]",
+        "desc": "AWS secret key"
+      },
+      {
+        "pattern": "(?:token|bearer)\\s*[:=]\\s*['\\\"][A-Za-z0-9_\\-.]{20,}['\\\"]",
+        "desc": "Hardcoded token"
+      },
+      {
+        "pattern": "(?:private[_-]?key)\\s*[:=]\\s*['\\\"]-----BEGIN",
+        "desc": "Private key in source"
+      },
+      {
+        "pattern": "ghp_[A-Za-z0-9]{36}",
+        "desc": "GitHub personal access token"
+      },
+      {
+        "pattern": "sk-[A-Za-z0-9]{20,}",
+        "desc": "OpenAI/Stripe secret key"
+      },
+      {
+        "pattern": "(?:mongodb|postgres|mysql)://[^\\\\s'\\\"]+:[^\\\\s'\\\"]+@",
+        "desc": "Database connection string"
+      },
+      {
+        "pattern": "(?:slack|xoxb|xoxp)-[A-Za-z0-9\\-]{10,}",
+        "desc": "Slack token"
+      }
+    ],
+    "js_paths": [
+      "/main.js",
+      "/app.js",
+      "/bundle.js",
+      "/vendor.js",
+      "/static/js/main.js",
+      "/static/js/bundle.js",
+      "/assets/index.js",
+      "/dist/app.js",
+      "/js/app.js",
+      "/js/main.js"
+    ]
+  }
+}

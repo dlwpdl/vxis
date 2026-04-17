@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "skill": "test_api_security",
+  "description": "ADR-007 Phase 3-9: externalized datasets from test_api_security.py",
+  "datasets": {
+    "mass_assign_fields": [
+      {
+        "field": "role",
+        "value": "admin",
+        "desc": "Role escalation"
+      },
+      {
+        "field": "isAdmin",
+        "value": "true",
+        "desc": "Admin flag"
+      },
+      {
+        "field": "is_staff",
+        "value": "true",
+        "desc": "Staff flag"
+      },
+      {
+        "field": "verified",
+        "value": "true",
+        "desc": "Email verification bypass"
+      },
+      {
+        "field": "balance",
+        "value": "999999",
+        "desc": "Balance manipulation"
+      },
+      {
+        "field": "discount",
+        "value": "100",
+        "desc": "Discount override"
+      },
+      {
+        "field": "price",
+        "value": "0",
+        "desc": "Price override"
+      },
+      {
+        "field": "permissions",
+        "value": "all",
+        "desc": "Permissions escalation"
+      }
+    ],
+    "verb_tamper_paths": [
+      "/api/users",
+      "/api/admin",
+      "/api/config",
+      "/api/settings",
+      "/api/roles",
+      "/api/permissions"
+    ]
+  }
+}

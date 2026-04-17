@@ -3,26 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-STATE_CHANGING_PATHS = [
-    ("/api/users", "POST", "Create user"),
-    ("/api/profile", "PUT", "Update profile"),
-    ("/api/password", "POST", "Change password"),
-    ("/api/transfer", "POST", "Transfer funds"),
-    ("/api/settings", "POST", "Update settings"),
-    ("/api/admin/users", "DELETE", "Delete user"),
-    ("/api/orders", "POST", "Create order"),
-    ("/api/comments", "POST", "Post comment"),
-    ("/api/account", "PUT", "Update account"),
-    ("/api/email", "POST", "Change email"),
-    ("/profile/update", "POST", "Update profile"),
-    ("/account/delete", "POST", "Delete account"),
-    ("/cart/checkout", "POST", "Checkout"),
-    ("/api/tokens", "POST", "Create token"),
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+STATE_CHANGING_PATHS = [tuple(_c) for _c in _load_ds("test_csrf", "state_changing_paths")]  # ADR-007 Phase 3-9 — data in data/payloads/test_csrf.json
 
 
 async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> dict[str, Any]:

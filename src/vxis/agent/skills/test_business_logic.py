@@ -3,41 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-LOGIC_TESTS: list[dict[str, Any]] = [
-    # Negative quantity
-    {"path": "/api/cart/add", "method": "POST", "body": {"product_id": 1, "quantity": -1},
-     "desc": "Negative quantity in cart", "severity": "high"},
-    {"path": "/api/orders", "method": "POST", "body": {"items": [{"id": 1, "qty": -100}]},
-     "desc": "Negative quantity in order", "severity": "high"},
-    # Zero price
-    {"path": "/api/cart/add", "method": "POST", "body": {"product_id": 1, "quantity": 1, "price": 0},
-     "desc": "Zero price override", "severity": "critical"},
-    {"path": "/api/orders", "method": "POST", "body": {"items": [{"id": 1, "price": 0.01}]},
-     "desc": "Penny price override", "severity": "critical"},
-    # Large values / overflow
-    {"path": "/api/cart/add", "method": "POST", "body": {"product_id": 1, "quantity": 2147483647},
-     "desc": "Integer overflow quantity", "severity": "high"},
-    {"path": "/api/transfer", "method": "POST", "body": {"amount": -1000, "to": "attacker"},
-     "desc": "Negative transfer amount", "severity": "critical"},
-    {"path": "/api/transfer", "method": "POST", "body": {"amount": 99999999999, "to": "attacker"},
-     "desc": "Overflow transfer amount", "severity": "high"},
-    # Coupon reuse
-    {"path": "/api/coupon/apply", "method": "POST", "body": {"code": "DISCOUNT50"},
-     "desc": "Coupon reuse attempt", "severity": "medium"},
-    {"path": "/api/promo", "method": "POST", "body": {"code": "FREESHIP", "apply_count": 10},
-     "desc": "Multi-apply coupon", "severity": "medium"},
-    # State transition skip
-    {"path": "/api/checkout/confirm", "method": "POST", "body": {"order_id": 1, "step": 3},
-     "desc": "Skip to final checkout step", "severity": "high"},
-    {"path": "/api/orders/1/ship", "method": "POST", "body": {},
-     "desc": "Ship without payment", "severity": "critical"},
-    {"path": "/api/account/verify", "method": "POST", "body": {"verified": True},
-     "desc": "Self-verify account", "severity": "high"},
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+LOGIC_TESTS = _load_ds("test_business_logic", "logic_tests")  # ADR-007 Phase 3-9 — data in data/payloads/test_business_logic.json
 
 
 async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> dict[str, Any]:

@@ -5,30 +5,13 @@ import logging
 import re
 import ssl
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-SECRET_PATTERNS: list[dict[str, str]] = [
-    {"pattern": r"(?:api[_-]?key|apikey)\s*[:=]\s*['\"][A-Za-z0-9_\-]{16,}['\"]", "desc": "API key in source"},
-    {"pattern": r"(?:secret|password|passwd|pwd)\s*[:=]\s*['\"][^'\"]{6,}['\"]", "desc": "Hardcoded secret/password"},
-    {"pattern": r"(?:aws_access_key_id|AKIA)[A-Z0-9]{16,}", "desc": "AWS access key"},
-    {"pattern": r"(?:aws_secret_access_key)\s*[:=]\s*['\"][A-Za-z0-9/+=]{30,}['\"]", "desc": "AWS secret key"},
-    {"pattern": r"(?:token|bearer)\s*[:=]\s*['\"][A-Za-z0-9_\-.]{20,}['\"]", "desc": "Hardcoded token"},
-    {"pattern": r"(?:private[_-]?key)\s*[:=]\s*['\"]-----BEGIN", "desc": "Private key in source"},
-    {"pattern": r"ghp_[A-Za-z0-9]{36}", "desc": "GitHub personal access token"},
-    {"pattern": r"sk-[A-Za-z0-9]{20,}", "desc": "OpenAI/Stripe secret key"},
-    {"pattern": r"(?:mongodb|postgres|mysql)://[^\\s'\"]+:[^\\s'\"]+@", "desc": "Database connection string"},
-    {"pattern": r"(?:slack|xoxb|xoxp)-[A-Za-z0-9\-]{10,}", "desc": "Slack token"},
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+SECRET_PATTERNS = _load_ds("test_crypto", "secret_patterns")  # ADR-007 Phase 3-9 — data in data/payloads/test_crypto.json
 
-JS_PATHS = [
-    "/main.js", "/app.js", "/bundle.js", "/vendor.js",
-    "/static/js/main.js", "/static/js/bundle.js",
-    "/assets/index.js", "/dist/app.js",
-    "/js/app.js", "/js/main.js",
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+JS_PATHS = _load_ds("test_crypto", "js_paths")  # ADR-007 Phase 3-9 — data in data/payloads/test_crypto.json
 
 
 async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:

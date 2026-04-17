@@ -3,39 +3,21 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
 # Default credentials to try
-DEFAULT_CREDS = [
-    ("admin", "admin"), ("admin", "admin123"), ("admin", "password"),
-    ("admin@admin.com", "admin"), ("admin@admin.com", "admin123"),
-    ("test", "test"), ("user", "user"), ("guest", "guest"),
-    ("administrator", "administrator"), ("root", "root"),
-    ("demo", "demo"), ("admin", "1234"), ("admin", "12345"),
-]
+DEFAULT_CREDS = [tuple(_c) for _c in _load_ds("attempt_auth", "default_creds")]  # ADR-007 Phase 3-9 — data in data/payloads/attempt_auth.json
 
 # SQLi bypass payloads
-SQLI_CREDS = [
-    ("' OR 1=1--", "x"),
-    ("admin'--", "x"),
-    ("' OR '1'='1", "x"),
-    ("admin' OR '1'='1'--", "x"),
-    # --- AUTO-UPDATED CREDS BELOW (managed by growth pipeline) ---
-]
+SQLI_CREDS = [tuple(_c) for _c in _load_ds("attempt_auth", "sqli_creds")]  # ADR-007 Phase 3-9 — data in data/payloads/attempt_auth.json
 
 # Common login endpoint patterns
-LOGIN_PATHS = [
-    "/rest/user/login", "/api/auth/login", "/auth/login", "/login",
-    "/api/login", "/api/v1/auth/login", "/api/sessions", "/api/token",
-    "/oauth/token", "/rest/auth", "/users/sign_in",
-]
+LOGIN_PATHS = _load_ds("attempt_auth", "login_paths")  # ADR-007 Phase 3-9 — data in data/payloads/attempt_auth.json
 
 # Common password reset patterns
-RESET_PATHS = [
-    "/rest/user/reset-password", "/api/auth/reset", "/forgot-password",
-    "/api/reset-password", "/password/reset",
-]
+RESET_PATHS = _load_ds("attempt_auth", "reset_paths")  # ADR-007 Phase 3-9 — data in data/payloads/attempt_auth.json
 
 
 async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:

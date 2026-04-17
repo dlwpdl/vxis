@@ -3,58 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
 # 120+ common web paths — covers REST APIs, admin panels, configs, debug endpoints
-COMMON_PATHS = [
-    # API patterns
-    "/api/", "/api/v1/", "/api/v2/", "/api/Users/", "/api/users/",
-    "/api/Products/", "/api/Orders/", "/api/Feedbacks/", "/api/Complaints/",
-    "/api/SecurityQuestions/", "/api/BasketItems/", "/api/Cards/",
-    "/api/Deliverys/", "/api/Recycles/", "/api/Quantitys/", "/api/Challenges/",
-    "/api/Memories/", "/api/Wallets/", "/api/Addresses/",
-    # REST patterns
-    "/rest/", "/rest/admin/", "/rest/user/", "/rest/products/",
-    "/rest/admin/application-configuration", "/rest/admin/application-version",
-    "/rest/products/search?q=", "/rest/languages", "/rest/user/whoami",
-    "/rest/user/change-password", "/rest/user/login", "/rest/user/reset-password",
-    "/rest/basket/1", "/rest/basket/2", "/rest/wallet/balance",
-    "/rest/deluxe-membership", "/rest/memories", "/rest/chatbot/status",
-    "/rest/chatbot/respond", "/rest/track-order/1", "/rest/saveLoginIp",
-    "/rest/repeat-notification", "/rest/continue-code",
-    # Admin/debug
-    "/admin/", "/administration/", "/dashboard/", "/debug/", "/console/",
-    "/actuator/", "/actuator/health", "/actuator/env", "/actuator/info",
-    "/status", "/health", "/healthz", "/info", "/env",
-    "/server-status", "/server-info", "/_debug/", "/__debug__/",
-    # Files & directories
-    "/ftp/", "/files/", "/uploads/", "/backup/", "/backups/", "/data/",
-    "/temp/", "/tmp/", "/logs/", "/log/", "/support/logs",
-    "/encryptionkeys/", "/keys/", "/certs/", "/ssl/",
-    # Configs
-    "/.env", "/.git/", "/.git/HEAD", "/.git/config", "/.gitignore",
-    "/config", "/config.json", "/config.yml", "/settings",
-    "/wp-config.php", "/web.config", "/application.properties",
-    "/.htaccess", "/.htpasswd", "/package.json", "/composer.json",
-    # Docs
-    "/api-docs/", "/swagger/", "/swagger.json", "/swagger-ui/",
-    "/openapi.json", "/graphql", "/graphiql",
-    # Metrics & monitoring
-    "/metrics", "/prometheus", "/grafana/", "/kibana/",
-    # Auth
-    "/login", "/signin", "/signup", "/register", "/logout",
-    "/forgot-password", "/reset-password", "/oauth/", "/auth/",
-    "/token", "/.well-known/openid-configuration",
-    # Common frameworks
-    "/robots.txt", "/sitemap.xml", "/security.txt",
-    "/.well-known/security.txt", "/favicon.ico",
-    "/humans.txt", "/crossdomain.xml",
-    # Misc
-    "/redirect", "/redirect?to=https://evil.com", "/video",
-    "/profile", "/account", "/settings", "/dataerasure",
-    "/b2b/v2/orders", "/snippets", "/accounting",
-]
+COMMON_PATHS = _load_ds("enumerate_endpoints", "common_paths")  # ADR-007 Phase 3-9 — data in data/payloads/enumerate_endpoints.json
 
 
 async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:

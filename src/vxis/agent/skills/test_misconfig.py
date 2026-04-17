@@ -3,45 +3,15 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-REQUIRED_HEADERS = [
-    ("content-security-policy", "CSP", "high"),
-    ("strict-transport-security", "HSTS", "high"),
-    ("x-frame-options", "X-Frame-Options", "medium"),
-    ("x-content-type-options", "X-Content-Type-Options", "medium"),
-    ("x-xss-protection", "X-XSS-Protection", "low"),
-    ("referrer-policy", "Referrer-Policy", "low"),
-    ("permissions-policy", "Permissions-Policy", "low"),
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+REQUIRED_HEADERS = [tuple(_c) for _c in _load_ds("test_misconfig", "required_headers")]  # ADR-007 Phase 3-9 — data in data/payloads/test_misconfig.json
 
-DEBUG_PATHS = [
-    ("/debug", "Debug endpoint"),
-    ("/debug/", "Debug directory"),
-    ("/_debug/", "Debug panel"),
-    ("/actuator", "Spring Actuator"),
-    ("/actuator/env", "Actuator environment"),
-    ("/actuator/heapdump", "Actuator heap dump"),
-    ("/actuator/mappings", "Actuator URL mappings"),
-    ("/elmah.axd", "ELMAH error log"),
-    ("/trace", "Trace endpoint"),
-    ("/console", "H2 console"),
-    ("/__debug__/", "Django debug toolbar"),
-    ("/server-info", "Server info"),
-    ("/info", "Info endpoint"),
-    ("/health", "Health check"),
-    ("/manage", "Management endpoint"),
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+DEBUG_PATHS = [tuple(_c) for _c in _load_ds("test_misconfig", "debug_paths")]  # ADR-007 Phase 3-9 — data in data/payloads/test_misconfig.json
 
-CORS_ORIGINS = [
-    "https://evil.com",
-    "null",
-    "https://attacker.example.com",
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+CORS_ORIGINS = _load_ds("test_misconfig", "cors_origins")  # ADR-007 Phase 3-9 — data in data/payloads/test_misconfig.json
 
 
 async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:

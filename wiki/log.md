@@ -26,3 +26,5 @@
 ## [2026-04-17] decision | ADR-008 Finding Precision Bayesian smoothing — 5벡터 noise 90% 축소, user rule 실행 가능해짐
 
 ## [2026-04-17] decision | ADR-007 Phase 2 — XSS payloads → xss.json (behavior-preserving, pytest parity 3 rounds)
+
+## [2026-04-17] ingest | ADR-007 Phase 3-9 — 12 non-rotation skills migrated to datasets (load_skill_dataset)

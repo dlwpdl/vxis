@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "skill": "test_misconfig",
+  "description": "ADR-007 Phase 3-9: externalized datasets from test_misconfig.py",
+  "datasets": {
+    "required_headers": [
+      [
+        "content-security-policy",
+        "CSP",
+        "high"
+      ],
+      [
+        "strict-transport-security",
+        "HSTS",
+        "high"
+      ],
+      [
+        "x-frame-options",
+        "X-Frame-Options",
+        "medium"
+      ],
+      [
+        "x-content-type-options",
+        "X-Content-Type-Options",
+        "medium"
+      ],
+      [
+        "x-xss-protection",
+        "X-XSS-Protection",
+        "low"
+      ],
+      [
+        "referrer-policy",
+        "Referrer-Policy",
+        "low"
+      ],
+      [
+        "permissions-policy",
+        "Permissions-Policy",
+        "low"
+      ]
+    ],
+    "debug_paths": [
+      [
+        "/debug",
+        "Debug endpoint"
+      ],
+      [
+        "/debug/",
+        "Debug directory"
+      ],
+      [
+        "/_debug/",
+        "Debug panel"
+      ],
+      [
+        "/actuator",
+        "Spring Actuator"
+      ],
+      [
+        "/actuator/env",
+        "Actuator environment"
+      ],
+      [
+        "/actuator/heapdump",
+        "Actuator heap dump"
+      ],
+      [
+        "/actuator/mappings",
+        "Actuator URL mappings"
+      ],
+      [
+        "/elmah.axd",
+        "ELMAH error log"
+      ],
+      [
+        "/trace",
+        "Trace endpoint"
+      ],
+      [
+        "/console",
+        "H2 console"
+      ],
+      [
+        "/__debug__/",
+        "Django debug toolbar"
+      ],
+      [
+        "/server-info",
+        "Server info"
+      ],
+      [
+        "/info",
+        "Info endpoint"
+      ],
+      [
+        "/health",
+        "Health check"
+      ],
+      [
+        "/manage",
+        "Management endpoint"
+      ]
+    ],
+    "cors_origins": [
+      "https://evil.com",
+      "null",
+      "https://attacker.example.com"
+    ]
+  }
+}

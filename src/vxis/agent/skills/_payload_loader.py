@@ -34,7 +34,15 @@ class _PayloadFile(BaseModel):
 
     schema_version: int
     skill: str
+    # Rotation-aware payloads (test_injection, test_xss). Key is round number as str.
     rounds: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    # Non-rotation named datasets (creds, path lists, header checks, regex patterns, etc.).
+    # ADR-007 Phase 3+: skills without round rotation use this instead of ``rounds``.
+    datasets: dict[str, list[Any]] = Field(default_factory=dict)
+
+
+class PayloadDatasetMissingError(KeyError):
+    """Raised when a skill's JSON is present but the requested dataset key is not."""
 
 
 @cache
@@ -70,6 +78,22 @@ def load_skill_payloads(skill_name: str, round_num: int) -> list[dict[str, Any]]
     for key in sorted(parsed.rounds.keys(), key=lambda s: int(s)):
         merged.extend(parsed.rounds[key])
     return merged
+
+
+def load_skill_dataset(skill_name: str, dataset_key: str) -> list[Any]:
+    """Return the non-rotation dataset list for ``(skill_name, dataset_key)``.
+
+    Used by skills without round rotation (ADR-007 Phase 3+). Raises
+    ``PayloadDatasetMissingError`` if the key is not present — fail-loud so
+    callers never silently degrade to an empty list.
+    """
+    parsed = _load_file(skill_name)
+    if dataset_key not in parsed.datasets:
+        raise PayloadDatasetMissingError(
+            f"Dataset key {dataset_key!r} missing in {skill_name}.json; "
+            f"present keys: {sorted(parsed.datasets)}"
+        )
+    return list(parsed.datasets[dataset_key])
 
 
 def clear_cache() -> None:

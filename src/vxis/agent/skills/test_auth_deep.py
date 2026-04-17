@@ -5,26 +5,13 @@ import base64
 import json
 import logging
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-JWT_ALG_NONE_HEADERS = [
-    {"alg": "none", "typ": "JWT"},
-    {"alg": "None", "typ": "JWT"},
-    {"alg": "NONE", "typ": "JWT"},
-    {"alg": "nOnE", "typ": "JWT"},
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+JWT_ALG_NONE_HEADERS = _load_ds("test_auth_deep", "jwt_alg_none_headers")  # ADR-007 Phase 3-9 — data in data/payloads/test_auth_deep.json
 
-RESET_PATHS = [
-    "/api/password-reset",
-    "/api/forgot-password",
-    "/password/reset",
-    "/auth/reset",
-    "/api/auth/forgot",
-    "/users/password",
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+RESET_PATHS = _load_ds("test_auth_deep", "reset_paths")  # ADR-007 Phase 3-9 — data in data/payloads/test_auth_deep.json
 
 
 def _b64_encode(data: bytes) -> str:

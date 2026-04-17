@@ -4,30 +4,13 @@ import asyncio
 import logging
 import time
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-MASS_ASSIGN_FIELDS: list[dict[str, str]] = [
-    {"field": "role", "value": "admin", "desc": "Role escalation"},
-    {"field": "isAdmin", "value": "true", "desc": "Admin flag"},
-    {"field": "is_staff", "value": "true", "desc": "Staff flag"},
-    {"field": "verified", "value": "true", "desc": "Email verification bypass"},
-    {"field": "balance", "value": "999999", "desc": "Balance manipulation"},
-    {"field": "discount", "value": "100", "desc": "Discount override"},
-    {"field": "price", "value": "0", "desc": "Price override"},
-    {"field": "permissions", "value": "all", "desc": "Permissions escalation"},
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+MASS_ASSIGN_FIELDS = _load_ds("test_api_security", "mass_assign_fields")  # ADR-007 Phase 3-9 — data in data/payloads/test_api_security.json
 
-VERB_TAMPER_PATHS = [
-    "/api/users",
-    "/api/admin",
-    "/api/config",
-    "/api/settings",
-    "/api/roles",
-    "/api/permissions",
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+VERB_TAMPER_PATHS = _load_ds("test_api_security", "verb_tamper_paths")  # ADR-007 Phase 3-9 — data in data/payloads/test_api_security.json
 
 
 async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> dict[str, Any]:

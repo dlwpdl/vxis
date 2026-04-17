@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "skill": "test_sensitive_files",
+  "description": "ADR-007 Phase 3-9: externalized datasets from test_sensitive_files.py",
+  "datasets": {
+    "sensitive_paths": [
+      [
+        "/.git/HEAD",
+        "critical",
+        "Git repository HEAD exposed"
+      ],
+      [
+        "/.git/config",
+        "critical",
+        "Git config with potential remote URLs"
+      ],
+      [
+        "/.gitignore",
+        "low",
+        "Gitignore reveals file structure"
+      ],
+      [
+        "/.env",
+        "critical",
+        "Environment variables (may contain secrets)"
+      ],
+      [
+        "/.env.bak",
+        "critical",
+        "Backup env file"
+      ],
+      [
+        "/env",
+        "medium",
+        "Environment endpoint"
+      ],
+      [
+        "/config",
+        "medium",
+        "Configuration endpoint"
+      ],
+      [
+        "/backup/",
+        "high",
+        "Backup directory listing"
+      ],
+      [
+        "/backup.sql",
+        "critical",
+        "SQL database backup"
+      ],
+      [
+        "/backup.zip",
+        "critical",
+        "Compressed backup"
+      ],
+      [
+        "/db.sqlite3",
+        "critical",
+        "SQLite database file"
+      ],
+      [
+        "/dump.sql",
+        "critical",
+        "Database dump"
+      ],
+      [
+        "/wp-config.php",
+        "critical",
+        "WordPress config with DB credentials"
+      ],
+      [
+        "/web.config",
+        "high",
+        "IIS configuration"
+      ],
+      [
+        "/application.properties",
+        "high",
+        "Spring Boot config"
+      ],
+      [
+        "/application.yml",
+        "high",
+        "Spring Boot YAML config"
+      ],
+      [
+        "/config.json",
+        "medium",
+        "JSON config"
+      ],
+      [
+        "/config.yml",
+        "medium",
+        "YAML config"
+      ],
+      [
+        "/settings.py",
+        "critical",
+        "Django settings with SECRET_KEY"
+      ],
+      [
+        "/package.json",
+        "low",
+        "Node.js dependencies"
+      ],
+      [
+        "/logs/",
+        "high",
+        "Log directory"
+      ],
+      [
+        "/log/",
+        "high",
+        "Log directory"
+      ],
+      [
+        "/support/logs",
+        "high",
+        "Support logs"
+      ],
+      [
+        "/error.log",
+        "medium",
+        "Error log"
+      ],
+      [
+        "/access.log",
+        "medium",
+        "Access log"
+      ],
+      [
+        "/debug.log",
+        "medium",
+        "Debug log"
+      ],
+      [
+        "/encryptionkeys/",
+        "critical",
+        "Encryption keys directory"
+      ],
+      [
+        "/keys/",
+        "critical",
+        "Keys directory"
+      ],
+      [
+        "/private.key",
+        "critical",
+        "Private key file"
+      ],
+      [
+        "/id_rsa",
+        "critical",
+        "SSH private key"
+      ],
+      [
+        "/server.key",
+        "critical",
+        "SSL private key"
+      ],
+      [
+        "/metrics",
+        "medium",
+        "Prometheus metrics"
+      ],
+      [
+        "/debug/",
+        "high",
+        "Debug endpoint"
+      ],
+      [
+        "/actuator/",
+        "high",
+        "Spring Actuator"
+      ],
+      [
+        "/actuator/env",
+        "critical",
+        "Spring Actuator environment"
+      ],
+      [
+        "/actuator/health",
+        "low",
+        "Health check"
+      ],
+      [
+        "/server-status",
+        "medium",
+        "Apache status"
+      ],
+      [
+        "/phpinfo.php",
+        "medium",
+        "PHP info page"
+      ],
+      [
+        "/_debug/",
+        "high",
+        "Debug panel"
+      ],
+      [
+        "/api-docs/",
+        "medium",
+        "API documentation"
+      ],
+      [
+        "/swagger.json",
+        "medium",
+        "Swagger spec"
+      ],
+      [
+        "/swagger-ui/",
+        "medium",
+        "Swagger UI"
+      ],
+      [
+        "/graphql",
+        "medium",
+        "GraphQL endpoint"
+      ],
+      [
+        "/graphiql",
+        "medium",
+        "GraphQL IDE"
+      ],
+      [
+        "/ftp/",
+        "high",
+        "FTP directory"
+      ],
+      [
+        "/uploads/",
+        "medium",
+        "Upload directory"
+      ],
+      [
+        "/files/",
+        "medium",
+        "File directory"
+      ],
+      [
+        "/.htpasswd",
+        "critical",
+        "Apache password file"
+      ],
+      [
+        "/etc/passwd",
+        "critical",
+        "System password file"
+      ],
+      [
+        "/robots.txt",
+        "informational",
+        "Robots.txt"
+      ],
+      [
+        "/sitemap.xml",
+        "informational",
+        "Sitemap"
+      ],
+      [
+        "/.well-known/security.txt",
+        "informational",
+        "Security contact"
+      ],
+      [
+        "/crossdomain.xml",
+        "low",
+        "Flash cross-domain policy"
+      ],
+      [
+        "/security.txt",
+        "informational",
+        "Security contact"
+      ]
+    ]
+  }
+}

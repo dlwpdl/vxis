@@ -3,31 +3,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-AUTH_PATHS = [
-    "/api/Users/", "/api/Users/1", "/api/Users/2",
-    "/api/Orders/", "/api/Orders/1",
-    "/api/BasketItems/", "/api/BasketItems/1",
-    "/api/Complaints/", "/api/Complaints/1",
-    "/api/Cards/", "/api/Cards/1",
-    "/api/Deliverys/", "/api/Deliverys/1",
-    "/api/Recycles/", "/api/Recycles/1",
-    "/api/Addresses/", "/api/Addresses/1",
-    "/api/Wallets/", "/api/SecurityAnswers/",
-    "/rest/basket/1", "/rest/basket/2", "/rest/basket/3",
-    "/rest/wallet/balance", "/rest/user/whoami",
-    "/rest/user/change-password",
-    "/rest/deluxe-membership", "/rest/saveLoginIp",
-    "/rest/admin/application-configuration",
-    "/rest/memories", "/rest/chatbot/status",
-    "/administration/", "/accounting/",
-    "/profile", "/profile/image/url",
-    "/b2b/v2/orders",
-    "/file-upload",
-    "/dataerasure",
-]
+AUTH_PATHS = _load_ds("post_auth_enum", "auth_paths")  # ADR-007 Phase 3-9 — data in data/payloads/post_auth_enum.json
 
 
 async def execute(target_url: str, token: str, **kwargs: Any) -> dict[str, Any]:

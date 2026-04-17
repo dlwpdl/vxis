@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "skill": "test_infra",
+  "description": "ADR-007 Phase 3-9: externalized datasets from test_infra.py",
+  "datasets": {
+    "git_paths": [
+      [
+        "/.git/HEAD",
+        "ref: refs/heads/"
+      ],
+      [
+        "/.git/config",
+        "[core]"
+      ],
+      [
+        "/.git/index",
+        "DIRC"
+      ],
+      [
+        "/.git/COMMIT_EDITMSG",
+        ""
+      ],
+      [
+        "/.git/description",
+        ""
+      ],
+      [
+        "/.git/packed-refs",
+        "# pack-refs"
+      ]
+    ],
+    "env_paths": [
+      "/.env",
+      "/.env.local",
+      "/.env.production",
+      "/.env.staging",
+      "/.env.backup",
+      "/.env.bak",
+      "/.env.old",
+      "/env.js",
+      "/config.env"
+    ],
+    "cloud_endpoints": [
+      {
+        "url": "http://169.254.169.254/latest/meta-data/",
+        "detect": "ami-",
+        "desc": "AWS metadata"
+      },
+      {
+        "url": "http://169.254.169.254/latest/meta-data/iam/security-credentials/",
+        "detect": "AccessKeyId",
+        "desc": "AWS IAM creds"
+      },
+      {
+        "url": "http://metadata.google.internal/computeMetadata/v1/project/project-id",
+        "headers": {
+          "Metadata-Flavor": "Google"
+        },
+        "detect": "",
+        "desc": "GCP metadata"
+      },
+      {
+        "url": "http://169.254.169.254/metadata/instance?api-version=2021-02-01",
+        "headers": {
+          "Metadata": "true"
+        },
+        "detect": "",
+        "desc": "Azure metadata"
+      }
+    ],
+    "subdomain_prefixes": [
+      "admin",
+      "api",
+      "dev",
+      "staging",
+      "test",
+      "beta",
+      "internal",
+      "mail",
+      "vpn",
+      "git",
+      "ci",
+      "jenkins",
+      "grafana",
+      "monitor",
+      "db",
+      "mysql",
+      "redis",
+      "elastic",
+      "kibana",
+      "prometheus"
+    ]
+  }
+}

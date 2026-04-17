@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "skill": "test_csrf",
+  "description": "ADR-007 Phase 3-9: externalized datasets from test_csrf.py",
+  "datasets": {
+    "state_changing_paths": [
+      [
+        "/api/users",
+        "POST",
+        "Create user"
+      ],
+      [
+        "/api/profile",
+        "PUT",
+        "Update profile"
+      ],
+      [
+        "/api/password",
+        "POST",
+        "Change password"
+      ],
+      [
+        "/api/transfer",
+        "POST",
+        "Transfer funds"
+      ],
+      [
+        "/api/settings",
+        "POST",
+        "Update settings"
+      ],
+      [
+        "/api/admin/users",
+        "DELETE",
+        "Delete user"
+      ],
+      [
+        "/api/orders",
+        "POST",
+        "Create order"
+      ],
+      [
+        "/api/comments",
+        "POST",
+        "Post comment"
+      ],
+      [
+        "/api/account",
+        "PUT",
+        "Update account"
+      ],
+      [
+        "/api/email",
+        "POST",
+        "Change email"
+      ],
+      [
+        "/profile/update",
+        "POST",
+        "Update profile"
+      ],
+      [
+        "/account/delete",
+        "POST",
+        "Delete account"
+      ],
+      [
+        "/cart/checkout",
+        "POST",
+        "Checkout"
+      ],
+      [
+        "/api/tokens",
+        "POST",
+        "Create token"
+      ]
+    ]
+  }
+}
