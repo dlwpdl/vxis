@@ -2,16 +2,21 @@
 name: test_injection
 type: skill
 status: active
-when_to_read: SQLi/XSS/SSTI/CMDi payload rotation 동작 / round 구분 / time-based 감지 임계값
-updated: 2026-04-16
+when_to_read: SQLi/XSS/SSTI/CMDi payload rotation 동작 / round 구분 / time-based 감지 임계값 / 페이로드 JSON 위치
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_injection.py
+  - ../../../src/vxis/data/payloads/injection.json
+  - ../../../src/vxis/agent/skills/_payload_loader.py
 related:
   - ../modules/scan_loop.md
   - ../modules/skill_runner.md
+  - ../../decisions/draft_007_payloads_yaml_refactor.md
 code_anchors:
   - src/vxis/agent/skills/test_injection.py:execute
   - src/vxis/agent/skills/test_injection.py:_payloads_for_round
+  - src/vxis/agent/skills/_payload_loader.py:load_skill_payloads
+  - src/vxis/data/payloads/injection.json
 ---
 # test_injection
 
@@ -38,11 +43,14 @@ code_anchors:
 | `**kwargs` | Any | — | 무시 (forward-compat) |
 
 ## Payload Rounds
-- **Round 1 (`PAYLOADS`)**: error-based SQLi (`'`, `UNION SELECT`), 기본 XSS (`<script>alert(1)`), SSTI (`{{7*7}}`, `${7*7}`), cmdi (`;id`, `$(id)`), path (`../../etc/passwd`), SSRF (`169.254.169.254`), NoSQL (`{'$ne': null}`).
-- **Round 2 (`PAYLOADS_ROUND2`)**: 시간 기반 blind SQLi (`SLEEP(3)`, `WAITFOR DELAY`, `pg_sleep(3)`), stacked/UNION, OOB probe, XSS 필터 우회 (`<ScRiPt>`, `javascript:`, `<body onload>`), SSTI (Ruby ERB `#{}`, Thymeleaf `*{}`, Razor `@()`), CRLF, XXE, LDAP.
-- **Round 3 (`PAYLOADS_ROUND3`)**: 0xsobky 폴리글롯, URL/double-URL encoded, 유니코드 zero-width, SQL 주석 기반 우회 (`'/**/OR/**/1=1--`), null byte path, IFS cmdi (`$IFS$9id`), Jinja2 MRO (`__subclasses__`).
 
-`round >= 4` 또는 `<= 0` → 세 세트 합친 exhaustive 모드.
+**데이터 위치 (ADR-007 Phase 1, 2026-04-17 적용)**: `src/vxis/data/payloads/injection.json` — `rounds.{1,2,3}` 키. 로더: `_payload_loader.load_skill_payloads("injection", r)`. `test_injection.py` 의 `PAYLOADS` / `PAYLOADS_ROUND2` / `PAYLOADS_ROUND3` 모듈 상수는 **legacy** — growth 파이프라인 재배선(Phase 10) 이후 제거 예정.
+
+- **Round 1 (`rounds.1`, 32개)**: error-based SQLi (`'`, `UNION SELECT`), 기본 XSS (`<script>alert(1)`), SSTI (`{{7*7}}`, `${7*7}`), cmdi (`;id`, `$(id)`), path (`../../etc/passwd`), SSRF (`169.254.169.254`), NoSQL (`{'$ne': null}`).
+- **Round 2 (`rounds.2`, 21개)**: 시간 기반 blind SQLi (`SLEEP(3)`, `WAITFOR DELAY`, `pg_sleep(3)`), stacked/UNION, OOB probe, XSS 필터 우회 (`<ScRiPt>`, `javascript:`, `<body onload>`), SSTI (Ruby ERB `#{}`, Thymeleaf `*{}`, Razor `@()`), CRLF, XXE, LDAP.
+- **Round 3 (`rounds.3`, 16개)**: 0xsobky 폴리글롯, URL/double-URL encoded, 유니코드 zero-width, SQL 주석 기반 우회 (`'/**/OR/**/1=1--`), null byte path, IFS cmdi (`$IFS$9id`), Jinja2 MRO (`__subclasses__`).
+
+`round >= 4` 또는 `<= 0` → 세 라운드 JSON 병합 (exhaustive 모드).
 
 ## Known Limitations
 - NoSQL operator 주입만 probe (no query-body injection)
@@ -51,4 +59,6 @@ code_anchors:
 - 파라미터 1개만 동시 테스트 (URL 의 첫 param 또는 `param_name`)
 
 ## Source Files
-- `src/vxis/agent/skills/test_injection.py`
+- `src/vxis/agent/skills/test_injection.py` — `execute()`, `_payloads_for_round()` (로더 위임)
+- `src/vxis/data/payloads/injection.json` — 페이로드 데이터 (ADR-007 Phase 1)
+- `src/vxis/agent/skills/_payload_loader.py` — JSON 로더 (`@cache` + pydantic 검증)

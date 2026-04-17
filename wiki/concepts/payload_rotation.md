@@ -2,16 +2,19 @@
 name: Payload Rotation
 type: concept
 status: active
-when_to_read: payload rotation 동작 / 새 페이로드 추가 위치 / WAF 우회 round 매핑 / clean 결과 re-queue
-updated: 2026-04-16
+when_to_read: payload rotation 동작 / 새 페이로드 추가 위치 / WAF 우회 round 매핑 / clean 결과 re-queue / JSON vs 모듈 상수
+updated: 2026-04-17
 sources:
   - ../../src/vxis/agent/skills/test_injection.py
   - ../../src/vxis/agent/skills/test_xss.py
   - ../../src/vxis/agent/scan_loop.py
+  - ../../src/vxis/data/payloads/injection.json
+  - ../../src/vxis/agent/skills/_payload_loader.py
 related:
   - ../entities/skills/test_injection.md
   - ../entities/skills/test_xss.md
   - ../entities/modules/scan_loop.md
+  - ../decisions/draft_007_payloads_yaml_refactor.md
   - ./brain_first.md
 ---
 # Payload Rotation
@@ -36,8 +39,13 @@ Payload Rotation은 단일 skill이 한 페이로드 세트에 묶이지 않게 
 WAF·sanitizer가 round 1 classic 페이로드를 차단해도 Brain이 포기하지 않게 하려면 페이로드 다양성이 필요하다. 한 skill을 여러 번 호출하되 args가 같으면 skill_runner 캐시가 `[CACHED — hit #N]` nudge로 Brain에게 "다른 args로" 재시도하라고 압박한다(→ [skill_runner](../entities/modules/skill_runner.md)). round 증가는 Brain이 그 압박에 응답하는 공식 경로다.
 
 ## How
-- **페이로드 정의**: `test_injection.py:PAYLOADS_ROUND1/2/3`, `test_xss.py:XSS_PAYLOADS_ROUND1/2/3`. 새 페이로드 추가 시 해당 round 리스트에 dict 형태(`{"payload": ..., "context": ...}`)로.
-- **Skill 측 선택**: `_payloads_for_round(r)` 또는 `_xss_payloads_for_round(r)` — round 벗어나면 전체 합집합.
+- **페이로드 정의**:
+  - **injection (ADR-007 Phase 1 적용 완료, 2026-04-17)**: `src/vxis/data/payloads/injection.json` → `rounds.{"1","2","3"}` 키. 추가 시 JSON 파일에 dict 형태(`{"payload": ..., "context": ...}`) append. `test_injection.py:PAYLOADS*` 모듈 상수는 legacy (Phase 10 이후 제거).
+  - **xss (아직 미마이그레이션)**: `test_xss.py:XSS_PAYLOADS_ROUND1/2/3` 모듈 상수. ADR-007 Phase 2 에서 JSON 이전 예정.
+- **Skill 측 선택**:
+  - injection: `_payloads_for_round(r)` → `_payload_loader.load_skill_payloads("injection", r)` 위임.
+  - xss: `_xss_payloads_for_round(r)` 내부 상수 선택 (Phase 2 이후 동일 패턴).
+- **Round 벗어난 값** (`r >= 4` 또는 `r <= 0`): 세 라운드 전체 합집합.
 - **scan_loop re-queue** (`scan_loop.py:1268`): skill 결과의 `round` 키를 읽어 `_cur_round < 3`이고 `vulnerable=False`면 `_skill_override` alias로 다음 round 큐잉.
 - **Alias 규칙**: `{real_skill}__round{N}_iter{M}` — skill_runner가 `_skill_override`를 strip한 뒤 dispatch.
 

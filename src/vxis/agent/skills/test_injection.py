@@ -128,14 +128,14 @@ def _payloads_for_round(r: int) -> list[dict]:
     Round 2: blind/time-based + filter bypass — used on second attempt.
     Round 3: WAF evasion + polyglots — last-resort.
     Round >=4 or <=0: union of all three (exhaustive).
+
+    Payloads live in ``src/vxis/data/payloads/injection.json`` (ADR-007).
+    The ``PAYLOADS`` / ``PAYLOADS_ROUND2`` / ``PAYLOADS_ROUND3`` module
+    constants above are LEGACY — retained until the Phase 10 growth
+    pipeline rewire removes them. Do not reference them from new code.
     """
-    if r == 1:
-        return PAYLOADS
-    if r == 2:
-        return PAYLOADS_ROUND2
-    if r == 3:
-        return PAYLOADS_ROUND3
-    return PAYLOADS + PAYLOADS_ROUND2 + PAYLOADS_ROUND3
+    from vxis.agent.skills._payload_loader import load_skill_payloads
+    return load_skill_payloads("injection", r)
 
 
 async def execute(url: str, param_name: str | None = None, round: int = 1,
