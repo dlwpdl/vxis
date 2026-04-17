@@ -138,30 +138,238 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         from vxis.scoring.engine import ScoringEngine
         from vxis.scoring.tracker import ScoreTracker
 
-        tracker = ScoreTracker(target_type="web")
+        _target_type = getattr(ctx, "target_type", "web") or "web"
 
-        # Map finding types to vector IDs
-        _type_to_vector = {
+        tracker = ScoreTracker(target_type=_target_type)
+
+        # Per-target-type finding_type → vector_id mappings (all IDs verified against registry)
+        _web_type_to_vector: dict[str, str] = {
+            # Injection
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "sql_injection_blind": "WEB-SQLI-002",
+            "sql_injection_time_based": "WEB-SQLI-003",
+            "sql_injection_error": "WEB-SQLI-004",
+            "sql_injection_oob": "WEB-SQLI-005",
+            "sql_injection_second_order": "WEB-SQLI-006",
+            "nosql_injection": "WEB-NOSQL-001",
+            "nosql_js_injection": "WEB-NOSQL-002",
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "blind_command_injection": "WEB-CMDI-002",
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            "ssti": "WEB-SSTI-001",
+            "xxe": "WEB-XXE-001",
+            "deserialization": "WEB-DESER-001",
+            "rce": "WEB-DESER-001",
+            "file_upload": "WEB-UPLOAD-001",
+            "websocket_injection": "WEB-WSS-001",
+            "prototype_pollution": "WEB-INJECT-022",
+            "csp_bypass": "WEB-INJECT-023",
+            "cache_poisoning": "WEB-INJECT-024",
+            "llm_code_injection": "WEB-INJECT-018",
+            "laravel_rce": "WEB-INJECT-019",
+            "cms_code_injection": "WEB-INJECT-020",
+            "prompt_injection": "WEB-INJECT-021",
+            # XSS
+            "xss": "WEB-XSS-001",
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
+            "xss_mutation": "WEB-XSS-004",
+            # SSRF
+            "ssrf": "WEB-SSRF-001",
+            "ssrf_blind": "WEB-SSRF-002",
+            "dns_rebinding": "WEB-SSRF-003",
+            # Auth
+            "brute_force": "WEB-AUTH-001",
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "default_credentials": "WEB-AUTH-002",
+            "jwt_confusion": "WEB-AUTH-003",
+            "jwt_algorithm_confusion": "WEB-AUTH-003",
+            "jwt_none": "WEB-AUTH-004",
+            "session_fixation": "WEB-AUTH-005",
+            "session_hijacking": "WEB-AUTH-006",
+            "oauth_bypass": "WEB-AUTH-007",
+            "password_reset": "WEB-AUTH-008",
+            "magic_link_bypass": "WEB-AUTH-010",
+            "saml_bypass": "WEB-AUTH-011",
+            "saml_replay": "WEB-AUTH-012",
+            "oauth_state_bypass": "WEB-AUTH-013",
+            "csrf": "WEB-CSRF-001",
+            # Access control
+            "idor": "WEB-AC-001",
+            "broken_access_control": "WEB-AC-002",
+            "privilege_escalation": "WEB-AC-003",
+            "path_traversal": "WEB-AC-004",
+            "directory_traversal": "WEB-AC-004",
+            "forced_browsing": "WEB-AC-005",
+            # Misconfiguration
+            "debug_endpoint": "WEB-MISCONF-001",
+            "misconfiguration": "WEB-MISCONF-001",
+            "default_config": "WEB-MISCONF-002",
+            "verbose_errors": "WEB-MISCONF-003",
+            "information_disclosure": "WEB-MISCONF-003",
+            "error_oracle": "WEB-MISCONF-003",
+            "missing_headers": "WEB-MISCONF-004",
+            "cors": "WEB-MISCONF-005",
+            "open_redirect": "WEB-MISCONF-006",
+            # Cryptography
+            "weak_tls": "WEB-CRYPTO-001",
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "weak_hashing": "WEB-CRYPTO-002",
+            "hardcoded_secrets": "WEB-CRYPTO-003",
+            "insecure_randomness": "WEB-CRYPTO-004",
+            # Race / logic
+            "race_condition": "WEB-RACE-001",
+            "business_logic": "WEB-BIZ-001",
+            "negative_value": "WEB-BIZ-001",
+            "state_transition": "WEB-BIZ-002",
+            "payment_race": "WEB-BIZ-003",
+            "transaction_replay": "WEB-BIZ-004",
+            "privilege_escalation_state": "WEB-BIZ-005",
+            # API
+            "mass_assignment": "WEB-API-001",
+            "rate_limiting": "WEB-API-002",
+            "graphql": "WEB-API-003",
+            "graphql_batching": "WEB-API-004",
+            "verb_tampering": "WEB-API-005",
+            "grpc_reflection": "WEB-API-006",
+            "grpc_injection": "WEB-API-007",
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # Infrastructure
+            "subdomain_takeover": "WEB-INFRA-001",
+            "dns_zone_transfer": "WEB-INFRA-002",
+            "s3_bucket": "WEB-INFRA-003",
+            "firebase_misconfiguration": "WEB-INFRA-004",
+            "exposed_git": "WEB-INFRA-005",
+            "f5_rce": "WEB-INFRA-006",
+            # Supply chain
+            "supply_chain": "WEB-SUPPLY-001",
+            "cicd_compromise": "WEB-SUPPLY-002",
         }
+        _game_type_to_vector: dict[str, str] = {
+            # Server validation
+            "negative_currency": "GAME-SV-001",
+            "integer_overflow": "GAME-SV-002",
+            "zero_price": "GAME-SV-003",
+            "speed_hack": "GAME-SV-004",
+            "teleport": "GAME-SV-005",
+            "game_idor": "GAME-SV-006",
+            "idor": "GAME-SV-006",
+            "input_truncation": "GAME-SV-007",
+            # Economy
+            "item_duplication": "GAME-ECON-001",
+            "currency_manipulation": "GAME-ECON-002",
+            "trade_abuse": "GAME-ECON-003",
+            "gift_abuse": "GAME-ECON-004",
+            "marketplace_manipulation": "GAME-ECON-005",
+            "iap_forgery": "GAME-ECON-006",
+            # Protocol
+            "weak_integrity": "GAME-PROTO-001",
+            "packet_replay": "GAME-PROTO-002",
+            "packet_injection": "GAME-PROTO-003",
+            "state_desync": "GAME-PROTO-004",
+            # Client-side
+            "memory_manipulation": "GAME-CLIENT-001",
+            "binary_reversing": "GAME-CLIENT-002",
+            "save_tampering": "GAME-CLIENT-003",
+            "config_tampering": "GAME-CLIENT-004",
+            "asset_manipulation": "GAME-CLIENT-005",
+            # Anti-cheat
+            "anticheat_detection": "GAME-AC-001",
+            "anticheat_bypass": "GAME-AC-002",
+            "kernel_anticheat": "GAME-AC-003",
+            # Game logic
+            "leaderboard_manipulation": "GAME-LOGIC-001",
+            "matchmaking_abuse": "GAME-LOGIC-002",
+            "time_manipulation": "GAME-LOGIC-003",
+            "gacha_rng": "GAME-LOGIC-004",
+            "gm_command_injection": "GAME-LOGIC-005",
+            "referral_abuse": "GAME-LOGIC-006",
+            # Social
+            "chat_injection": "GAME-SOCIAL-001",
+            "username_xss": "GAME-SOCIAL-002",
+            "xss": "GAME-SOCIAL-002",
+            "ingame_phishing": "GAME-SOCIAL-003",
+            "guild_abuse": "GAME-SOCIAL-004",
+            # DRM
+            "drm_bypass": "GAME-DRM-001",
+            "cloud_save_manipulation": "GAME-DRM-002",
+        }
+        _mobile_type_to_vector: dict[str, str] = {
+            # Static analysis
+            "hardcoded_api_key": "MOB-STATIC-001",
+            "hardcoded_secrets": "MOB-STATIC-001",
+            "weak_cryptography": "MOB-STATIC-002",
+            "weak_crypto": "MOB-STATIC-002",
+            "over_privileged": "MOB-STATIC-003",
+            "exported_components": "MOB-STATIC-004",
+            "debug_flag": "MOB-STATIC-005",
+            "backup_enabled": "MOB-STATIC-006",
+            "firebase_config": "MOB-STATIC-007",
+            # Binary analysis
+            "no_pie": "MOB-BINARY-001",
+            "no_stack_canary": "MOB-BINARY-002",
+            "no_obfuscation": "MOB-BINARY-003",
+            "native_secrets": "MOB-BINARY-004",
+            # Network
+            "no_ssl_pinning": "MOB-NET-001",
+            "weak_ssl_pinning": "MOB-NET-002",
+            "cleartext_traffic": "MOB-NET-003",
+            "cert_validation_bypass": "MOB-NET-004",
+            # API / Backend
+            "auth_bypass": "MOB-API-001",
+            "idor": "MOB-API-002",
+            "rate_limiting": "MOB-API-003",
+            "graphql": "MOB-API-004",
+            "grpc_reflection": "MOB-API-005",
+            # Storage
+            "unencrypted_storage": "MOB-STORE-001",
+            "shared_prefs_leak": "MOB-STORE-002",
+            "keychain_misconfiguration": "MOB-STORE-003",
+            "cache_leakage": "MOB-STORE-004",
+            "clipboard_exposure": "MOB-STORE-005",
+            "screenshot_not_blocked": "MOB-STORE-006",
+            # Dynamic analysis
+            "root_detection_bypass": "MOB-DYN-001",
+            "emulator_detection_bypass": "MOB-DYN-002",
+            "anti_tamper_bypass": "MOB-DYN-003",
+            "debugger_detection_bypass": "MOB-DYN-004",
+            "dex_injection": "MOB-DYN-005",
+            # Business logic
+            "iap_bypass": "MOB-BIZ-001",
+            "subscription_spoofing": "MOB-BIZ-002",
+            "deep_link_hijacking": "MOB-BIZ-003",
+            "feature_flag_manipulation": "MOB-BIZ-004",
+            "offline_abuse": "MOB-BIZ-005",
+            # Platform
+            "intent_injection": "MOB-PLAT-001",
+            "content_provider_exposure": "MOB-PLAT-002",
+            "broadcast_abuse": "MOB-PLAT-003",
+            "task_hijacking": "MOB-PLAT-004",
+            "webview_bridge": "MOB-PLAT-005",
+            "universal_link_hijacking": "MOB-PLAT-006",
+            # Cloud backend
+            "firebase_realtime_db": "MOB-CLOUD-001",
+            "s3_bucket": "MOB-CLOUD-002",
+            "cloud_function": "MOB-CLOUD-003",
+            # SDK
+            "known_cve": "MOB-SDK-001",
+            "analytics_leakage": "MOB-SDK-002",
+            "push_notification_spoofing": "MOB-SDK-003",
+            # Privacy
+            "improper_credential_usage": "MOB-PRIV-001",
+            "privacy_controls": "MOB-PRIV-002",
+            "insecure_data_storage": "MOB-PRIV-003",
+        }
+        _type_to_vector_map = {
+            "web": _web_type_to_vector,
+            "game": _game_type_to_vector,
+            "mobile": _mobile_type_to_vector,
+        }
+        _type_to_vector = _type_to_vector_map.get(_target_type, _web_type_to_vector)
 
         # Severity → exploitation level
         _sev_to_level = {
@@ -228,7 +436,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             findings_count=len(ctx.findings),
         )
 
-        engine = ScoringEngine("web")
+        engine = ScoringEngine(_target_type)
         vxis_score = engine.calculate(tracker, ctx.findings, scan_id=ctx.scan_id)
 
         # Print detailed score
@@ -236,7 +444,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         return vxis_score.total, vxis_score.grade
 
-    except Exception as e:
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
