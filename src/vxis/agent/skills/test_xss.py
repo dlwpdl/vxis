@@ -89,16 +89,12 @@ XSS_PAYLOADS_ROUND3: list[dict[str, str]] = [
 
 def _xss_payloads_for_round(r: int) -> list[dict[str, str]]:
     """Select XSS payload set by rotation round.
-    1 = classic, 2 = filter bypass, 3 = polyglot/DOM/WAF evasion,
-    else = all combined (exhaustive, use sparingly).
+
+    ADR-007 Phase 2: 페이로드 데이터는 ``src/vxis/data/payloads/xss.json``.
+    모듈 상수(``XSS_PAYLOADS*``) 는 legacy — Phase 11 이후 제거.
     """
-    if r == 1:
-        return XSS_PAYLOADS
-    if r == 2:
-        return XSS_PAYLOADS_ROUND2
-    if r == 3:
-        return XSS_PAYLOADS_ROUND3
-    return XSS_PAYLOADS + XSS_PAYLOADS_ROUND2 + XSS_PAYLOADS_ROUND3
+    from ._payload_loader import load_skill_payloads
+    return load_skill_payloads("xss", r)
 
 
 async def execute(url: str, param_name: str | None = None, round: int = 1,

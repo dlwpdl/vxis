@@ -59,6 +59,42 @@ class TestInjectionParity:
         assert r0 == r4
 
 
+class TestXssParity:
+    """ADR-007 Phase 2 — xss.json must match legacy XSS_PAYLOADS* byte-for-byte."""
+
+    def test_round1_matches_legacy_constant(self):
+        from vxis.agent.skills.test_xss import XSS_PAYLOADS
+
+        assert load_skill_payloads("xss", 1) == XSS_PAYLOADS
+
+    def test_round2_matches_legacy_constant(self):
+        from vxis.agent.skills.test_xss import XSS_PAYLOADS_ROUND2
+
+        assert load_skill_payloads("xss", 2) == XSS_PAYLOADS_ROUND2
+
+    def test_round3_matches_legacy_constant(self):
+        from vxis.agent.skills.test_xss import XSS_PAYLOADS_ROUND3
+
+        assert load_skill_payloads("xss", 3) == XSS_PAYLOADS_ROUND3
+
+    def test_round4_returns_union_of_all_rounds(self):
+        from vxis.agent.skills.test_xss import (
+            XSS_PAYLOADS,
+            XSS_PAYLOADS_ROUND2,
+            XSS_PAYLOADS_ROUND3,
+        )
+
+        assert load_skill_payloads("xss", 4) == (
+            XSS_PAYLOADS + XSS_PAYLOADS_ROUND2 + XSS_PAYLOADS_ROUND3
+        )
+
+    def test_xss_payloads_for_round_delegates_to_loader(self):
+        from vxis.agent.skills.test_xss import _xss_payloads_for_round
+
+        for r in (1, 2, 3, 4):
+            assert _xss_payloads_for_round(r) == load_skill_payloads("xss", r)
+
+
 class TestLoaderContract:
     def test_missing_skill_raises_fail_loud(self):
         with pytest.raises(PayloadDataMissingError):

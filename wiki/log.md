@@ -24,3 +24,5 @@
 - ADR-001~006 + 2026-04-16 3 postmortems + draft_007 (payloads yaml refactor plan). code_freeze 원칙 ADR-006 으로 격상.
 
 ## [2026-04-17] decision | ADR-008 Finding Precision Bayesian smoothing — 5벡터 noise 90% 축소, user rule 실행 가능해짐
+
+## [2026-04-17] decision | ADR-007 Phase 2 — XSS payloads → xss.json (behavior-preserving, pytest parity 3 rounds)
