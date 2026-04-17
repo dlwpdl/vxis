@@ -25,6 +25,12 @@ _LEVEL_POINTS: dict[int, int] = {
     4: 10,  # Crown Jewel access
 }
 
+# ── Finding Precision: 통계적 신뢰도 임계값 (ADR-008) ──
+# n (total_judged) < _MIN_JUDGMENTS_FOR_CONFIDENCE 일 때는 단일 판정이
+# 전체 precision 점수를 좌우하는 것을 막기 위해 Bayesian smoothing 적용.
+_MIN_JUDGMENTS_FOR_CONFIDENCE: int = 3
+_PRECISION_PRIOR: float = 3.0  # α=β — 중립(0.5) 방향 prior 강도
+
 # ── 등급 임계값 ──
 _GRADE_THRESHOLDS: list[tuple[int, str]] = [
     (900, "S"),
@@ -374,7 +380,11 @@ class ScoringEngine:
     ) -> DimensionScore:
         """Dimension 4: Finding Precision (max 200pts).
 
-        Base = TP / (TP + FP) × 200 (애널리스트 판정이 없으면 1.0으로 가정)
+        ADR-008: 판정 수 부족 시 Bayesian smoothing 으로 noise 축소.
+          total_judged == 0 → 중립 100pts (기존 140pts, perverse incentive 제거)
+          0 < total_judged < MIN_JUDGMENTS_FOR_CONFIDENCE → (tp+α)/(n+2α), α=3
+          total_judged ≥ MIN_JUDGMENTS_FOR_CONFIDENCE → tp/n × 200 (그대로)
+
         Bonus 1: Evidence quality (+최대 20pts, finding당 증거 2개 이상 시)
         Bonus 2: Dedup accuracy (+최대 10pts, ground truth 매칭률)
 
@@ -387,17 +397,28 @@ class ScoringEngine:
         total_judged = tp + fp
         total_findings = len(tracker.exploitation_levels)  # 실제 기록된 findings 수
 
-        # findings가 하나도 없으면 정밀도 0 — 찾지 못한 스캔은 정밀도 점수 없음
+        measurement_valid = False
         if total_findings == 0:
+            # findings가 하나도 없으면 정밀도 측정 대상 없음.
             precision_ratio = 0.0
             base_score = 0.0
         elif total_judged == 0:
-            # findings는 있지만 애널리스트 판정이 없으면 70% 기본
-            precision_ratio = 1.0
-            base_score = max_score * 0.7  # 판정 없이는 최대 70% (140pts)
+            # 판정 0건 → 중립 50% (기존 70% 기본값은 "판정 안 할수록 고득점" 결함).
+            # ADR-008 참조.
+            precision_ratio = 0.5
+            base_score = max_score * 0.5
+        elif total_judged < _MIN_JUDGMENTS_FOR_CONFIDENCE:
+            # 판정 1~2건 → Bayesian smoothing (α=β=_PRECISION_PRIOR) 으로
+            # prior (0.5) 방향으로 shrink. 단일 판정의 극단값(0% 또는 100%)이
+            # 전체 점수를 좌우하지 못하도록. ADR-008 참조.
+            alpha = _PRECISION_PRIOR
+            precision_ratio = (tp + alpha) / (total_judged + 2 * alpha)
+            base_score = precision_ratio * max_score
         else:
+            # 판정 ≥_MIN_JUDGMENTS_FOR_CONFIDENCE 건 → 통계적 의미 있음, 그대로.
             precision_ratio = tp / total_judged
             base_score = precision_ratio * max_score
+            measurement_valid = True
 
         # Bonus 1: Evidence quality (finding당 증거 2개 이상 → 보너스)
         findings_with_good_evidence = sum(
@@ -435,6 +456,9 @@ class ScoringEngine:
                 "ground_truth_bonus": round(gt_bonus, 2),
                 "ground_truth_coverage": len(ground_truth),
                 "analyst_judged_coverage": total_judged,
+                # ADR-008: 통계적 신뢰도 메타데이터.
+                "measurement_valid": measurement_valid,
+                "min_judgments_required": _MIN_JUDGMENTS_FOR_CONFIDENCE,
             },
         )
 

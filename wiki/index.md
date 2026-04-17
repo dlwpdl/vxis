@@ -88,6 +88,7 @@
 - [ADR-005 — Dynamic Attack Only](decisions/005_dynamic_not_static.md) — 코드 grep 커버리지 측정 금지 이유 / 동적 스캔 필수 근거 / 스코어링 원칙
 - [ADR-006 — Code Freeze + Data-Only Updates](decisions/006_code_freeze_data_only_updates.md) — 코드 수정 검토 / 데이터 vs 로직 분리 / 회귀 방지 / AI 할루시네이션 방지
 - [ADR-007 (DRAFT) — Payloads as External Data Files](decisions/draft_007_payloads_yaml_refactor.md) — 페이로드 추가 위치 / skills 코드 freeze 전략 / round 로테이션 JSON화 / growth loop 재배선
+- [ADR-008 — Finding Precision Bayesian Smoothing](decisions/008_finding_precision_smoothing.md) — 스코어 비교 시 FP 차원 해석 / 판정 수 부족 / baseline vs after 노이즈 / 측정 인프라 수정 정당화
 
 ## Sources
 

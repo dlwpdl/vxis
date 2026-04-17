@@ -261,6 +261,13 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         # Print detailed score
         print(vxis_score.summary_text())
 
+        # Expose full VXISScore on ctx so benchmark/comparison can access 5-dim breakdown.
+        # ADR-007 regression gate reads this; ctx.vxis_score stays as _SimpleScore for CLI.
+        try:
+            setattr(ctx, "score_detail", vxis_score)
+        except Exception:
+            pass
+
         return vxis_score.total, vxis_score.grade
 
     except Exception as e:
@@ -454,6 +461,18 @@ class ScanPipeline:
         # 10. Compute VXIS score
         score_value, grade = _compute_vxis_score(ctx)
         ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
+
+        # 10a. Dump full 5-dim breakdown next to the HTML report for benchmark comparison.
+        detail = getattr(ctx, "score_detail", None)
+        report_path = getattr(self, "_report_output_path", None) or getattr(self, "report_output_path", None)
+        if detail is not None and report_path:
+            try:
+                score_json_path = Path(str(report_path)).with_suffix(".score.json")
+                score_json_path.parent.mkdir(parents=True, exist_ok=True)
+                score_json_path.write_text(detail.to_json(), encoding="utf-8")
+                logger.info("VXIS_BENCHMARK score breakdown -> %s", score_json_path)
+            except Exception:
+                logger.exception("Failed to dump score breakdown JSON — continuing")
 
         # 11. Populate phase logs (duration_seconds is a computed @property on ctx)
         try:

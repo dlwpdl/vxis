@@ -22,3 +22,5 @@
 
 ## [2026-04-16] ingest | Phase 5 incidents (3) + ADRs (6+draft_007) seeded
 - ADR-001~006 + 2026-04-16 3 postmortems + draft_007 (payloads yaml refactor plan). code_freeze 원칙 ADR-006 으로 격상.
+
+## [2026-04-17] decision | ADR-008 Finding Precision Bayesian smoothing — 5벡터 noise 90% 축소, user rule 실행 가능해짐

@@ -1,0 +1,173 @@
+{
+  "total": 332.33,
+  "grade": "D",
+  "target_type": "web",
+  "scan_id": "VXIS-20260417-135440",
+  "timestamp": "2026-04-17T05:00:40.134252+00:00",
+  "dimensions": {
+    "vector_coverage": {
+      "name": "Vector Coverage",
+      "name_ko": "벡터 커버리지",
+      "score": 24.15,
+      "max_score": 250.0,
+      "percentage": 0.0966,
+      "details": {
+        "vectors_attempted": 10,
+        "vectors_found": 6,
+        "total_vectors": 82,
+        "attempt_score": 14.63,
+        "found_score": 9.51,
+        "unknown_vectors_ignored": 9,
+        "category_coverage": {
+          "injection": {
+            "total": 24,
+            "attempted": 4,
+            "found": 3
+          },
+          "xss": {
+            "total": 4,
+            "attempted": 2,
+            "found": 1
+          },
+          "ssrf": {
+            "total": 3,
+            "attempted": 1,
+            "found": 0
+          },
+          "auth": {
+            "total": 13,
+            "attempted": 2,
+            "found": 1
+          },
+          "access_control": {
+            "total": 5,
+            "attempted": 0,
+            "found": 0
+          },
+          "misconfig": {
+            "total": 6,
+            "attempted": 0,
+            "found": 0
+          },
+          "crypto": {
+            "total": 4,
+            "attempted": 1,
+            "found": 1
+          },
+          "logic": {
+            "total": 1,
+            "attempted": 0,
+            "found": 0
+          },
+          "api": {
+            "total": 9,
+            "attempted": 0,
+            "found": 0
+          },
+          "infrastructure": {
+            "total": 6,
+            "attempted": 0,
+            "found": 0
+          },
+          "supply_chain": {
+            "total": 2,
+            "attempted": 0,
+            "found": 0
+          },
+          "business_logic": {
+            "total": 5,
+            "attempted": 0,
+            "found": 0
+          }
+        }
+      }
+    },
+    "exploitation_reach": {
+      "name": "Exploitation Reach",
+      "name_ko": "익스플로잇 도달 깊이",
+      "score": 158.18,
+      "max_score": 300.0,
+      "percentage": 0.5273,
+      "details": {
+        "findings_count": 22,
+        "level_distribution": {
+          "L0": 0,
+          "L1": 10,
+          "L2": 5,
+          "L3": 7,
+          "L4": 0
+        },
+        "actual_points": 116,
+        "ideal_points": 220,
+        "level_points_mapping": {
+          "L0": 1,
+          "L1": 3,
+          "L2": 6,
+          "L3": 8,
+          "L4": 10
+        }
+      }
+    },
+    "chain_intelligence": {
+      "name": "Chain Intelligence",
+      "name_ko": "체인 지능",
+      "score": 50.0,
+      "max_score": 150.0,
+      "percentage": 0.3333,
+      "details": {
+        "chain_count": 3,
+        "max_chain_depth": 2,
+        "chains": [
+          {
+            "chain_id": "chain-0",
+            "depth": 2,
+            "description_en": ""
+          },
+          {
+            "chain_id": "chain-1",
+            "depth": 2,
+            "description_en": ""
+          },
+          {
+            "chain_id": "chain-2",
+            "depth": 2,
+            "description_en": ""
+          }
+        ]
+      }
+    },
+    "finding_precision": {
+      "name": "Finding Precision",
+      "name_ko": "발견 정밀도",
+      "score": 0.0,
+      "max_score": 200.0,
+      "percentage": 0.0,
+      "details": {
+        "true_positives": 0,
+        "false_positives": 1,
+        "total_judged": 1,
+        "precision_ratio": 0.0,
+        "base_score": 0.0,
+        "evidence_bonus": 0.0,
+        "ground_truth_bonus": 0.0,
+        "ground_truth_coverage": 0,
+        "analyst_judged_coverage": 1
+      }
+    },
+    "completeness": {
+      "name": "Completeness",
+      "name_ko": "완성도",
+      "score": 100.0,
+      "max_score": 100.0,
+      "percentage": 1.0,
+      "details": {
+        "completed": 1,
+        "skipped_na": 0,
+        "skipped_error": 0,
+        "failed": 0,
+        "total_applicable": 1,
+        "error_phases": []
+      }
+    }
+  }
+}
