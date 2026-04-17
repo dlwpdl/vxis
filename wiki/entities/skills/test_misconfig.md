@@ -3,7 +3,7 @@ name: test_misconfig
 type: skill
 status: active
 when_to_read: 보안 헤더 부재 / CORS / debug endpoint / verbose error / server version
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_misconfig.py
 related:

@@ -3,7 +3,7 @@ name: test_crypto
 type: skill
 status: active
 when_to_read: TLS 약한 버전 / JS 번들 하드코드 시크릿 / MD5/SHA1 해시 노출
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_crypto.py
 related:

@@ -10,6 +10,7 @@ sources:
   - ../../src/vxis/agent/skills/test_injection.py
   - ../../src/vxis/agent/skills/test_xss.py
   - ../../src/vxis/growth/apply.py
+  - ../../src/vxis/growth/rollback.py
   - ../../src/vxis/core/enricher.py
 related:
   - ./006_code_freeze_data_only_updates.md
@@ -23,6 +24,8 @@ code_anchors:
   - src/vxis/agent/skills/test_injection.py:_payloads_for_round
   - src/vxis/agent/skills/test_xss.py:_xss_payloads_for_round
   - src/vxis/growth/apply.py:_apply_skill_payload
+  - src/vxis/growth/apply.py:_TECHNIQUE_TARGETS
+  - src/vxis/growth/rollback.py:_revert_skill_payload
   - src/vxis/core/enricher.py:_load_json
 ---
 # ADR-007 (DRAFT) — Payloads as External Data Files
@@ -101,10 +104,22 @@ Phase 3-9 (12 non-rotation skills) 검증 (2026-04-17):
 | 1 | Loader + `injection.json` + `test_injection.py` 교체 + 단위 테스트 | ✅ `e6a5a99` (2026-04-17) |
 | 2 | XSS migration (`test_xss.py` + `xss.json`) | ✅ `760e3e2` (2026-04-17) |
 | 3-9 | 12 non-rotation skills 일괄 배치 — `datasets` 확장 + `PayloadDatasetMissingError` 추가 | ✅ (2026-04-17, single commit by directive) |
-| 10 | Growth pipeline rewire (`_apply_skill_payload` → JSON append) | ⏳ |
-| 11 | ADR 활성화 (`draft` → `active`), CLAUDE.md 포인터 갱신 | ⏳ |
+| 10 | Growth pipeline rewire: `_apply_skill_payload` + `_revert_skill_payload` → JSON append/strip + `_TECHNIQUE_TARGETS` 매핑 + pydantic 게이트 | ✅ (2026-04-17) |
+| 11 | ADR 활성화 (`draft` → `active`), legacy `PAYLOADS*` 상수 제거, CLAUDE.md 포인터 갱신 | ⏳ |
 
 Phase 3-9 영향 skills (alphabetical): `attempt_auth`, `enumerate_endpoints`, `post_auth_enum`, `test_api_security`, `test_auth_deep`, `test_business_logic`, `test_crypto`, `test_csrf`, `test_infra`, `test_misconfig`, `test_sensitive_files`, `test_ssrf`. 총 24 datasets (`default_creds`, `sqli_creds`, `login_paths`, `reset_paths`, `common_paths`, `auth_paths`, `sensitive_paths`, `jwt_alg_none_headers`, `state_changing_paths`, `ssrf_payloads`, `url_params`, `mass_assign_fields`, `verb_tamper_paths`, `required_headers`, `debug_paths`, `cors_origins`, `logic_tests`, `secret_patterns`, `js_paths`, `git_paths`, `env_paths`, `cloud_endpoints`, `subdomain_prefixes` + `reset_paths` in `test_auth_deep`).
+
+**Phase 10 rewire details** (apply.py / rollback.py):
+
+`_TECHNIQUE_TARGETS` 맵이 technique (`sqli`, `xss`, `path_traversal`, `auth_bypass`, `ssrf` ...) → `(json_basename, insert_mode, mode_arg)` 삼중. insert_mode 4종:
+- `round` — `rounds[mode_arg]` 에 `{type, payload, detect}` dict append (기본 WAF-bypass round 3)
+- `dataset` — `datasets[mode_arg]` 에 payload 문자열 append (e.g. `ssrf_payloads`)
+- `dataset_triple` — `datasets[mode_arg]` 에 `[path, severity, desc]` append (`sensitive_paths`)
+- `dataset_tuple` — `datasets[mode_arg]` 에 `[user, pwd]` append (`default_creds`)
+
+apply·revert 둘 다 쓰기 직전 `_PayloadFile.model_validate` 를 통과해야 하고, 성공 시 `clear_cache()` 로 로더 싱글톤 무효화. Legacy `.py` target (예: 과거 applied/ 엔트리의 `src/vxis/agent/skills/*.py`) 는 revert 시 silent no-op — 재생 시 스팸 방지용. Unknown technique 은 `generate_proposals` 에서 drop → schema-validate 불가능한 파일로는 PR 만들지 않는다는 정책.
+
+Phase 10 smoke (2026-04-17, sandbox): 8/8 케이스 통과 — sqli(round 3 append), dedup no-op, revert, path_traversal(triple), auth_bypass(tuple), ssrf(string), unknown_technique(reject), xss→xss.json (legacy bug `xss→test_injection` 수정).
 
 ## Out of Scope
 

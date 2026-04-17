@@ -3,7 +3,7 @@ name: test_api_security
 type: skill
 status: active
 when_to_read: Mass assignment / rate limiting / verb tampering / param pollution
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_api_security.py
 related:

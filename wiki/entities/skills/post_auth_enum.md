@@ -3,7 +3,7 @@ name: post_auth_enum
 type: skill
 status: active
 when_to_read: 인증 후 접근 가능 경로 / broken access control / IDOR 후보 탐지
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/post_auth_enum.py
 related:

@@ -3,7 +3,7 @@ name: test_sensitive_files
 type: skill
 status: active
 when_to_read: 노출 파일·백업·키 탐지 / body-aware severity 조정 / actuator masking
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_sensitive_files.py
 related:

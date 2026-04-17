@@ -3,7 +3,7 @@ name: test_ssrf
 type: skill
 status: active
 when_to_read: SSRF URL 파라미터 탐지 / 클라우드 metadata / protocol smuggling / IP bypass
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_ssrf.py
 related:

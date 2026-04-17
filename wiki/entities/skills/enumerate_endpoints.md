@@ -3,7 +3,7 @@ name: enumerate_endpoints
 type: skill
 status: active
 when_to_read: 120+ common paths blast / SPA baseline detection / accessible/auth_required 분류
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/enumerate_endpoints.py
 related:

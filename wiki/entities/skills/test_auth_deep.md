@@ -3,7 +3,7 @@ name: test_auth_deep
 type: skill
 status: active
 when_to_read: JWT alg:none / RS→HS 혼동 / session fixation / password reset host poisoning
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_auth_deep.py
 related:

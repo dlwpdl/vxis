@@ -3,7 +3,7 @@ name: attempt_auth
 type: skill
 status: active
 when_to_read: 로그인 우회 / default creds / SQLi bypass / password reset 체크 순서
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/attempt_auth.py
 related:

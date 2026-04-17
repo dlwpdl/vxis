@@ -3,7 +3,7 @@ name: test_infra
 type: skill
 status: active
 when_to_read: .git / .env 노출 / 클라우드 metadata / 서브도메인 DNS / Firebase public
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_infra.py
 related:

@@ -3,7 +3,7 @@ name: test_business_logic
 type: skill
 status: active
 when_to_read: 음수 수량·가격 0·정수 overflow·coupon 재사용·state skip·race condition
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_business_logic.py
 related:

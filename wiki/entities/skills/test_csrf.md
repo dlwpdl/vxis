@@ -3,7 +3,7 @@ name: test_csrf
 type: skill
 status: active
 when_to_read: CSRF 토큰 없이 state-changing 요청 허용 / SameSite 부재 / invalid token 허용
-updated: 2026-04-16
+updated: 2026-04-17
 sources:
   - ../../../src/vxis/agent/skills/test_csrf.py
 related:
