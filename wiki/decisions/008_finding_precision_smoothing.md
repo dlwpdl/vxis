@@ -10,7 +10,7 @@ sources:
   - ../../benchmarks/juice_shop/after_phase1_2026-04-17.score.json
 related:
   - ./006_code_freeze_data_only_updates.md
-  - ./draft_007_payloads_yaml_refactor.md
+  - ./007_payloads_as_data_files.md
   - ../concepts/scoring_model.md
 code_anchors:
   - src/vxis/scoring/engine.py:_calc_finding_precision

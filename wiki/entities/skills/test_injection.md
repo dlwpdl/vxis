@@ -11,7 +11,7 @@ sources:
 related:
   - ../modules/scan_loop.md
   - ../modules/skill_runner.md
-  - ../../decisions/draft_007_payloads_yaml_refactor.md
+  - ../../decisions/007_payloads_as_data_files.md
 code_anchors:
   - src/vxis/agent/skills/test_injection.py:execute
   - src/vxis/agent/skills/test_injection.py:_payloads_for_round
@@ -44,7 +44,7 @@ code_anchors:
 
 ## Payload Rounds
 
-**데이터 위치 (ADR-007 Phase 1, 2026-04-17 적용)**: `src/vxis/data/payloads/injection.json` — `rounds.{1,2,3}` 키. 로더: `_payload_loader.load_skill_payloads("injection", r)`. `test_injection.py` 의 `PAYLOADS` / `PAYLOADS_ROUND2` / `PAYLOADS_ROUND3` 모듈 상수는 **legacy** — growth 파이프라인 재배선(Phase 10) 이후 제거 예정.
+**데이터 위치 (ADR-007 active, 2026-04-17)**: `src/vxis/data/payloads/injection.json` — `rounds.{1,2,3}` 키. 로더: `_payload_loader.load_skill_payloads("injection", r)`. 모듈 상수(`PAYLOADS*`)는 Phase 11 에서 삭제 — `execute()` 는 `_payloads_for_round(r)` 를 통해서만 JSON 접근.
 
 - **Round 1 (`rounds.1`, 32개)**: error-based SQLi (`'`, `UNION SELECT`), 기본 XSS (`<script>alert(1)`), SSTI (`{{7*7}}`, `${7*7}`), cmdi (`;id`, `$(id)`), path (`../../etc/passwd`), SSRF (`169.254.169.254`), NoSQL (`{'$ne': null}`).
 - **Round 2 (`rounds.2`, 21개)**: 시간 기반 blind SQLi (`SLEEP(3)`, `WAITFOR DELAY`, `pg_sleep(3)`), stacked/UNION, OOB probe, XSS 필터 우회 (`<ScRiPt>`, `javascript:`, `<body onload>`), SSTI (Ruby ERB `#{}`, Thymeleaf `*{}`, Razor `@()`), CRLF, XXE, LDAP.
@@ -60,5 +60,5 @@ code_anchors:
 
 ## Source Files
 - `src/vxis/agent/skills/test_injection.py` — `execute()`, `_payloads_for_round()` (로더 위임)
-- `src/vxis/data/payloads/injection.json` — 페이로드 데이터 (ADR-007 Phase 1)
+- `src/vxis/data/payloads/injection.json` — 페이로드 데이터 (ADR-007)
 - `src/vxis/agent/skills/_payload_loader.py` — JSON 로더 (`@cache` + pydantic 검증)

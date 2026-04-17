@@ -15,7 +15,7 @@ related:
   - ../entities/skills/test_injection.md
   - ../entities/skills/test_xss.md
   - ../entities/modules/scan_loop.md
-  - ../decisions/draft_007_payloads_yaml_refactor.md
+  - ../decisions/007_payloads_as_data_files.md
   - ./brain_first.md
 ---
 # Payload Rotation
@@ -40,10 +40,10 @@ Payload Rotation은 단일 skill이 한 페이로드 세트에 묶이지 않게 
 WAF·sanitizer가 round 1 classic 페이로드를 차단해도 Brain이 포기하지 않게 하려면 페이로드 다양성이 필요하다. 한 skill을 여러 번 호출하되 args가 같으면 skill_runner 캐시가 `[CACHED — hit #N]` nudge로 Brain에게 "다른 args로" 재시도하라고 압박한다(→ [skill_runner](../entities/modules/skill_runner.md)). round 증가는 Brain이 그 압박에 응답하는 공식 경로다.
 
 ## How
-- **페이로드 정의** (ADR-007 Phase 1~2 적용, 2026-04-17):
+- **페이로드 정의** (ADR-007 active, Phase 1~11 완료, 2026-04-17):
   - **injection**: `src/vxis/data/payloads/injection.json` — `rounds.{"1","2","3"}` 키.
   - **xss**: `src/vxis/data/payloads/xss.json` — 동일 구조.
-  - 추가 시 JSON 파일에 dict 형태(`{"payload": ..., "context": ...}`) append. 모듈 상수 (`PAYLOADS*`, `XSS_PAYLOADS*`) 는 legacy — Phase 10 이후 제거.
+  - 추가 시 JSON 파일에 dict 형태(`{"payload": ..., "context": ...}`) append. 모듈 상수 (`PAYLOADS*`, `XSS_PAYLOADS*`) 는 Phase 11 에서 제거됨 — 이제 오직 JSON 이 truth.
 - **Skill 측 선택**: `_payloads_for_round(r)` / `_xss_payloads_for_round(r)` → `_payload_loader.load_skill_payloads(<name>, r)` 위임.
 - **Round 벗어난 값** (`r >= 4` 또는 `r <= 0`): 세 라운드 전체 합집합.
 - **scan_loop re-queue** (`scan_loop.py:1268`): skill 결과의 `round` 키를 읽어 `_cur_round < 3`이고 `vulnerable=False`면 `_skill_override` alias로 다음 round 큐잉.

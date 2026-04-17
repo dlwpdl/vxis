@@ -1,7 +1,7 @@
 ---
 name: Payloads as external data files (code freeze / data-only updates)
 type: decision
-status: draft
+status: active
 when_to_read: 페이로드 추가·수정 위치 / skills 코드 freeze 전략 / round=1|2|3 로테이션 데이터화 / non-rotation datasets / growth loop JSON 재배선
 updated: 2026-04-17
 sources:
@@ -28,7 +28,7 @@ code_anchors:
   - src/vxis/growth/rollback.py:_revert_skill_payload
   - src/vxis/core/enricher.py:_load_json
 ---
-# ADR-007 (DRAFT) — Payloads as External Data Files
+# ADR-007 — Payloads as External Data Files
 
 ## 핵심 사실
 | 항목 | 값 |
@@ -40,7 +40,7 @@ code_anchors:
 | API | `load_skill_payloads(skill, round)` (rotation) · `load_skill_dataset(skill, key)` (non-rotation) |
 | round 로테이션 | JSON 내 `rounds: {"1":[...],"2":[...],"3":[...]}` 키로 보존 |
 | 비-로테이션 | JSON 내 `datasets: {<key>: [...]}` 키로 — creds·paths·headers·regex 등 |
-| 마이그레이션 | Phase 1~9 완료 (2026-04-17, 14/14 skills) |
+| 마이그레이션 | Phase 1~11 완료 (2026-04-17) — ADR active |
 | 실패 모드 | 파일 없으면 `PayloadDataMissingError`, dataset key 없으면 `PayloadDatasetMissingError` (모두 fail-loud) |
 
 ## TL;DR
@@ -105,7 +105,7 @@ Phase 3-9 (12 non-rotation skills) 검증 (2026-04-17):
 | 2 | XSS migration (`test_xss.py` + `xss.json`) | ✅ `760e3e2` (2026-04-17) |
 | 3-9 | 12 non-rotation skills 일괄 배치 — `datasets` 확장 + `PayloadDatasetMissingError` 추가 | ✅ (2026-04-17, single commit by directive) |
 | 10 | Growth pipeline rewire: `_apply_skill_payload` + `_revert_skill_payload` → JSON append/strip + `_TECHNIQUE_TARGETS` 매핑 + pydantic 게이트 | ✅ (2026-04-17) |
-| 11 | ADR 활성화 (`draft` → `active`), legacy `PAYLOADS*` 상수 제거, CLAUDE.md 포인터 갱신 | ⏳ |
+| 11 | ADR 활성화 (`draft` → `active`), legacy `PAYLOADS*` / `XSS_PAYLOADS*` 상수 + `# --- AUTO-UPDATED` 마커 제거, 위키 링크 갱신, 파리티 테스트 재작성(legacy-const 참조 제거) | ✅ (2026-04-17) |
 
 Phase 3-9 영향 skills (alphabetical): `attempt_auth`, `enumerate_endpoints`, `post_auth_enum`, `test_api_security`, `test_auth_deep`, `test_business_logic`, `test_crypto`, `test_csrf`, `test_infra`, `test_misconfig`, `test_sensitive_files`, `test_ssrf`. 총 24 datasets (`default_creds`, `sqli_creds`, `login_paths`, `reset_paths`, `common_paths`, `auth_paths`, `sensitive_paths`, `jwt_alg_none_headers`, `state_changing_paths`, `ssrf_payloads`, `url_params`, `mass_assign_fields`, `verb_tamper_paths`, `required_headers`, `debug_paths`, `cors_origins`, `logic_tests`, `secret_patterns`, `js_paths`, `git_paths`, `env_paths`, `cloud_endpoints`, `subdomain_prefixes` + `reset_paths` in `test_auth_deep`).
 

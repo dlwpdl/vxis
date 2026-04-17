@@ -30,3 +30,5 @@
 ## [2026-04-17] ingest | ADR-007 Phase 3-9 — 12 non-rotation skills migrated to datasets (load_skill_dataset)
 
 ## [2026-04-17] ingest | ADR-007 Phase 10 — growth apply.py / rollback.py rewired to JSON data files (pydantic-validated)
+
+## [2026-04-17] ingest | ADR-007 Phase 11 activated — legacy PAYLOADS*/XSS_PAYLOADS* removed, docs resynced

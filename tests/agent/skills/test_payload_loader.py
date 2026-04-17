@@ -1,8 +1,9 @@
 """Unit tests for the ADR-007 payload loader.
 
-Pins the loader's behavioural contract so the skill-by-skill migration can
-proceed without regressions. The legacy in-file constants are still present
-during the migration window (Phase 1–9); these tests depend on that.
+Pins the loader's behavioural contract. After Phase 11 the legacy
+in-file ``PAYLOADS*`` / ``XSS_PAYLOADS*`` constants are gone — parity is
+enforced by per-skill dataset counts + module-constant comparisons (for
+skills that still surface loader output as a module-level constant).
 """
 from __future__ import annotations
 
@@ -25,70 +26,37 @@ def _reset_loader_cache():
     clear_cache()
 
 
-class TestInjectionParity:
-    """Loader output must equal the legacy PAYLOADS constants, byte-for-byte."""
+class TestRotationContract:
+    """Rotation count pins + union semantics for r<=0 / r>=4."""
 
-    def test_round1_matches_legacy_constant(self):
-        from vxis.agent.skills.test_injection import PAYLOADS
+    @pytest.mark.parametrize("skill,r,expected_count", [
+        ("injection", 1, 32),
+        ("injection", 2, 21),
+        ("injection", 3, 16),
+        ("xss", 1, 20),
+        ("xss", 2, 20),
+        ("xss", 3, 16),
+    ])
+    def test_round_count_pinned(self, skill, r, expected_count):
+        assert len(load_skill_payloads(skill, r)) == expected_count
 
-        assert load_skill_payloads("injection", 1) == PAYLOADS
+    @pytest.mark.parametrize("skill", ["injection", "xss"])
+    def test_round4_returns_union_of_all_rounds(self, skill):
+        r1 = load_skill_payloads(skill, 1)
+        r2 = load_skill_payloads(skill, 2)
+        r3 = load_skill_payloads(skill, 3)
+        assert load_skill_payloads(skill, 4) == r1 + r2 + r3
 
-    def test_round2_matches_legacy_constant(self):
-        from vxis.agent.skills.test_injection import PAYLOADS_ROUND2
-
-        assert load_skill_payloads("injection", 2) == PAYLOADS_ROUND2
-
-    def test_round3_matches_legacy_constant(self):
-        from vxis.agent.skills.test_injection import PAYLOADS_ROUND3
-
-        assert load_skill_payloads("injection", 3) == PAYLOADS_ROUND3
-
-    def test_round4_returns_union_of_all_rounds(self):
-        from vxis.agent.skills.test_injection import (
-            PAYLOADS,
-            PAYLOADS_ROUND2,
-            PAYLOADS_ROUND3,
-        )
-
-        assert load_skill_payloads("injection", 4) == (
-            PAYLOADS + PAYLOADS_ROUND2 + PAYLOADS_ROUND3
-        )
-
-    def test_round0_also_returns_union(self):
+    @pytest.mark.parametrize("skill", ["injection", "xss"])
+    def test_round0_also_returns_union(self, skill):
         """Scan_loop may pass r<=0 if round counter underflows — treat as exhaustive."""
-        r0 = load_skill_payloads("injection", 0)
-        r4 = load_skill_payloads("injection", 4)
-        assert r0 == r4
+        assert load_skill_payloads(skill, 0) == load_skill_payloads(skill, 4)
 
+    def test_payload_for_round_in_test_injection_delegates_to_loader(self):
+        from vxis.agent.skills.test_injection import _payloads_for_round
 
-class TestXssParity:
-    """ADR-007 Phase 2 — xss.json must match legacy XSS_PAYLOADS* byte-for-byte."""
-
-    def test_round1_matches_legacy_constant(self):
-        from vxis.agent.skills.test_xss import XSS_PAYLOADS
-
-        assert load_skill_payloads("xss", 1) == XSS_PAYLOADS
-
-    def test_round2_matches_legacy_constant(self):
-        from vxis.agent.skills.test_xss import XSS_PAYLOADS_ROUND2
-
-        assert load_skill_payloads("xss", 2) == XSS_PAYLOADS_ROUND2
-
-    def test_round3_matches_legacy_constant(self):
-        from vxis.agent.skills.test_xss import XSS_PAYLOADS_ROUND3
-
-        assert load_skill_payloads("xss", 3) == XSS_PAYLOADS_ROUND3
-
-    def test_round4_returns_union_of_all_rounds(self):
-        from vxis.agent.skills.test_xss import (
-            XSS_PAYLOADS,
-            XSS_PAYLOADS_ROUND2,
-            XSS_PAYLOADS_ROUND3,
-        )
-
-        assert load_skill_payloads("xss", 4) == (
-            XSS_PAYLOADS + XSS_PAYLOADS_ROUND2 + XSS_PAYLOADS_ROUND3
-        )
+        for r in (1, 2, 3, 4):
+            assert _payloads_for_round(r) == load_skill_payloads("injection", r)
 
     def test_xss_payloads_for_round_delegates_to_loader(self):
         from vxis.agent.skills.test_xss import _xss_payloads_for_round
@@ -110,13 +78,6 @@ class TestLoaderContract:
         cache_info_after = _payload_loader._load_file.cache_info()
         assert cache_info_after.hits == cache_info_before.hits + 1
         assert cache_info_after.misses == cache_info_before.misses
-
-    def test_payload_for_round_in_test_injection_delegates_to_loader(self):
-        """`_payloads_for_round(r)` must now return the loader's output verbatim."""
-        from vxis.agent.skills.test_injection import _payloads_for_round
-
-        for r in (1, 2, 3, 4):
-            assert _payloads_for_round(r) == load_skill_payloads("injection", r)
 
 
 class TestSkillDataset:

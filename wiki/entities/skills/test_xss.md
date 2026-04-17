@@ -11,7 +11,7 @@ sources:
 related:
   - ./test_injection.md
   - ../modules/scan_loop.md
-  - ../../decisions/draft_007_payloads_yaml_refactor.md
+  - ../../decisions/007_payloads_as_data_files.md
 code_anchors:
   - src/vxis/agent/skills/test_xss.py:execute
   - src/vxis/agent/skills/test_xss.py:_xss_payloads_for_round
@@ -43,7 +43,7 @@ XSS 전용 skill. `test_injection` 에도 XSS 있지만 여기는 context-labele
 
 ## Payload Rounds
 
-**데이터 위치 (ADR-007 Phase 2, 2026-04-17 적용)**: `src/vxis/data/payloads/xss.json` — `rounds.{1,2,3}` 키. 로더: `_payload_loader.load_skill_payloads("xss", r)`. `test_xss.py:XSS_PAYLOADS*` 모듈 상수는 **legacy** — Phase 10 growth 재배선 후 제거 예정.
+**데이터 위치 (ADR-007 active, 2026-04-17)**: `src/vxis/data/payloads/xss.json` — `rounds.{1,2,3}` 키. 로더: `_payload_loader.load_skill_payloads("xss", r)`. `test_xss.py:XSS_PAYLOADS*` 모듈 상수는 Phase 11 에서 삭제 — `execute()` 는 `_xss_payloads_for_round(r)` 를 통해서만 JSON 접근.
 
 - **Round 1 (`rounds.1`, 20개)**: `<script>alert(1)</script>`, `<img onerror>`, `<svg/onload>`, attribute break `"><script>`, template literal ``${alert(1)}``, `<iframe javascript:>`, mXSS (`<math><mi><mglyph>...`).
 - **Round 2 (`rounds.2`, 20개)**: 대소문자 혼용 `<ScRiPt>`, whitespace `<script >`, 탭/개행 split, nested `<scr<script>ipt>`, HTML entity `&#40;`, `<keygen autofocus>`, `<isindex>`, `<iframe srcdoc=>`, `<form formaction=javascript:>`, `xlink:href` SVG.
@@ -59,5 +59,5 @@ XSS 전용 skill. `test_injection` 에도 XSS 있지만 여기는 context-labele
 
 ## Source Files
 - `src/vxis/agent/skills/test_xss.py` — `execute()`, `_xss_payloads_for_round()` (로더 위임)
-- `src/vxis/data/payloads/xss.json` — 페이로드 데이터 (ADR-007 Phase 2)
+- `src/vxis/data/payloads/xss.json` — 페이로드 데이터 (ADR-007)
 - `src/vxis/agent/skills/_payload_loader.py` — JSON 로더
