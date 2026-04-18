@@ -140,27 +140,103 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
+        # Map finding types to vector IDs — must match vectors.py registry exactly.
+        # Engine intersects with valid_ids; unrecognised IDs score 0.
         _type_to_vector = {
+            # ── Injection: SQL ──
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "blind_sqli": "WEB-SQLI-002",
+            "time_based_sqli": "WEB-SQLI-003",
+            "error_based_sqli": "WEB-SQLI-004",
+            "second_order_sqli": "WEB-SQLI-006",
+            "nosql_injection": "WEB-NOSQL-001",
+            # ── Injection: Code ──
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "rce": "WEB-CMDI-001",          # corrected: WEB-RCE-001 doesn't exist
+            "command_injection_blind": "WEB-CMDI-002",
+            "ssti": "WEB-SSTI-001",
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            "xxe": "WEB-XXE-001",
+            "deserialization": "WEB-DESER-001",
+            "file_upload": "WEB-UPLOAD-001",
+            # ── XSS ──
+            "xss": "WEB-XSS-001",
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "dom_xss": "WEB-XSS-003",
+            "mxss": "WEB-XSS-004",
+            # ── SSRF ──
+            "ssrf": "WEB-SSRF-001",
+            "ssrf_blind": "WEB-SSRF-002",
+            "ssrf_dns_rebinding": "WEB-SSRF-003",
+            # ── Auth / Session ──
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "default_credentials": "WEB-AUTH-002",
+            "jwt_confusion": "WEB-AUTH-003",   # corrected: WEB-JWT-001 doesn't exist
+            "jwt_none": "WEB-AUTH-004",
+            "session_fixation": "WEB-AUTH-005",
+            "session_hijacking": "WEB-AUTH-006",
+            "oauth_bypass": "WEB-AUTH-007",
+            "password_reset_poisoning": "WEB-AUTH-008",
+            "magic_link_bypass": "WEB-AUTH-010",
+            "saml_bypass": "WEB-AUTH-011",
+            "saml_replay": "WEB-AUTH-012",
+            "oauth_csrf": "WEB-AUTH-013",
+            "csrf": "WEB-CSRF-001",
+            # ── Access Control ──
+            "idor": "WEB-AC-001",               # corrected: WEB-IDOR-001 doesn't exist
+            "broken_access_control": "WEB-AC-002",  # corrected: WEB-BAC-001 doesn't exist
+            "privilege_escalation": "WEB-AC-003",
+            "path_traversal": "WEB-AC-004",     # corrected: WEB-TRAV-001 doesn't exist
+            "forced_browsing": "WEB-AC-005",
+            # ── Misconfiguration ──
+            "debug_endpoints": "WEB-MISCONF-001",
+            "misconfiguration": "WEB-MISCONF-001",  # corrected: WEB-MISC-001 doesn't exist
+            "default_config": "WEB-MISCONF-002",
+            "information_disclosure": "WEB-MISCONF-003",  # corrected: WEB-INFO-001 doesn't exist
+            "error_oracle": "WEB-MISCONF-003",    # corrected: WEB-INFO-002 doesn't exist
+            "missing_security_headers": "WEB-MISCONF-004",
+            "cors_misconfiguration": "WEB-MISCONF-005",
+            "open_redirect": "WEB-MISCONF-006",   # corrected: WEB-REDIR-001 doesn't exist
+            # ── Crypto ──
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "weak_tls": "WEB-CRYPTO-001",
+            "weak_hashing": "WEB-CRYPTO-002",
+            "hardcoded_secrets": "WEB-CRYPTO-003",
+            "insecure_randomness": "WEB-CRYPTO-004",
+            # ── Business Logic ──
+            "business_logic": "WEB-BIZ-001",    # corrected: WEB-LOGIC-001 doesn't exist
+            "negative_value_injection": "WEB-BIZ-001",
+            "state_transition_skip": "WEB-BIZ-002",
+            "payment_race_condition": "WEB-BIZ-003",
+            "transaction_replay": "WEB-BIZ-004",
+            "race_condition": "WEB-RACE-001",
+            # ── API ──
+            "mass_assignment": "WEB-API-001",
+            "rate_limiting": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "graphql_batching": "WEB-API-004",
+            "http_verb_tampering": "WEB-API-005",
+            "grpc_reflection": "WEB-API-006",
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # ── Modern Injection ──
+            "prototype_pollution": "WEB-INJECT-022",
+            "csp_bypass": "WEB-INJECT-023",
+            "cache_poisoning": "WEB-INJECT-024",
+            "llm_prompt_injection": "WEB-INJECT-021",
+            # ── Infrastructure ──
+            "subdomain_takeover": "WEB-INFRA-001",
+            "s3_bucket_public": "WEB-INFRA-003",
+            "firebase_exposure": "WEB-INFRA-004",
+            "git_exposure": "WEB-INFRA-005",
+            # ── Supply Chain ──
+            "supply_chain": "WEB-SUPPLY-001",
+            "cicd_compromise": "WEB-SUPPLY-002",
+            # ── Other ──
+            "websocket_injection": "WEB-WSS-001",
         }
 
         # Severity → exploitation level
