@@ -1,34 +1,40 @@
 {
-  "date": "2026-04-13",
-  "stop_reason": "stagnation",
-  "total_iterations": 2,
-  "score_target": 1000,
+  "date": "2026-04-20",
+  "total_iterations": 1,
   "start_score": 100.0,
   "final_score": 100.0,
-  "total_growth": 0.0,
-  "code_improvements": 0,
+  "total_growth": 0,
   "iterations": [
     {
       "iteration": 1,
-      "timestamp": "2026-04-13T05:53:59.683180+00:00",
+      "timestamp": "2026-04-20T04:17:05.046388+00:00",
       "best_score": 100.0,
       "weakest_dimension": "vector_coverage",
       "weakest_pct": 0.0,
-      "improvement": 100.0,
-      "consecutive_no_improve": 0,
-      "action": "no_patches_generated",
-      "code_improved": false
-    },
-    {
-      "iteration": 2,
-      "timestamp": "2026-04-13T05:54:25.409420+00:00",
-      "best_score": 100.0,
-      "weakest_dimension": "vector_coverage",
-      "weakest_pct": 0.0,
+      "all_dimensions": {
+        "vector_coverage": 0.0,
+        "exploitation_reach": 0.0,
+        "chain_intelligence": 0.0,
+        "finding_precision": 0.0,
+        "completeness": 100.0
+      },
       "improvement": 0.0,
-      "consecutive_no_improve": 1,
-      "action": "no_patches_generated",
-      "code_improved": false
+      "results_per_target": [
+        {
+          "target": "juice-shop",
+          "score": 100.0,
+          "grade": "D",
+          "dimensions": {
+            "vector_coverage": 0.0,
+            "exploitation_reach": 0.0,
+            "chain_intelligence": 0.0,
+            "finding_precision": 0.0,
+            "completeness": 100.0
+          },
+          "error": null
+        }
+      ],
+      "action": "더 많은 벡터를 시도하도록 Brain 전략 조정"
     }
   ]
 }
