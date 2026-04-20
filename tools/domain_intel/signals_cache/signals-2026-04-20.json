@@ -1,0 +1,981 @@
+[
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] Tell HN: Fiverr left customer files public and searchable",
+    "url": "https://news.ycombinator.com/item?id=47769796",
+    "description": "",
+    "relevance_tags": [],
+    "score": 827.0,
+    "timestamp": "2026-04-14T18:56:40Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 827,
+      "comments": 231
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Deleteduser.com —a $15 PII Magnet",
+    "url": "https://mike-sheward.medium.com/deleteduser-com-a-15-pii-magnet-c4396eb21061",
+    "description": "",
+    "relevance_tags": [],
+    "score": 144.0,
+    "timestamp": "2026-04-17T20:19:05.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 144,
+      "comments": 48
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] HTTP desync in Discord's media proxy: Spying on a whole platform",
+    "url": "https://tmctmt.com/posts/http-desync-in-discord/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 65.0,
+    "timestamp": "2026-04-17T06:59:40.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 65,
+      "comments": 7
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Stop using JWTs (2019)",
+    "url": "https://gist.github.com/samsch/0d1f3d3b4745d778f78b230cf6061452",
+    "description": "",
+    "relevance_tags": [],
+    "score": 55.0,
+    "timestamp": "2026-04-16T12:34:44.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 55,
+      "comments": 32
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Towards Trust in Emacs",
+    "url": "https://eshelyaron.com/posts/2026-04-15-towards-trust-in-emacs.html",
+    "description": "",
+    "relevance_tags": [],
+    "score": 38.0,
+    "timestamp": "2026-04-18T07:15:03.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 38,
+      "comments": 6
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] EU age verification app: \"Worry-free package\" with security vulnerabilities",
+    "url": "https://www.heise.de/en/news/EU-age-verification-app-Worry-free-package-with-security-vulnerabilities-11262921.html",
+    "description": "",
+    "relevance_tags": [],
+    "score": 35.0,
+    "timestamp": "2026-04-19T08:12:00Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 35,
+      "comments": 1
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Practical Antiforgery in Software Design",
+    "url": "https://hudlow.org/2026/practical-antiforgery",
+    "description": "",
+    "relevance_tags": [],
+    "score": 33.0,
+    "timestamp": "2026-04-17T11:06:02.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 33,
+      "comments": 1
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Vercel April 2026 security incident",
+    "url": "https://vercel.com/kb/bulletin/vercel-april-2026-security-incident",
+    "description": "<p>some context: <a href=\"https://nitter.net/DiffeKey/status/2045813085408051670\" rel=\"ugc\">https://nitter.net/DiffeKey/status/2045813085408051670</a></p>\n",
+    "relevance_tags": [],
+    "score": 25.0,
+    "timestamp": "2026-04-19T10:21:16.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 25,
+      "comments": 1
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] There are zero-day exploits for your mind",
+    "url": "https://mikemorgenstern.substack.com/p/there-are-zero-day-exploits-for-your-mind",
+    "description": "",
+    "relevance_tags": [
+      "zero-day"
+    ],
+    "score": 21.0,
+    "timestamp": "2026-04-09T20:48:45Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 21,
+      "comments": 7
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Anthropic Claude Code Leak Reveals Critical Command Injection Vulnerabilities",
+    "url": "https://beyondmachines.net/event_details/anthropic-claude-code-leak-reveals-critical-command-injection-vulnerabilities-e-6-c-1-k/gD2P6Ple2L",
+    "description": "",
+    "relevance_tags": [
+      "injection"
+    ],
+    "score": 17.0,
+    "timestamp": "2026-04-18T19:59:30.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 17,
+      "comments": 5
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Discourse is Not Going Closed Source",
+    "url": "https://blog.discourse.org/2026/04/discourse-is-not-going-closed-source/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 14.0,
+    "timestamp": "2026-04-17T06:50:11.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 14,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Cybersecurity Looks Like Proof of Work Now",
+    "url": "https://www.dbreunig.com/2026/04/14/cybersecurity-is-proof-of-work-now.html",
+    "description": "",
+    "relevance_tags": [],
+    "score": 13.0,
+    "timestamp": "2026-04-15T17:50:38.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 13,
+      "comments": 12
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] Show HN: Open Passkey – open-source passkey auth with free \"backendless\" host",
+    "url": "https://github.com/locke-inc/open-passkey",
+    "description": "",
+    "relevance_tags": [],
+    "score": 10.0,
+    "timestamp": "2026-04-19T00:12:52Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 10,
+      "comments": 2
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-34197 — Apache ActiveMQ",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-34197",
+    "description": "Apache ActiveMQ contains an improper input validation vulnerability that allows for code injection.",
+    "relevance_tags": [
+      "cve-2026-34197",
+      "apache",
+      "activemq",
+      "apache activemq improper input validation vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-16",
+    "metadata": {
+      "cve_id": "CVE-2026-34197",
+      "vendor": "Apache",
+      "product": "ActiveMQ",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-30",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2009-0238 — Microsoft Office",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2009-0238",
+    "description": "Microsoft Office Excel contains a remote code execution vulnerability that could allow an attacker to take complete control of an affected system if a user opens a specially crafted Excel file that includes a malformed object.",
+    "relevance_tags": [
+      "cve-2009-0238",
+      "microsoft",
+      "office",
+      "microsoft office remote code execution"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-14",
+    "metadata": {
+      "cve_id": "CVE-2009-0238",
+      "vendor": "Microsoft",
+      "product": "Office",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-28",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-32201 — Microsoft SharePoint Server",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-32201",
+    "description": "Microsoft SharePoint Server contains an improper input validation vulnerability that allows an unauthorized attacker to perform spoofing over a network.",
+    "relevance_tags": [
+      "cve-2026-32201",
+      "microsoft",
+      "sharepoint server",
+      "microsoft sharepoint server improper input validation vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-14",
+    "metadata": {
+      "cve_id": "CVE-2026-32201",
+      "vendor": "Microsoft",
+      "product": "SharePoint Server",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-28",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2012-1854 — Microsoft Visual Basic for Applications (VBA)",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2012-1854",
+    "description": "Microsoft Visual Basic for Applications (VBA) contains an insecure library loading vulnerability that could allow for remote code execution.",
+    "relevance_tags": [
+      "cve-2012-1854",
+      "microsoft",
+      "visual basic for applications (vba)",
+      "microsoft visual basic for applications insecure library loading vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-13",
+    "metadata": {
+      "cve_id": "CVE-2012-1854",
+      "vendor": "Microsoft",
+      "product": "Visual Basic for Applications (VBA)",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-27",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2025-60710 — Microsoft Windows",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-60710",
+    "description": "Microsoft Windows contains a link following vulnerability that allows for privilege escalation",
+    "relevance_tags": [
+      "cve-2025-60710",
+      "microsoft",
+      "windows",
+      "microsoft windows link following vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-13",
+    "metadata": {
+      "cve_id": "CVE-2025-60710",
+      "vendor": "Microsoft",
+      "product": "Windows",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-27",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2023-21529 — Microsoft Exchange Server",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2023-21529",
+    "description": "Microsoft Exchange Server contains a deserialization of untrusted data that allows an authenticated attacker to achieve remote code execution.",
+    "relevance_tags": [
+      "cve-2023-21529",
+      "microsoft",
+      "exchange server",
+      "microsoft exchange server deserialization of untrusted data vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-13",
+    "metadata": {
+      "cve_id": "CVE-2023-21529",
+      "vendor": "Microsoft",
+      "product": "Exchange Server",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-27",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2023-36424 — Microsoft Windows",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2023-36424",
+    "description": "Microsoft Windows Common Log File System Driver contains an out-of-bounds read vulnerability that could allow a threat actor for privileges escalation",
+    "relevance_tags": [
+      "cve-2023-36424",
+      "microsoft",
+      "windows",
+      "microsoft windows out-of-bounds read vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-13",
+    "metadata": {
+      "cve_id": "CVE-2023-36424",
+      "vendor": "Microsoft",
+      "product": "Windows",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-27",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2020-9715 — Adobe Acrobat",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2020-9715",
+    "description": "Adobe Acrobat contains a use-after-free vulnerability that allows for code execution",
+    "relevance_tags": [
+      "cve-2020-9715",
+      "adobe",
+      "acrobat",
+      "adobe acrobat use-after-free vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-13",
+    "metadata": {
+      "cve_id": "CVE-2020-9715",
+      "vendor": "Adobe",
+      "product": "Acrobat",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-27",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-21643 — Fortinet FortiClient EMS",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-21643",
+    "description": "Fortinet FortiClient EMS contains a SQL injection vulnerability that may allow an unauthenticated attacker to execute unauthorized code or commands via specifically crafted HTTP requests.",
+    "relevance_tags": [
+      "cve-2026-21643",
+      "fortinet",
+      "forticlient ems",
+      "fortinet forticlient ems sql injection vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-13",
+    "metadata": {
+      "cve_id": "CVE-2026-21643",
+      "vendor": "Fortinet",
+      "product": "FortiClient EMS",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-16",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-34621 — Adobe Acrobat and Reader",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-34621",
+    "description": "Adobe Acrobat and Reader contain a prototype pollution vulnerability that allows for arbitrary code execution.",
+    "relevance_tags": [
+      "cve-2026-34621",
+      "adobe",
+      "acrobat and reader",
+      "adobe acrobat and reader prototype pollution vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-04-13",
+    "metadata": {
+      "cve_id": "CVE-2026-34621",
+      "vendor": "Adobe",
+      "product": "Acrobat and Reader",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-04-27",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Some secret management belongs in your HTTP proxy",
+    "url": "https://blog.exe.dev/http-proxy-secrets",
+    "description": "",
+    "relevance_tags": [],
+    "score": 8.0,
+    "timestamp": "2026-04-18T16:46:44.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 8,
+      "comments": 3
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] AppArmor's experimental permissions prompting (2024)",
+    "url": "https://discourse.ubuntu.com/t/ubuntu-desktop-s-24-10-dev-cycle-part-5-introducing-permissions-prompting/47963",
+    "description": "",
+    "relevance_tags": [],
+    "score": 6.0,
+    "timestamp": "2026-04-17T15:01:54.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 6,
+      "comments": 2
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Encrypting an external device with LUKS",
+    "url": "https://iagoleal.com/posts/usb-crypt/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 5.0,
+    "timestamp": "2026-04-17T05:41:24.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 5,
+      "comments": 2
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] MATRIX: Multi-Layer Code Watermarking via Dual-Channel Constrained Parity-Check Encoding",
+    "url": "http://arxiv.org/abs/2604.16001v1",
+    "description": "Code Large Language Models (Code LLMs) have revolutionized software development but raised critical concerns regarding code provenance, copyright protection, and security. Existing code watermarking approaches suffer from two fundamental limitations: black-box methods either exhibit detectable syntactic patterns vulnerable to statistical analysis or rely on implicit neural embedding behaviors that weaken interpretability, auditability, and precise control, while white-box methods lack code-aware",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-04-17T12:25:41Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] HarmfulSkillBench: How Do Harmful Skills Weaponize Your Agents?",
+    "url": "http://arxiv.org/abs/2604.15415v1",
+    "description": "Large language models (LLMs) have evolved into autonomous agents that rely on open skill ecosystems (e.g., ClawHub and Skills.Rest), hosting numerous publicly reusable skills. Existing security research on these ecosystems mainly focuses on vulnerabilities within skills, such as prompt injection. However, there is a critical gap regarding skills that may be misused for harmful actions (e.g., cyber attacks, fraud and scams, privacy violations, and sexual content generation), namely harmful skills",
+    "relevance_tags": [
+      "injection"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-16T17:31:52Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Towards Personalizing Secure Programming Education with LLM-Injected Vulnerabilities",
+    "url": "http://arxiv.org/abs/2604.13955v1",
+    "description": "According to constructivist theory, students learn software security more effectively when examples are grounded in their own code. Generic examples often fail to connect with students' prior work, limiting engagement and understanding. Advances in LLMs are now making it possible to automatically generate personalized examples by embedding security vulnerabilities directly into student-authored code. This paper introduces a method that uses LLMs to inject instances of specific Common Weakness En",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-04-15T15:06:42Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] RealVuln: Benchmarking Rule-Based, General-Purpose LLM, and Security-Specialized Scanners on Real-World Code",
+    "url": "http://arxiv.org/abs/2604.13764v1",
+    "description": "How do security scanners perform on real-world code? We present RealVuln, the first open-source benchmark comparing Rule-Based SAST, General-Purpose LLMs, and Security-Specialized scanners on 26 intentionally vulnerable Python repositories (educational and Capture-The-Flag applications) with 796 hand-labeled entries (676 vulnerabilities, 120 false-positive traps). We test 15 scanners (3 Rule-Based SAST, 10 General-Purpose LLM, 2 Security-Specialized) and rank them by F3 score (beta=3, weighting",
+    "relevance_tags": [
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-15T11:49:29Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] LogicEval: A Systematic Framework for Evaluating Automated Repair Techniques for Logical Vulnerabilities in Real-World Software",
+    "url": "http://arxiv.org/abs/2604.12994v1",
+    "description": "Logical vulnerabilities in software stem from flaws in program logic rather than memory safety, which can lead to critical security failures. Although existing automated program repair techniques primarily focus on repairing memory corruption vulnerabilities, they struggle with logical vulnerabilities because of their limited semantic understanding of the vulnerable code and its expected behavior. On the other hand, recent successes of large language models (LLMs) in understanding and repairing",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-04-14T17:26:07Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] AWE: Adaptive Agents for Dynamic Web Penetration Testing",
+    "url": "http://arxiv.org/abs/2603.00960v1",
+    "description": "Modern web applications are increasingly produced through AI-assisted development and rapid no-code deployment pipelines, widening the gap between accelerating software velocity and the limited adaptability of existing security tooling. Pattern-driven scanners fail to reason about novel contexts, while emerging LLM-based penetration testers rely on unconstrained exploration, yielding high cost, unstable behavior, and poor reproducibility.   We introduce AWE, a memory-augmented multi-agent framew",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-03-01T07:32:42Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Can AI Lower the Barrier to Cybersecurity? A Human-Centered Mixed-Methods Study of Novice CTF Learning",
+    "url": "http://arxiv.org/abs/2602.18172v1",
+    "description": "Capture-the-Flag (CTF) competitions serve as gateways into offensive cybersecurity, yet they often present steep barriers for novices due to complex toolchains and opaque workflows. Recently, agentic AI frameworks for cybersecurity promise to lower these barriers by automating and coordinating penetration testing tasks. However, their role in shaping novice learning remains underexplored.   We present a human-centered, mixed-methods case study examining how agentic AI frameworks -- here Cybersec",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-02-20T12:20:36Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Towards Cybersecurity Superintelligence: from AI-guided humans to human-guided AI",
+    "url": "http://arxiv.org/abs/2601.14614v3",
+    "description": "Cybersecurity superintelligence -- artificial intelligence exceeding the best human capability in both speed and strategic reasoning -- represents the next frontier in security. This paper documents the emergence of such capability through three major contributions that have pioneered the field of AI Security. First, PentestGPT (2023) established LLM-guided penetration testing, achieving 228.6% improvement over baseline models through an architecture that externalizes security expertise into nat",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-01-21T03:12:48Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Cybersecurity AI: A Game-Theoretic AI for Guiding Attack and Defense",
+    "url": "http://arxiv.org/abs/2601.05887v1",
+    "description": "AI-driven penetration testing now executes thousands of actions per hour but still lacks the strategic intuition humans apply in competitive security. To build cybersecurity superintelligence --Cybersecurity AI exceeding best human capability-such strategic intuition must be embedded into agentic reasoning processes. We present Generative Cut-the-Rope (G-CTR), a game-theoretic guidance layer that extracts attack graphs from agent's context, computes Nash equilibria with effort-aware scoring, and",
+    "relevance_tags": [
+      "agent"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-01-09T16:06:10Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] dataRLsec: Safety, Security, and Reliability With Robust Offline Reinforcement Learning for DPAs",
+    "url": "http://arxiv.org/abs/2601.01289v1",
+    "description": "Data poisoning attacks (DPAs) are becoming popular as artificial intelligence (AI) algorithms, machine learning (ML) algorithms, and deep learning (DL) algorithms in this artificial intelligence (AI) era. Hackers and penetration testers are excessively injecting malicious contents in the training data (and in testing data too) that leads to false results that are very hard to inspect and predict. We have analyzed several recent technologies used (from deep reinforcement learning to federated lea",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-01-03T21:28:17Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Security and Resilience in Autonomous Vehicles: A Proactive Design Approach",
+    "url": "http://arxiv.org/abs/2604.12408v1",
+    "description": "Autonomous vehicles (AVs) promise efficient, clean and cost-effective transportation systems, but their reliance on sensors, wireless communications, and decision-making systems makes them vulnerable to cyberattacks and physical threats. This chapter presents novel design techniques to strengthen the security and resilience of AVs. We first provide a taxonomy of potential attacks across different architectural layers, from perception and control manipulation to Vehicle-to-Any (V2X) communication",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-04-14T07:45:16Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Supply-Chain Poisoning Attacks Against LLM Coding Agent Skill Ecosystems",
+    "url": "http://arxiv.org/abs/2604.03081v1",
+    "description": "LLM-based coding agents extend their capabilities via third-party agent skills distributed through open marketplaces without mandatory security review. Unlike traditional packages, these skills are executed as operational directives with system-level privileges, so a single malicious skill can compromise the host. Prior work has not examined whether supply-chain attacks can directly hijack an agent's action space, such as file writes, shell commands, and network requests, despite existing safegu",
+    "relevance_tags": [
+      "agent",
+      "llm",
+      "supply-chain"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-03T14:58:58Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Obfuscating Code Vulnerabilities against Static Analysis in JavaScript Code",
+    "url": "http://arxiv.org/abs/2604.01131v1",
+    "description": "Code obfuscation is widely adopted in modern software development to protect intellectual property and hinder reverse engineering, but it also provides attackers with a powerful means to conceal malicious logic inside otherwise legitimate JavaScript code. In a software supply chain where a single compromised package can affect thousands of applications, this raises a critical question: how robust are the Static Application Security Testing (SAST) tools that CI/CD pipelines rely on as automated s",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-04-01T16:52:37Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] 5G Puppeteer: Chaining Hidden Command and Control Channels in 5G Core Networks",
+    "url": "http://arxiv.org/abs/2603.29636v1",
+    "description": "Mobile networks are essential for modern societies. The most recent generation of mobile networks will be even more ubiquitous than previous ones. Therefore, the security of these networks as part of the critical infrastructure with essential communication services is of the uttermost importance. However, these systems are still vulnerable to being compromised, as showcased in the recent discussion on supply chain security and other challenges. This work addresses problems arising from compromis",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-03-31T12:00:38Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] \"Elementary, My Dear Watson.\" Detecting Malicious Skills via Neuro-Symbolic Reasoning across Heterogeneous Artifacts",
+    "url": "http://arxiv.org/abs/2603.27204v1",
+    "description": "Skills are increasingly used to extend LLM agents by packaging prompts, code, and configurations into reusable modules. As public registries and marketplaces expand, they form an emerging agentic supply chain, but also introduce a new attack surface for malicious skills. Detecting malicious skills is challenging because relevant evidence is often distributed across heterogeneous artifacts and must be reasoned in context. Existing static, LLM-based, and dynamic approaches each capture only part o",
+    "relevance_tags": [
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-03-28T09:12:07Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] MulCovFuzz: A Multi-Component Coverage-Guided Greybox Fuzzer for 5G Protocol Testing",
+    "url": "http://arxiv.org/abs/2602.21794v1",
+    "description": "As mobile networks transition to 5G infrastructure, ensuring robust security becomes more important due to the complex architecture and expanded attack surface. Traditional security testing approaches for 5G networks rely on black-box fuzzing techniques, which are limited by their inability to observe internal program state and coverage information. This paper presents MulCovFuzz, a novel coverage-guided greybox fuzzing tool for 5G network testing. Unlike existing tools that depend solely on sys",
+    "relevance_tags": [
+      "fuzzing"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-02-25T11:17:42Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] TÄMU: Emulating Trusted Applications at the (GlobalPlatform)-API Layer",
+    "url": "http://arxiv.org/abs/2601.20507v1",
+    "description": "Mobile devices rely on Trusted Execution Environments (TEEs) to execute security-critical code and protect sensitive assets. This security-critical code is modularized in components known as Trusted Applications (TAs). Vulnerabilities in TAs can compromise the TEE and, thus, the entire system. However, the closed-source nature and fragmentation of mobile TEEs severely hinder dynamic analysis of TAs, limiting testing efforts to mostly static analyses. This paper presents TÄMU, a rehosting platfor",
+    "relevance_tags": [
+      "api"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-01-28T11:34:06Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Energy-Efficient Multi-LLM Reasoning for Binary-Free Zero-Day Detection in IoT Firmware",
+    "url": "http://arxiv.org/abs/2512.19945v1",
+    "description": "Securing Internet of Things (IoT) firmware remains difficult due to proprietary binaries, stripped symbols, heterogeneous architectures, and limited access to executable code. Existing analysis methods, such as static analysis, symbolic execution, and fuzzing, depend on binary visibility and functional emulation, making them unreliable when firmware is encrypted or inaccessible. To address this limitation, we propose a binary-free, architecture-agnostic solution that estimates the likelihood of",
+    "relevance_tags": [
+      "fuzzing",
+      "zero-day"
+    ],
+    "score": 0.0,
+    "timestamp": "2025-12-23T00:34:50Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] PILOT: Command-line Interface Fuzzing via Path-Guided, Iterative Large Language Model Prompting",
+    "url": "http://arxiv.org/abs/2511.20555v2",
+    "description": "Command-line interface (CLI) fuzzing tests programs by mutating both command-line options and input file contents, thus enabling discovery of vulnerabilities that only manifest under specific option-input combinations. Prior works of CLI fuzzing face the challenges of generating semantics-rich option strings and input files, which cannot reach deeply embedded target functions. This often leads to a misdetection of such a deep vulnerability using existing CLI fuzzing techniques. In this paper, we",
+    "relevance_tags": [
+      "fuzzing",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2025-11-25T17:54:10Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] MALF: A Multi-Agent LLM Framework for Intelligent Fuzzing of Industrial Control Protocols",
+    "url": "http://arxiv.org/abs/2510.02694v1",
+    "description": "Industrial control systems (ICS) are vital to modern infrastructure but increasingly vulnerable to cybersecurity threats, particularly through weaknesses in their communication protocols. This paper presents MALF (Multi-Agent LLM Fuzzing Framework), an advanced fuzzing solution that integrates large language models (LLMs) with multi-agent coordination to identify vulnerabilities in industrial control protocols (ICPs). By leveraging Retrieval-Augmented Generation (RAG) for domain-specific knowled",
+    "relevance_tags": [
+      "fuzzing",
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2025-10-03T03:19:49Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] QUACK! Making the (Rubber) Ducky Talk: A Systematic Study of Keystroke Dynamics for HID Injection Detection",
+    "url": "http://arxiv.org/abs/2604.15845v1",
+    "description": "Modern computing systems inherently trust human input devices, creating an exploitable attack surface for adversarial automation. USB Human Interface Device (HID) emulation attacks, such as those enabled by the USB Rubber Ducky, exploit this assumption to inject arbitrary keystroke sequences while bypassing traditional defenses. Existing countermeasures rely on simple heuristics based on typing speed or timing regularity, which can be easily evaded through basic randomization. Keystroke dynamics",
+    "relevance_tags": [
+      "automation",
+      "exploit",
+      "injection"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-17T08:53:24Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] COBALT-TLA: A Neuro-Symbolic Verification Loop for Cross-Chain Bridge Vulnerability Discovery",
+    "url": "http://arxiv.org/abs/2604.12172v1",
+    "description": "We present COBALT-TLA, a neuro-symbolic verification loop that pairs an LLM with TLC, the TLA+ model checker, in an automated REPL. The LLM generates bounded TLA+ specifications; TLC acts as a semantic oracle; structured error traces are parsed and injected back into the model's context to drive convergence. We evaluate the system against three cross-chain bridge targets, including a faithful model of the Nomad $190M exploit. COBALT-TLA reaches a verified BUG_FOUND state in at most 2 iterations",
+    "relevance_tags": [
+      "exploit",
+      "llm",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-14T00:56:58Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] A Deductive System for Contract Satisfaction Proofs",
+    "url": "http://arxiv.org/abs/2604.09165v1",
+    "description": "Hardware-software contracts are abstract specifications of a CPU's leakage behavior. They enable verifying the security of high-level programs against side-channel attacks without having to explicitly reason about the microarchitectural details of the CPU. Using the abstraction powers of a contract requires proving that the targeted CPU satisfies the contract in the sense that the contract over-approximates the CPU's leakage. Besides pen-and-paper reasoning, proving contract satisfaction has bee",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-04-10T09:51:24Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] PoC-Adapt: Semantic-Aware Automated Vulnerability Reproduction with LLM Multi-Agents and Reinforcement Learning-Driven Adaptive Policy",
+    "url": "http://arxiv.org/abs/2604.06618v2",
+    "description": "While recent approaches leverage large language models (LLMs) and multi-agent pipelines to automatically generate proof-of-concept (PoC) exploits from vulnerability reports, existing systems often suffer from two fundamental limitations: unreliable validation based on surface-level execution signals and high operational cost caused by extensive trial-and-error during exploit generation. In this paper, we present PoC-Adapt, an end-to-end framework for automated PoC generation and verification, ar",
+    "relevance_tags": [
+      "exploit",
+      "llm",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-08T02:59:42Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] RuleForge: Automated Generation and Validation for Web Vulnerability Detection at Scale",
+    "url": "http://arxiv.org/abs/2604.01977v1",
+    "description": "Security teams face a challenge: the volume of newly disclosed Common Vulnerabilities and Exposures (CVEs) far exceeds the capacity to manually develop detection mechanisms. In 2025, the National Vulnerability Database published over 48,000 new vulnerabilities, motivating the need for automation. We present RuleForge, an AWS internal system that automatically generates detection rules--JSON-based patterns that identify malicious HTTP requests exploiting specific vulnerabilities--from structured",
+    "relevance_tags": [
+      "automation",
+      "aws",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-02T12:39:26Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Vercel confirms breach as hackers claim to be selling stolen data",
+    "url": "https://www.bleepingcomputer.com/news/security/vercel-confirms-breach-as-hackers-claim-to-be-selling-stolen-data/",
+    "description": "Cloud development platform Vercel has disclosed a security incident after threat actors claimed to have breached its systems and are attempting to sell stolen data. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Sun, 19 Apr 2026 13:32:45 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Apple account change alerts abused to send phishing emails",
+    "url": "https://www.bleepingcomputer.com/news/security/apple-account-change-alerts-abused-to-send-phishing-emails/",
+    "description": "Apple account change notifications are being abused to send fake iPhone purchase phishing scams within legitimate emails sent from Apple's servers, increasing legitimacy and potentially allowing them to bypass spam filters. [...]",
+    "relevance_tags": [
+      "phishing"
+    ],
+    "score": 0.0,
+    "timestamp": "Sun, 19 Apr 2026 12:03:01 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] NIST to stop rating non-priority flaws due to volume increase",
+    "url": "https://www.bleepingcomputer.com/news/security/nist-to-stop-rating-non-priority-flaws-due-to-volume-increase/",
+    "description": "The National Institute of Standards and Technology will stop assigning severity scores to lower-priority vulnerabilities due to the growing workload from rising submission volumes. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Sun, 19 Apr 2026 10:17:43 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Critical flaw in Protobuf library enables JavaScript code execution",
+    "url": "https://www.bleepingcomputer.com/news/security/critical-flaw-in-protobuf-library-enables-javascript-code-execution/",
+    "description": "Proof-of-concept exploit code has been published for a critical remote code execution flaw in protobuf.js, a widely used JavaScript implementation of Google's Protocol Buffers. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Sat, 18 Apr 2026 11:09:44 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Microsoft Teams right-click paste broken by Edge update bug",
+    "url": "https://www.bleepingcomputer.com/news/microsoft/microsoft-teams-right-click-paste-broken-by-edge-update-bug/",
+    "description": "Microsoft is warning that a recent Microsoft Edge browser update introduced a bug that breaks right-click paste in chats in the Microsoft Teams desktop client. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Sat, 18 Apr 2026 10:11:21 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] NAKIVO v11.2: Ransomware Defense, Faster Replication, vSphere 9, and Proxmox VE 9.0 Support",
+    "url": "https://www.bleepingcomputer.com/news/security/nakivo-v112-ransomware-defense-faster-replication-vsphere-9-and-proxmox-ve-90-support/",
+    "description": "NAKIVO Inc. announced the general availability of NAKIVO Backup & Replication v11.2, focused on fast, reliable, and proactive data protection. [...]",
+    "relevance_tags": [
+      "ransomware"
+    ],
+    "score": 0.0,
+    "timestamp": "Sat, 18 Apr 2026 09:45:54 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Payouts King ransomware uses QEMU VMs to bypass endpoint security",
+    "url": "https://www.bleepingcomputer.com/news/security/payouts-king-ransomware-uses-qemu-vms-to-bypass-endpoint-security/",
+    "description": "The Payouts King ransomware is using the QEMU emulator as a reverse SSH backdoor to run hidden virtual machines on compromised systems and bypass endpoint security. [...]",
+    "relevance_tags": [
+      "bypass",
+      "ransomware"
+    ],
+    "score": 0.0,
+    "timestamp": "Fri, 17 Apr 2026 15:10:19 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Grinex exchange blames \"Western intelligence\" for $13.7M crypto hack",
+    "url": "https://www.bleepingcomputer.com/news/security/grinex-exchange-blames-western-intelligence-for-137m-crypto-hack/",
+    "description": "Kyrgyzstan-based cryptocurrency exchange Grinex has suspended its operations after suffering a $13.7 million hack attributed to Western intelligence agencies. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 17 Apr 2026 11:08:53 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Inside an Underground Guide: How Threat Actors Vet Stolen Credit Card Shops",
+    "url": "https://www.bleepingcomputer.com/news/security/inside-an-underground-guide-how-threat-actors-vet-stolen-credit-card-shops/",
+    "description": "In cybercrime markets, trust isn't assumed, it's verified. Flare reveals how underground guides teach actors to evaluate carding shops based on data quality, reputation, and survivability. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 17 Apr 2026 10:01:11 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Webinar: From phishing to fallout — Why MSPs must rethink both security and recovery",
+    "url": "https://www.bleepingcomputer.com/news/security/webinar-from-phishing-to-fallout-why-msps-must-rethink-both-security-and-recovery/",
+    "description": "Cyberattacks are evolving faster than many MSP and corporate defenses can keep up, with phishing driving much of today's cybercrime. Join our upcoming webinar to learn how to combine security and recovery strategies to reduce risk and maintain business continuity. [...]",
+    "relevance_tags": [
+      "phishing"
+    ],
+    "score": 0.0,
+    "timestamp": "Fri, 17 Apr 2026 08:20:28 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  }
+]
