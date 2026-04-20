@@ -89,6 +89,7 @@
 - [ADR-006 — Code Freeze + Data-Only Updates](decisions/006_code_freeze_data_only_updates.md) — 코드 수정 검토 / 데이터 vs 로직 분리 / 회귀 방지 / AI 할루시네이션 방지
 - [ADR-007 — Payloads as External Data Files](decisions/007_payloads_as_data_files.md) — 페이로드 추가 위치 / skills 코드 freeze 전략 / round 로테이션 JSON화 / growth loop 재배선
 - [ADR-008 — Finding Precision Bayesian Smoothing](decisions/008_finding_precision_smoothing.md) — 스코어 비교 시 FP 차원 해석 / 판정 수 부족 / baseline vs after 노이즈 / 측정 인프라 수정 정당화
+- [ADR-009 — Severity Oracle threshold externalization (draft)](decisions/009_severity_oracle_thresholds.md) — _adjust_severity() 룰 수정 / masking 비율·크기 임계값 조정 / 오라클 파일 freeze 완화 / DSL 유혹 대응
 
 ## Sources
 
