@@ -231,6 +231,68 @@ class BrowserEngine:
 # ── Browser Page (단일 탭) ───────────────────────────────────────
 
 
+_EMAIL_ALIASES = {"email", "e-mail", "mail"}
+_PASSWORD_ALIASES = {"password", "passwd", "pwd", "pass"}
+_TEL_ALIASES = {"phone", "tel", "mobile"}
+
+
+def _detect_input_type(field_name: str) -> str | None:
+    """Field name → HTML input type (email/password/tel). None if unknown.
+
+    타겟 앱이 HTML `name=` 대신 `type=email` 만 쓰는 경우 (Angular Material)
+    마지막 수단으로 type 기반 셀렉터 생성을 위해 사용.
+    """
+    f = field_name.strip().lower()
+    if f in _EMAIL_ALIASES:
+        return "email"
+    if f in _PASSWORD_ALIASES:
+        return "password"
+    if f in _TEL_ALIASES:
+        return "tel"
+    return None
+
+
+def _fill_form_selectors(form_selector: str, field_name: str) -> list[str]:
+    """주어진 field_name 에 대해 시도할 CSS 셀렉터 리스트 (우선순위 순).
+
+    순서: 구체적 → 느슨 / 스코프 → 전역.
+    Juice Shop 등 Angular Material 앱을 위해 formcontrolname·data-placeholder
+    ·aria-label·autocomplete·type 셀렉터까지 포함.
+    """
+    f = field_name.strip()
+    form = form_selector.strip()
+
+    patterns: list[str] = [
+        f"[name='{f}']",
+        f"#{f}",
+        f"[formcontrolname='{f}']",
+        f"[data-placeholder*='{f}' i]",
+        f"[aria-label*='{f}' i]",
+        f"[autocomplete*='{f}' i]",
+        f"[placeholder*='{f}' i]",
+    ]
+    input_type = _detect_input_type(f)
+    if input_type:
+        patterns.append(f"input[type='{input_type}']")
+
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def _add(sel: str) -> None:
+        if sel not in seen:
+            seen.add(sel)
+            result.append(sel)
+
+    # 스코프: 가장 정확. form_selector 가 실제 <form> 매치하면 여기서 끝남
+    if form:
+        for p in patterns:
+            _add(f"{form} {p}")
+    # 전역 폴백: form_selector 가 매치 못 해도 rescue
+    for p in patterns:
+        _add(p)
+    return result
+
+
 class BrowserPage:
     """단일 브라우저 탭 — Brain이 제어하는 실제 인터페이스."""
 
@@ -347,26 +409,42 @@ class BrowserPage:
         """입력 필드에 값 입력."""
         await self._page.fill(selector, value)
 
-    async def fill_form(self, form_selector: str, data: dict[str, str]) -> None:
-        """폼 필드를 일괄 입력."""
+    async def fill_form(
+        self, form_selector: str, data: dict[str, str]
+    ) -> dict[str, Any]:
+        """폼 필드 일괄 입력. Angular Material / a11y 셀렉터 폴백 포함.
+
+        Returns:
+            {"filled": [field_name, ...], "failed": [field_name, ...],
+             "tried_selectors": {field_name: [selector, ...]}}.
+            Brain 이 실패 시 PIVOT 할 수 있도록 구조화 반환.
+        """
+        filled: list[str] = []
+        failed: list[str] = []
+        tried: dict[str, list[str]] = {}
         for field_name, value in data.items():
-            selectors = [
-                f"{form_selector} [name='{field_name}']",
-                f"{form_selector} #{field_name}",
-                f"{form_selector} input[placeholder*='{field_name}' i]",
-            ]
-            filled = False
+            selectors = _fill_form_selectors(form_selector, field_name)
+            tried[field_name] = selectors
+            was_filled = False
             for sel in selectors:
                 try:
                     el = await self._page.query_selector(sel)
                     if el:
                         await el.fill(value)
-                        filled = True
+                        was_filled = True
                         break
                 except Exception:
                     continue
-            if not filled:
-                logger.warning("Could not fill field: %s", field_name)
+            if was_filled:
+                filled.append(field_name)
+            else:
+                failed.append(field_name)
+                logger.warning(
+                    "Could not fill field %s (tried %d selectors)",
+                    field_name,
+                    len(selectors),
+                )
+        return {"filled": filled, "failed": failed, "tried_selectors": tried}
 
     async def select(self, selector: str, value: str) -> None:
         """드롭다운 선택."""
