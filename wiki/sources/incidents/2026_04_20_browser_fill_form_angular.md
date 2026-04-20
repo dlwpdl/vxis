@@ -44,7 +44,17 @@ related:
 - **phase-2** (`browser_tools.py`): 구조화 반환 소비. `failed` 비어있지 않으면 `ok=False`, `error=fields_not_found`, `data.tried_selectors` 제공. 실패 시 submit 건너뜀.
 - **phase-3** (`scan_loop.py`): 프롬프트에서 하드코딩 예시 제거. `browser_analyze_dom` → `browser_fill_form` 2-step 지시 + `ok=False` 시 field_name 키 다양화 가이드.
 
+## Verification (2026-04-20 post-fix scan)
+- Total: **375.7/D → 483.3/C (+107.6)**, ADR-008 ±65pt 노이즈 밖 — 유의미 개선.
+- Chain Intelligence: **0 → 100** (pre-auth SQLi → post-auth IDOR 체인 연결).
+- Exploitation Reach: 151.6 → 159.1 (+7.5), findings 19 → 23 (+4).
+- MITRE coverage 62.5% → 68.8%, tactics 7 → 8 (Credential Access·Privilege Escalation 포함).
+- Juice Shop 내부 challenge 7개 solved: loginAdmin (SQLi bypass), basketAccess (IDOR), registerAdmin (mass assignment), errorHandling, exposedMetrics, securityPolicy, passwordRepeat.
+- LLM call count 57 동일 — 같은 예산으로 +107.6 pt 획득.
+- 저장: [after_fillform_fix_2026-04-20.score.json](../benchmarks/juice_shop/after_fillform_fix_2026-04-20.score.json).
+
 ## Lessons
 - 같은 이슈가 두 경로에 존재하면 한쪽 fix 로 안심 금지 — sibling path grep 필수 (`\.fill_form\(`).
 - Tool 의 ok=True 는 "실행 실패 아님" 일 뿐, "의도 달성" 은 별개. 구조화 반환으로 의도-달성 여부 surface.
 - Brain 프롬프트의 구체적 예시는 template 로 고착되기 쉽다. 예시는 패턴 (2-step flow) 로, 값은 DOM 에서 읽게 강제.
+- Chain Intelligence 는 선행 조건 (성공한 auth) 없으면 0 에 고정 — auth 막힘 해제가 복수 차원을 한 번에 끌어올림.
