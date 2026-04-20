@@ -32,3 +32,5 @@
 ## [2026-04-17] ingest | ADR-007 Phase 10 — growth apply.py / rollback.py rewired to JSON data files (pydantic-validated)
 
 ## [2026-04-17] ingest | ADR-007 Phase 11 activated — legacy PAYLOADS*/XSS_PAYLOADS* removed, docs resynced
+
+## [2026-04-20] ingest | 2026-04-20 browser_fill_form Angular+PIVOT fix (phase-1/2/3); eyes.md + scan_loop.md code_anchors stale

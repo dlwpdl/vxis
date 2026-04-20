@@ -104,3 +104,4 @@ _(유기적 추가 — 외부 논문/블로그/CVE)_
 - [2026-04-16 Seven Disconnections](sources/incidents/2026_04_16_seven_disconnections.md) — scan_loop 동작 이상 / chain 연쇄 안 됨 / skill cache 꼬임 / severity 정적 고정 / IDOR 자동 큐잉 누락
 - [2026-04-16 Auto-login Fix](sources/incidents/2026_04_16_auto_login_fix.md) — auto-login 전체 실패 / BrowserPage.fill TypeError / Enter 키 미전달 / login pivot 메시지
 - [2026-04-16 Payload Rotation + Sweep](sources/incidents/2026_04_16_payload_rotation_and_sweep.md) — payload rotation R2/R3 동작 / skill sweep 트리거 / _real_skills_completed / round re-queue alias
+- [2026-04-20 browser_fill_form Angular Material & PIVOT](sources/incidents/2026_04_20_browser_fill_form_angular.md) — Juice Shop 스코어 낮음 / auto-login silent fail / Angular Material formcontrolname / browser_fill_form 이 ok=True 인데 실제 미입력
