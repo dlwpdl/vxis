@@ -140,27 +140,69 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
+        # Map finding types to registered vector IDs (vectors.py ground truth)
         _type_to_vector = {
+            # Injection
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "sql_injection_blind_boolean": "WEB-SQLI-002",
+            "sql_injection_blind_time": "WEB-SQLI-003",
+            "sql_injection_error": "WEB-SQLI-004",
+            "nosql_injection": "WEB-NOSQL-001",
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "ssti": "WEB-SSTI-001",
+            "xxe": "WEB-XXE-001",
+            "deserialization": "WEB-DESER-001",
+            "rce": "WEB-DESER-001",         # closest registered vector for generic RCE
+            "file_upload": "WEB-UPLOAD-001",
+            "websocket_injection": "WEB-WSS-001",
+            "prototype_pollution": "WEB-INJECT-022",
+            "cache_poisoning": "WEB-INJECT-024",
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            # XSS
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
+            "xss": "WEB-XSS-001",
+            # SSRF
+            "ssrf": "WEB-SSRF-001",
+            "ssrf_blind": "WEB-SSRF-002",
+            # Auth
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-002",
+            "jwt_confusion": "WEB-AUTH-003",   # WEB-AUTH-003: JWT alg confusion
+            "jwt_none": "WEB-AUTH-004",
+            "session_fixation": "WEB-AUTH-005",
+            "oauth_vulnerability": "WEB-AUTH-007",
+            "saml_bypass": "WEB-AUTH-011",
+            "csrf": "WEB-CSRF-001",
+            # Access Control (fixed: were pointing to non-existent WEB-IDOR-001 etc.)
+            "idor": "WEB-AC-001",
+            "broken_access_control": "WEB-AC-002",
+            "privilege_escalation": "WEB-AC-003",
+            "path_traversal": "WEB-AC-004",    # fixed: was WEB-TRAV-001 (non-existent)
+            "forced_browsing": "WEB-AC-005",
+            # Misconfiguration (fixed: were pointing to WEB-MISC-001, WEB-REDIR-001 etc.)
+            "misconfiguration": "WEB-MISCONF-001",
+            "error_oracle": "WEB-MISCONF-003",  # fixed: was WEB-INFO-002 (non-existent)
+            "information_disclosure": "WEB-MISCONF-003",  # fixed: was WEB-INFO-001
+            "cors_misconfiguration": "WEB-MISCONF-005",
+            "open_redirect": "WEB-MISCONF-006", # fixed: was WEB-REDIR-001 (non-existent)
+            # Crypto
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "hardcoded_secrets": "WEB-CRYPTO-003",
+            # API
+            "mass_assignment": "WEB-API-001",
+            "rate_limit_bypass": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # Business Logic (fixed: was WEB-LOGIC-001, non-existent)
+            "business_logic": "WEB-BIZ-001",
+            "race_condition": "WEB-RACE-001",
+            # Infrastructure
+            "subdomain_takeover": "WEB-INFRA-001",
+            "supply_chain": "WEB-SUPPLY-001",
         }
 
         # Severity → exploitation level
