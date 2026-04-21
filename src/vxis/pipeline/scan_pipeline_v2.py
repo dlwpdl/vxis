@@ -140,27 +140,70 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
+        # Map finding types to vector IDs (must match vxis.scoring.vectors registry)
         _type_to_vector = {
-            "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
-            "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
-            "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            # SQL Injection
+            "sql_injection":          "WEB-SQLI-001",
+            "sqli_boolean":           "WEB-SQLI-002",
+            "sqli_time":              "WEB-SQLI-003",
+            "sqli_error":             "WEB-SQLI-004",
+            "nosql_injection":        "WEB-NOSQL-001",
+            # Other Injection
+            "command_injection":      "WEB-CMDI-001",
+            "ldap_injection":         "WEB-LDAP-001",
+            "xpath_injection":        "WEB-XPATH-001",
+            "ssti":                   "WEB-SSTI-001",
+            "xxe":                    "WEB-XXE-001",
+            "rce":                    "WEB-DESER-001",
+            "deserialization":        "WEB-DESER-001",
+            "file_upload":            "WEB-UPLOAD-001",
+            "prototype_pollution":    "WEB-INJECT-022",
+            "cache_poisoning":        "WEB-INJECT-024",
+            # XSS
+            "xss_reflected":          "WEB-XSS-001",
+            "xss_stored":             "WEB-XSS-002",
+            "xss_dom":                "WEB-XSS-003",
+            "xss":                    "WEB-XSS-001",
+            # SSRF
+            "ssrf":                   "WEB-SSRF-001",
+            "ssrf_blind":             "WEB-SSRF-002",
+            # Authentication
+            "auth_bypass":            "WEB-AUTH-001",
+            "weak_auth":              "WEB-AUTH-001",
+            "brute_force":            "WEB-AUTH-001",
+            "default_credentials":    "WEB-AUTH-002",
+            "jwt_confusion":          "WEB-AUTH-003",
+            "jwt_none":               "WEB-AUTH-004",
+            "session_fixation":       "WEB-AUTH-005",
+            "oauth_bypass":           "WEB-AUTH-007",
+            "password_reset":         "WEB-AUTH-008",
+            "saml_bypass":            "WEB-AUTH-011",
+            # Access Control
+            "idor":                   "WEB-AC-001",
+            "broken_access_control":  "WEB-AC-002",
+            "privilege_escalation":   "WEB-AC-003",
+            "path_traversal":         "WEB-AC-004",
+            "directory_traversal":    "WEB-AC-004",
+            "forced_browsing":        "WEB-AC-005",
+            # Misconfiguration
+            "misconfiguration":       "WEB-MISCONF-001",
+            "information_disclosure": "WEB-MISCONF-003",
+            "error_oracle":           "WEB-MISCONF-003",
+            "missing_headers":        "WEB-MISCONF-004",
+            "cors_misconfiguration":  "WEB-MISCONF-005",
+            "open_redirect":          "WEB-MISCONF-006",
+            # Cryptographic Failures
+            "weak_crypto":            "WEB-CRYPTO-001",
+            "hardcoded_secrets":      "WEB-CRYPTO-003",
+            # Business Logic / Race
+            "business_logic":         "WEB-BIZ-001",
+            "race_condition":         "WEB-RACE-001",
+            # CSRF / WebSocket / API
+            "csrf":                   "WEB-CSRF-001",
+            "websocket_injection":    "WEB-WSS-001",
+            "mass_assignment":        "WEB-API-001",
+            "graphql_introspection":  "WEB-API-003",
+            "http_verb_tampering":    "WEB-API-005",
         }
 
         # Severity → exploitation level
@@ -236,7 +279,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         return vxis_score.total, vxis_score.grade
 
-    except Exception as e:
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
