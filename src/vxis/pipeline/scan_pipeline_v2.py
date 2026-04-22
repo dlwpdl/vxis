@@ -271,6 +271,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         # they'll be wired up when the MacOSRecon skill lands in phase-F.
         _DESKTOP_SKILL_TO_VECTORS = {
             "test_local_storage_secrets": ["DESK-LSS-001"],
+            "test_electron_misconfig": ["DESK-ELC-001", "DESK-ELC-002", "DESK-ELC-003"],
         }
         _kind_value = ctx.kind.value if hasattr(ctx.kind, "value") else str(ctx.kind)
         _skill_to_vectors = (

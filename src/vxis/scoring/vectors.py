@@ -1296,6 +1296,28 @@ DESKTOP_VECTORS: tuple[AttackVector, ...] = (
         target_types=("desktop",), phase="Phase 5", max_depth=3,
         owasp_id="M9",  # OWASP Mobile/Desktop "Insecure Data Storage"
     ),
+    # ── Electron Misconfiguration (DESK-ELC-*) ── phase-J slice 2
+    AttackVector(
+        id="DESK-ELC-001", category="misconfiguration",
+        name_en="Electron nodeIntegration enabled",
+        name_ko="Electron nodeIntegration 활성화",
+        target_types=("desktop",), phase="Phase 5", max_depth=4,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-ELC-002", category="misconfiguration",
+        name_en="Electron contextIsolation disabled",
+        name_ko="Electron contextIsolation 비활성화",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-ELC-003", category="misconfiguration",
+        name_en="Electron webSecurity disabled",
+        name_ko="Electron webSecurity 비활성화",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="A05:2021",
+    ),
     AttackVector(
         id="DESK-RECON-001", category="recon",
         name_en="Binary Recon — Imports / Entitlements / Signature",

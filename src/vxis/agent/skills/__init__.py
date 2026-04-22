@@ -34,6 +34,13 @@ try:
 except ImportError:  # pragma: no cover — desktop skill optional today
     test_local_storage_secrets = None  # type: ignore[assignment]
 
+try:
+    from vxis.agent.skills.desktop.test_electron_misconfig import (
+        execute as test_electron_misconfig,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_electron_misconfig = None  # type: ignore[assignment]
+
 SKILL_REGISTRY: dict[str, dict] = {
     "enumerate_endpoints": {
         "fn": enumerate_endpoints,
@@ -122,4 +129,18 @@ if test_local_storage_secrets is not None:
             "target.kind == desktop."
         ),
         "args": "target_url (required — path to .app / dir / binary)",
+    }
+
+if test_electron_misconfig is not None:
+    SKILL_REGISTRY["test_electron_misconfig"] = {
+        "fn": test_electron_misconfig,
+        "description": (
+            "Desktop-only: detect Electron-specific misconfigurations "
+            "(nodeIntegration, contextIsolation, webSecurity). Use when "
+            "target.kind == desktop and the app uses Electron framework."
+        ),
+        "args": (
+            "target_url (required — path to .app bundle or directory containing "
+            "Electron app)"
+        ),
     }
