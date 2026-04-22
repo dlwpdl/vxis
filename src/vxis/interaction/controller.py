@@ -137,6 +137,23 @@ class InteractionAction:
 
 
 @dataclass
+class InteractionFinding:
+    """Lightweight finding emitted by the controller mid-loop.
+
+    Distinct from the heavyweight `vxis.models.finding.Finding` (which needs
+    scan_id / source_plugin / cvss). Brain consumes these via
+    `InteractionResult.findings` to keep its observation stream coherent
+    when the controller surfaces a non-fatal signal — e.g. an unsupported
+    surface stub (phase-H), or a degraded mode fallback.
+    """
+
+    severity: str
+    title: str
+    description: str = ""
+    surface: str = "web"  # web|desktop|mobile|game
+
+
+@dataclass
 class InteractionResult:
     """Controller가 Brain에게 반환하는 결과."""
 
@@ -161,6 +178,10 @@ class InteractionResult:
     auth_tokens: list[dict[str, str]] = field(default_factory=list)
     secrets_found: list[dict[str, str]] = field(default_factory=list)
     vulnerabilities: list[dict[str, str]] = field(default_factory=list)
+
+    # phase-H: in-flight findings emitted during execute() — used today by
+    # the unsupported-surface informational signal so Brain knows the gap.
+    findings: list[InteractionFinding] = field(default_factory=list)
 
     # Chain 결과
     chain_results: list[dict[str, Any]] = field(default_factory=list)
@@ -496,13 +517,35 @@ class InteractionController:
         if self._surface is None or not self._session:
             return InteractionResult(success=False, error="No session")
 
-        envelope = await self._surface.hands.request(
-            action.method or "GET",
-            path=action.url or "/",
-            data=action.data,
-            json_data=action.json_data,
-            headers=action.headers,
-        )
+        try:
+            envelope = await self._surface.hands.request(
+                action.method or "GET",
+                path=action.url or "/",
+                data=action.data,
+                json_data=action.json_data,
+                headers=action.headers,
+            )
+        except NotImplementedError as exc:
+            # phase-H: Mobile/Game stubs (or any future kind) raise here.
+            # Surface the gap as an informational finding instead of crashing
+            # the Brain loop — so subsequent intent decisions can route
+            # around the unsupported surface.
+            kind = self._surface.target.kind.value
+            return InteractionResult(
+                success=False,
+                mode_used=mode,
+                error=str(exc),
+                findings=[
+                    InteractionFinding(
+                        severity="informational",
+                        title=(
+                            f"surface_unsupported|||서피스 미지원 ({kind})"
+                        ),
+                        description=str(exc),
+                        surface=kind,
+                    )
+                ],
+            )
 
         resp = getattr(self._surface.hands, "last_response", None)
         if resp is None:

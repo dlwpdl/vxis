@@ -22,13 +22,15 @@ def test_factory_builds_web_surface():
     assert isinstance(s.recon, WebRecon)
 
 
-@pytest.mark.parametrize("kind_name", ["DESKTOP", "MOBILE", "GAME"])
-def test_factory_raises_for_unimplemented_kinds(kind_name):
-    """phase-B.5 — non-web kinds defer to phase-C/H/I and must raise clearly."""
+def test_factory_raises_for_desktop_until_phase_c():
+    """phase-B.5 / phase-H — DESKTOP construction still raises (impl in phase-C/I).
+
+    MOBILE/GAME used to raise here too, but phase-H landed stub Surface aggregates
+    so Brain code can stay surface-agnostic — see test_mobile_game_surface.py.
+    """
     from vxis.interaction.factory import SurfaceFactory
     from vxis.interaction.surface import Target, TargetKind
 
-    kind = TargetKind[kind_name]
     with pytest.raises(NotImplementedError) as exc:
-        SurfaceFactory.build(Target(kind=kind, entry="x"))
-    assert kind.value in str(exc.value).lower()
+        SurfaceFactory.build(Target(kind=TargetKind.DESKTOP, entry="x"))
+    assert "desktop" in str(exc.value).lower()
