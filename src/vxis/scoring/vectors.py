@@ -1281,12 +1281,45 @@ MOBILE_VECTORS: tuple[AttackVector, ...] = (
 
 
 # ─────────────────────────────────────────────
+# DESKTOP VECTORS — minimal slice for macOS e2e (phase-J)
+# ─────────────────────────────────────────────
+#
+# 풀 14개 (DESK-LSS/ELC/IPC/UPD/DLK/PIE/PRV/DEP) 정의는 phase-F (Windows
+# 풀 desktop pipeline) 에서 들어옴. 지금은 macOS-only e2e 를 위한 최소
+# 1개 (LSS) 만 등록 — 추가 벡터는 phase-J slice 들이 점진적으로 채움.
+
+DESKTOP_VECTORS: tuple[AttackVector, ...] = (
+    AttackVector(
+        id="DESK-LSS-001", category="information_disclosure",
+        name_en="Local Storage — Plaintext Secret in Application Bundle",
+        name_ko="로컬 스토리지 — 앱 번들 평문 시크릿",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="M9",  # OWASP Mobile/Desktop "Insecure Data Storage"
+    ),
+    AttackVector(
+        id="DESK-RECON-001", category="recon",
+        name_en="Binary Recon — Imports / Entitlements / Signature",
+        name_ko="바이너리 정찰 — Imports / Entitlements / Signature",
+        target_types=("desktop",), phase="Phase 4", max_depth=1,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-SIG-001", category="misconfiguration",
+        name_en="Code Signature — Missing or Invalid",
+        name_ko="코드 서명 — 누락 또는 무효",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A08:2021",
+    ),
+)
+
+
+# ─────────────────────────────────────────────
 # Registry helper
 # ─────────────────────────────────────────────
 
 _ALL_VECTORS: dict[str, AttackVector] = {
     v.id: v
-    for v in (*WEB_VECTORS, *GAME_VECTORS, *MOBILE_VECTORS)
+    for v in (*WEB_VECTORS, *GAME_VECTORS, *MOBILE_VECTORS, *DESKTOP_VECTORS)
 }
 
 
@@ -1296,6 +1329,7 @@ def get_vectors_for_type(target_type: str) -> tuple[AttackVector, ...]:
         "web": WEB_VECTORS,
         "game": GAME_VECTORS,
         "mobile": MOBILE_VECTORS,
+        "desktop": DESKTOP_VECTORS,
     }
     if target_type not in mapping:
         raise ValueError(

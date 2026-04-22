@@ -24,6 +24,16 @@ from vxis.agent.skills.test_business_logic import execute as test_business_logic
 from vxis.agent.skills.test_crypto import execute as test_crypto
 from vxis.agent.skills.test_infra import execute as test_infra
 
+# Desktop skills — phase-J slice (macOS-only). Phase-F (Windows full
+# desktop pipeline) ships the remaining 7. We import lazily so that
+# environments without the desktop adapter installed still work.
+try:
+    from vxis.agent.skills.desktop.test_local_storage_secrets import (
+        execute as test_local_storage_secrets,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_local_storage_secrets = None  # type: ignore[assignment]
+
 SKILL_REGISTRY: dict[str, dict] = {
     "enumerate_endpoints": {
         "fn": enumerate_endpoints,
@@ -101,3 +111,15 @@ SKILL_REGISTRY: dict[str, dict] = {
         "args": "target_url (required)",
     },
 }
+
+if test_local_storage_secrets is not None:
+    SKILL_REGISTRY["test_local_storage_secrets"] = {
+        "fn": test_local_storage_secrets,
+        "description": (
+            "Desktop-only: walk the .app bundle / directory / parent-of-binary "
+            "and match each text file against hardcoded-secret patterns "
+            "(AWS, GitHub, JWT, private keys, generic api_key='...'). Use when "
+            "target.kind == desktop."
+        ),
+        "args": "target_url (required — path to .app / dir / binary)",
+    }

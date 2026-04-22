@@ -248,7 +248,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         # Record vectors from ALL executed skills (including clean results)
         # so that vector_coverage reflects attempted vectors, not just findings.
-        _skill_to_vectors = {
+        _WEB_SKILL_TO_VECTORS = {
             "enumerate_endpoints": ["WEB-INFO-001", "WEB-INFO-002"],
             "test_sensitive_files": ["WEB-INFO-001"],
             "test_infra": ["WEB-MISC-001", "WEB-INFO-001"],
@@ -265,6 +265,20 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             "test_business_logic": ["WEB-LOGIC-001"],
             "test_crypto": ["WEB-CRYPTO-001"],
         }
+        # phase-J slice — desktop minimal mapping. Phase-F (Windows full
+        # desktop pipeline) extends this with the remaining DESK-* vectors.
+        _DESKTOP_SKILL_TO_VECTORS = {
+            "test_local_storage_secrets": ["DESK-LSS-001"],
+            # Surface-driven recon credit: when scan_loop pulls
+            # MacOSRecon.fingerprint(), it logs `recon_macos` as the
+            # completed step so Brain still gets vector coverage credit
+            # for the Mach-O fingerprint pass.
+            "recon_macos": ["DESK-RECON-001", "DESK-SIG-001"],
+        }
+        _kind_value = ctx.kind.value if hasattr(ctx.kind, "value") else str(ctx.kind)
+        _skill_to_vectors = (
+            _DESKTOP_SKILL_TO_VECTORS if _kind_value == "desktop" else _WEB_SKILL_TO_VECTORS
+        )
         # Get completed skills from scan loop result
         _completed_skills: set[str] = set(getattr(ctx, "skills_completed", []) or [])
 

@@ -408,7 +408,7 @@ def scan(
 
     # ── Pre-flight checks ──────────────────────────────────
     console.print("[dim]Running pre-flight checks...[/dim]")
-    pf = run_preflight(target, ghost=ghost, interactive=interactive)
+    pf = run_preflight(target, ghost=ghost, interactive=interactive, kind=_kind.value)
 
     pf_table = Table.grid(padding=(0, 2))
     pf_table.add_column(style="bold", no_wrap=True)
