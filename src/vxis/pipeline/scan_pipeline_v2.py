@@ -128,6 +128,62 @@ def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str
     )
 
 
+# Sandbox command fingerprint → vector IDs. Credits VC (Vector Coverage) when
+# Brain uses shell_exec/python_exec instead of (or alongside) run_skill.
+# Phase 3 made sandbox the primary attack surface; Phase 4 makes the score
+# reflect that. Conservative mapping: only clear pentest-tool keywords count.
+#
+# Order matters — python jwt check runs before generic command matching so
+# that `python -c "import jwt"` doesn't also match a made-up `jwt` command.
+_SANDBOX_TOOL_VECTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("sqlmap",   ("WEB-SQLI-001",)),
+    ("nuclei",   ("WEB-INFO-001", "WEB-MISC-001")),
+    ("nikto",    ("WEB-MISC-001", "WEB-INFO-001")),
+    ("wapiti",   ("WEB-SQLI-001", "WEB-XSS-001")),
+    ("hydra",    ("WEB-AUTH-001",)),
+    ("ffuf",     ("WEB-INFO-001",)),
+    ("gobuster", ("WEB-INFO-001",)),
+    ("dirsearch",("WEB-INFO-001",)),
+    ("wfuzz",    ("WEB-INFO-001",)),
+)
+
+# Python code fingerprints — substring match on source.
+_PYTHON_CODE_VECTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("import jwt",      ("WEB-JWT-001",)),
+    ("jwt.encode",      ("WEB-JWT-001",)),
+    ("jwt.decode",      ("WEB-JWT-001",)),
+    ("alg.*none",       ("WEB-JWT-001",)),
+)
+
+
+def _sandbox_cmd_to_vectors(cmd: str) -> list[str]:
+    """Map a sandbox command/code string to vector IDs it likely exercises.
+
+    Returns [] for unknown or empty input — no VC inflation. Case-insensitive
+    substring match; tolerates absolute paths (`/usr/bin/sqlmap`), quoted args,
+    and mixed case. Python keywords (`import jwt`, `jwt.encode`) credit JWT
+    vector so that hand-rolled JWT confusion PoCs aren't scored below run_skill.
+    """
+    if not cmd or not isinstance(cmd, str):
+        return []
+    lowered = cmd.lower()
+    hits: list[str] = []
+    seen: set[str] = set()
+    for keyword, vectors in _SANDBOX_TOOL_VECTORS:
+        if keyword in lowered:
+            for v in vectors:
+                if v not in seen:
+                    hits.append(v)
+                    seen.add(v)
+    for keyword, vectors in _PYTHON_CODE_VECTORS:
+        if keyword in lowered:
+            for v in vectors:
+                if v not in seen:
+                    hits.append(v)
+                    seen.add(v)
+    return hits
+
+
 def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
     """Compute VXIS score using the full 5-dimension ScoringEngine.
 
@@ -198,6 +254,17 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             if skill_name in _completed_skills:
                 for vid in vector_ids:
                     tracker.record_vector_attempt(vid)
+
+        # Phase 4: credit sandbox (shell_exec / python_exec) usage.
+        # Brain-First + Phase 3 sandbox primacy require scoring to reward
+        # creative tool use, not just the 15 pre-built skills.
+        _sandbox_invocations = getattr(ctx, "sandbox_invocations", []) or []
+        for inv in _sandbox_invocations:
+            if not isinstance(inv, dict):
+                continue
+            _cmd = inv.get("cmd") or inv.get("code") or inv.get("command") or ""
+            for vid in _sandbox_cmd_to_vectors(str(_cmd)):
+                tracker.record_vector_attempt(vid)
 
         for f in ctx.findings:
             ftype = f.finding_type if hasattr(f, "finding_type") else str(getattr(f, "finding_type", ""))
@@ -404,6 +471,9 @@ class ScanPipeline:
         ctx.confirmed_findings = loop_result.get("confirmed_findings", []) or []  # type: ignore[attr-defined]
         ctx.refuted_findings = loop_result.get("refuted_findings", []) or []  # type: ignore[attr-defined]
         ctx.skills_completed = loop_result.get("skills_completed", []) or []  # type: ignore[attr-defined]
+        # Phase 4: surface sandbox invocations so _compute_vxis_score can
+        # credit VC for shell_exec / python_exec usage (sandbox primacy).
+        ctx.sandbox_invocations = loop_result.get("sandbox_invocations", []) or []  # type: ignore[attr-defined]
         if verdict_counts:
             print(
                 "VXIS_BELIEF verdicts={} confirmed={} refuted={}".format(

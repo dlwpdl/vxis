@@ -571,6 +571,11 @@ class ScanAgentLoop:
         _real_skills_completed: set[str] = set()
         _all_skill_names = {s[0] for s in _skill_sequence}
         _auth_token: str | None = None
+        # Phase 4: track every shell_exec / python_exec invocation so the
+        # scoring layer can credit VC for sandbox-based attacks. Each entry
+        # is {"tool": name, "cmd"|"code": str}. Brain gets rewarded for
+        # creative sandbox use instead of penalized (prior behavior).
+        _sandbox_invocations: list[dict[str, str]] = []
 
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
@@ -788,6 +793,21 @@ class ScanAgentLoop:
                 self.state.add_message("tool", {"name": name, "args": args, "result": {
                     "ok": result.ok, "summary": result.summary, "data": result.data,
                 }})
+
+                # Phase 4: record sandbox invocations for VC scoring.
+                # Every shell_exec / python_exec call — whether ok or not —
+                # counts as an attempt so that VC reflects Brain's explored
+                # surface, not only successful runs.
+                if name in ("shell_exec", "python_exec"):
+                    _inv: dict[str, str] = {"tool": name}
+                    _cmd_val = args.get("command") or args.get("cmd") or ""
+                    _code_val = args.get("code") or ""
+                    if _cmd_val:
+                        _inv["cmd"] = str(_cmd_val)
+                    if _code_val:
+                        _inv["code"] = str(_code_val)
+                    if _inv.get("cmd") or _inv.get("code"):
+                        _sandbox_invocations.append(_inv)
 
                 # Phase B: auto-extract findings from probe output. If the tool
                 # output looks like a path-size-status probe result, parse it,
@@ -2100,4 +2120,5 @@ class ScanAgentLoop:
             "confirmed_findings": list(self.state.confirmed_findings),
             "refuted_findings": list(self.state.refuted_findings),
             "skills_completed": list(_skills_completed),
+            "sandbox_invocations": list(_sandbox_invocations),
         }
