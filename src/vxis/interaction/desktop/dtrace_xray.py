@@ -40,8 +40,10 @@ class SyscallEvent:
 
 
 class MacOSXRay(XRay):
-    def __init__(self, target: Target) -> None:
+    def __init__(self, target: Target, pid: int | None = None) -> None:
         self._target = target
+        # system-wide capture leaks unrelated process events into the scan report
+        self._pid = pid
         self._captured: list[SyscallEvent] = []
         self._running = False
 
@@ -120,10 +122,14 @@ class MacOSXRay(XRay):
         Script prints:    pid<TAB>path
         Anything else is ignored (banners, errors).
         """
+        if self._pid is not None:
+            predicate = f"/pid == {self._pid}/"
+        else:
+            logger.warning("dtrace running system-wide — set pid to scope")
+            predicate = ""
         script = (
-            "syscall::open*:entry { "
-            'printf("%d\\t%s\\n", pid, copyinstr(arg0)); '
-            "}"
+            f"syscall::open*:entry {predicate} "
+            '{ printf("%d\\t%s\\n", pid, copyinstr(arg0)); }'
         )
         try:
             proc = await asyncio.create_subprocess_exec(

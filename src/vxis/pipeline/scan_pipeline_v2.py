@@ -267,13 +267,10 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         }
         # phase-J slice — desktop minimal mapping. Phase-F (Windows full
         # desktop pipeline) extends this with the remaining DESK-* vectors.
+        # DESK-RECON-001 / DESK-SIG-001 stay defined in scoring/vectors.py;
+        # they'll be wired up when the MacOSRecon skill lands in phase-F.
         _DESKTOP_SKILL_TO_VECTORS = {
             "test_local_storage_secrets": ["DESK-LSS-001"],
-            # Surface-driven recon credit: when scan_loop pulls
-            # MacOSRecon.fingerprint(), it logs `recon_macos` as the
-            # completed step so Brain still gets vector coverage credit
-            # for the Mach-O fingerprint pass.
-            "recon_macos": ["DESK-RECON-001", "DESK-SIG-001"],
         }
         _kind_value = ctx.kind.value if hasattr(ctx.kind, "value") else str(ctx.kind)
         _skill_to_vectors = (
@@ -462,13 +459,21 @@ class ScanPipeline:
         except Exception:
             pass
 
-        # 3. Build the tool registry
+        # 3. Propagate surface kind into Brain so it selects the right system prompt.
+        # Brain is constructed before run() — we patch _target_kind here because
+        # kind is only known at scan time, not at construction time.
+        # Brain이 올바른 시스템 프롬프트를 선택할 수 있도록 서피스 종류를 주입합니다.
+        # Brain은 run() 이전에 생성되므로 스캔 시점에만 알 수 있는 kind를 여기서 패치합니다.
+        if hasattr(self.brain, "_target_kind"):
+            self.brain._target_kind = kind
+
+        # 4. Build the tool registry
         registry = build_default_registry(brain=self.brain)
 
-        # 4. Emit a synthetic phase_start so the CLI Rich Live display has content
+        # 5. Emit a synthetic phase_start so the CLI Rich Live display has content
         self._emit("phase_start", {"phase": "scan_loop", "name": "ScanAgentLoop"})
 
-        # 5. Create + run the ScanAgentLoop
+        # 6. Create + run the ScanAgentLoop
         max_iters = 50  # Phase A cap; Phase B will tune
         loop = ScanAgentLoop(
             target=target,

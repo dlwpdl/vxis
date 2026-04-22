@@ -76,6 +76,26 @@ _SKIP_EXT = {
 }
 
 
+def _mask(matched: str) -> str:
+    """Return a fingerprint-safe masked version of a matched secret.
+
+    Keeps up to 6 chars of prefix and up to 6 chars of suffix so the customer
+    can verify they found the right value, while replacing the middle with '*'.
+    The report is delivered to the customer as HTML; a live secret in the
+    report body would itself become an exfiltration channel.
+
+    Examples:
+        "AKIAIOSFODNN7EXAMPLE"  -> "AKIAIO**************XAMPLE"
+        "eyJhbGciOiJSUzI1NiJ9...sig"  -> "eyJhbG...***...sig" (too short? still masked)
+        "abc"  -> "***"  (shorter than 12 chars — fully starred)
+    """
+    keep = 6
+    if len(matched) <= keep * 2:
+        return "*" * len(matched)
+    stars = "*" * max(1, len(matched) - keep * 2)
+    return matched[:keep] + stars + matched[-keep:]
+
+
 def _looks_binary(chunk: bytes) -> bool:
     """Heuristic: NUL byte in the first chunk → binary."""
     return b"\x00" in chunk
@@ -160,25 +180,33 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                 m = pattern.search(text)
                 if not m:
                     continue
-                snippet = text[max(0, m.start() - 30): m.end() + 30].replace("\n", "\\n")
+                # Context (30 chars before/after) stays as-is — it's not the
+                # secret itself. Only the matched portion is masked so the
+                # customer can verify the finding without the report becoming
+                # an exfiltration vector.
+                prefix_ctx = text[max(0, m.start() - 30): m.start()].replace("\n", "\\n")
+                suffix_ctx = text[m.end(): m.end() + 30].replace("\n", "\\n")
+                masked_match = _mask(m.group())
+                snippet = (prefix_ctx + masked_match + suffix_ctx)[:240]
+                poc_hint = masked_match[:120]
                 findings.append({
                     "path": os.path.relpath(fpath, root),
                     "abs_path": fpath,
                     "severity": severity,
                     "pattern": name,
-                    "snippet": snippet[:240],
+                    "snippet": snippet,
                     "vector": "DESK-LSS-001",
                     "title": f"Secret in app bundle ({name}|||앱 번들 내 시크릿 ({name}))",
                     "description": (
                         f"WHAT: {name} pattern matched in {fpath}\n"
                         f"HOW: filesystem walk of the application bundle\n"
                         f"IMPACT: secret recoverable by anyone with read access to the app\n"
-                        f"PoC: open '{fpath}' and look for: {snippet[:120]}\n"
+                        f"PoC: open '{fpath}' and look for: {poc_hint}\n"
                         f"|||"
                         f"WHAT: {name} 패턴이 {fpath} 에서 발견됨\n"
                         f"HOW: 애플리케이션 번들 파일 시스템 워크\n"
                         f"IMPACT: 앱 읽기 권한만 있으면 누구나 시크릿 회수 가능\n"
-                        f"PoC: '{fpath}' 열어서 다음 확인: {snippet[:120]}"
+                        f"PoC: '{fpath}' 열어서 다음 확인: {poc_hint}"
                     ),
                 })
 
