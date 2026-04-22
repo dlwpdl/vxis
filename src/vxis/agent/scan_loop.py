@@ -693,17 +693,22 @@ class ScanAgentLoop:
                     component = str(args.get("affected_component", ""))
                     if len(evidence) < 200 and component.startswith("http"):
                         try:
-                            import httpx as _httpx
-                            async with _httpx.AsyncClient(timeout=5, verify=False, follow_redirects=True) as _c:
-                                _resp = await _c.get(component)
+                            from vxis.interaction.hands import SessionManager as _SessionManager
+                            _mgr = _SessionManager()
+                            try:
+                                _sess = await _mgr.get_session(component)
+                                _resp = await _sess.request("GET", component)
+                                _headers = list(_resp.headers.items())[:15]
                                 _enriched = (
-                                    f"HTTP/{_resp.http_version} {_resp.status_code}\n"
-                                    + "\n".join(f"{k}: {v}" for k, v in list(_resp.headers.items())[:15])
+                                    f"HTTP {_resp.status}\n"
+                                    + "\n".join(f"{k}: {v}" for k, v in _headers)
                                     + f"\n\n{_resp.text[:1500]}"
                                 )
                                 args["evidence"] = _enriched + "\n\n--- Original evidence ---\n" + evidence
                                 logger.info("auto-enriched evidence for %s (%d → %d chars)",
                                            component, len(evidence), len(args["evidence"]))
+                            finally:
+                                await _mgr.close_all()
                         except Exception:
                             pass  # enrichment is best-effort
 

@@ -1,7 +1,13 @@
-"""Unit tests for HTTP revalidation stage (stage 3.5) in the FP pipeline."""
+"""Unit tests for HTTP revalidation stage (stage 3.5) in the FP pipeline.
+
+phase-B.4 — revalidation now flows through SessionManager (vxis.interaction.hands)
+instead of raw httpx.AsyncClient. Mocks below patch the SessionManager.get_session
+seam and return AnalyzedResponse-shaped objects (`.status: int`, `.headers: dict`).
+"""
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -51,12 +57,49 @@ def make_flagged_finding(**overrides) -> Finding:
 def make_mock_response(
     status_code: int = 200,
     headers: dict[str, str] | None = None,
-) -> httpx.Response:
-    """Create a mock httpx.Response with the given status and headers."""
-    resp = MagicMock(spec=httpx.Response)
-    resp.status_code = status_code
-    resp.headers = httpx.Headers(headers or {})
+) -> MagicMock:
+    """Create a mock AnalyzedResponse with `.status` (int) and `.headers` (dict).
+
+    phase-B.4 — `_check_vulnerability_indicators` and `_http_revalidate` now
+    consume AnalyzedResponse from SessionManager (not raw httpx.Response).
+    """
+    resp = MagicMock()
+    resp.status = status_code
+    resp.headers = headers or {}
     return resp
+
+
+@contextmanager
+def patch_session_manager(
+    head_response: MagicMock | None = None,
+    get_response: MagicMock | None = None,
+    head_exc: Exception | None = None,
+    get_exc: Exception | None = None,
+):
+    """Patch SessionManager so `get_session().request("HEAD"/"GET")` returns the given mocks.
+
+    Yields the mock session so tests can inspect call history.
+    """
+    session = AsyncMock()
+
+    async def _request(method: str, url: str, **_kw):
+        m = method.upper()
+        if m == "HEAD":
+            if head_exc is not None:
+                raise head_exc
+            return head_response
+        if m == "GET":
+            if get_exc is not None:
+                raise get_exc
+            return get_response
+        raise AssertionError(f"unexpected method {method}")
+
+    session.request = AsyncMock(side_effect=_request)
+    mgr_instance = MagicMock()
+    mgr_instance.get_session = AsyncMock(return_value=session)
+    mgr_instance.close_all = AsyncMock(return_value=None)
+    with patch("vxis.core.fp_pipeline.SessionManager", return_value=mgr_instance):
+        yield session
 
 
 # ---------------------------------------------------------------------------
@@ -174,13 +217,7 @@ class TestHttpRevalidate:
 
         mock_response = make_mock_response(status_code=200)
 
-        with patch("vxis.core.fp_pipeline.httpx.AsyncClient") as MockClient:
-            client_instance = AsyncMock()
-            client_instance.head = AsyncMock(return_value=mock_response)
-            client_instance.get = AsyncMock(return_value=mock_response)
-            MockClient.return_value.__aenter__ = AsyncMock(return_value=client_instance)
-            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
-
+        with patch_session_manager(head_response=mock_response, get_response=mock_response):
             result = await pipeline._http_revalidate(f)
 
         assert result.confidence == pytest.approx(0.55 + _REVALIDATION_CONFIRM_BOOST)
@@ -198,13 +235,7 @@ class TestHttpRevalidate:
 
         mock_response = make_mock_response(status_code=404)
 
-        with patch("vxis.core.fp_pipeline.httpx.AsyncClient") as MockClient:
-            client_instance = AsyncMock()
-            client_instance.head = AsyncMock(return_value=mock_response)
-            client_instance.get = AsyncMock(return_value=mock_response)
-            MockClient.return_value.__aenter__ = AsyncMock(return_value=client_instance)
-            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
-
+        with patch_session_manager(head_response=mock_response, get_response=mock_response):
             result = await pipeline._http_revalidate(f)
 
         assert result.confidence == pytest.approx(0.55 - _REVALIDATION_DENY_PENALTY)
@@ -223,16 +254,15 @@ class TestHttpRevalidate:
         head_response = make_mock_response(status_code=405)
         get_response = make_mock_response(status_code=200)
 
-        with patch("vxis.core.fp_pipeline.httpx.AsyncClient") as MockClient:
-            client_instance = AsyncMock()
-            client_instance.head = AsyncMock(return_value=head_response)
-            client_instance.get = AsyncMock(return_value=get_response)
-            MockClient.return_value.__aenter__ = AsyncMock(return_value=client_instance)
-            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
-
+        with patch_session_manager(
+            head_response=head_response, get_response=get_response
+        ) as session:
             result = await pipeline._http_revalidate(f)
 
-        client_instance.get.assert_called_once()
+        # The 405 HEAD must trigger a follow-up GET — assert at least one
+        # call with method == "GET".
+        get_calls = [c for c in session.request.call_args_list if c.args[0].upper() == "GET"]
+        assert get_calls, "expected GET follow-up after HEAD 405"
         assert "[http_revalidation] Confirmed" in result.analyst_notes
 
     @pytest.mark.asyncio
@@ -246,13 +276,10 @@ class TestHttpRevalidate:
             confidence=original_confidence,
         )
 
-        with patch("vxis.core.fp_pipeline.httpx.AsyncClient") as MockClient:
-            client_instance = AsyncMock()
-            client_instance.head = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            client_instance.get = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
-            MockClient.return_value.__aenter__ = AsyncMock(return_value=client_instance)
-            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
-
+        with patch_session_manager(
+            head_exc=httpx.TimeoutException("timed out"),
+            get_exc=httpx.TimeoutException("timed out"),
+        ):
             result = await pipeline._http_revalidate(f)
 
         assert result.confidence == pytest.approx(original_confidence)
@@ -269,17 +296,10 @@ class TestHttpRevalidate:
             confidence=original_confidence,
         )
 
-        with patch("vxis.core.fp_pipeline.httpx.AsyncClient") as MockClient:
-            client_instance = AsyncMock()
-            client_instance.head = AsyncMock(
-                side_effect=httpx.ConnectError("connection refused")
-            )
-            client_instance.get = AsyncMock(
-                side_effect=httpx.ConnectError("connection refused")
-            )
-            MockClient.return_value.__aenter__ = AsyncMock(return_value=client_instance)
-            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
-
+        with patch_session_manager(
+            head_exc=httpx.ConnectError("connection refused"),
+            get_exc=httpx.ConnectError("connection refused"),
+        ):
             result = await pipeline._http_revalidate(f)
 
         assert result.confidence == pytest.approx(original_confidence)
@@ -330,13 +350,7 @@ class TestHttpRevalidationBatch:
 
         mock_response = make_mock_response(status_code=200)
 
-        with patch("vxis.core.fp_pipeline.httpx.AsyncClient") as MockClient:
-            client_instance = AsyncMock()
-            client_instance.head = AsyncMock(return_value=mock_response)
-            client_instance.get = AsyncMock(return_value=mock_response)
-            MockClient.return_value.__aenter__ = AsyncMock(return_value=client_instance)
-            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
-
+        with patch_session_manager(head_response=mock_response, get_response=mock_response):
             results = await pipeline._http_revalidation([flagged, unflagged])
 
         # Flagged should have been revalidated (confidence changed)

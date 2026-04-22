@@ -18,9 +18,43 @@ import logging
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
+from vxis.interaction.hands import AnalyzedResponse, SessionManager
 from vxis.plugins.base import BasePlugin, PluginMeta
 
 logger = logging.getLogger(__name__)
+
+
+async def _post_json(
+    base_url: str,
+    endpoint: str,
+    payload: dict[str, Any],
+    auth_headers: dict[str, str] | None,
+) -> AnalyzedResponse | None:
+    """POST a JSON payload via SessionManager — replaces raw httpx.AsyncClient.
+
+    Returns AnalyzedResponse on success, None on transport failure. Caller
+    inspects `resp.status` (int) and `resp.text` (str). The session is closed
+    after each call so we don't leak connections across the 5 economy tests.
+    """
+    headers = {"Content-Type": "application/json"}
+    if auth_headers:
+        headers.update(auth_headers)
+    mgr = SessionManager()
+    try:
+        session = await mgr.get_session(base_url)
+        return await session.request(
+            "POST",
+            f"{base_url}{endpoint}",
+            json_data=payload,
+            headers=headers,
+        )
+    except Exception:
+        return None
+    finally:
+        try:
+            await mgr.close_all()
+        except Exception:
+            pass
 
 
 class EconomyTesterPlugin(BasePlugin):
@@ -206,8 +240,6 @@ class EconomyTesterPlugin(BasePlugin):
         auth_headers: dict[str, str] | None,
     ) -> dict[str, Any]:
         """음수 금액 거래 테스트."""
-        import httpx
-
         payloads = [
             {"amount": -1, "quantity": -1, "item_id": item_id},
             {"amount": -9999, "item_id": item_id, "price": -100},
@@ -215,22 +247,15 @@ class EconomyTesterPlugin(BasePlugin):
         ]
 
         for payload in payloads:
-            try:
-                async with httpx.AsyncClient(verify=False, timeout=10) as client:
-                    headers = {"Content-Type": "application/json"}
-                    if auth_headers:
-                        headers.update(auth_headers)
-                    resp = await client.post(f"{base_url}{endpoint}", json=payload, headers=headers)
-                    if resp.status_code in (200, 201):
-                        return {
-                            "test": "negative_amount",
-                            "vulnerable": True,
-                            "payload": payload,
-                            "status": resp.status_code,
-                            "response_preview": resp.text[:200],
-                        }
-            except Exception:
-                pass
+            resp = await _post_json(base_url, endpoint, payload, auth_headers)
+            if resp is not None and resp.status in (200, 201):
+                return {
+                    "test": "negative_amount",
+                    "vulnerable": True,
+                    "payload": payload,
+                    "status": resp.status,
+                    "response_preview": resp.text[:200],
+                }
 
         return {"test": "negative_amount", "vulnerable": False}
 
@@ -242,8 +267,6 @@ class EconomyTesterPlugin(BasePlugin):
         auth_headers: dict[str, str] | None,
     ) -> dict[str, Any]:
         """정수 오버플로우 테스트."""
-        import httpx
-
         overflow_values = [
             2147483648,   # INT32_MAX + 1
             4294967296,   # UINT32_MAX + 1
@@ -252,31 +275,26 @@ class EconomyTesterPlugin(BasePlugin):
         ]
 
         for val in overflow_values:
-            try:
-                payload = {"amount": val, "quantity": val, "item_id": item_id}
-                async with httpx.AsyncClient(verify=False, timeout=10) as client:
-                    headers = {"Content-Type": "application/json"}
-                    if auth_headers:
-                        headers.update(auth_headers)
-                    resp = await client.post(f"{base_url}{endpoint}", json=payload, headers=headers)
-                    if resp.status_code in (200, 201):
-                        return {
-                            "test": "integer_overflow",
-                            "vulnerable": True,
-                            "overflow_value": val,
-                            "status": resp.status_code,
-                        }
-                    # 500 오류도 취약 — 서버가 크래시됨
-                    if resp.status_code == 500:
-                        return {
-                            "test": "integer_overflow",
-                            "vulnerable": True,
-                            "type": "server_crash",
-                            "overflow_value": val,
-                            "status": resp.status_code,
-                        }
-            except Exception:
-                pass
+            payload = {"amount": val, "quantity": val, "item_id": item_id}
+            resp = await _post_json(base_url, endpoint, payload, auth_headers)
+            if resp is None:
+                continue
+            if resp.status in (200, 201):
+                return {
+                    "test": "integer_overflow",
+                    "vulnerable": True,
+                    "overflow_value": val,
+                    "status": resp.status,
+                }
+            # 500 오류도 취약 — 서버가 크래시됨
+            if resp.status == 500:
+                return {
+                    "test": "integer_overflow",
+                    "vulnerable": True,
+                    "type": "server_crash",
+                    "overflow_value": val,
+                    "status": resp.status,
+                }
 
         return {"test": "integer_overflow", "vulnerable": False}
 
@@ -288,8 +306,6 @@ class EconomyTesterPlugin(BasePlugin):
         auth_headers: dict[str, str] | None,
     ) -> dict[str, Any]:
         """가격 변조 테스트 (클라이언트 가격을 서버가 신뢰하는지)."""
-        import httpx
-
         tampered_payloads = [
             {"item_id": item_ids[0], "price": 0, "total": 0},
             {"item_id": item_ids[0], "price": 1, "cost": 1},
@@ -297,23 +313,16 @@ class EconomyTesterPlugin(BasePlugin):
         ]
 
         for payload in tampered_payloads:
-            try:
-                async with httpx.AsyncClient(verify=False, timeout=10) as client:
-                    headers = {"Content-Type": "application/json"}
-                    if auth_headers:
-                        headers.update(auth_headers)
-                    resp = await client.post(f"{base_url}{endpoint}", json=payload, headers=headers)
-                    if resp.status_code in (200, 201):
-                        resp_text = resp.text.lower()
-                        if any(k in resp_text for k in ["success", "purchased", "item", "inventory"]):
-                            return {
-                                "test": "price_tampering",
-                                "vulnerable": True,
-                                "payload": payload,
-                                "status": resp.status_code,
-                            }
-            except Exception:
-                pass
+            resp = await _post_json(base_url, endpoint, payload, auth_headers)
+            if resp is not None and resp.status in (200, 201):
+                resp_text = resp.text.lower()
+                if any(k in resp_text for k in ["success", "purchased", "item", "inventory"]):
+                    return {
+                        "test": "price_tampering",
+                        "vulnerable": True,
+                        "payload": payload,
+                        "status": resp.status,
+                    }
 
         return {"test": "price_tampering", "vulnerable": False}
 
@@ -328,21 +337,12 @@ class EconomyTesterPlugin(BasePlugin):
 
         동일한 거래를 동시에 여러 번 전송하여 중복 처리 여부 확인.
         """
-        import httpx
-
         payload = {"item_id": item_id, "quantity": 1, "action": "transfer"}
         concurrent_count = 10
 
         async def send_request() -> int:
-            try:
-                async with httpx.AsyncClient(verify=False, timeout=10) as client:
-                    headers = {"Content-Type": "application/json"}
-                    if auth_headers:
-                        headers.update(auth_headers)
-                    resp = await client.post(f"{base_url}{endpoint}", json=payload, headers=headers)
-                    return resp.status_code
-            except Exception:
-                return 0
+            resp = await _post_json(base_url, endpoint, payload, auth_headers)
+            return resp.status if resp is not None else 0
 
         # 동시 요청 발송
         tasks = [send_request() for _ in range(concurrent_count)]
@@ -375,8 +375,6 @@ class EconomyTesterPlugin(BasePlugin):
         auth_headers: dict[str, str] | None,
     ) -> dict[str, Any]:
         """구매 한도 우회 테스트 (일일/총 구매 제한)."""
-        import httpx
-
         # 비정상적으로 많은 수량
         large_quantity_payloads = [
             {"item_id": item_id, "quantity": 99999},
@@ -384,20 +382,13 @@ class EconomyTesterPlugin(BasePlugin):
         ]
 
         for payload in large_quantity_payloads:
-            try:
-                async with httpx.AsyncClient(verify=False, timeout=10) as client:
-                    headers = {"Content-Type": "application/json"}
-                    if auth_headers:
-                        headers.update(auth_headers)
-                    resp = await client.post(f"{base_url}{endpoint}", json=payload, headers=headers)
-                    if resp.status_code in (200, 201):
-                        return {
-                            "test": "purchase_limit_bypass",
-                            "vulnerable": True,
-                            "payload": payload,
-                            "status": resp.status_code,
-                        }
-            except Exception:
-                pass
+            resp = await _post_json(base_url, endpoint, payload, auth_headers)
+            if resp is not None and resp.status in (200, 201):
+                return {
+                    "test": "purchase_limit_bypass",
+                    "vulnerable": True,
+                    "payload": payload,
+                    "status": resp.status,
+                }
 
         return {"test": "purchase_limit_bypass", "vulnerable": False}

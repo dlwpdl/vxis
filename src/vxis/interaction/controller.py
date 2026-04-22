@@ -47,6 +47,7 @@ from vxis.interaction.hands import (
     SessionManager,
     TargetSession,
 )
+from vxis.interaction.surface import Surface, Target, TargetKind
 from vxis.interaction.xray import (
     CapturedFlow,
     FlowAnalyzer,
@@ -302,6 +303,7 @@ class InteractionController:
         enable_eyes: bool = True,
         enable_xray: bool = True,
         proxy_port: int = 8080,
+        surface: Surface | None = None,
     ) -> None:
         self._target = target.rstrip("/")
         self._enable_eyes = enable_eyes and EYES_AVAILABLE
@@ -310,6 +312,12 @@ class InteractionController:
         # Hands (항상 활성화)
         self._session_mgr = SessionManager()
         self._session: TargetSession | None = None
+
+        # phase-B.6: Surface dispatch keystone. If the caller injected one
+        # (e.g. a test or a non-web Brain harness), reuse it; otherwise the
+        # WEB surface is built lazily in start() so the existing public
+        # ctor signature stays unchanged.
+        self._surface: Surface | None = surface
 
         # Eyes (선택적)
         self._browser: BrowserEngine | None = None
@@ -345,6 +353,20 @@ class InteractionController:
         self._session = await self._session_mgr.get_session(self._target, **session_kwargs)
         logger.info("Hands ready: %s (proxy: %s)", self._target, proxy_url)
 
+        # phase-B.6: ensure a Surface is bound before execute() runs. The
+        # WEB factory branch reuses self._session_mgr so cookies / CSRF /
+        # auth state stay coherent between surface-routed and direct calls.
+        if self._surface is None:
+            from vxis.interaction.factory import SurfaceFactory
+            self._surface = SurfaceFactory.build(
+                Target(kind=TargetKind.WEB, entry=self._target),
+                session_mgr=self._session_mgr,
+            )
+        try:
+            await self._surface.hands.start()
+        except Exception as exc:
+            logger.debug("Surface hands.start() skipped: %s", exc)
+
         # Eyes — Playwright 있으면 시작 (같은 프록시 사용)
         if self._enable_eyes and EYES_AVAILABLE:
             try:
@@ -370,7 +392,11 @@ class InteractionController:
 
     async def stop(self) -> None:
         # 각 컴포넌트 개별 정리 — 하나 실패해도 나머지 정리 보장
+        # phase-B.6: stop the surface first so kind-specific teardown runs;
+        # the surface's hands share self._session_mgr so we still close the
+        # SessionManager once at the end.
         for name, cleanup in [
+            ("Surface", lambda: self._surface.hands.stop() if self._surface else None),
             ("Eyes", lambda: self._browser.stop() if self._browser else None),
             ("X-Ray", lambda: self._mitm.stop() if self._mitm else None),
             ("Hands", lambda: self._session_mgr.close_all()),
@@ -458,18 +484,35 @@ class InteractionController:
         action: InteractionAction,
         mode: InteractionMode,
     ) -> InteractionResult:
-        """기본 HTTP 요청 실행."""
-        session = self._session
-        if not session:
+        """기본 HTTP 요청 실행.
+
+        phase-B.6: dispatched through `self._surface.hands.request(...)` so
+        kind-aware routing (web/desktop/mobile/game) flows through the same
+        keystone. The WEB surface shares our SessionManager — no double
+        request, cookies/CSRF stay coherent. The underlying AnalyzedResponse
+        is exposed via `WebHands.last_response` so the existing rich
+        InteractionResult (forms/links/error_patterns) keeps building.
+        """
+        if self._surface is None or not self._session:
             return InteractionResult(success=False, error="No session")
 
-        resp = await session.request(
-            method=action.method,
-            path=action.url,
+        envelope = await self._surface.hands.request(
+            action.method or "GET",
+            path=action.url or "/",
             data=action.data,
             json_data=action.json_data,
             headers=action.headers,
         )
+
+        resp = getattr(self._surface.hands, "last_response", None)
+        if resp is None:
+            # surface.hands.request failed (envelope.success == False) —
+            # surface non-web variants don't expose AnalyzedResponse
+            return InteractionResult(
+                success=envelope.success,
+                mode_used=mode,
+                error=envelope.error,
+            )
 
         # X-Ray에 플로우 기록
         self._record_flow(resp, str(action.data or action.json_data or ""))
