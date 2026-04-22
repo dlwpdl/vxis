@@ -51,6 +51,7 @@ from vxis.agent.tools.finding_tools import _get_chains as _get_chain_dicts
 from vxis.agent.tools.finding_tools import _get_findings as _get_finding_dicts
 from vxis.agent.tools.finding_tools import _reset_for_tests as _reset_finding_store
 from vxis.agent.tools.memory_tools import record_scan_result as _record_scan_memory
+from vxis.interaction.surface import TargetKind
 from vxis.pipeline.context import ScanContext
 
 logger = logging.getLogger(__name__)
@@ -194,7 +195,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         from vxis.scoring.engine import ScoringEngine
         from vxis.scoring.tracker import ScoreTracker
 
-        tracker = ScoreTracker(target_type="web")
+        tracker = ScoreTracker(target_type=ctx.kind.value)
 
         # Map finding types to vector IDs
         _type_to_vector = {
@@ -397,6 +398,7 @@ class ScanPipeline:
         app_context_en: str = "",
         app_context_ko: str = "",
         resume_from: str | None = None,  # Phase A: ignored, kept for signature compat
+        kind: TargetKind = TargetKind.WEB,
     ) -> ScanContext:
         """Run a Strix-parity single-loop scan against the target."""
         started = time.monotonic()
@@ -404,6 +406,7 @@ class ScanPipeline:
         # 1. Build context
         ctx = ScanContext(
             target=target,
+            kind=kind,
             app_context_en=app_context_en,
             app_context_ko=app_context_ko,
             scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from vxis.interaction.surface import TargetKind
 from vxis.models.finding import Finding
 from vxis.scoring.tracker import ScoreTracker
 
@@ -42,7 +43,7 @@ class ScanContext:
     """
 
     target: str
-    target_type: str = "web"  # "web" | "game" | "mobile"
+    kind: TargetKind = TargetKind.WEB  # web | desktop | mobile | game
     app_context_en: str = ""
     app_context_ko: str = ""
     scan_id: str = ""
@@ -112,9 +113,19 @@ class ScanContext:
     peak_context_bytes: int = 0
 
     def __post_init__(self) -> None:
-        """ScoreTracker를 target_type에 맞게 초기화한다."""
-        object.__setattr__(self, "score_tracker", ScoreTracker(target_type=self.target_type))
+        """ScoreTracker를 kind에 맞게 초기화한다."""
+        object.__setattr__(self, "score_tracker", ScoreTracker(target_type=self.kind.value))
         object.__setattr__(self, "_lock", threading.Lock())
+
+    @property
+    def target_type(self) -> str:
+        """Backward-compat shim — legacy callers expected `target_type: str`.
+
+        Surface ABC migration replaced the bare string with `kind: TargetKind`.
+        Existing `ctx.target_type` reads still resolve to the kind's string value,
+        so ScoreTracker / to_dict / report headers stay source-compatible.
+        """
+        return self.kind.value
 
     # findings 무제한 증가 방지 — 메모리 상한
     MAX_FINDINGS: int = 500

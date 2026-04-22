@@ -337,6 +337,12 @@ def scan(
         help="Skip the interactive approval gate and auto-approve injection. "
              "ONLY use on targets you own / are explicitly authorized to test.",
     ),
+    kind: str = typer.Option(
+        "web",
+        "--kind",
+        help="Target surface: web | desktop | mobile | game (phase-A: web only; "
+             "desktop/mobile/game land in phase-B+).",
+    ),
 ) -> None:
     """Run a Brain-First security scan against the target.
 
@@ -386,9 +392,19 @@ def scan(
 
     _print_banner()
 
+    from vxis.interaction.surface import TargetKind
     from vxis.registry import VERSION, WEB_PHASES
     from vxis.cli.preflight import run_preflight
     from vxis.cli.scan_display import ScanLiveDisplay
+
+    try:
+        _kind = TargetKind(kind.lower())
+    except ValueError as exc:
+        err_console.print(
+            f"[bold red]Invalid --kind '{kind}'. Use one of: "
+            f"{', '.join(k.value for k in TargetKind)}[/bold red]"
+        )
+        raise typer.Exit(code=2) from exc
 
     # ── Pre-flight checks ──────────────────────────────────
     console.print("[dim]Running pre-flight checks...[/dim]")
@@ -599,7 +615,7 @@ def scan(
 
         refresh_task = _aio.create_task(_refresh_loop())
         try:
-            ctx = await pipeline.run(target=_target, resume_from=resume)
+            ctx = await pipeline.run(target=_target, resume_from=resume, kind=_kind)
         finally:
             refresh_task.cancel()
             try:
