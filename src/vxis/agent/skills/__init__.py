@@ -41,6 +41,20 @@ try:
 except ImportError:  # pragma: no cover — desktop skill optional today
     test_electron_misconfig = None  # type: ignore[assignment]
 
+try:
+    from vxis.agent.skills.desktop.test_signature_audit import (
+        execute as test_signature_audit,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_signature_audit = None  # type: ignore[assignment]
+
+try:
+    from vxis.agent.skills.desktop.test_entitlement_audit import (
+        execute as test_entitlement_audit,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_entitlement_audit = None  # type: ignore[assignment]
+
 SKILL_REGISTRY: dict[str, dict] = {
     "enumerate_endpoints": {
         "fn": enumerate_endpoints,
@@ -143,4 +157,25 @@ if test_electron_misconfig is not None:
             "target_url (required — path to .app bundle or directory containing "
             "Electron app)"
         ),
+    }
+
+if test_signature_audit is not None:
+    SKILL_REGISTRY["test_signature_audit"] = {
+        "fn": test_signature_audit,
+        "description": (
+            "Desktop-only: audit code signature (signed/ad-hoc/hardened runtime). "
+            "Use when target.kind == desktop. Quick recon, runs codesign(1)."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
+    }
+
+if test_entitlement_audit is not None:
+    SKILL_REGISTRY["test_entitlement_audit"] = {
+        "fn": test_entitlement_audit,
+        "description": (
+            "Desktop-only: audit dangerous macOS entitlements "
+            "(library validation, DYLD env, JIT). Use when "
+            "target.kind == desktop and the app is signed."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
     }

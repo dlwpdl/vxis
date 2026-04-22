@@ -272,6 +272,8 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         _DESKTOP_SKILL_TO_VECTORS = {
             "test_local_storage_secrets": ["DESK-LSS-001"],
             "test_electron_misconfig": ["DESK-ELC-001", "DESK-ELC-002", "DESK-ELC-003"],
+            "test_signature_audit": ["DESK-SIG-001", "DESK-SIG-002", "DESK-SIG-003", "DESK-SIG-004"],
+            "test_entitlement_audit": ["DESK-ENT-001", "DESK-ENT-002", "DESK-ENT-003"],
         }
         _kind_value = ctx.kind.value if hasattr(ctx.kind, "value") else str(ctx.kind)
         _skill_to_vectors = (

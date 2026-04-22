@@ -1332,6 +1332,49 @@ DESKTOP_VECTORS: tuple[AttackVector, ...] = (
         target_types=("desktop",), phase="Phase 4", max_depth=2,
         owasp_id="A08:2021",
     ),
+    AttackVector(
+        id="DESK-SIG-002", category="misconfiguration",
+        name_en="Unsigned binary",
+        name_ko="서명 안 된 바이너리",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A08:2021",
+    ),
+    AttackVector(
+        id="DESK-SIG-003", category="misconfiguration",
+        name_en="Ad-hoc signed (no Developer ID)",
+        name_ko="Ad-hoc 서명 (Developer ID 없음)",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A08:2021",
+    ),
+    AttackVector(
+        id="DESK-SIG-004", category="misconfiguration",
+        name_en="Hardened Runtime disabled",
+        name_ko="Hardened Runtime 비활성화",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A08:2021",
+    ),
+    # ── Entitlement Audit (DESK-ENT-*) — phase-J slice 3 ──────────────────────
+    AttackVector(
+        id="DESK-ENT-001", category="misconfiguration",
+        name_en="Disabled Library Validation",
+        name_ko="라이브러리 검증 비활성화",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-ENT-002", category="misconfiguration",
+        name_en="Allows DYLD Environment Variables",
+        name_ko="DYLD 환경 변수 허용",
+        target_types=("desktop",), phase="Phase 4", max_depth=4,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-ENT-003", category="misconfiguration",
+        name_en="Allow JIT or Unsigned Executable Memory",
+        name_ko="JIT/서명되지 않은 실행 메모리 허용",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A05:2021",
+    ),
 )
 
 
