@@ -47,6 +47,7 @@ from enum import Enum
 from typing import Any
 
 from vxis.evidence.schema import Evidence, Severity
+from vxis.interaction.surface import TargetKind
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,9 @@ class OSILayer(str, Enum):
     SUPPLY_CHAIN = "supply_chain" # 의존성, CI/CD
     HUMAN = "human"               # 소셜 엔지니어링, 피싱
     DATA = "data"                 # DB, 파일, 시크릿
+    DESKTOP = "desktop"           # phase-G: native desktop apps (Win/macOS/Linux)
+    MOBILE = "mobile"             # phase-G: iOS/Android apps (stubs in phase-H)
+    GAME = "game"                 # phase-G: game protocols (stubs in phase-H)
 
 
 class AttackCategory(str, Enum):
@@ -119,6 +123,16 @@ _AGENT_LAYER_MAP: dict[str, OSILayer] = {
     "email_security": OSILayer.APPLICATION,
     "subdomain_takeover": OSILayer.NETWORK,
     "secrets_lifecycle": OSILayer.DATA,
+    # phase-G: desktop attack skills (impl phase-C/F). Listed individually so
+    # explicit mapping wins over the prefix fallback in _tag_layer.
+    "desktop_local_storage_secrets": OSILayer.DESKTOP,
+    "desktop_electron_misconfig":    OSILayer.DESKTOP,
+    "desktop_ipc_injection":         OSILayer.DESKTOP,
+    "desktop_update_mitm":           OSILayer.DESKTOP,
+    "desktop_deeplink_abuse":        OSILayer.DESKTOP,
+    "desktop_binary_protections":    OSILayer.DESKTOP,
+    "desktop_privilege_escalation":  OSILayer.DESKTOP,
+    "desktop_dependency_confusion":  OSILayer.DESKTOP,
 }
 
 # 키워드 → 공격 카테고리 매핑
@@ -132,6 +146,13 @@ _KEYWORD_CATEGORY_MAP: dict[str, AttackCategory] = {
     "open redirect": AttackCategory.INITIAL_ACCESS,
     "default credential": AttackCategory.INITIAL_ACCESS,
     "brute force": AttackCategory.INITIAL_ACCESS,
+    # phase-G: desktop-specific initial-access vectors. Named pipes / COM /
+    # deeplinks accepting unauthenticated payloads are the desktop-equivalent
+    # of an unauthenticated HTTP endpoint — they're how the foothold lands.
+    "initial access": AttackCategory.INITIAL_ACCESS,
+    "named pipe": AttackCategory.INITIAL_ACCESS,
+    "ipc injection": AttackCategory.INITIAL_ACCESS,
+    "deeplink": AttackCategory.INITIAL_ACCESS,
     # Credential Harvest
     ".env": AttackCategory.CREDENTIAL_HARVEST,
     "api key": AttackCategory.CREDENTIAL_HARVEST,
@@ -296,6 +317,33 @@ KNOWN_PATTERNS: list[ConnectionPattern] = [
         description="Wi-Fi 취약점 → 내부 네트워크 진입 → AD 장악",
         kill_chain_stage="Initial Access → Lateral Movement → Domain Dominance",
     ),
+    # ── phase-G: Desktop 자격증명 → 클라우드 데이터 탈취 ──
+    # 데스크톱 바이너리(.asar / .NET strings / Info.plist) 에서 노출된 AWS·
+    # Azure 키가 동일 조직의 클라우드 자산을 잠금해제하는 시나리오. 개별로는
+    # HIGH/MEDIUM 이지만 cross-surface 체인은 CRITICAL.
+    ConnectionPattern(
+        name="desktop_creds_to_cloud",
+        source_layer=OSILayer.DESKTOP,
+        target_layer=OSILayer.CLOUD,
+        source_categories=[AttackCategory.CREDENTIAL_HARVEST],
+        target_categories=[AttackCategory.DATA_EXFILTRATION],
+        chain_severity=Severity.CRITICAL,
+        description="데스크톱 바이너리 자격증명 → 클라우드 자산 데이터 탈취",
+        kill_chain_stage="Credential Access → Collection → Exfiltration",
+    ),
+    # ── phase-G: Desktop IPC 초기 진입 → 애플리케이션 권한 상승 ──
+    # 명명된 파이프 / COM / RPC 가 인증 없이 페이로드를 받아들이면 동일
+    # 호스트의 다른 프로세스로 lateral / 권한 상승이 따라온다.
+    ConnectionPattern(
+        name="desktop_ipc_to_lateral",
+        source_layer=OSILayer.DESKTOP,
+        target_layer=OSILayer.APPLICATION,
+        source_categories=[AttackCategory.INITIAL_ACCESS],
+        target_categories=[AttackCategory.PRIVILEGE_ESCALATION, AttackCategory.LATERAL_MOVEMENT],
+        chain_severity=Severity.CRITICAL,
+        description="데스크톱 IPC 초기 진입(파이프/COM) → 동일 호스트 권한 상승·lateral",
+        kill_chain_stage="Initial Access → Lateral Movement → Privilege Escalation",
+    ),
 ]
 
 
@@ -420,6 +468,21 @@ class CrossProtocolSynthesizer:
                         individual = f"{src_f.severity.value} + {tgt_f.severity.value}"
                         escalated = pattern.chain_severity
 
+                        # phase-G: surface-boundary marker. When the two
+                        # findings come from different surface kinds (e.g.
+                        # desktop credential → cloud bucket) annotate so
+                        # analysts spot inherently cross-platform attacks at
+                        # a glance — these are the rarest / highest-impact
+                        # discoveries.
+                        src_surf = getattr(src_f, "surface", TargetKind.WEB)
+                        tgt_surf = getattr(tgt_f, "surface", TargetKind.WEB)
+                        boundary_marker = ""
+                        if src_surf != tgt_surf:
+                            boundary_marker = (
+                                f"\n\n[crosses surface boundary: "
+                                f"{src_surf.value} → {tgt_surf.value}]"
+                            )
+
                         chain = SynthesizedChain(
                             id=f"chain_{pattern.name}_{src_f.id[:8]}_{tgt_f.id[:8]}",
                             title=f"{pattern.description}",
@@ -432,6 +495,7 @@ class CrossProtocolSynthesizer:
                                 f"개별 평가: {individual}\n"
                                 f"체인 평가: {escalated.value.upper()}\n\n"
                                 f"Kill Chain: {pattern.kill_chain_stage}"
+                                f"{boundary_marker}"
                             ),
                             severity=escalated,
                             kill_chain_stages=pattern.kill_chain_stage.split(" → "),
@@ -560,8 +624,29 @@ JSON으로 응답:
     # ── Tagging ─────────────────────────────────────────────────
 
     def _tag_layer(self, evidence: Evidence) -> OSILayer:
-        """Finding의 에이전트 ID로 OSI 레이어를 결정한다."""
-        return _AGENT_LAYER_MAP.get(evidence.agent_id, OSILayer.APPLICATION)
+        """OSI 레이어 결정 — surface (phase-G) > agent_id explicit map > prefix.
+
+        Resolution order:
+          1. evidence.surface == DESKTOP/MOBILE/GAME → matching OSILayer
+             (so custom skills not in _AGENT_LAYER_MAP are still classified).
+          2. agent_id in _AGENT_LAYER_MAP → explicit mapping wins.
+          3. agent_id startswith "desktop_" → DESKTOP fallback.
+          4. default → APPLICATION (web bias preserved for legacy data).
+        """
+        surface_to_layer = {
+            TargetKind.DESKTOP: OSILayer.DESKTOP,
+            TargetKind.MOBILE: OSILayer.MOBILE,
+            TargetKind.GAME: OSILayer.GAME,
+        }
+        explicit = _AGENT_LAYER_MAP.get(evidence.agent_id)
+        if explicit is not None:
+            return explicit
+        surf = getattr(evidence, "surface", TargetKind.WEB)
+        if surf in surface_to_layer:
+            return surface_to_layer[surf]
+        if evidence.agent_id.startswith("desktop_"):
+            return OSILayer.DESKTOP
+        return OSILayer.APPLICATION
 
     def _tag_categories(self, evidence: Evidence) -> list[AttackCategory]:
         """Finding의 제목/설명에서 공격 카테고리를 추출한다."""

@@ -57,12 +57,23 @@ from vxis.pipeline.context import ScanContext
 logger = logging.getLogger(__name__)
 
 
-def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str) -> Any:
+def _build_finding_from_dict(
+    d: dict[str, Any],
+    scan_id: str,
+    target: str,
+    *,
+    kind: TargetKind = TargetKind.WEB,
+) -> Any:
     """Convert a finding_tools dict into a Finding object for the report.
 
     Uses minimal valid field set; richer structure (MITRE, bilingual PoC) is
     filled with safe defaults because Phase A's ScanAgentLoop doesn't yet
     emit them. Phase B will enrich.
+
+    `kind` (phase-G) tags every Evidence with the originating Surface so
+    cross_protocol synthesis can flag chains that span >1 surface kind.
+    Defaults to WEB so legacy callers and single-target web scans behave
+    identically to the pre-phase-G build.
     """
     from vxis.evidence.schema import Severity
     from vxis.models.finding import CVSSVector, Evidence, Finding
@@ -93,6 +104,7 @@ def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str
             evidence_type="log",
             title="Brain-reported evidence",
             content=evidence_text,
+            surface=kind,
         )
     ]
 
@@ -127,6 +139,11 @@ def _finding_dict_to_finding_object(d: dict[str, Any], scan_id: str, target: str
         remediation=bilingual_remediation,
         references=[],
     )
+
+
+# Back-compat alias — older callers reference the legacy name. New code should
+# import _build_finding_from_dict.
+_finding_dict_to_finding_object = _build_finding_from_dict
 
 
 # Sandbox command fingerprint → vector IDs. Credits VC (Vector Coverage) when
@@ -490,8 +507,8 @@ class ScanPipeline:
         finding_dicts = _get_finding_dicts()
         for d in finding_dicts:
             try:
-                f = _finding_dict_to_finding_object(
-                    d, scan_id=ctx.scan_id, target=ctx.target
+                f = _build_finding_from_dict(
+                    d, scan_id=ctx.scan_id, target=ctx.target, kind=ctx.kind
                 )
                 ctx.findings.append(f)
                 self._emit(
