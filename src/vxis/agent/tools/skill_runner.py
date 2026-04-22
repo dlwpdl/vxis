@@ -1,7 +1,15 @@
-"""Skill runner tool — Brain calls run_skill to execute attack capabilities.
+"""Skill runner tool — reusable attack template wrapper.
 
-One run_skill call = dozens of payloads tested = one Brain decision.
-Brain decides WHAT to test WHERE, the skill handles HOW.
+run_skill is an OPTIONAL convenience layer over frequently-reused attack
+patterns (SQLi sweep, IDOR probe, sensitive files enum, etc.). Brain's
+PRIMARY attack surface is shell_exec + python_exec inside the vxis-sandbox
+(sqlmap, nuclei, ffuf, nikto, custom Python PoCs — unlimited creativity).
+
+Use run_skill when evidence points to a pattern already coded as a skill
+and the shortcut beats hand-rolling. Use shell_exec / python_exec when the
+target needs bespoke technique, chain pivot, or post-exploitation beyond
+any pre-built skill. Do NOT default to run_skill because it's shorter —
+default to evidence.
 """
 from __future__ import annotations
 import json
@@ -38,17 +46,20 @@ def _reset_cache_for_tests() -> None:
 class RunSkillTool:
     name = "run_skill"
     description = (
-        "Execute a pre-built attack skill. Each skill runs a complete "
-        "attack test (dozens of payloads) in one call. Brain decides "
-        "WHICH skill to run on WHICH endpoint — the skill handles HOW.\n\n"
-        "Available skills:\n"
+        "OPTIONAL convenience wrapper for reusable attack templates. "
+        "PRIMARY attack tools are shell_exec + python_exec (vxis-sandbox: "
+        "sqlmap, nuclei, ffuf, nikto, gobuster, wapiti, curl, httpx, nmap, "
+        "plus custom Python). Reach for run_skill only when evidence points "
+        "to a pattern already coded below; otherwise pick the sandbox tool "
+        "that fits the hypothesis.\n\n"
+        "Reusable skill templates (shortcuts for recurring patterns):\n"
         "  enumerate_endpoints — scan 120+ paths, return all accessible endpoints\n"
-        "  test_injection — SQLi/XSS/SSTI/CMDi (40+ payloads) on URL+param\n"
+        "  test_injection — SQLi/XSS/SSTI/CMDi rotation on URL+param\n"
         "  attempt_auth — default creds + SQLi bypass + password reset\n"
         "  post_auth_enum — with token, test all authenticated endpoints\n"
         "  test_sensitive_files — scan 60+ sensitive file/config paths\n"
         "  test_idor — iterate IDs on an endpoint, detect access control issues\n"
-        "  test_xss — XSS (reflected/stored/DOM) with 20+ payloads on URL+param\n"
+        "  test_xss — XSS (reflected/stored/DOM) rotation on URL+param\n"
         "  test_auth_deep — JWT alg:none, RS256->HS256, session fixation, reset poisoning\n"
         "  test_csrf — CSRF token validation + SameSite cookie checks\n"
         "  test_ssrf — SSRF: internal IPs, cloud metadata, file://, DNS rebinding\n"
@@ -57,6 +68,8 @@ class RunSkillTool:
         "  test_business_logic — negative qty, price manipulation, state skip, race conditions\n"
         "  test_crypto — TLS versions, hardcoded secrets in JS, weak hashes\n"
         "  test_infra — exposed .git/.env, cloud metadata, Firebase, subdomains\n"
+        "\nIf the evidence demands a technique outside these templates, go to "
+        "shell_exec / python_exec — do not bend the finding to fit a skill."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
