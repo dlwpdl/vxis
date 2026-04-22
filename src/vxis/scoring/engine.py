@@ -333,25 +333,34 @@ class ScoringEngine:
         )
 
     def _calc_chain_intelligence(self, tracker: ScoreTracker) -> DimensionScore:
-        """Dimension 3: Chain Intelligence (max 150pts).
+        """Dimension 3: Chain Intelligence (max 150pts) — continuous gradient.
 
-        No chains: 0pts
-        1-2 step chains: 50pts  (max depth across all chains)
-        3-4 step chains: 100pts
-        5+ step full kill chain: 150pts
+        depth_points = min(max_depth * 25, 125)            # 1→25, 5+→125
+        count_bonus  = min((chain_count - 1) * 10, 15)     # 2→+10, 3+→+15
+        crown_bonus  = 25 if any step.level >= 3 else 0    # critical impact
+        score        = min(sum, 150)
+
+        기존 step-function (0/50/100/150) 의 단점:
+          - chain_count 무시 → 여러 체인 구축 무보상
+          - 체인 임팩트 무시 → recon-only 체인과 RCE 체인이 동점
+          - 깊이 1-2 gradient 부재 → 2 step 만 채우면 최대 보상 착각
+
+        경계 보존: 5-depth + crown + 2+chains = 125+15+25 = 165 → clamp 150.
+        See: wiki/sources/incidents/2026_04_20_brain_prompt_prison.md
         """
         max_score = self.MAX_SCORES["chain_intelligence"]
         max_depth = tracker.max_chain_depth
         chain_count = len(tracker.attack_chains)
 
-        if max_depth == 0:
-            score = 0.0
-        elif max_depth <= 2:
-            score = 50.0
-        elif max_depth <= 4:
-            score = 100.0
-        else:
-            score = 150.0
+        depth_points = min(max_depth * 25, 125) if max_depth > 0 else 0
+        count_bonus = min((chain_count - 1) * 10, 15) if chain_count > 1 else 0
+        has_crown = any(
+            step.level >= 3
+            for chain in tracker.attack_chains
+            for step in chain.steps
+        )
+        crown_bonus = 25 if has_crown else 0
+        score = float(min(depth_points + count_bonus + crown_bonus, max_score))
 
         return DimensionScore(
             name="Chain Intelligence",
@@ -362,6 +371,9 @@ class ScoringEngine:
             details={
                 "chain_count": chain_count,
                 "max_chain_depth": max_depth,
+                "depth_points": depth_points,
+                "count_bonus": count_bonus,
+                "crown_bonus": crown_bonus,
                 "chains": [
                     {
                         "chain_id": c.chain_id,
