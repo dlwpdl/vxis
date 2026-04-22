@@ -140,27 +140,115 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
-        _type_to_vector = {
+        # Map finding types to valid vector IDs from the VXIS registry.
+        # All IDs must exist in vxis.scoring.vectors.WEB_VECTORS.
+        _type_to_vector: dict[str, str] = {
+            # Injection — SQL
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "blind_sqli": "WEB-SQLI-002",
+            "boolean_sqli": "WEB-SQLI-002",
+            "time_based_sqli": "WEB-SQLI-003",
+            "error_based_sqli": "WEB-SQLI-004",
+            "second_order_sqli": "WEB-SQLI-006",
+            # Injection — NoSQL / Other
+            "nosql_injection": "WEB-NOSQL-001",
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "os_command_injection": "WEB-CMDI-001",
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            "ssti": "WEB-SSTI-001",
+            "template_injection": "WEB-SSTI-001",
+            "xxe": "WEB-XXE-001",
+            "xml_external_entity": "WEB-XXE-001",
+            "deserialization": "WEB-DESER-001",
+            "insecure_deserialization": "WEB-DESER-001",
+            "rce": "WEB-DESER-001",
+            "remote_code_execution": "WEB-DESER-001",
+            "file_upload": "WEB-UPLOAD-001",
+            "unrestricted_file_upload": "WEB-UPLOAD-001",
+            "prototype_pollution": "WEB-INJECT-022",
+            "cache_poisoning": "WEB-INJECT-024",
+            "web_cache_deception": "WEB-INJECT-024",
+            "llm_prompt_injection": "WEB-INJECT-021",
+            "prompt_injection": "WEB-INJECT-021",
+            # XSS
+            "xss": "WEB-XSS-001",
+            "xss_reflected": "WEB-XSS-001",
+            "reflected_xss": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "stored_xss": "WEB-XSS-002",
+            "dom_xss": "WEB-XSS-003",
+            "xss_dom": "WEB-XSS-003",
+            # SSRF
+            "ssrf": "WEB-SSRF-001",
+            "blind_ssrf": "WEB-SSRF-002",
+            "server_side_request_forgery": "WEB-SSRF-001",
+            # Authentication & Session
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "brute_force": "WEB-AUTH-001",
+            "default_credentials": "WEB-AUTH-002",
+            "jwt_confusion": "WEB-AUTH-003",
+            "jwt_algorithm_confusion": "WEB-AUTH-003",
+            "jwt_none_algorithm": "WEB-AUTH-004",
+            "session_fixation": "WEB-AUTH-005",
+            "session_hijacking": "WEB-AUTH-006",
+            "oauth_bypass": "WEB-AUTH-007",
+            "password_reset_poisoning": "WEB-AUTH-008",
+            "magic_link_bypass": "WEB-AUTH-010",
+            "saml_bypass": "WEB-AUTH-011",
+            "csrf": "WEB-CSRF-001",
+            "cross_site_request_forgery": "WEB-CSRF-001",
+            # Access Control
+            "idor": "WEB-AC-001",
+            "insecure_direct_object_reference": "WEB-AC-001",
+            "broken_access_control": "WEB-AC-002",
+            "privilege_escalation": "WEB-AC-003",
+            "vertical_privilege_escalation": "WEB-AC-003",
+            "horizontal_privilege_escalation": "WEB-AC-002",
+            "path_traversal": "WEB-AC-004",
+            "directory_traversal": "WEB-AC-004",
+            "forced_browsing": "WEB-AC-005",
+            # Misconfiguration / Information Disclosure
+            "misconfiguration": "WEB-MISCONF-001",
+            "debug_endpoint": "WEB-MISCONF-001",
+            "default_config": "WEB-MISCONF-002",
+            "information_disclosure": "WEB-MISCONF-003",
+            "error_oracle": "WEB-MISCONF-003",
+            "stack_trace_disclosure": "WEB-MISCONF-003",
+            "security_headers": "WEB-MISCONF-004",
+            "missing_security_headers": "WEB-MISCONF-004",
+            "cors_misconfiguration": "WEB-MISCONF-005",
+            "open_redirect": "WEB-MISCONF-006",
+            # Crypto
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "weak_tls": "WEB-CRYPTO-001",
+            "weak_hashing": "WEB-CRYPTO-002",
+            "hardcoded_secrets": "WEB-CRYPTO-003",
+            "hardcoded_api_key": "WEB-CRYPTO-003",
+            "insecure_randomness": "WEB-CRYPTO-004",
+            # API
+            "mass_assignment": "WEB-API-001",
+            "rate_limiting_bypass": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "graphql_batching": "WEB-API-004",
+            "http_verb_tampering": "WEB-API-005",
+            "grpc_reflection": "WEB-API-006",
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # Business Logic
+            "business_logic": "WEB-BIZ-001",
+            "negative_value_injection": "WEB-BIZ-001",
+            "state_transition_skip": "WEB-BIZ-002",
+            "payment_race_condition": "WEB-BIZ-003",
+            "transaction_replay": "WEB-BIZ-004",
+            # Misc
+            "race_condition": "WEB-RACE-001",
+            "websocket_injection": "WEB-WSS-001",
+            "subdomain_takeover": "WEB-INFRA-001",
+            "s3_bucket_public": "WEB-INFRA-003",
+            "git_repo_exposed": "WEB-INFRA-005",
+            "supply_chain": "WEB-SUPPLY-001",
         }
 
         # Severity → exploitation level
@@ -177,7 +265,9 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
-            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            # Unknown types fall back to WEB-MISCONF-001 (a real registry ID)
+            # rather than generating a fabricated ID that gets silently discarded.
+            vector_id = _type_to_vector.get(ftype, "WEB-MISCONF-001")
             level = _sev_to_level.get(sev, 0)
 
             tracker.record_vector_attempt(vector_id)
@@ -236,7 +326,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         return vxis_score.total, vxis_score.grade
 
-    except Exception as e:
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
@@ -462,7 +552,7 @@ class ScanPipeline:
         # summary line for operators.
         try:
             from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            mitre = coverage_report(_get_finding_dicts())
             logger.info(
                 "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
                 len(mitre["techniques_covered"]),
