@@ -202,6 +202,52 @@ def _sandbox_cmd_to_vectors(cmd: str) -> list[str]:
     return hits
 
 
+# Module-level mappings — lifted from `_compute_vxis_score()` so tests can pin
+# the symmetry between dispatchable skills (`scan_loop._DESKTOP_SKILLS`) and
+# vector denominator entries. Inline definitions hid a regression where new
+# skills added to the mapping never made it into the dispatch frozenset,
+# producing a permanent VC penalty (commit history: see Phase-F → smoke C1).
+_WEB_SKILL_TO_VECTORS: dict[str, list[str]] = {
+    "enumerate_endpoints": ["WEB-INFO-001", "WEB-INFO-002"],
+    "test_sensitive_files": ["WEB-INFO-001"],
+    "test_infra": ["WEB-MISC-001", "WEB-INFO-001"],
+    "attempt_auth": ["WEB-AUTH-001"],
+    "post_auth_enum": ["WEB-BAC-001"],
+    "test_injection": ["WEB-SQLI-001", "WEB-CMDI-001"],
+    "test_xss": ["WEB-XSS-001", "WEB-XSS-002"],
+    "test_ssrf": ["WEB-SSRF-001"],
+    "test_idor": ["WEB-IDOR-001"],
+    "test_auth_deep": ["WEB-JWT-001", "WEB-AUTH-001"],
+    "test_csrf": ["WEB-CSRF-001"],
+    "test_misconfig": ["WEB-MISC-001"],
+    "test_api_security": ["WEB-BAC-001", "WEB-IDOR-001"],
+    "test_business_logic": ["WEB-LOGIC-001"],
+    "test_crypto": ["WEB-CRYPTO-001"],
+}
+
+_DESKTOP_SKILL_TO_VECTORS: dict[str, list[str]] = {
+    "test_local_storage_secrets": ["DESK-LSS-001"],
+    "test_electron_misconfig": ["DESK-ELC-001", "DESK-ELC-002", "DESK-ELC-003"],
+    "test_signature_audit": [
+        "DESK-RECON-001",
+        "DESK-SIG-001",
+        "DESK-SIG-002",
+        "DESK-SIG-003",
+        "DESK-SIG-004",
+    ],
+    "test_entitlement_audit": [
+        "DESK-RECON-001",
+        "DESK-ENT-001",
+        "DESK-ENT-002",
+        "DESK-ENT-003",
+    ],
+    "test_dylib_hijack": ["DESK-DYL-001", "DESK-DYL-002", "DESK-DYL-003"],
+    "test_deeplink_abuse": ["DESK-DLK-001", "DESK-DLK-002", "DESK-DLK-003"],
+    "test_ipc_injection": ["DESK-IPC-001"],
+    "test_binary_protections": ["DESK-PIE-001", "DESK-PIE-002", "DESK-PIE-003"],
+}
+
+
 def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
     """Compute VXIS score using the full 5-dimension ScoringEngine.
 
@@ -248,50 +294,8 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         # Record vectors from ALL executed skills (including clean results)
         # so that vector_coverage reflects attempted vectors, not just findings.
-        _WEB_SKILL_TO_VECTORS = {
-            "enumerate_endpoints": ["WEB-INFO-001", "WEB-INFO-002"],
-            "test_sensitive_files": ["WEB-INFO-001"],
-            "test_infra": ["WEB-MISC-001", "WEB-INFO-001"],
-            "attempt_auth": ["WEB-AUTH-001"],
-            "post_auth_enum": ["WEB-BAC-001"],
-            "test_injection": ["WEB-SQLI-001", "WEB-CMDI-001"],
-            "test_xss": ["WEB-XSS-001", "WEB-XSS-002"],
-            "test_ssrf": ["WEB-SSRF-001"],
-            "test_idor": ["WEB-IDOR-001"],
-            "test_auth_deep": ["WEB-JWT-001", "WEB-AUTH-001"],
-            "test_csrf": ["WEB-CSRF-001"],
-            "test_misconfig": ["WEB-MISC-001"],
-            "test_api_security": ["WEB-BAC-001", "WEB-IDOR-001"],
-            "test_business_logic": ["WEB-LOGIC-001"],
-            "test_crypto": ["WEB-CRYPTO-001"],
-        }
-        # phase-J slice — desktop mapping. signature_audit + entitlement_audit
-        # additionally credit DESK-RECON-001 (binary recon) since both skills
-        # perform full Mach-O / plist inspection. signature_audit also covers
-        # the umbrella DESK-SIG-001 (signature missing/invalid). Without these
-        # mappings, both vectors stayed permanently un-attempted on every
-        # desktop scan — pure coverage gap, no skill ever satisfied them.
-        _DESKTOP_SKILL_TO_VECTORS = {
-            "test_local_storage_secrets": ["DESK-LSS-001"],
-            "test_electron_misconfig": ["DESK-ELC-001", "DESK-ELC-002", "DESK-ELC-003"],
-            "test_signature_audit": [
-                "DESK-RECON-001",
-                "DESK-SIG-001",
-                "DESK-SIG-002",
-                "DESK-SIG-003",
-                "DESK-SIG-004",
-            ],
-            "test_entitlement_audit": [
-                "DESK-RECON-001",
-                "DESK-ENT-001",
-                "DESK-ENT-002",
-                "DESK-ENT-003",
-            ],
-            "test_dylib_hijack": ["DESK-DYL-001", "DESK-DYL-002", "DESK-DYL-003"],
-            "test_deeplink_abuse": ["DESK-DLK-001", "DESK-DLK-002", "DESK-DLK-003"],
-            "test_ipc_injection": ["DESK-IPC-001"],
-            "test_binary_protections": ["DESK-PIE-001", "DESK-PIE-002", "DESK-PIE-003"],
-        }
+        # Mappings live at module scope (top of file) so the symmetry test
+        # can pin them against `scan_loop._DESKTOP_SKILLS`.
         _kind_value = ctx.kind.value if hasattr(ctx.kind, "value") else str(ctx.kind)
         _skill_to_vectors = (
             _DESKTOP_SKILL_TO_VECTORS if _kind_value == "desktop" else _WEB_SKILL_TO_VECTORS

@@ -169,6 +169,28 @@ def test_desktop_skills_set_is_frozen() -> None:
     assert "test_infra" not in _DESKTOP_SKILLS
 
 
+def test_desktop_skills_matches_vector_mapping() -> None:
+    """Symmetry pin: every key in `_DESKTOP_SKILL_TO_VECTORS` MUST be in
+    `_DESKTOP_SKILLS` — otherwise new skills add vectors to the denominator
+    (`total_vectors` in VC scoring) without being dispatchable, producing
+    a permanent Vector Coverage penalty.
+
+    Regression: Phase-F commits 3ff0e57 (test_ipc_injection) + 89235e8
+    (test_binary_protections) added 4 new DESK-* vectors to the mapping
+    but left `_DESKTOP_SKILLS` at 6 entries — smoke rerun showed VC
+    dropped 120→98 (-18%) on both Calculator and ProtoPie because the
+    loop's surface guard rejected every Brain dispatch of the new skills.
+    """
+    from vxis.pipeline.scan_pipeline_v2 import _DESKTOP_SKILL_TO_VECTORS
+
+    missing = set(_DESKTOP_SKILL_TO_VECTORS) - _DESKTOP_SKILLS
+    assert missing == set(), (
+        f"skills mapped to desktop vectors but not in _DESKTOP_SKILLS: "
+        f"{sorted(missing)} — this guarantees VC penalty (vectors in "
+        f"denominator but never attempted). Add to scan_loop.py:134."
+    )
+
+
 # ─── Phase Q2: dedup discriminator ────────────────────────────────────
 # Without it, 18 dylib_hijack findings on the same .app bundle dedup to a
 # single VXIS-NNNN. The promotion block must append the per-finding key

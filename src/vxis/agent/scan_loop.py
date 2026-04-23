@@ -138,6 +138,8 @@ _DESKTOP_SKILLS: frozenset[str] = frozenset({
     "test_entitlement_audit",
     "test_dylib_hijack",
     "test_deeplink_abuse",
+    "test_ipc_injection",
+    "test_binary_protections",
 })
 
 
