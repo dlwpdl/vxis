@@ -219,3 +219,22 @@ if test_deeplink_abuse is not None:
             "Contents/Info.plist)"
         ),
     }
+
+try:
+    from vxis.agent.skills.desktop.test_ipc_injection import (
+        execute as test_ipc_injection,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_ipc_injection = None  # type: ignore[assignment]
+
+if test_ipc_injection is not None:
+    SKILL_REGISTRY["test_ipc_injection"] = {
+        "fn": test_ipc_injection,
+        "description": (
+            "Desktop-only (macOS): detect XPC service attack surface — "
+            "writable XPC bundles (privilege escalation via bundle replacement) "
+            "and Mach service names that impersonate the com.apple.* namespace "
+            "(typosquat / IPC interception). Use when target.kind == desktop."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
+    }

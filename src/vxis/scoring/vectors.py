@@ -1419,6 +1419,36 @@ DESKTOP_VECTORS: tuple[AttackVector, ...] = (
         target_types=("desktop",), phase="Phase 4", max_depth=2,
         owasp_id="A05:2021",
     ),
+    # ── IPC Injection / XPC Service Abuse (DESK-IPC-*) — phase-F slice 7 ──────
+    AttackVector(
+        id="DESK-IPC-001", category="misconfiguration",
+        name_en="XPC Service Attack Surface — Writable Bundle or Mach Name Typosquat",
+        name_ko="XPC 서비스 공격면 — 쓰기 가능 번들 또는 Mach 이름 타이포스쿼팅",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="A05:2021",
+    ),
+    # ── Binary Protections / Mach-O Hardening (DESK-PIE-*) — phase-F slice 8 ──
+    AttackVector(
+        id="DESK-PIE-001", category="misconfiguration",
+        name_en="Mach-O PIE (Position Independent Executable) disabled",
+        name_ko="Mach-O PIE (위치 독립 실행파일) 비활성화",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A06:2021",
+    ),
+    AttackVector(
+        id="DESK-PIE-002", category="misconfiguration",
+        name_en="Stack Canary not present in Mach-O binary",
+        name_ko="Mach-O 바이너리에 스택 카나리 미적용",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A06:2021",
+    ),
+    AttackVector(
+        id="DESK-PIE-003", category="misconfiguration",
+        name_en="__RESTRICT segment absent — DYLD injection not blocked",
+        name_ko="__RESTRICT 세그먼트 없음 — DYLD 인젝션 차단 안됨",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A06:2021",
+    ),
 )
 
 

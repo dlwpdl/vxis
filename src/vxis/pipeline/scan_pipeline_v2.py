@@ -289,6 +289,8 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             ],
             "test_dylib_hijack": ["DESK-DYL-001", "DESK-DYL-002", "DESK-DYL-003"],
             "test_deeplink_abuse": ["DESK-DLK-001", "DESK-DLK-002", "DESK-DLK-003"],
+            "test_ipc_injection": ["DESK-IPC-001"],
+            "test_binary_protections": ["DESK-PIE-001", "DESK-PIE-002", "DESK-PIE-003"],
         }
         _kind_value = ctx.kind.value if hasattr(ctx.kind, "value") else str(ctx.kind)
         _skill_to_vectors = (
