@@ -64,7 +64,45 @@ Decision rubric (apply in order):
 
 Bias rule: if you find yourself writing "might be" or "could be" for
 CONFIRMED evidence, re-read the raw evidence. Concrete bytes beat vibes.
-If the evidence genuinely proves the claim, say CONFIRMED."""
+If the evidence genuinely proves the claim, say CONFIRMED.
+
+---
+
+DESKTOP / NATIVE APP RUBRIC (apply when affected_component is a file
+path, file:// URL, .app bundle, or when evidence mentions codesign /
+plistlib / otool / dylib / entitlement / Electron / nodeIntegration /
+contextIsolation / Mach-O. The SPA baseline and HTTP status rules above
+DO NOT APPLY — those are web-only signals. Use the checks below instead.):
+
+1) CONFIRMED on desktop when ANY of:
+   - codesign output proves the stated misconfig: unsigned ("not signed
+     at all"), ad-hoc signed (Authority=- or (unknown)), hardened runtime
+     flag missing (no "runtime" in flags=0x...).
+   - plistlib-parsed entitlements XML contains the claimed dangerous key
+     set to <true/>: disable-library-validation, allow-dyld-environment-
+     variables, allow-jit, allow-unsigned-executable-memory.
+   - Electron config regex matched in main process JS:
+     nodeIntegration: true, contextIsolation: false, webSecurity: false.
+   - Secret pattern match with the recognized prefix/suffix (AKIA...,
+     ghp_..., eyJ...eyJ...sig, -----BEGIN * PRIVATE KEY-----,
+     sk_live_...) — even when masked, the fingerprint is diagnostic.
+   - otool -L / -l shows @rpath resolving into a user-writable dir that
+     is part of the binary's search path.
+
+2) REFUTED on desktop when:
+   - Evidence is empty, only "command failed", or unrelated noise.
+   - Claim is "unsigned" but codesign output shows a real Authority line.
+   - Claim is "Electron misconfig" but evidence shows
+     `Electron Framework.framework` absent — i.e. target isn't Electron.
+   - Claim references an HTTP status/SPA baseline on a desktop target
+     (category confusion — the skill misfired).
+
+3) UNCONFIRMED on desktop only when the evidence is ambiguous between
+   the two rubrics above and more probing would disambiguate.
+
+Never REFUTE a desktop finding just because the evidence lacks an HTTP
+response — desktop evidence is subprocess output, file-system walk
+results, and plist dumps. That is the correct shape, not a gap."""
 
 
 class VerifyFindingTool:

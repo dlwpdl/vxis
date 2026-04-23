@@ -1375,6 +1375,28 @@ DESKTOP_VECTORS: tuple[AttackVector, ...] = (
         target_types=("desktop",), phase="Phase 4", max_depth=2,
         owasp_id="A05:2021",
     ),
+    # ── Dylib Hijack (DESK-DYL-*) — phase-J slice 5 ───────────────────────────
+    AttackVector(
+        id="DESK-DYL-001", category="misconfiguration",
+        name_en="Writable dylib path",
+        name_ko="쓰기 가능한 dylib 경로",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="A06:2021",
+    ),
+    AttackVector(
+        id="DESK-DYL-002", category="misconfiguration",
+        name_en="Missing dylib (LC_LOAD_WEAK_DYLIB)",
+        name_ko="누락된 dylib (LC_LOAD_WEAK_DYLIB)",
+        target_types=("desktop",), phase="Phase 5", max_depth=2,
+        owasp_id="A06:2021",
+    ),
+    AttackVector(
+        id="DESK-DYL-003", category="misconfiguration",
+        name_en="Multiple RPATH entries",
+        name_ko="다중 RPATH 항목",
+        target_types=("desktop",), phase="Phase 5", max_depth=2,
+        owasp_id="A06:2021",
+    ),
 )
 
 

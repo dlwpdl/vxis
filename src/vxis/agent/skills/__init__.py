@@ -179,3 +179,22 @@ if test_entitlement_audit is not None:
         ),
         "args": "target_url (required — path to .app, dir, or Mach-O binary)",
     }
+
+try:
+    from vxis.agent.skills.desktop.test_dylib_hijack import (
+        execute as test_dylib_hijack,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_dylib_hijack = None  # type: ignore[assignment]
+
+if test_dylib_hijack is not None:
+    SKILL_REGISTRY["test_dylib_hijack"] = {
+        "fn": test_dylib_hijack,
+        "description": (
+            "Desktop-only: detect macOS dylib hijack opportunities "
+            "(writable @rpath, missing weak dylibs, multi-RPATH search-order). "
+            "Use when target.kind == desktop. Combine with entitlement_audit "
+            "DESK-ENT-001 for full chain."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
+    }
