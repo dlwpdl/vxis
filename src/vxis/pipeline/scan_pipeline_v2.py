@@ -265,15 +265,28 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             "test_business_logic": ["WEB-LOGIC-001"],
             "test_crypto": ["WEB-CRYPTO-001"],
         }
-        # phase-J slice — desktop minimal mapping. Phase-F (Windows full
-        # desktop pipeline) extends this with the remaining DESK-* vectors.
-        # DESK-RECON-001 / DESK-SIG-001 stay defined in scoring/vectors.py;
-        # they'll be wired up when the MacOSRecon skill lands in phase-F.
+        # phase-J slice — desktop mapping. signature_audit + entitlement_audit
+        # additionally credit DESK-RECON-001 (binary recon) since both skills
+        # perform full Mach-O / plist inspection. signature_audit also covers
+        # the umbrella DESK-SIG-001 (signature missing/invalid). Without these
+        # mappings, both vectors stayed permanently un-attempted on every
+        # desktop scan — pure coverage gap, no skill ever satisfied them.
         _DESKTOP_SKILL_TO_VECTORS = {
             "test_local_storage_secrets": ["DESK-LSS-001"],
             "test_electron_misconfig": ["DESK-ELC-001", "DESK-ELC-002", "DESK-ELC-003"],
-            "test_signature_audit": ["DESK-SIG-001", "DESK-SIG-002", "DESK-SIG-003", "DESK-SIG-004"],
-            "test_entitlement_audit": ["DESK-ENT-001", "DESK-ENT-002", "DESK-ENT-003"],
+            "test_signature_audit": [
+                "DESK-RECON-001",
+                "DESK-SIG-001",
+                "DESK-SIG-002",
+                "DESK-SIG-003",
+                "DESK-SIG-004",
+            ],
+            "test_entitlement_audit": [
+                "DESK-RECON-001",
+                "DESK-ENT-001",
+                "DESK-ENT-002",
+                "DESK-ENT-003",
+            ],
             "test_dylib_hijack": ["DESK-DYL-001", "DESK-DYL-002", "DESK-DYL-003"],
             "test_deeplink_abuse": ["DESK-DLK-001", "DESK-DLK-002", "DESK-DLK-003"],
         }
