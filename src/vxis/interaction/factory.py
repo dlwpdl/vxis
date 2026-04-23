@@ -9,6 +9,7 @@ phase-C lands; DESKTOP/Linux is explicitly out-of-scope per the plan.
 """
 from __future__ import annotations
 
+from vxis.interaction.code import CodeEyes, CodeHands, CodeRecon, CodeXRay
 from vxis.interaction.desktop.dtrace_xray import MacOSXRay
 from vxis.interaction.desktop.macos_hands import MacOSHands
 from vxis.interaction.desktop.recon_macho import MacOSRecon
@@ -94,6 +95,17 @@ class SurfaceFactory:
             )
         if target.kind == TargetKind.DESKTOP:
             return SurfaceFactory._build_desktop(target)
+        if target.kind == TargetKind.CODE:
+            # CODE surface is hypothesis-only: Hands=file I/O, Eyes=AST,
+            # XRay=git history, Recon=manifest detection.
+            # report_finding MUST NOT be called from any Code* impl.
+            return Surface(
+                target=target,
+                hands=CodeHands(target),
+                eyes=CodeEyes(target),
+                xray=CodeXRay(target),
+                recon=CodeRecon(target),
+            )
         raise NotImplementedError(f"unknown TargetKind: {target.kind!r}")
 
     @staticmethod
