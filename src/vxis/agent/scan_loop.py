@@ -877,6 +877,22 @@ class ScanAgentLoop:
                     "ok": result.ok, "summary": result.summary, "data": result.data,
                 }})
 
+                # Phase Q10: credit Brain-direct run_skill calls so VC isn't
+                # blind to LLM initiative. Pre-Q10 only the auto-exec ladder
+                # (line ~1193) populated _real_skills_completed, so when Brain
+                # picked test_signature_audit on its own the pipeline's
+                # _DESKTOP_SKILL_TO_VECTORS lookup found nothing → VC=0
+                # despite real skill execution (Q9 smoke proof).
+                if (
+                    name == "run_skill"
+                    and result.ok
+                    and isinstance(args, dict)
+                ):
+                    _real_sk = str(args.get("skill") or "").strip()
+                    if _real_sk:
+                        _real_skills_completed.add(_real_sk)
+                        _skills_completed.add(_real_sk)
+
                 # Phase 4: record sandbox invocations for VC scoring.
                 # Every shell_exec / python_exec call — whether ok or not —
                 # counts as an attempt so that VC reflects Brain's explored
@@ -2301,6 +2317,13 @@ class ScanAgentLoop:
             "verdict_counts": dict(self.state.verdict_counts),
             "confirmed_findings": list(self.state.confirmed_findings),
             "refuted_findings": list(self.state.refuted_findings),
-            "skills_completed": list(_skills_completed),
+            # Phase Q10: return _real_skills_completed so the pipeline's
+            # _DESKTOP_SKILL_TO_VECTORS lookup matches. _skills_completed
+            # contains queue aliases the iter-25 sweep injects (e.g.
+            # 'test_dylib_hijack__sweep25'), which never match the mapping
+            # keys (real names) → VC=0. _real_skills_completed already
+            # holds the un-aliased real names for both sweep and Brain-direct
+            # paths.
+            "skills_completed": list(_real_skills_completed),
             "sandbox_invocations": list(_sandbox_invocations),
         }

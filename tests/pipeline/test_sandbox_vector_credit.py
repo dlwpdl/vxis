@@ -87,6 +87,10 @@ def _make_mock_ctx(sandbox_invocations: list[dict] | None = None) -> MagicMock:
     ctx.sandbox_invocations = sandbox_invocations or []
     # ScoringEngine 이 읽을 수 있도록 score_detail 을 MagicMock 으로
     ctx.score_detail = None
+    # Phase Q5: _compute_vxis_score reads ctx.kind.value (was hardcoded "web"
+    # before). MagicMock returns a MagicMock for unset attrs, which fails
+    # ScoringEngine's str-validation. Set explicitly.
+    ctx.kind.value = "web"
     return ctx
 
 
