@@ -119,6 +119,28 @@ CURRENT FINDINGS:
 Pick ONE action grounded in the evidence above and output the JSON tool call."""
 
 
+# Module-level surface gating.
+#
+# Reused by both the kind-aware skill SWEEP (L~2080) and the dispatch-level
+# guard (L~805). Kept at module scope so the guard doesn't have to rebuild
+# the set on every Brain tool call.
+#
+# Why a guard at all: the desktop preamble in `build_agent_system_prompt`
+# tells the LLM "DO NOT call web skills", but Brain ignores it ~30% of the
+# time on Calculator.app smoke runs and dispatches `run_skill test_infra`,
+# `test_csrf`, etc. → wasted iterations + false-positive cloud_metadata
+# reports against a file:// path. The guard is the hard floor: refuse the
+# dispatch and inject a HINT so Brain re-plans on the next iter.
+_DESKTOP_SKILLS: frozenset[str] = frozenset({
+    "test_local_storage_secrets",
+    "test_electron_misconfig",
+    "test_signature_audit",
+    "test_entitlement_audit",
+    "test_dylib_hijack",
+    "test_deeplink_abuse",
+})
+
+
 class ScanAgentLoop:
     def __init__(
         self,
@@ -501,6 +523,7 @@ class ScanAgentLoop:
     async def run(self) -> dict[str, Any]:
         import json as _json
         import re as _re
+        from vxis.interaction.surface import TargetKind as _TK
 
         self.state.add_message("system", f"Scan started on {self.state.target}")
         self.state.add_message("user", (
@@ -801,6 +824,53 @@ class ScanAgentLoop:
                                 continue
                     except Exception:
                         logger.exception("auto-verify failed — proceeding with report_finding")
+
+                # Phase Q: dispatch-level surface guard. The desktop preamble
+                # in build_agent_system_prompt tells Brain "DO NOT call web
+                # skills" but the LLM ignores it on ~30% of desktop iters and
+                # fires test_infra / test_csrf / test_xss at file:// paths,
+                # producing false positives like cloud_metadata. Block at
+                # dispatch time and feed the rule back into the chat so Brain
+                # re-plans toward a desktop skill.
+                if (
+                    name == "run_skill"
+                    and isinstance(args, dict)
+                    and self._target_kind == _TK.DESKTOP
+                ):
+                    _requested_skill = str(args.get("skill") or "").strip()
+                    if _requested_skill and _requested_skill not in _DESKTOP_SKILLS:
+                        _block_msg = (
+                            f"blocked: web skill '{_requested_skill}' on desktop target "
+                            f"— surface guard refused dispatch. Use one of: "
+                            f"{', '.join(sorted(_DESKTOP_SKILLS))}"
+                        )
+                        self.state.add_message("tool", {
+                            "name": "run_skill",
+                            "args": args,
+                            "result": {
+                                "ok": False,
+                                "summary": _block_msg,
+                                "data": {
+                                    "surface_guard_blocked": True,
+                                    "requested_skill": _requested_skill,
+                                    "target_kind": "desktop",
+                                    "allowed_skills": sorted(_DESKTOP_SKILLS),
+                                },
+                            },
+                        })
+                        self.state.add_message("system", {
+                            "hint": (
+                                f"SYSTEM HINT: target is a macOS .app bundle (file://). "
+                                f"Web skill '{_requested_skill}' cannot apply. "
+                                f"Pick a desktop skill: {', '.join(sorted(_DESKTOP_SKILLS - _real_skills_completed))}"
+                            ),
+                        })
+                        logger.warning(
+                            "iter %d: surface_guard BLOCKED run_skill=%s on desktop target",
+                            self.state.iteration,
+                            _requested_skill,
+                        )
+                        continue
 
                 result = await self.registry.dispatch(name, args)
                 self.state.add_message("tool", {"name": name, "args": args, "result": {
@@ -1125,6 +1195,19 @@ class ScanAgentLoop:
                         skill_name not in _skills_completed
                         and self.state.iteration >= trigger_iter
                     ):
+                        # Phase Q: surface gate. _skill_sequence is a hardcoded
+                        # web recon ladder (enumerate_endpoints → test_infra →
+                        # attempt_auth → ...). On desktop targets these all hit
+                        # file:// and produce noise / false positives. Skip the
+                        # web ladder entirely; the kind-aware sweep at L~2150
+                        # surfaces the real desktop skills instead.
+                        _real_skill_check = extra_params.get("_skill_override") or skill_name
+                        if (
+                            self._target_kind == _TK.DESKTOP
+                            and _real_skill_check not in _DESKTOP_SKILLS
+                        ):
+                            _skills_completed.add(skill_name)
+                            continue
                         _skills_completed.add(skill_name)
                         try:
                             params = {**extra_params}
@@ -2066,27 +2149,17 @@ class ScanAgentLoop:
                     _sweep_gap = self.state.iteration - _last_sweep
                     if _sweep_gap >= 10:
                         from vxis.agent.skills import SKILL_REGISTRY as _REG
-                        from vxis.interaction.surface import TargetKind as _TK
                         # Filter the registry to skills that match the surface
-                        # kind. The 6 desktop skills have macOS-specific code
-                        # paths (codesign, otool, plistlib) that crash or
-                        # return empty on web targets. Conversely, web skills
-                        # on a desktop target waste iters firing HTTP at a
-                        # file:// path. Naming convention: desktop skills
-                        # live under skills/desktop/ and have no web siblings.
-                        _DESKTOP_ONLY = {
-                            "test_local_storage_secrets",
-                            "test_electron_misconfig",
-                            "test_signature_audit",
-                            "test_entitlement_audit",
-                            "test_dylib_hijack",
-                            "test_deeplink_abuse",
-                        }
+                        # kind. The 6 desktop skills (module-level _DESKTOP_SKILLS)
+                        # have macOS-specific code paths (codesign, otool, plistlib)
+                        # that crash or return empty on web targets. Conversely,
+                        # web skills on a desktop target waste iters firing HTTP
+                        # at a file:// path.
                         _all_registered = set(_REG.keys())
                         if self._target_kind == _TK.DESKTOP:
-                            _eligible = _all_registered & _DESKTOP_ONLY
+                            _eligible = _all_registered & _DESKTOP_SKILLS
                         else:
-                            _eligible = _all_registered - _DESKTOP_ONLY
+                            _eligible = _all_registered - _DESKTOP_SKILLS
                         _untried = sorted(_eligible - _real_skills_completed)
                         if _untried:
                             self._last_skill_sweep_iter = self.state.iteration
