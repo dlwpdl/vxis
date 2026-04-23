@@ -238,3 +238,23 @@ if test_ipc_injection is not None:
         ),
         "args": "target_url (required — path to .app, dir, or Mach-O binary)",
     }
+
+try:
+    from vxis.agent.skills.desktop.test_binary_protections import (
+        execute as test_binary_protections,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_binary_protections = None  # type: ignore[assignment]
+
+if test_binary_protections is not None:
+    SKILL_REGISTRY["test_binary_protections"] = {
+        "fn": test_binary_protections,
+        "description": (
+            "Desktop-only (macOS): check Mach-O binary hardening — PIE/ASLR "
+            "(DESK-PIE-001), stack canary via __stack_chk_guard (DESK-PIE-002), "
+            "and __RESTRICT,__restrict segment for DYLD injection blocking "
+            "(DESK-PIE-003). Requires otool + nm (Xcode CLT). Use when "
+            "target.kind == desktop."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
+    }
