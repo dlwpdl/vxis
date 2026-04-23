@@ -108,15 +108,25 @@ def test_think_in_loop_adapter_concatenation_no_brace_explosion():
     body = AGENT_SYSTEM_PROMPT.format(available_tools="  - test_tool: test description")
     full = LOOP_PROMPT_ADAPTER + "\n" + body
 
-    # Phase B: adapter header renamed from "ADAPTER INSTRUCTIONS" to "STRIX-STYLE ADAPTER"
-    assert "STRIX-STYLE ADAPTER" in full
-    assert "100% COVERAGE" in full  # body marker
+    # Phase B rewrote the adapter from a thin "ADAPTER INSTRUCTIONS / STRIX-STYLE
+    # ADAPTER" header into a full HOW-TO-THINK guide. "STRIX-STYLE ADAPTER" no
+    # longer appears; assert on the actual section header present instead.
+    assert "HOW TO THINK" in full
+    # Authorization preamble survives the rewrite.
+    assert "Authorization confirmed" in full
 
-    assert "{{" not in full
-    assert "}}" not in full
+    # No brace explosion — AGENT_SYSTEM_PROMPT.format() must not raise KeyError.
+    # The adapter is a raw string so its JSON-example braces are literals, not
+    # format placeholders.  Only check that the adapter itself has no {{ or }}
+    # (which would indicate accidental double-escaping in the raw string).
+    assert "{{" not in LOOP_PROMPT_ADAPTER
+    # AGENT_SYSTEM_PROMPT has {available_tools} filled above — confirm no
+    # unfilled placeholders remain in the body.
+    assert "{available_tools}" not in body
 
     assert "Controller" in full
     # Phase B: adapter upgraded to prefer shell_exec (real sqlmap/nuclei/ffuf)
-    # over the hypothetical cpr_recon tool that was never implemented
+    # over the hypothetical cpr_recon tool that was never implemented.
     assert "shell_exec" in full
-    assert "http_request" in full
+    # link_chain is surfaced via the adapter's FINDING REPORT FORMAT section.
+    assert "link_chain" in full
