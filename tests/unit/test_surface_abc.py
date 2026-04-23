@@ -8,14 +8,19 @@ import pytest
 
 
 def test_target_kind_enum_values():
-    """phase-A.1 — TargetKind covers all 4 surfaces with stable string values."""
+    """phase-A.1 — TargetKind covers all 5 surfaces with stable string values.
+
+    CODE surface is a hypothesis-only source; it never emits findings directly.
+    Dynamic surfaces (web/desktop) confirm or refute code hypotheses.
+    """
     from vxis.interaction.surface import TargetKind
 
-    assert {k.value for k in TargetKind} == {"web", "desktop", "mobile", "game"}
+    assert {k.value for k in TargetKind} == {"web", "desktop", "mobile", "game", "code"}
     assert TargetKind.WEB.value == "web"
     assert TargetKind.DESKTOP.value == "desktop"
     assert TargetKind.MOBILE.value == "mobile"
     assert TargetKind.GAME.value == "game"
+    assert TargetKind.CODE.value == "code"
 
 
 @pytest.mark.parametrize("cls_name", ["Hands", "Eyes", "XRay", "Recon"])

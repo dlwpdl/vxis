@@ -18,12 +18,18 @@ from pydantic import BaseModel, Field
 
 
 class TargetKind(str, Enum):
-    """Surface stack the Brain is attacking. Stable string values for telemetry."""
+    """Surface stack the Brain is attacking. Stable string values for telemetry.
+
+    CODE is a read-only hypothesis source — it never reports findings directly.
+    All Code Recon output flows into the P3 Hypothesis queue for dynamic
+    confirmation/refutation. No scoring credit until a dynamic surface confirms.
+    """
 
     WEB = "web"
     DESKTOP = "desktop"
     MOBILE = "mobile"
     GAME = "game"
+    CODE = "code"
 
 
 class Target(BaseModel):
