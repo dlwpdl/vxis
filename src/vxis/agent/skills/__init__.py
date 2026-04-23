@@ -198,3 +198,24 @@ if test_dylib_hijack is not None:
         ),
         "args": "target_url (required — path to .app, dir, or Mach-O binary)",
     }
+
+try:
+    from vxis.agent.skills.desktop.test_deeplink_abuse import (
+        execute as test_deeplink_abuse,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_deeplink_abuse = None  # type: ignore[assignment]
+
+if test_deeplink_abuse is not None:
+    SKILL_REGISTRY["test_deeplink_abuse"] = {
+        "fn": test_deeplink_abuse,
+        "description": (
+            "Desktop-only: parse Info.plist URL scheme registrations and flag "
+            "generic/privileged/colliding schemes. Use when target.kind == desktop. "
+            "Static analysis — no app launch."
+        ),
+        "args": (
+            "target_url (required — path to .app or directory containing "
+            "Contents/Info.plist)"
+        ),
+    }

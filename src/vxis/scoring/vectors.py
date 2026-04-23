@@ -1397,6 +1397,28 @@ DESKTOP_VECTORS: tuple[AttackVector, ...] = (
         target_types=("desktop",), phase="Phase 5", max_depth=2,
         owasp_id="A06:2021",
     ),
+    # ── Deep Link / URL Scheme Abuse (DESK-DLK-*) — phase-J slice 6 ───────────
+    AttackVector(
+        id="DESK-DLK-001", category="misconfiguration",
+        name_en="Generic URL scheme registered",
+        name_ko="일반적 URL scheme 등록",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-DLK-002", category="misconfiguration",
+        name_en="Privileged URL scheme without role declaration",
+        name_ko="권한 있는 URL scheme 의 role 미선언",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A01:2021",
+    ),
+    AttackVector(
+        id="DESK-DLK-003", category="misconfiguration",
+        name_en="Multiple URL schemes (collision risk)",
+        name_ko="다중 URL scheme (충돌 위험)",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A05:2021",
+    ),
 )
 
 
