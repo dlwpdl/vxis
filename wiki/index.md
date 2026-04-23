@@ -31,6 +31,7 @@
 - [Plan-Review and Code-Review Workflow](concepts/plan_review_workflow.md) — 비자명 작업 시작 절차 / 8 subagent 역할 / phased commit 규칙 / CLAUDE.md 길이 제한 근거
 - [VXIS Architecture — Brain / Hands / Eyes / X-Ray](concepts/vxis_architecture.md) — 모듈 역할 분담 / raw httpx 금지 근거 / 어느 컴포넌트가 무엇 담당 / 파이프라인 진입점
 - [AI Context Hygiene — 4 Principles](concepts/ai_context_hygiene.md) — context window 관리 원칙 / tool 결과 dump 금지 / wiki 가 RAG 구현인 이유 / 5-Loop 매핑
+- [Cross-Surface Synthesis](concepts/cross_surface_synthesis.md) — surface boundary marker / desktop+web 체인 / OSILayer.DESKTOP 매핑 / _agent_to_layer 사용처 / Evidence.surface 의미
 
 ## Entities
 
@@ -51,6 +52,8 @@
 - [test_business_logic](entities/skills/test_business_logic.md) — 음수 수량·가격 0·정수 overflow·coupon 재사용·state skip·race condition
 - [test_crypto](entities/skills/test_crypto.md) — TLS 약한 버전 / JS 번들 하드코드 시크릿 / MD5/SHA1 해시 노출
 - [test_infra](entities/skills/test_infra.md) — .git / .env 노출 / 클라우드 metadata / 서브도메인 DNS / Firebase public
+- [test_ipc_injection](entities/skills/test_ipc_injection.md) — macOS XPC service 위협 / Mach service typosquat 탐지 / writable XPC bundle / DESK-IPC-001 의미
+- [test_binary_protections](entities/skills/test_binary_protections.md) — macOS Mach-O 메모리 안전성 / PIE / stack canary / __RESTRICT segment / DYLD_INSERT_LIBRARIES 차단
 
 ### Modules
 
@@ -90,11 +93,14 @@
 - [ADR-007 — Payloads as External Data Files](decisions/007_payloads_as_data_files.md) — 페이로드 추가 위치 / skills 코드 freeze 전략 / round 로테이션 JSON화 / growth loop 재배선
 - [ADR-008 — Finding Precision Bayesian Smoothing](decisions/008_finding_precision_smoothing.md) — 스코어 비교 시 FP 차원 해석 / 판정 수 부족 / baseline vs after 노이즈 / 측정 인프라 수정 정당화
 - [ADR-009 — Severity Oracle threshold externalization (draft)](decisions/009_severity_oracle_thresholds.md) — _adjust_severity() 룰 수정 / masking 비율·크기 임계값 조정 / 오라클 파일 freeze 완화 / DSL 유혹 대응
+- [ADR-010 — Universal Pentest Plan 권위 교체 (2026-04-23 refresh)](decisions/010_universal_pentest_plan_refresh.md) — 현재 authoritative plan 어디 / 원본 plan 이 historical 인지 / phase-A~I 매핑 / macOS-first 이유
 
 ## Sources
 
 ### Benchmarks
 _(유기적 추가 — 새 스캔 리포트 요약)_
+
+- [ProtoPie Studio macOS Desktop Validation](protopie-validation.md) — macOS desktop pipeline 의 첫 third-party 검증 결과 / signed app 동작 확인 / entitlement audit 가 L2 finding 까지 끌어올린 사례 / VXIS 0.2.0 desktop baseline
 
 ### Research
 _(유기적 추가 — 외부 논문/블로그/CVE)_

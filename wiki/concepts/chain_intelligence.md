@@ -2,8 +2,8 @@
 name: Chain Intelligence
 type: concept
 status: active
-when_to_read: chain nudge 재주입 주기 / _desired 계산식 / finish_scan 거부 조건 / 체인 부족 시 동작
-updated: 2026-04-16
+when_to_read: chain nudge 재주입 주기 / _desired 계산식 / finish_scan 거부 조건 (0-finding/chains 부족) / 체인 부족 시 동작
+updated: 2026-04-23
 sources:
   - ../../src/vxis/agent/scan_loop.py
 related:
@@ -20,8 +20,8 @@ related:
 | 목표 체인 수 (`_desired`) | `max(3, len(findings) // 3)` — findings 3개당 체인 1개 |
 | Nudge 재주입 주기 | 6 iter gap (`_last_chain_nudge_iter` 기록) |
 | Nudge 시작 조건 | findings ≥ 3 AND chains < `_desired` AND iter ≥ 18 |
-| finish_scan 거부 조건 | findings ≥ 3 이면서 chains < `_desired` |
-| 거부 응답 | top-4 severity 피어링 쌍 + ready-to-call `link_chain()` 템플릿 |
+| finish_scan 거부 조건 | (1) iter < `min_iters` (2) **0 findings** (Q11, 2026-04-23) (3) findings ≥ 3 이면서 chains < `_desired` |
+| 거부 응답 | (체인 부족) top-4 severity 피어링 쌍 + ready-to-call `link_chain()` 템플릿 / (0 findings) 등록 tool 목록 + run_skill·shell_exec·report_finding 옵션 |
 | 대시보드 | ≥ 2 findings 부터 5 카테고리 × 7 candidate 템플릿 상시 노출 |
 
 ## TL;DR
@@ -36,7 +36,7 @@ Brain이 chain을 "안 만들면" 원인은 거의 항상 프롬프트 품질이
 ## How
 - **대시보드** (`scan_loop.py:221` 근처): findings ≥ 2이면 매 iter 시스템 메시지에 `Chains recorded: N / _desired+ target` 노출. `_desired = max(3, len(reported) // 3)`.
 - **Nudge 재주입** (`scan_loop.py:1892` 근처): `_last_chain_nudge_iter` gap 체크. 6 iter마다 `link_chain(finding_ids=["ID-001","ID-002"], ...)` 템플릿을 실제 finding ID로 채워 재주입.
-- **finish_scan gate** (`scan_loop.py:997` 근처): Brain이 종료 시도 시 `_fin_desired` 재계산 → 부족하면 `ok=False`, rejected 메시지 + 미연결 쌍 제안.
+- **finish_scan gate** (`scan_loop.py:1095-1230` 근처): 3 단 ladder. 첫째 `iter < min_iters` reject. 둘째 (Q11, commit `507f21a`) `_get_findings()` 비어 있으면 reject — Q10 smoke 에서 Calculator.app 이 21 findings (Q9) → 0 findings (Q10) 회귀했던 원인이 0-finding finish_scan 이 acceptance 로 슬쩍 넘어가던 배관 버그였다. 셋째 `findings ≥ 3 AND chains < _desired` 면 reject + top-4 severity 쌍 제안.
 
 ## Related
 - [brain_first](./brain_first.md) — Brain이 chain의 주체인 이유
