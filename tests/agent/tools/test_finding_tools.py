@@ -225,3 +225,66 @@ def test_build_default_registry_contains_finding_tools():
     assert "query_findings" in names
     assert "link_chain" in names
     assert len(names) >= 11
+
+
+# ── Phase Q8: # discriminator preservation ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_hash_discriminator_keeps_findings_distinct() -> None:
+    """Desktop promotion block appends '#<dylib>' to affected_component so 18
+    DYL-002 findings on one binary stay distinct. urlparse used to drop
+    everything after '#' as a URI fragment, so the dedup grouped them all."""
+    tool = ReportFindingTool()
+
+    binary = "/Applications/X.app/Contents/MacOS/X"
+    dylibs = [
+        "/usr/lib/libfoo.dylib",
+        "/usr/lib/libbar.dylib",
+        "/usr/lib/libbaz.dylib",
+    ]
+
+    ids: list[str] = []
+    for dylib in dylibs:
+        r = await tool.run(
+            title="Missing dylib",
+            severity="medium",
+            finding_type="DESK-DYL-002",
+            affected_component=f"{binary}#{dylib}",
+            description=f"weak link to {dylib} missing",
+            evidence=f"otool -l shows weak {dylib}",
+        )
+        ids.append(r.data["id"])
+
+    assert len(set(ids)) == 3, (
+        f"expected 3 distinct VXIS ids (one per dylib discriminator), "
+        f"got {ids}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_hash_falls_back_to_existing_dedup() -> None:
+    """When affected_component has no '#', behavior must be unchanged — same
+    base path + same finding_type still groups under the first VXIS id."""
+    tool = ReportFindingTool()
+
+    base = "/api/Orders"
+    r1 = await tool.run(
+        title="IDOR",
+        severity="high",
+        finding_type="idor",
+        affected_component=f"{base}/1",
+        description="...",
+        evidence="GET /api/Orders/1 returns other user data",
+    )
+    r2 = await tool.run(
+        title="IDOR",
+        severity="high",
+        finding_type="idor",
+        affected_component=f"{base}/2",
+        description="...",
+        evidence="GET /api/Orders/2 returns other user data",
+    )
+    assert r1.data["id"] == r2.data["id"], (
+        "without '#' the existing base-path dedup must still merge IDs"
+    )

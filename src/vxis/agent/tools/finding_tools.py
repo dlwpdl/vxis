@@ -100,12 +100,25 @@ class ReportFindingTool:
             /api/Baskets/1/items → /api/baskets
             http://x:3000/api/Orders/1 → /api/orders
             /rest/products/search?q=test' → /rest/products/search
+
+            Phase Q8: when affected_component carries an explicit '#'
+            discriminator (set by scan_loop's desktop promotion block), the
+            suffix MUST be preserved — otherwise 20 distinct dylib_hijack
+            findings on the same binary all collapse to the binary path and
+            dedup into a single VXIS-NNNN with everything in
+            affected_endpoints. urlparse treats '#' as a URI fragment and
+            drops it by default; we re-attach it so the discriminator
+            actually discriminates.
             """
             import re
             from urllib.parse import urlparse
             try:
                 parsed = urlparse(component)
                 path = parsed.path or component
+                if parsed.fragment:
+                    # Reattach the discriminator the desktop promotion block
+                    # appended (e.g. "<binary>#<dylib>@<candidate_path>").
+                    path = f"{path}#{parsed.fragment}"
             except Exception:
                 path = component
             path = path.lower().strip().rstrip("/")
