@@ -21,59 +21,59 @@ async def execute(target_url: str, token: str, **kwargs: Any) -> dict[str, Any]:
             "total_tested": int,
         }
     """
-    import httpx
+    from vxis.interaction.hands import SessionManager
 
     target = target_url.rstrip("/")
-    headers = {"Authorization": f"Bearer {token}", "Cookie": f"token={token}"}
+    auth_headers = {"Authorization": f"Bearer {token}", "Cookie": f"token={token}"}
 
     accessible: list[dict] = []
     new_endpoints: list[dict] = []
     user_data_exposed: list[dict] = []
 
-    async with httpx.AsyncClient(base_url=target, timeout=10, verify=False,
-                                  limits=httpx.Limits(max_connections=15)) as c:
-        sem = asyncio.Semaphore(15)
+    _mgr = SessionManager()
+    _session = await _mgr.get_session(target)
+    sem = asyncio.Semaphore(15)
 
-        async def check(path: str) -> None:
-            async with sem:
-                try:
-                    # Test with auth
-                    r_auth = await c.get(path, headers=headers)
-                    if r_auth.status_code == 404:
-                        return
+    async def check(path: str) -> None:
+        async with sem:
+            try:
+                # Test with auth
+                r_auth = await _session.request("GET", path, headers=auth_headers)
+                if r_auth.status == 404:
+                    return
 
-                    # Test without auth
-                    r_noauth = await c.get(path)
+                # Test without auth
+                r_noauth = await _session.request("GET", path)
 
-                    entry = {
-                        "path": path,
-                        "status_auth": r_auth.status_code,
-                        "status_noauth": r_noauth.status_code,
-                        "size_auth": len(r_auth.content),
-                        "size_noauth": len(r_noauth.content),
-                    }
+                entry = {
+                    "path": path,
+                    "status_auth": r_auth.status,
+                    "status_noauth": r_noauth.status,
+                    "size_auth": r_auth.body_length,
+                    "size_noauth": r_noauth.body_length,
+                }
 
-                    if r_auth.status_code == 200:
-                        entry["preview"] = r_auth.text[:300]
-                        accessible.append(entry)
+                if r_auth.status == 200:
+                    entry["preview"] = r_auth.text[:300]
+                    accessible.append(entry)
 
-                        # Detect broken access control: should need auth but doesn't
-                        if r_noauth.status_code == 200 and r_noauth.text == r_auth.text:
-                            entry["issue"] = "no_auth_required"
+                    # Detect broken access control: should need auth but doesn't
+                    if r_noauth.status == 200 and r_noauth.text == r_auth.text:
+                        entry["issue"] = "no_auth_required"
 
-                        # Detect IDOR-able data
-                        body = r_auth.text.lower()
-                        if any(kw in body for kw in ["email", "password", "role", "token", "secret"]):
-                            user_data_exposed.append(entry)
+                    # Detect IDOR-able data
+                    body = r_auth.text.lower()
+                    if any(kw in body for kw in ["email", "password", "role", "token", "secret"]):
+                        user_data_exposed.append(entry)
 
-                    # Track newly accessible (auth unlocks)
-                    if r_auth.status_code == 200 and r_noauth.status_code == 401:
-                        new_endpoints.append(entry)
+                # Track newly accessible (auth unlocks)
+                if r_auth.status == 200 and r_noauth.status == 401:
+                    new_endpoints.append(entry)
 
-                except Exception:
-                    pass
+            except Exception:
+                pass
 
-        await asyncio.gather(*[check(p) for p in AUTH_PATHS])
+    await asyncio.gather(*[check(p) for p in AUTH_PATHS])
 
     accessible.sort(key=lambda x: x.get("size_auth", 0), reverse=True)
 

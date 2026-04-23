@@ -29,7 +29,11 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
     Returns:
         {"vulnerable": bool, "findings": [...], "tested": int, "url": str, "round": int}
     """
-    import httpx
+    from vxis.interaction.hands import SessionManager
+    from urllib.parse import urlparse as _urlparse
+    _base = _urlparse(url)
+    _base_url = f"{_base.scheme}://{_base.netloc}"
+
     _payloads = _xss_payloads_for_round(round)
 
     parsed = urlparse(url)
@@ -48,42 +52,43 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
     tested = 0
     sem = asyncio.Semaphore(15)
 
-    async with httpx.AsyncClient(timeout=10, verify=False) as client:
-        try:
-            base_r = await client.get(url)
-            baseline_body = base_r.text.lower()
-        except Exception as e:
-            return {"vulnerable": False, "findings": [], "tested": 0, "url": url, "error": str(e)}
+    _mgr = SessionManager()
+    _session = await _mgr.get_session(_base_url)
+    try:
+        base_r = await _session.request("GET", url)
+        baseline_body = base_r.text.lower()
+    except Exception as e:
+        return {"vulnerable": False, "findings": [], "tested": 0, "url": url, "error": str(e)}
 
-        async def test_payload(p: dict[str, str]) -> None:
-            nonlocal tested
-            async with sem:
-                tested += 1
-                new_params = dict(params)
-                orig = new_params[target_param][0] if new_params[target_param] else ""
-                new_params[target_param] = [orig + p["payload"]]
-                query = urlencode({k: v[0] for k, v in new_params.items()})
-                test_url = urlunparse(parsed._replace(query=query))
+    async def test_payload(p: dict[str, str]) -> None:
+        nonlocal tested
+        async with sem:
+            tested += 1
+            new_params = dict(params)
+            orig = new_params[target_param][0] if new_params[target_param] else ""
+            new_params[target_param] = [orig + p["payload"]]
+            query = urlencode({k: v[0] for k, v in new_params.items()})
+            test_url = urlunparse(parsed._replace(query=query))
 
-                try:
-                    r = await client.get(test_url, timeout=10)
-                except Exception:
-                    return
+            try:
+                r = await _session.request("GET", test_url)
+            except Exception:
+                return
 
-                body = r.text
-                # Check if payload reflected unescaped
-                if p["payload"].lower() in body.lower():
-                    findings.append({
-                        "type": f"xss_{p['context']}",
-                        "payload": p["payload"],
-                        "param": target_param,
-                        "evidence": f"Payload reflected unescaped in response (status {r.status_code})",
-                        "response_preview": body[:300],
-                        "severity": "high",
-                    })
-                    logger.info("XSS found: %s on param %s", p["context"], target_param)
+            body = r.text
+            # Check if payload reflected unescaped
+            if p["payload"].lower() in body.lower():
+                findings.append({
+                    "type": f"xss_{p['context']}",
+                    "payload": p["payload"],
+                    "param": target_param,
+                    "evidence": f"Payload reflected unescaped in response (status {r.status})",
+                    "response_preview": body[:300],
+                    "severity": "high",
+                })
+                logger.info("XSS found: %s on param %s", p["context"], target_param)
 
-        await asyncio.gather(*[test_payload(p) for p in _payloads])
+    await asyncio.gather(*[test_payload(p) for p in _payloads])
 
     # Deduplicate by context
     seen: set[str] = set()

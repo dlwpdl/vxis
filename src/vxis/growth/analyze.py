@@ -134,13 +134,18 @@ def analyze_signal(
         body_text = signal.metadata.get("description", "") if signal.metadata else ""
     if len(body_text) < 500 and signal.url and signal.url.startswith("http"):
         try:
-            import httpx
-            r = httpx.get(signal.url, timeout=10, follow_redirects=True,
-                          headers={"User-Agent": "VXIS-Growth/1.0"})
-            if r.status_code == 200 and len(r.text) > 500:
+            import re
+            import urllib.request
+            req = urllib.request.Request(
+                signal.url,
+                headers={"User-Agent": "VXIS-Growth/1.0"},
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+                raw_bytes: bytes = resp.read(1_000_000)  # cap at 1MB
+            raw_html = raw_bytes.decode("utf-8", errors="replace")
+            if resp.status == 200 and len(raw_html) > 500:
                 # Extract text from HTML — simple approach
-                import re
-                html = r.text
+                html = raw_html
                 # Remove script/style tags
                 html = re.sub(r"<(script|style)[^>]*>.*?</\1>", "", html, flags=re.DOTALL | re.I)
                 # Remove HTML tags

@@ -38,7 +38,7 @@ async def validate_payload(
             "results": [{"target", "status", "matched", "detect_hit"}, ...],
         }
     """
-    import httpx
+    from vxis.interaction.hands import SessionManager
 
     if targets is None:
         targets = DEFAULT_TARGETS
@@ -54,53 +54,54 @@ async def validate_payload(
 
     results: list[dict] = []
 
-    async with httpx.AsyncClient(timeout=10, verify=False, follow_redirects=True) as c:
-        for target in targets:
+    for target in targets:
+        _mgr = SessionManager()
+        try:
+            _session = await _mgr.get_session(target)
+            # Choose injection point based on technique
+            if technique in ("sqli", "sql_injection", "nosql", "xss", "ssti", "cmdi"):
+                test_url = f"{target}/search?q={payload}"
+            elif technique in ("ssrf",):
+                test_url = f"{target}/redirect?to={payload}"
+            elif technique in ("path_traversal",):
+                test_url = f"{target}/{payload}"
+            else:
+                test_url = f"{target}/?input={payload}"
+
+            r = await _session.request("GET", test_url)
+            body = r.text.lower()
+            status = r.status
+
+            # Check detect signatures
+            matched = []
+            for sig in detect:
+                if isinstance(sig, str) and sig.lower() in body:
+                    matched.append(sig)
+
+            # Also check for generic error indicators
+            error_indicators = status == 500 or "error" in body[:200].lower()
+
+            results.append({
+                "target": target,
+                "url": test_url[:100],
+                "status": status,
+                "size": r.body_length,
+                "matched_signatures": matched,
+                "error_triggered": error_indicators,
+            })
+
+        except Exception as e:
+            results.append({
+                "target": target,
+                "url": target,
+                "status": -1,
+                "error": str(e)[:100],
+            })
+        finally:
             try:
-                # Choose injection point based on technique
-                if technique in ("sqli", "sql_injection", "nosql", "xss", "ssti", "cmdi"):
-                    # Try as query parameter
-                    test_url = f"{target}/search?q={payload}"
-                    r = await c.get(test_url)
-                elif technique in ("ssrf",):
-                    test_url = f"{target}/redirect?to={payload}"
-                    r = await c.get(test_url)
-                elif technique in ("path_traversal",):
-                    test_url = f"{target}/{payload}"
-                    r = await c.get(test_url)
-                else:
-                    # Generic: try as query param on root
-                    test_url = f"{target}/?input={payload}"
-                    r = await c.get(test_url)
-
-                body = r.text.lower()
-                status = r.status_code
-
-                # Check detect signatures
-                matched = []
-                for sig in detect:
-                    if isinstance(sig, str) and sig.lower() in body:
-                        matched.append(sig)
-
-                # Also check for generic error indicators
-                error_indicators = status == 500 or "error" in body[:200].lower()
-
-                results.append({
-                    "target": target,
-                    "url": test_url[:100],
-                    "status": status,
-                    "size": len(r.content),
-                    "matched_signatures": matched,
-                    "error_triggered": error_indicators,
-                })
-
-            except Exception as e:
-                results.append({
-                    "target": target,
-                    "url": target,
-                    "status": -1,
-                    "error": str(e)[:100],
-                })
+                await _mgr.close_all()
+            except Exception:
+                pass
 
     # Valid if any target had a signature match or error trigger
     valid = any(

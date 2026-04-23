@@ -29,33 +29,14 @@ import pathlib
 ALLOWED: frozenset[str] = frozenset({
     "src/vxis/interaction/hands.py",        # the SessionManager / TargetSession owner
     "src/vxis/agent/tools/hands_tools.py",  # tool-call wrapper around Hands
+    "src/vxis/ghost/transport.py",          # httpx.AsyncBaseTransport impl — legitimately owns raw httpx
 })
 
 # Pre-existing offenders carved out of phase-B.4 scope. These are tracked for
 # a follow-up phase. The list must only shrink — never grow.
-DEFERRED: frozenset[str] = frozenset({
-    # 16 skill modules — lazy imports, deferred to a dedicated skill-refactor phase
-    "src/vxis/agent/skills/test_csrf.py",
-    "src/vxis/agent/skills/test_xss.py",
-    "src/vxis/agent/skills/test_auth_deep.py",
-    "src/vxis/agent/skills/test_idor.py",
-    "src/vxis/agent/skills/test_sensitive_files.py",
-    "src/vxis/agent/skills/test_business_logic.py",
-    "src/vxis/agent/skills/test_misconfig.py",
-    "src/vxis/agent/skills/test_ssrf.py",
-    "src/vxis/agent/skills/enumerate_endpoints.py",
-    "src/vxis/agent/skills/test_injection.py",
-    "src/vxis/agent/skills/post_auth_enum.py",
-    "src/vxis/agent/skills/test_crypto.py",
-    "src/vxis/agent/skills/test_infra.py",
-    "src/vxis/agent/skills/test_api_security.py",
-    "src/vxis/agent/skills/attempt_auth.py",
-    # growth-loop self-improvement infra — separate phase
-    "src/vxis/growth/payload_validator.py",
-    "src/vxis/growth/analyze.py",
-    # ghost C2 transport — out-of-band, separate phase
-    "src/vxis/ghost/transport.py",
-})
+# phase-B (skill purge): all skill + growth + ghost entries have been cleaned.
+# ghost/transport.py is now promoted to ALLOWED (it is an httpx transport impl).
+DEFERRED: frozenset[str] = frozenset()
 
 
 def _imports_httpx(path: pathlib.Path) -> int | None:

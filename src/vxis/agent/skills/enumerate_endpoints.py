@@ -23,7 +23,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             "baseline_size": int | None,
         }
     """
-    import httpx
+    from vxis.interaction.hands import SessionManager
 
     target = target_url.rstrip("/")
     accessible: list[dict] = []
@@ -31,50 +31,49 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
     errors: list[dict] = []
     baseline_size: int | None = None
 
-    async with httpx.AsyncClient(
-        base_url=target, timeout=5, verify=False, follow_redirects=False,
-        limits=httpx.Limits(max_connections=20),
-    ) as c:
-        # Detect SPA baseline
-        try:
-            r = await c.get("/definitely-not-real-xyz-probe")
-            if r.status_code == 200:
-                baseline_size = len(r.content)
-        except Exception:
-            pass
+    _mgr = SessionManager()
+    _session = await _mgr.get_session(target)
 
-        # Blast all paths concurrently (batches of 20)
-        sem = asyncio.Semaphore(20)
+    # Detect SPA baseline
+    try:
+        r = await _session.request("GET", "/definitely-not-real-xyz-probe")
+        if r.status == 200:
+            baseline_size = r.body_length
+    except Exception:
+        pass
 
-        async def check(path: str) -> None:
-            async with sem:
-                try:
-                    r = await c.get(path)
-                    size = len(r.content)
-                    # Skip SPA baseline responses
-                    if baseline_size and size == baseline_size:
-                        return
-                    if r.status_code == 404:
-                        return
+    # Blast all paths concurrently (batches of 20)
+    sem = asyncio.Semaphore(20)
 
-                    entry = {"path": path, "status": r.status_code, "size": size}
-                    if r.status_code == 200:
-                        # Include a body preview for interesting responses
-                        if size > 100:
-                            entry["preview"] = r.text[:200]
-                        accessible.append(entry)
-                    elif r.status_code == 401:
-                        auth_required.append(entry)
-                    elif r.status_code == 500:
-                        entry["error_preview"] = r.text[:200]
-                        errors.append(entry)
-                    elif r.status_code in (301, 302, 303, 307, 308):
-                        entry["redirect"] = r.headers.get("location", "")
-                        accessible.append(entry)
-                except Exception:
-                    pass
+    async def check(path: str) -> None:
+        async with sem:
+            try:
+                r = await _session.request("GET", path)
+                size = r.body_length
+                # Skip SPA baseline responses
+                if baseline_size and size == baseline_size:
+                    return
+                if r.status == 404:
+                    return
 
-        await asyncio.gather(*[check(p) for p in COMMON_PATHS])
+                entry: dict[str, object] = {"path": path, "status": r.status, "size": size}
+                if r.status == 200:
+                    # Include a body preview for interesting responses
+                    if size > 100:
+                        entry["preview"] = r.text[:200]
+                    accessible.append(entry)
+                elif r.status == 401:
+                    auth_required.append(entry)
+                elif r.status == 500:
+                    entry["error_preview"] = r.text[:200]
+                    errors.append(entry)
+                elif r.status in (301, 302, 303, 307, 308):
+                    entry["redirect"] = r.headers.get("location", "")
+                    accessible.append(entry)
+            except Exception:
+                pass
+
+    await asyncio.gather(*[check(p) for p in COMMON_PATHS])
 
     # Sort by size descending (bigger = more interesting)
     accessible.sort(key=lambda x: x["size"], reverse=True)

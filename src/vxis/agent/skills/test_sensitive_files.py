@@ -71,50 +71,51 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             "total_scanned": int,
         }
     """
-    import httpx
+    from vxis.interaction.hands import SessionManager
 
     target = target_url.rstrip("/")
     exposed: list[dict] = []
     baseline_size: int | None = kwargs.get("baseline_size")
 
-    async with httpx.AsyncClient(base_url=target, timeout=5, verify=False,
-                                  limits=httpx.Limits(max_connections=20)) as c:
-        if baseline_size is None:
+    _mgr = SessionManager()
+    _session = await _mgr.get_session(target)
+
+    if baseline_size is None:
+        try:
+            r = await _session.request("GET", "/definitely-not-real-probe")
+            if r.status == 200:
+                baseline_size = r.body_length
+        except Exception:
+            pass
+
+    sem = asyncio.Semaphore(20)
+
+    async def check(path: str, severity: str, description: str) -> None:
+        async with sem:
             try:
-                r = await c.get("/definitely-not-real-probe")
-                if r.status_code == 200:
-                    baseline_size = len(r.content)
+                r = await _session.request("GET", path)
+                size = r.body_length
+                if r.status == 404 or (baseline_size and size == baseline_size):
+                    return
+                if r.status == 200 and size > 50:
+                    body = r.text
+                    final_sev, note = _adjust_severity(path, body, severity)
+                    entry = {
+                        "path": path,
+                        "severity": final_sev,
+                        "description": description + (f" [{note}]" if note else ""),
+                        "status": r.status,
+                        "size": size,
+                        "preview": body[:300],
+                    }
+                    if note:
+                        entry["severity_note"] = note
+                        entry["original_severity"] = severity
+                    exposed.append(entry)
             except Exception:
                 pass
 
-        sem = asyncio.Semaphore(20)
-
-        async def check(path: str, severity: str, description: str) -> None:
-            async with sem:
-                try:
-                    r = await c.get(path)
-                    size = len(r.content)
-                    if r.status_code == 404 or (baseline_size and size == baseline_size):
-                        return
-                    if r.status_code == 200 and size > 50:
-                        body = r.text
-                        final_sev, note = _adjust_severity(path, body, severity)
-                        entry = {
-                            "path": path,
-                            "severity": final_sev,
-                            "description": description + (f" [{note}]" if note else ""),
-                            "status": r.status_code,
-                            "size": size,
-                            "preview": body[:300],
-                        }
-                        if note:
-                            entry["severity_note"] = note
-                            entry["original_severity"] = severity
-                        exposed.append(entry)
-                except Exception:
-                    pass
-
-        await asyncio.gather(*[check(p, s, d) for p, s, d in SENSITIVE_PATHS])
+    await asyncio.gather(*[check(p, s, d) for p, s, d in SENSITIVE_PATHS])
 
     exposed.sort(key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4}.get(x["severity"], 5))
 
