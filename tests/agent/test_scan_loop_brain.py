@@ -3,6 +3,10 @@ from unittest.mock import MagicMock, AsyncMock
 
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
+from vxis.agent.tools.finding_tools import (
+    ReportFindingTool,
+    _reset_for_tests as _reset_findings,
+)
 
 
 class EchoTool:
@@ -23,15 +27,34 @@ class FinishTool:
         return ToolResult(ok=True, summary="done")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_findings():
+    _reset_findings()
+    yield
+    _reset_findings()
+
+
 @pytest.mark.asyncio
 async def test_brain_drives_loop_via_think_in_loop():
+    """Brain drives loop via think_in_loop; Q11 requires ≥1 finding before
+    finish_scan can complete, and the min_iters guard requires iter ≥
+    max_iters//2 (= 2 here). Sequence: echo → report_finding → finish_scan
+    rejected (iter 3, but actually iter < min_iters? min=2, iter 3 ≥ 2 so
+    passes min_iters; 1 finding so passes 0-finding gate; chains check
+    skipped for <3 findings) → completes.
+    """
     reg = ToolRegistry()
     reg.register(EchoTool())
     reg.register(FinishTool())
+    reg.register(ReportFindingTool())
 
     fake_brain = MagicMock()
     fake_brain.think_in_loop = AsyncMock(side_effect=[
         [("echo", {"msg": "hello"})],
+        [("report_finding", {
+            "title": "stub", "severity": "low", "finding_type": "test_stub",
+            "affected_component": "/x", "description": "fixture",
+        })],
         [("finish_scan", {})],
     ])
 
@@ -39,7 +62,7 @@ async def test_brain_drives_loop_via_think_in_loop():
     result = await loop.run()
 
     assert result["completed"] is True
-    assert fake_brain.think_in_loop.await_count == 2
+    assert fake_brain.think_in_loop.await_count == 3
     first_call_args = fake_brain.think_in_loop.await_args_list[0].args
     messages_arg = first_call_args[0]
     tools_arg = first_call_args[1]

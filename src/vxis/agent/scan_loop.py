@@ -1125,6 +1125,46 @@ class ScanAgentLoop:
                         _fin_findings = _gf2()
                         _fin_chains = _gc2()
                         _fin_desired = max(3, len(_fin_findings) // 3)
+                        # Phase Q11: hard-block finish_scan when nothing has
+                        # been reported. Pre-Q11 the chains-deficit branch
+                        # below was gated on `findings >= 3`, so 0-finding
+                        # finish_scan past min_iters slipped to acceptance.
+                        # Q10 smoke caught this on Calculator.app: Brain
+                        # called finish_scan at iter 25/50 with no findings
+                        # yet → silent completion, VC=0, empty report. Force
+                        # Brain to keep exploring or report what it found.
+                        if not _fin_findings:
+                            _registered = []
+                            try:
+                                _registered = sorted(self.registry.list_tools())
+                            except Exception:
+                                pass
+                            self.state.add_message("tool", {
+                                "name": "finish_scan", "args": {},
+                                "result": {
+                                    "ok": False,
+                                    "summary": (
+                                        f"finish_scan REJECTED — 0 findings after "
+                                        f"{self.state.iteration} iterations. "
+                                        "An empty report is not a scan. Pick a "
+                                        "concrete probe NOW:\n"
+                                        "  - run_skill(skill=\"<one of the registered skills>\")\n"
+                                        "  - shell_exec — sqlmap/nuclei/ffuf for web, "
+                                        "otool/codesign/lipo for macOS desktop\n"
+                                        "  - report_finding — if you DO have evidence, report it before finishing\n"
+                                        f"Tools available: {', '.join(_registered[:12])}"
+                                    ),
+                                    "data": {
+                                        "empty_scan": True,
+                                        "iter": self.state.iteration,
+                                    },
+                                },
+                            })
+                            logger.warning(
+                                "iter %d: finish_scan rejected (0 findings)",
+                                self.state.iteration,
+                            )
+                            continue
                         if len(_fin_findings) >= 3 and len(_fin_chains) < _fin_desired:
                             # Build concrete chain suggestions from actual IDs.
                             # Group by severity — high/critical first so Brain
