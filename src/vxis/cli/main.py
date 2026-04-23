@@ -295,7 +295,13 @@ def _convert_finding_records(records) -> list:
 
 @app.command()
 def scan(
-    target: str = typer.Argument(help="Target URL or domain"),
+    target: Optional[str] = typer.Argument(default=None, help="Target URL or domain (mutually exclusive with --manifest)"),
+    manifest: Optional[Path] = typer.Option(
+        None,
+        "--manifest",
+        "-m",
+        help="Path to a scan.yml multi-target manifest (mutually exclusive with TARGET argument).",
+    ),
     profile: str = typer.Option(
         "standard",
         "--profile",
@@ -350,7 +356,48 @@ def scan(
     기본: LLM API Brain이 20 Phase 파이프라인을 자율 실행
     --interactive: Claude Code가 Brain (stdin/stdout JSON 프로토콜)
     --resume: 이전 스캔의 체크포인트에서 재개
+    --manifest: 여러 타겟을 한 번에 스캔 (scan.yml)
     """
+    # ── Multi-target manifest path ─────────────────────────────────
+    if manifest is not None:
+        if target is not None:
+            err_console.print(
+                "[bold red]Error:[/bold red] --manifest and TARGET are mutually exclusive. "
+                "Provide either a manifest file or a single target URL, not both."
+            )
+            raise typer.Exit(code=2)
+
+        import yaml  # type: ignore[import-untyped]
+        from pydantic import ValidationError as _ValErr
+        from vxis.cli.manifest import ScanManifest
+        from vxis.cli.multi_scan import multi_scan
+
+        manifest_path = manifest.resolve()
+        if not manifest_path.exists():
+            err_console.print(f"[bold red]Manifest not found:[/bold red] {manifest_path}")
+            raise typer.Exit(code=2)
+
+        try:
+            raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+            scan_manifest = ScanManifest.model_validate(raw)
+        except Exception as exc:  # noqa: BLE001
+            err_console.print(f"[bold red]Invalid manifest:[/bold red] {exc}")
+            raise typer.Exit(code=2)
+
+        console.print(
+            f"[bold cyan]Multi-scan[/bold cyan] — project: [cyan]{scan_manifest.project}[/cyan], "
+            f"targets: {len(scan_manifest.targets)}"
+        )
+
+        exit_code = multi_scan(scan_manifest)
+        raise typer.Exit(code=exit_code)
+
+    # ── Single-target path (original behaviour) ────────────────────
+    if target is None:
+        err_console.print(
+            "[bold red]Error:[/bold red] Provide a TARGET URL or use --manifest for multi-target scans."
+        )
+        raise typer.Exit(code=2)
     # Logging policy: TUI(non-interactive)는 로그를 파일로 보냄 → Live 간섭 0
     # interactive 모드는 stdin/stdout이 JSON 프로토콜이라 stderr로 보내야 함
     log_level = logging.DEBUG if verbose else logging.INFO

@@ -22,3 +22,6 @@ tools/upstream_watch/.state.json
 .worktrees/
 tools/benchmark/.brain/
 logs/
+
+# Claude Code agent metadata (worker locks, settings)
+.claude/

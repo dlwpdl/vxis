@@ -1,0 +1,28 @@
+version: 1
+project: ProtoPie suite
+correlation: true
+output: reports/protopie-suite-{date}.html
+max_iters_per_target: 50
+
+targets:
+  - name: studio
+    kind: desktop
+    entry: /Applications/ProtoPie Studio.app
+    os: macos
+
+  - name: cloud-api
+    kind: web
+    entry: http://localhost:3333
+    hints:
+      tech: clojure-ring-reitit
+
+  - name: mcp-proxy
+    kind: web
+    entry: http://localhost:8000
+    hints:
+      tech: python-fastapi-litellm
+
+  - name: cloud-api-source
+    kind: code
+    entry: /Users/eliot/Desktop/git/cloud-api
+    skip: true  # CodeSurface 가 land 한 후 unskip
