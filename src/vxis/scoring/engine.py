@@ -160,10 +160,10 @@ class ScoringEngine:
     }
 
     def __init__(self, target_type: str) -> None:
-        if target_type not in ("web", "game", "mobile"):
+        if target_type not in ("web", "game", "mobile", "desktop"):
             raise ValueError(
                 f"Unknown target_type: {target_type!r}. "
-                f"Must be one of: web, game, mobile"
+                f"Must be one of: web, game, mobile, desktop"
             )
         self.target_type = target_type
         self._vectors = get_vectors_for_type(target_type)

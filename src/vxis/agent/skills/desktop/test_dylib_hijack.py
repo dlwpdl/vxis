@@ -234,12 +234,16 @@ def _make_finding(
     attack_path_en: str,
     attack_path_ko: str,
     binary: str,
+    dylib: str = "",
 ) -> dict[str, Any]:
-    """Build a Finding-shaped dict matching VXIS report format."""
+    # `dylib` is a top-level discriminator key consumed by scan_loop's desktop
+    # promotion block — without it, every DYL-002 finding on the same binary
+    # collapses to a single VXIS-NNNN because affected_component is identical.
     return {
         "path": binary,
         "severity": severity,
         "vector": vector,
+        "dylib": dylib,
         "title": f"{title_en}|||{title_ko}",
         "description": (
             f"WHAT: {what_en}\n"
@@ -392,6 +396,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                             "피해자 프로세스 내에서 공격자 코드 실행."
                         ),
                         binary=binary,
+                        dylib=f"{dylib}@{candidate_path}",
                     ))
 
         # ── Step 4: DESK-DYL-002 — missing weak dylib ────────────────────────
@@ -465,6 +470,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                     "(약한 링크 플래그에도 불구하고) → 공격자 코드 실행."
                                 ),
                                 binary=binary,
+                                dylib=f"{dylib}@{target_path}",
                             ))
                 elif dylib.startswith(("/", "@executable_path", "@loader_path")):
                     # Absolute or relative-to-binary path.
@@ -516,6 +522,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                 f"피해자가 '{root}' 실행 → dyld 로드 → 코드 실행."
                             ),
                             binary=binary,
+                            dylib=dylib,
                         ))
 
         # ── Step 5: DESK-DYL-003 — multiple RPATHs with ≥1 writable ─────────
@@ -586,6 +593,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                         "피해자 프로세스 내에서 공격자 코드 실행."
                     ),
                     binary=binary,
+                    dylib=f"rpath-set:{','.join(sorted(writable_rpaths))}",
                 ))
 
     logger.info(

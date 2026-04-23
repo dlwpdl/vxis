@@ -104,7 +104,7 @@ class ScoreTracker:
       - record_phase_skipped(phase_name, reason)
     """
 
-    target_type: str  # "web" | "game" | "mobile"
+    target_type: str  # "web" | "game" | "mobile" | "desktop"
 
     # ── Vector Coverage ──
     vectors_attempted: set[str] = field(default_factory=set)

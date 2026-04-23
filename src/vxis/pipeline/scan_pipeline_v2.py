@@ -356,7 +356,10 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             findings_count=len(ctx.findings),
         )
 
-        engine = ScoringEngine("web")
+        # Use the scan's actual kind so DESKTOP scans aren't silently scored
+        # against the WEB vector pool (was producing "[SCORE] WEB" for desktop
+        # scans pre-Q5).
+        engine = ScoringEngine(_kind_value)
         vxis_score = engine.calculate(tracker, ctx.findings, scan_id=ctx.scan_id)
 
         # Print detailed score
