@@ -1522,6 +1522,29 @@ class ScanAgentLoop:
                                             or finding.get("binary")
                                             or _root
                                         )
+                                        # Phase Q2: dedup discriminator. Without
+                                        # it, 12 dylib_hijack findings all share
+                                        # the binary path → finding_tools dedupes
+                                        # them to a single VXIS-NNNN entry. Each
+                                        # finding type carries its own
+                                        # distinguishing key (dylib name,
+                                        # entitlement, scheme, flag) — append it
+                                        # to affected_component as a fragment so
+                                        # the binary stays the same but each
+                                        # specific issue gets its own slot.
+                                        _disc = (
+                                            finding.get("dylib")
+                                            or finding.get("entitlement_key")
+                                            or finding.get("entitlement")
+                                            or finding.get("scheme")
+                                            or finding.get("flag")
+                                            or finding.get("secret_type")
+                                            or finding.get("vector")
+                                        )
+                                        if _disc and "#" not in _loc:
+                                            _loc_with_disc = f"{_loc}#{_disc}"
+                                        else:
+                                            _loc_with_disc = _loc
                                         # Evidence: prefer the skill's snippet
                                         # if present (LSS gives masked context),
                                         # else fall back to a compact summary
@@ -1540,7 +1563,7 @@ class ScanAgentLoop:
                                             "title": finding.get("title", f"Desktop finding: {finding.get('vector', '?')}"),
                                             "severity": finding.get("severity", "medium"),
                                             "finding_type": finding.get("vector", "desktop_misconfiguration"),
-                                            "affected_component": _loc,
+                                            "affected_component": _loc_with_disc,
                                             "description": finding.get("description", "")[:1500],
                                             "evidence": str(_ev)[:500],
                                         })

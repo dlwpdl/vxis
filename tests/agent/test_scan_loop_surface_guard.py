@@ -167,3 +167,42 @@ def test_desktop_skills_set_is_frozen() -> None:
     assert isinstance(_DESKTOP_SKILLS, frozenset)
     assert "test_signature_audit" in _DESKTOP_SKILLS
     assert "test_infra" not in _DESKTOP_SKILLS
+
+
+# ─── Phase Q2: dedup discriminator ────────────────────────────────────
+# Without it, 18 dylib_hijack findings on the same .app bundle dedup to a
+# single VXIS-NNNN. The promotion block must append the per-finding key
+# (dylib name, entitlement, scheme, flag) to affected_component so each
+# distinct issue gets its own report row. Tested by inspecting the
+# promotion-block source for the discriminator logic — driving through
+# scan_loop's auto-scheduler is too brittle for a unit test.
+
+
+def test_phase_q2_promotion_block_includes_discriminator_logic() -> None:
+    """Source-level guard: the desktop auto-promotion block must include
+    the dedup discriminator logic. If someone refactors the block away,
+    this test catches it."""
+    import pathlib
+    src = pathlib.Path("src/vxis/agent/scan_loop.py").read_text()
+    # Block exists.
+    assert "Desktop skill auto-promotion" in src
+    # Discriminator logic appends per-finding key.
+    assert 'finding.get("dylib")' in src
+    assert 'finding.get("entitlement_key")' in src
+    assert 'finding.get("scheme")' in src
+    assert 'finding.get("flag")' in src
+    # Joins discriminator with '#' so finding_tools dedup treats each
+    # combo as a distinct slot.
+    assert "_loc_with_disc = f\"{_loc}#{_disc}\"" in src
+
+
+def test_phase_q2_discriminator_separator_choice() -> None:
+    """'#' is preferred over '/' or ':' because file paths legitimately
+    contain '/' and ':' (Windows drive letters), but '#' never appears in
+    a normal POSIX path or .app bundle structure — making it a safe
+    reversible delimiter for downstream report rendering."""
+    import pathlib
+    src = pathlib.Path("src/vxis/agent/scan_loop.py").read_text()
+    # Make sure we aren't accidentally using a separator that collides
+    # with path semantics.
+    assert "f\"{_loc}#{_disc}\"" in src
