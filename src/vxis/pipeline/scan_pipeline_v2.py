@@ -485,6 +485,7 @@ class ScanPipeline:
             registry=registry,
             max_iters=max_iters,
             brain=self.brain,
+            target_kind=kind,
         )
 
         loop_result: dict[str, Any] = {}

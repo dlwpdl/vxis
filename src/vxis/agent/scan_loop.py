@@ -127,12 +127,20 @@ class ScanAgentLoop:
         max_iters: int = 300,
         brain: Any | None = None,
         critic_interval: int = 6,
+        target_kind: Any = None,
     ) -> None:
         self.state = ScanLoopState(target=target, max_iters=max_iters)
         self.registry = registry
         self.brain = brain
         self.critic_interval = critic_interval
         self._last_critic_iter = 0
+        # Surface kind drives skill-sweep filtering. Without it, a desktop
+        # scan ends up running test_xss / test_sqli / etc. on a file:// path
+        # — wasted iterations + false-positive noise from web skills hitting
+        # a non-HTTP target. Kept as Any for back-compat with callers that
+        # don't pass it (default = web behaviour).
+        from vxis.interaction.surface import TargetKind as _TK
+        self._target_kind = target_kind or _TK.WEB
 
     async def _decide(self, state: ScanLoopState) -> list[tuple[str, dict[str, Any]]]:
         """Returns list of (tool_name, args). Delegates to brain.think_in_loop when brain is set."""
@@ -1402,6 +1410,58 @@ class ScanAgentLoop:
                                             "evidence": finding.get("evidence", "")[:500],
                                         })
 
+                                # ── Desktop skill auto-promotion ────────────
+                                # All 6 macOS desktop skills emit Finding-shaped
+                                # dicts with bilingual title|||description and a
+                                # DESK-* vector. Web skills above only run on
+                                # web targets, so this block fires exclusively
+                                # when Brain (or sweep) ran a desktop skill.
+                                # Without this, scan_loop would let internal
+                                # findings die in sr.data and the report would
+                                # come back empty even when the skill clearly
+                                # found something on disk.
+                                if _real_skill in (
+                                    "test_local_storage_secrets",
+                                    "test_electron_misconfig",
+                                    "test_signature_audit",
+                                    "test_entitlement_audit",
+                                    "test_dylib_hijack",
+                                    "test_deeplink_abuse",
+                                ) and sr.data:
+                                    _root = sr.data.get("root") or self.state.target
+                                    for finding in (sr.data.get("findings") or []):
+                                        # Each desktop skill picks its own
+                                        # location field; coalesce them so
+                                        # affected_component is always populated.
+                                        _loc = (
+                                            finding.get("abs_path")
+                                            or finding.get("path")
+                                            or finding.get("binary")
+                                            or _root
+                                        )
+                                        # Evidence: prefer the skill's snippet
+                                        # if present (LSS gives masked context),
+                                        # else fall back to a compact summary
+                                        # of the matched bytes for the verifier
+                                        # to chew on.
+                                        _ev = (
+                                            finding.get("snippet")
+                                            or finding.get("evidence")
+                                            or (
+                                                f"vector={finding.get('vector', '?')} "
+                                                f"flag={finding.get('flag', finding.get('entitlement_key', finding.get('scheme', '?')))} "
+                                                f"path={_loc}"
+                                            )
+                                        )
+                                        await self.registry.dispatch("report_finding", {
+                                            "title": finding.get("title", f"Desktop finding: {finding.get('vector', '?')}"),
+                                            "severity": finding.get("severity", "medium"),
+                                            "finding_type": finding.get("vector", "desktop_misconfiguration"),
+                                            "affected_component": _loc,
+                                            "description": finding.get("description", "")[:1500],
+                                            "evidence": str(_ev)[:500],
+                                        })
+
                         except Exception:
                             logger.exception("skill %s failed", skill_name)
 
@@ -2006,7 +2066,28 @@ class ScanAgentLoop:
                     _sweep_gap = self.state.iteration - _last_sweep
                     if _sweep_gap >= 10:
                         from vxis.agent.skills import SKILL_REGISTRY as _REG
-                        _untried = sorted(set(_REG.keys()) - _real_skills_completed)
+                        from vxis.interaction.surface import TargetKind as _TK
+                        # Filter the registry to skills that match the surface
+                        # kind. The 6 desktop skills have macOS-specific code
+                        # paths (codesign, otool, plistlib) that crash or
+                        # return empty on web targets. Conversely, web skills
+                        # on a desktop target waste iters firing HTTP at a
+                        # file:// path. Naming convention: desktop skills
+                        # live under skills/desktop/ and have no web siblings.
+                        _DESKTOP_ONLY = {
+                            "test_local_storage_secrets",
+                            "test_electron_misconfig",
+                            "test_signature_audit",
+                            "test_entitlement_audit",
+                            "test_dylib_hijack",
+                            "test_deeplink_abuse",
+                        }
+                        _all_registered = set(_REG.keys())
+                        if self._target_kind == _TK.DESKTOP:
+                            _eligible = _all_registered & _DESKTOP_ONLY
+                        else:
+                            _eligible = _all_registered - _DESKTOP_ONLY
+                        _untried = sorted(_eligible - _real_skills_completed)
                         if _untried:
                             self._last_skill_sweep_iter = self.state.iteration
                             _base = self.state.target.rstrip("/")
