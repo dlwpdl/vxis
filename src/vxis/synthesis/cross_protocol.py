@@ -133,7 +133,35 @@ _AGENT_LAYER_MAP: dict[str, OSILayer] = {
     "desktop_binary_protections":    OSILayer.DESKTOP,
     "desktop_privilege_escalation":  OSILayer.DESKTOP,
     "desktop_dependency_confusion":  OSILayer.DESKTOP,
+    # macOS-specific skill names used in phase-C skill tests — explicit entries
+    # so _agent_to_layer() answers DESKTOP even when called with the raw skill
+    # function name rather than an agent_id carrying the `desktop_` prefix.
+    "test_dylib_hijack":             OSILayer.DESKTOP,
+    "test_local_storage_secrets":    OSILayer.DESKTOP,
+    "test_electron_misconfig":       OSILayer.DESKTOP,
+    "test_entitlement_audit":        OSILayer.DESKTOP,
+    "test_signature_audit":          OSILayer.DESKTOP,
+    "test_deeplink_abuse":           OSILayer.DESKTOP,
 }
+
+
+def _agent_to_layer(agent_id: str) -> OSILayer:
+    """Map an agent_id string to its OSILayer — public helper for tests & tooling.
+
+    Resolution order (mirrors CrossProtocolSynthesizer._tag_layer but does NOT
+    consult evidence.surface because it operates only on the agent_id string):
+      1. Explicit entry in _AGENT_LAYER_MAP — wins unconditionally.
+      2. agent_id starts with "desktop_" → DESKTOP (prefix fallback for new
+         desktop skills not yet registered in the map).
+      3. Default APPLICATION (web bias for legacy / unknown agents).
+    """
+    explicit = _AGENT_LAYER_MAP.get(agent_id)
+    if explicit is not None:
+        return explicit
+    if agent_id.startswith("desktop_"):
+        return OSILayer.DESKTOP
+    return OSILayer.APPLICATION
+
 
 # 키워드 → 공격 카테고리 매핑
 _KEYWORD_CATEGORY_MAP: dict[str, AttackCategory] = {
