@@ -18,9 +18,40 @@ import pytest
 
 
 def test_import_vxis() -> None:
+    """Verify vxis package version matches the SSOT in pyproject.toml.
+
+    Version is read dynamically from pyproject.toml so we never have to
+    bump this assertion manually. SSOT chain is:
+      pyproject.toml [project].version
+        → src/vxis/registry.py:VERSION (manual mirror, see registry comment)
+        → src/vxis/__init__.py:__version__ (re-export from registry)
+    """
+    import sys
+    import tomllib
+    from pathlib import Path
+
     import vxis
 
-    assert vxis.__version__ == "0.1.0"
+    # Locate pyproject.toml — climb up from this test file until we find it.
+    pyproject_path = Path(__file__).resolve()
+    for parent in pyproject_path.parents:
+        candidate = parent / "pyproject.toml"
+        if candidate.exists():
+            pyproject_path = candidate
+            break
+    else:  # pragma: no cover — repo layout is fixed
+        raise FileNotFoundError("pyproject.toml not found above test_smoke.py")
+
+    with pyproject_path.open("rb") as fh:
+        expected_version = tomllib.load(fh)["project"]["version"]
+
+    assert vxis.__version__ == expected_version, (
+        f"vxis.__version__={vxis.__version__!r} but pyproject.toml has "
+        f"{expected_version!r} — bump src/vxis/registry.py:VERSION too"
+    )
+
+    # Sanity: tomllib is stdlib only on 3.11+; guard against an accidental backport.
+    assert sys.version_info >= (3, 11), "tomllib requires Python 3.11+"
 
 
 # ---------------------------------------------------------------------------
