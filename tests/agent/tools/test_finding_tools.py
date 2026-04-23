@@ -144,9 +144,13 @@ async def test_query_findings_text_contains_matches_title_or_description():
 @pytest.mark.asyncio
 async def test_query_findings_respects_limit():
     rep = ReportFindingTool()
-    # Phase B: use distinct affected_component values so dedup doesn't merge them
-    for i in range(10):
-        await rep.run(title=f"F{i}", severity="low", finding_type="misc", affected_component=f"/path/{i}", description="y")
+    # Phase B: base-path dedup strips trailing numeric segments (/0, /1, ...) so
+    # /path/0 through /path/9 all collapse to /path and merge into one finding.
+    # Use alphabetic slugs so _base_path() produces 10 distinct paths and each
+    # report_finding call creates a new VXIS-NNNN entry.
+    slugs = [f"/page/item-{chr(ord('a') + i)}" for i in range(10)]
+    for i, slug in enumerate(slugs):
+        await rep.run(title=f"F{i}", severity="low", finding_type="misc", affected_component=slug, description="y")
     q = QueryFindingsTool()
     r = await q.run(limit=3)
     assert r.data["count"] == 3
