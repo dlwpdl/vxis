@@ -140,27 +140,136 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
-        _type_to_vector = {
+        # Map finding types to valid registry vector IDs (vxis/scoring/vectors.py).
+        # Keys are snake_case finding_type values emitted by Brain/report_finding.
+        _type_to_vector: dict[str, str] = {
+            # ── Injection: SQL ──
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "sql_injection_union": "WEB-SQLI-001",
+            "sql_injection_blind": "WEB-SQLI-002",
+            "sql_injection_time": "WEB-SQLI-003",
+            "sql_injection_error": "WEB-SQLI-004",
+            "second_order_sqli": "WEB-SQLI-006",
+            # ── Injection: NoSQL ──
+            "nosql_injection": "WEB-NOSQL-001",
+            # ── Injection: Command ──
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "os_command_injection": "WEB-CMDI-001",
+            # RCE is closest to command injection; WEB-RCE-001 does NOT exist
+            "rce": "WEB-CMDI-001",
+            "remote_code_execution": "WEB-CMDI-001",
+            # ── Injection: LDAP / XPath ──
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            # ── Injection: SSTI ──
+            "ssti": "WEB-SSTI-001",
+            "server_side_template_injection": "WEB-SSTI-001",
+            # ── Injection: modern ──
+            "prototype_pollution": "WEB-INJECT-022",
+            "cache_poisoning": "WEB-INJECT-024",
+            "web_cache_deception": "WEB-INJECT-024",
+            "prompt_injection": "WEB-INJECT-021",
+            "llm_prompt_injection": "WEB-INJECT-021",
+            # ── XSS ──
+            "xss": "WEB-XSS-001",
+            "xss_reflected": "WEB-XSS-001",
+            "reflected_xss": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "stored_xss": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
+            "dom_xss": "WEB-XSS-003",
+            "mxss": "WEB-XSS-004",
+            # ── SSRF ──
+            "ssrf": "WEB-SSRF-001",
+            "blind_ssrf": "WEB-SSRF-002",
+            # ── Auth ──
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "brute_force": "WEB-AUTH-001",
+            "default_credentials": "WEB-AUTH-002",
+            # jwt_confusion → WEB-AUTH-003 (JWT Algorithm Confusion RS256→HS256)
+            # WEB-JWT-001 does NOT exist in registry
+            "jwt_confusion": "WEB-AUTH-003",
+            "jwt_algorithm_confusion": "WEB-AUTH-003",
+            "jwt_none_algorithm": "WEB-AUTH-004",
+            "session_fixation": "WEB-AUTH-005",
+            "session_hijacking": "WEB-AUTH-006",
+            "oauth_bypass": "WEB-AUTH-007",
+            "open_redirect_oauth": "WEB-AUTH-007",
+            "password_reset": "WEB-AUTH-008",
+            "password_reset_poisoning": "WEB-AUTH-008",
+            "magic_link_bypass": "WEB-AUTH-010",
+            "saml_bypass": "WEB-AUTH-011",
+            "saml_replay": "WEB-AUTH-012",
+            "oauth_csrf": "WEB-AUTH-013",
+            # ── Access Control ──
+            # WEB-IDOR-001, WEB-BAC-001 do NOT exist in registry
+            "idor": "WEB-AC-001",
+            "insecure_direct_object_reference": "WEB-AC-001",
+            "broken_access_control": "WEB-AC-002",
+            "horizontal_privilege_escalation": "WEB-AC-002",
+            "privilege_escalation": "WEB-AC-003",
+            "vertical_privilege_escalation": "WEB-AC-003",
+            # WEB-TRAV-001 does NOT exist — correct ID is WEB-AC-004
+            "path_traversal": "WEB-AC-004",
+            "directory_traversal": "WEB-AC-004",
+            "forced_browsing": "WEB-AC-005",
+            "hidden_endpoints": "WEB-AC-005",
+            # ── Misconfiguration ──
+            # WEB-MISC-001 does NOT exist — correct prefix is WEB-MISCONF-
+            "misconfiguration": "WEB-MISCONF-001",
+            "debug_endpoint": "WEB-MISCONF-001",
+            "default_configuration": "WEB-MISCONF-002",
+            # WEB-INFO-001, WEB-INFO-002 do NOT exist
+            "information_disclosure": "WEB-MISCONF-003",
+            "error_oracle": "WEB-MISCONF-003",
+            "stack_trace_disclosure": "WEB-MISCONF-003",
+            "verbose_errors": "WEB-MISCONF-003",
+            "security_headers": "WEB-MISCONF-004",
+            "missing_security_headers": "WEB-MISCONF-004",
+            "cors_misconfiguration": "WEB-MISCONF-005",
+            # WEB-REDIR-001 does NOT exist — correct ID is WEB-MISCONF-006
+            "open_redirect": "WEB-MISCONF-006",
+            # ── Cryptographic ──
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "weak_tls": "WEB-CRYPTO-001",
+            "weak_hashing": "WEB-CRYPTO-002",
+            "hardcoded_secrets": "WEB-CRYPTO-003",
+            "insecure_randomness": "WEB-CRYPTO-004",
+            # ── Complex / File ──
+            "xxe": "WEB-XXE-001",
+            "xml_external_entity": "WEB-XXE-001",
+            "deserialization": "WEB-DESER-001",
+            "insecure_deserialization": "WEB-DESER-001",
+            "file_upload": "WEB-UPLOAD-001",
+            "unrestricted_file_upload": "WEB-UPLOAD-001",
+            "race_condition": "WEB-RACE-001",
+            "toctou": "WEB-RACE-001",
+            "csrf": "WEB-CSRF-001",
+            "websocket_injection": "WEB-WSS-001",
+            # ── API ──
+            "mass_assignment": "WEB-API-001",
+            "rate_limiting_bypass": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "graphql_batching": "WEB-API-004",
+            "http_verb_tampering": "WEB-API-005",
+            "grpc_reflection": "WEB-API-006",
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # ── Infrastructure ──
+            "subdomain_takeover": "WEB-INFRA-001",
+            "dns_zone_transfer": "WEB-INFRA-002",
+            "s3_bucket_public": "WEB-INFRA-003",
+            "firebase_public": "WEB-INFRA-004",
+            "exposed_git": "WEB-INFRA-005",
+            # ── Business Logic ──
+            # WEB-LOGIC-001 does NOT exist — correct prefix is WEB-BIZ-
+            "business_logic": "WEB-BIZ-001",
+            "negative_value_injection": "WEB-BIZ-001",
+            "state_transition_skip": "WEB-BIZ-002",
+            "payment_race_condition": "WEB-BIZ-003",
+            "transaction_replay": "WEB-BIZ-004",
+            "supply_chain": "WEB-SUPPLY-001",
         }
 
         # Severity → exploitation level
@@ -177,7 +286,17 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
-            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            vector_id = _type_to_vector.get(ftype)
+            if vector_id is None:
+                # Unknown finding type — no valid registry vector to credit;
+                # still record exploitation level so Exploitation Reach scores.
+                tracker.exploitation_levels[fid] = _sev_to_level.get(sev, 0)
+                tracker.finding_vectors[fid] = ""
+                evidence_count = 0
+                if hasattr(f, "evidence") and f.evidence:
+                    evidence_count = len(f.evidence) if isinstance(f.evidence, list) else 1
+                tracker.evidence_counts[fid] = evidence_count
+                continue
             level = _sev_to_level.get(sev, 0)
 
             tracker.record_vector_attempt(vector_id)
