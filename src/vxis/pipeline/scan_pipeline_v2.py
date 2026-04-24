@@ -140,27 +140,64 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
+        # Map finding types to valid vector IDs from vectors.py registry.
+        # All IDs here must exist in WEB_VECTORS / GAME_VECTORS / MOBILE_VECTORS —
+        # unknown IDs are silently ignored by ScoringEngine._calc_vector_coverage.
         _type_to_vector = {
+            # Injection
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "nosql_injection": "WEB-NOSQL-001",
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "rce": "WEB-CMDI-001",           # RCE most commonly via cmd injection
+            "ssti": "WEB-SSTI-001",
+            "xxe": "WEB-XXE-001",
+            "deserialization": "WEB-DESER-001",
+            "file_upload": "WEB-UPLOAD-001",
+            "websocket_injection": "WEB-WSS-001",
+            "prototype_pollution": "WEB-INJECT-022",
+            "llm_prompt_injection": "WEB-INJECT-021",
+            # XSS
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
+            "xss": "WEB-XSS-001",
+            # SSRF
+            "ssrf": "WEB-SSRF-001",
+            # Authentication
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "jwt_confusion": "WEB-AUTH-003",   # JWT algorithm confusion RS256→HS256
+            "session_fixation": "WEB-AUTH-005",
+            "password_reset_poisoning": "WEB-AUTH-008",
+            "oauth_open_redirect": "WEB-AUTH-007",
+            "magic_link_bypass": "WEB-AUTH-010",
+            "csrf": "WEB-CSRF-001",
+            # Access Control (was WEB-IDOR-001 / WEB-BAC-001 — non-existent)
+            "idor": "WEB-AC-001",
+            "broken_access_control": "WEB-AC-002",
+            "privilege_escalation": "WEB-AC-003",
+            "path_traversal": "WEB-AC-004",    # WEB-TRAV-001 does not exist
+            # Misconfiguration (was WEB-MISC-001 / WEB-INFO-* — non-existent)
+            "misconfiguration": "WEB-MISCONF-001",
+            "information_disclosure": "WEB-MISCONF-003",
+            "error_oracle": "WEB-MISCONF-003",
+            "cors_misconfiguration": "WEB-MISCONF-005",
+            "open_redirect": "WEB-MISCONF-006",  # WEB-REDIR-001 does not exist
+            # Crypto
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "hardcoded_secrets": "WEB-CRYPTO-003",
+            # API
+            "mass_assignment": "WEB-API-001",
+            "rate_limiting": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # Business Logic (was WEB-LOGIC-001 — non-existent)
+            "business_logic": "WEB-BIZ-001",
+            "race_condition": "WEB-RACE-001",
+            # Infrastructure
+            "subdomain_takeover": "WEB-INFRA-001",
+            "supply_chain": "WEB-SUPPLY-001",
         }
 
         # Severity → exploitation level
@@ -177,14 +214,17 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
-            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            # Skip unmapped types — synthetic IDs would be silently ignored by
+            # ScoringEngine anyway, inflating unknown_vectors_ignored count.
+            vector_id = _type_to_vector.get(ftype)
             level = _sev_to_level.get(sev, 0)
 
-            tracker.record_vector_attempt(vector_id)
-            if level >= 1:
-                tracker.vectors_found.add(vector_id)
+            if vector_id:
+                tracker.record_vector_attempt(vector_id)
+                if level >= 1:
+                    tracker.vectors_found.add(vector_id)
+                tracker.finding_vectors[fid] = vector_id
             tracker.exploitation_levels[fid] = level
-            tracker.finding_vectors[fid] = vector_id
 
             # Evidence count from finding
             evidence_count = 0
