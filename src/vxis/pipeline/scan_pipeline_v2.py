@@ -138,7 +138,13 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         from vxis.scoring.engine import ScoringEngine
         from vxis.scoring.tracker import ScoreTracker
 
-        tracker = ScoreTracker(target_type="web")
+        target_type = getattr(ctx, "target_type", "web") or "web"
+        tracker = ScoreTracker(target_type=target_type)
+
+        # Prefix used when a finding_type has no explicit vector mapping.
+        # Must match each target type's registry namespace (WEB / GAME / MOB).
+        _prefix_map = {"web": "WEB", "game": "GAME", "mobile": "MOB"}
+        _fallback_prefix = _prefix_map.get(target_type, "WEB")
 
         # Map finding types to vector IDs
         _type_to_vector = {
@@ -177,7 +183,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
-            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            vector_id = _type_to_vector.get(ftype, f"{_fallback_prefix}-{ftype.upper()[:8]}-001")
             level = _sev_to_level.get(sev, 0)
 
             tracker.record_vector_attempt(vector_id)
@@ -228,7 +234,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             findings_count=len(ctx.findings),
         )
 
-        engine = ScoringEngine("web")
+        engine = ScoringEngine(target_type)
         vxis_score = engine.calculate(tracker, ctx.findings, scan_id=ctx.scan_id)
 
         # Print detailed score
