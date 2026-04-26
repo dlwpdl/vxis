@@ -140,27 +140,92 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
+        # Map finding types to vector IDs (must match vectors.py registry exactly)
         _type_to_vector = {
+            # Injection — SQL
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "sql_injection_boolean_blind": "WEB-SQLI-002",
+            "sql_injection_time_blind": "WEB-SQLI-003",
+            "sql_injection_error": "WEB-SQLI-004",
+            "sql_injection_second_order": "WEB-SQLI-006",
+            # Injection — NoSQL
+            "nosql_injection": "WEB-NOSQL-001",
+            # Injection — Command
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "os_command_injection": "WEB-CMDI-001",
+            # Injection — Modern
+            "ssti": "WEB-SSTI-001",
+            "server_side_template_injection": "WEB-SSTI-001",
+            "ldap_injection": "WEB-LDAP-001",
+            "xpath_injection": "WEB-XPATH-001",
+            "xxe": "WEB-XXE-001",
+            "xml_external_entity": "WEB-XXE-001",
+            "prototype_pollution": "WEB-INJECT-022",
+            "cache_poisoning": "WEB-INJECT-024",
+            # XSS
+            "xss": "WEB-XSS-001",
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
+            "xss_dom": "WEB-XSS-003",
+            # SSRF
+            "ssrf": "WEB-SSRF-001",
+            "server_side_request_forgery": "WEB-SSRF-001",
+            # Auth
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
+            "brute_force": "WEB-AUTH-001",
+            "default_credentials": "WEB-AUTH-002",
+            "jwt_confusion": "WEB-AUTH-003",      # was WEB-JWT-001 (non-existent)
+            "jwt_algorithm_confusion": "WEB-AUTH-003",
+            "jwt_none_algorithm": "WEB-AUTH-004",
+            "session_fixation": "WEB-AUTH-005",
+            "session_hijacking": "WEB-AUTH-006",
+            "oauth_bypass": "WEB-AUTH-007",
+            "password_reset_poisoning": "WEB-AUTH-008",
+            "csrf": "WEB-CSRF-001",
+            "saml_bypass": "WEB-AUTH-011",
+            # Access Control
+            "idor": "WEB-AC-001",                  # was WEB-IDOR-001 (non-existent)
+            "broken_access_control": "WEB-AC-002", # was WEB-BAC-001 (non-existent)
+            "privilege_escalation": "WEB-AC-003",
+            "path_traversal": "WEB-AC-004",        # was WEB-TRAV-001 (non-existent)
+            "directory_traversal": "WEB-AC-004",
+            "forced_browsing": "WEB-AC-005",
+            # Misconfig
+            "misconfiguration": "WEB-MISCONF-001", # was WEB-MISC-001 (non-existent)
+            "debug_endpoint": "WEB-MISCONF-001",
+            "information_disclosure": "WEB-MISCONF-003", # was WEB-INFO-001 (non-existent)
+            "error_oracle": "WEB-MISCONF-003",     # was WEB-INFO-002 (non-existent)
+            "stack_trace_disclosure": "WEB-MISCONF-003",
+            "missing_security_headers": "WEB-MISCONF-004",
+            "cors_misconfiguration": "WEB-MISCONF-005",
+            "open_redirect": "WEB-MISCONF-006",    # was WEB-REDIR-001 (non-existent)
+            # Crypto
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "weak_tls": "WEB-CRYPTO-001",
+            "weak_hashing": "WEB-CRYPTO-002",
+            "hardcoded_secrets": "WEB-CRYPTO-003",
+            "insecure_randomness": "WEB-CRYPTO-004",
+            # Complex attacks
+            "insecure_deserialization": "WEB-DESER-001",
+            "rce": "WEB-DESER-001",                # was WEB-RCE-001 (non-existent)
+            "remote_code_execution": "WEB-DESER-001",
+            "file_upload": "WEB-UPLOAD-001",
+            "unrestricted_file_upload": "WEB-UPLOAD-001",
+            "race_condition": "WEB-RACE-001",
+            # API
+            "mass_assignment": "WEB-API-001",
+            "rate_limiting_bypass": "WEB-API-002",
+            "graphql_introspection": "WEB-API-003",
+            "http_verb_tampering": "WEB-API-005",
+            "bopla": "WEB-API-008",
+            "bfla": "WEB-API-009",
+            # Business Logic
+            "business_logic": "WEB-BIZ-001",      # was WEB-LOGIC-001 (non-existent)
+            "negative_value_injection": "WEB-BIZ-001",
+            "state_transition_skip": "WEB-BIZ-002",
+            "payment_race_condition": "WEB-BIZ-003",
+            "transaction_replay": "WEB-BIZ-004",
         }
 
         # Severity → exploitation level
