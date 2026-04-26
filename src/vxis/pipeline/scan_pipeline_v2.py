@@ -140,27 +140,27 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         tracker = ScoreTracker(target_type="web")
 
-        # Map finding types to vector IDs
+        # Map finding types to vector IDs (must match vectors.py registry)
         _type_to_vector = {
             "sql_injection": "WEB-SQLI-001",
             "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
             "xss": "WEB-XSS-001",
             "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
+            "idor": "WEB-AC-001",                          # was WEB-IDOR-001 (non-existent)
+            "broken_access_control": "WEB-AC-002",         # was WEB-BAC-001 (non-existent)
+            "information_disclosure": "WEB-MISCONF-003",   # was WEB-INFO-001 (non-existent)
+            "path_traversal": "WEB-AC-004",                # was WEB-TRAV-001 (non-existent)
             "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
             "csrf": "WEB-CSRF-001",
             "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
+            "rce": "WEB-DESER-001",                        # was WEB-RCE-001 (non-existent)
             "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
+            "error_oracle": "WEB-MISCONF-003",             # was WEB-INFO-002 (non-existent)
+            "misconfiguration": "WEB-MISCONF-001",         # was WEB-MISC-001 (non-existent)
+            "open_redirect": "WEB-MISCONF-006",            # was WEB-REDIR-001 (non-existent)
+            "jwt_confusion": "WEB-AUTH-003",               # was WEB-JWT-001 (non-existent)
             "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
+            "business_logic": "WEB-BIZ-001",              # was WEB-LOGIC-001 (non-existent)
         }
 
         # Severity → exploitation level
@@ -236,7 +236,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         return vxis_score.total, vxis_score.grade
 
-    except Exception as e:
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
@@ -462,7 +462,7 @@ class ScanPipeline:
         # summary line for operators.
         try:
             from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            mitre = coverage_report(_get_finding_dicts())
             logger.info(
                 "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
                 len(mitre["techniques_covered"]),
