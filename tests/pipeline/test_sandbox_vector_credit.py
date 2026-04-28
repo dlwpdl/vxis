@@ -140,3 +140,16 @@ def test_missing_sandbox_invocations_field_does_not_crash() -> None:
     score, grade = _compute_vxis_score(ctx)
     assert isinstance(score, float)
     assert grade in ("A", "B", "C", "D", "F")
+
+
+def test_incomplete_scan_loop_penalizes_completeness() -> None:
+    """A max-iter timeout must not score as a completed scan loop."""
+    from vxis.pipeline.scan_pipeline_v2 import _compute_vxis_score
+
+    ctx = _make_mock_ctx([])
+    ctx.scan_loop_completed = False
+
+    _compute_vxis_score(ctx)
+
+    assert ctx.score_detail.completeness.score == 0.0
+    assert ctx.score_detail.completeness.details["failed"] == 1

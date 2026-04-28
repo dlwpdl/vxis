@@ -74,3 +74,47 @@ async def test_scan_loop_respects_max_iters():
     result = await loop.run()
     assert result["completed"] is False
     assert loop.state.iteration == 3
+
+
+@pytest.mark.asyncio
+async def test_finish_scan_rejected_when_two_findings_have_no_chain():
+    """Two findings are enough to require at least one crown-jewel chain."""
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "first finding",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "debug endpoint exposed",
+        })],
+        [("report_finding", {
+            "title": "second finding",
+            "severity": "high",
+            "finding_type": "auth_bypass",
+            "affected_component": "/login",
+            "description": "auth bypass evidence",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost", registry=reg, max_iters=8)
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    assert result["completed"] is False
+    chain_rejections = [
+        m for m in loop.state.messages
+        if m.get("role") == "tool"
+        and isinstance(m.get("content"), dict)
+        and (m["content"].get("result") or {}).get("data", {}).get("needs_chains")
+    ]
+    assert chain_rejections, "finish_scan must be rejected until the two findings are chained"

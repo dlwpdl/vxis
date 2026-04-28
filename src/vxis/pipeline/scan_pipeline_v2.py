@@ -369,10 +369,12 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         # Phase completion — single scan_loop phase
         from vxis.scoring.tracker import PhaseResult, PhaseStatus
+        _loop_completed = getattr(ctx, "scan_loop_completed", True)
         tracker.phase_results["scan_loop"] = PhaseResult(
             phase_name="scan_loop",
-            status=PhaseStatus.completed,
+            status=PhaseStatus.completed if _loop_completed is not False else PhaseStatus.failed,
             findings_count=len(ctx.findings),
+            error=None if _loop_completed is not False else "ScanAgentLoop hit max_iters before finish_scan",
         )
 
         # Use the scan's actual kind so DESKTOP scans aren't silently scored
@@ -534,6 +536,7 @@ class ScanPipeline:
 
         # Phase C belief state: surface verdict counts + confirmed/refuted lists.
         verdict_counts = loop_result.get("verdict_counts", {}) or {}
+        ctx.scan_loop_completed = bool(loop_result.get("completed", False))  # type: ignore[attr-defined]
         ctx.verdict_counts = verdict_counts  # type: ignore[attr-defined]
         ctx.confirmed_findings = loop_result.get("confirmed_findings", []) or []  # type: ignore[attr-defined]
         ctx.refuted_findings = loop_result.get("refuted_findings", []) or []  # type: ignore[attr-defined]

@@ -88,12 +88,16 @@ class BenchmarkRunner:
             scan_id=_scan_id,
         )
 
-        engine = ScoringEngine(target_type)
-        score = engine.calculate(
-            tracker=ctx.score_tracker,
-            findings=ctx.findings,
-            scan_id=_scan_id,
-        )
+        pipeline_score = getattr(ctx, "score_detail", None)
+        if isinstance(pipeline_score, VXISScore):
+            score = pipeline_score
+        else:
+            engine = ScoringEngine(target_type)
+            score = engine.calculate(
+                tracker=ctx.score_tracker,
+                findings=ctx.findings,
+                scan_id=_scan_id,
+            )
 
         self.last_ctx = ctx  # 리포트 생성용 — findings, scan_id 등 보관
 

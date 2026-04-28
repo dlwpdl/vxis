@@ -22,6 +22,32 @@ The preceding VXIS architecture (14-Phase `ScanPipeline` in `pipeline.py`, 5234 
 
 Phase A rebuilt VXIS so the Brain **owns the top of the stack**. Every tool call flows through `AgentBrain.think_in_loop()`, which is a true ReAct decision. Current state: `brain_decisions=50, llm_calls=55` on Juice Shop.
 
+## Vector exhaustion and crown-jewel semantics
+
+VXIS is not a tool picker. Tool names are only verbs. The real search state is the set of plausible attack vectors, hypotheses, pivots, and chain candidates that remain open for the current target.
+
+The loop should behave like:
+
+1. Discover surfaces and evidence.
+2. Generate plausible vector candidates.
+3. Prioritize by evidence, impact, and path-to-crown potential.
+4. Pick the tool that best proves or refutes the highest-value candidate.
+5. If blocked, classify the block and retry with a different route or variant.
+6. Mark a candidate dead only after diverse probes or a clear policy/scope block.
+7. Promote successful findings into chain candidates.
+8. Keep expanding chains toward crown jewels: admin takeover, DB dump, RCE, credential/key theft, or data exfiltration.
+9. Reject `finish_scan` while findings are unchained, likely vectors remain untested, or the loop ended by `max_iters` rather than completion.
+
+Current hard pins:
+
+- 0 findings cannot finish.
+- 2+ findings require at least one chain.
+- `max_iters` timeout is scored as incomplete.
+- Direct and auto sandbox commands count toward vector coverage.
+- Benchmark/growth-loop compares the same 5D score printed by the pipeline.
+
+Next structural step: add first-class `vector_candidates` and `attempt_outcomes` state to `ScanLoopState` so attempted, clean, blocked, failed, retryable, and dead-end candidates are preserved beyond prompt text.
+
 ## Layered view
 
 ```

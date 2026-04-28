@@ -1126,7 +1126,7 @@ class ScanAgentLoop:
                         from vxis.agent.tools.finding_tools import _get_findings as _gf2, _get_chains as _gc2
                         _fin_findings = _gf2()
                         _fin_chains = _gc2()
-                        _fin_desired = max(3, len(_fin_findings) // 3)
+                        _fin_desired = 1 if len(_fin_findings) < 3 else max(3, len(_fin_findings) // 3)
                         # Phase Q11: hard-block finish_scan when nothing has
                         # been reported. Pre-Q11 the chains-deficit branch
                         # below was gated on `findings >= 3`, so 0-finding
@@ -1167,7 +1167,7 @@ class ScanAgentLoop:
                                 self.state.iteration,
                             )
                             continue
-                        if len(_fin_findings) >= 3 and len(_fin_chains) < _fin_desired:
+                        if len(_fin_findings) >= 2 and len(_fin_chains) < _fin_desired:
                             # Build concrete chain suggestions from actual IDs.
                             # Group by severity — high/critical first so Brain
                             # is pointed at the most impactful composition.
@@ -1989,6 +1989,7 @@ class ScanAgentLoop:
                         fr = await self.registry.dispatch("shell_exec", {
                             "command": ffuf_cmd, "timeout": 60,
                         })
+                        _sandbox_invocations.append({"tool": "shell_exec", "cmd": ffuf_cmd})
                         if fr.ok:
                             stdout = str(fr.data.get("stdout", "")) if fr.data else ""
                             if stdout.strip():
@@ -2041,6 +2042,7 @@ class ScanAgentLoop:
                         nr = await self.registry.dispatch("shell_exec", {
                             "command": nuclei_cmd, "timeout": 120,
                         })
+                        _sandbox_invocations.append({"tool": "shell_exec", "cmd": nuclei_cmd})
                         if nr.ok:
                             self.state.add_message("tool", {
                                 "name": "shell_exec",
@@ -2108,6 +2110,7 @@ class ScanAgentLoop:
                         sr = await self.registry.dispatch("shell_exec", {
                             "command": sqlmap_cmd, "timeout": 180,
                         })
+                        _sandbox_invocations.append({"tool": "shell_exec", "cmd": sqlmap_cmd})
                         if sr.ok:
                             stdout = str(sr.data.get("stdout", "")) if sr.data else ""
                             self.state.add_message("tool", {

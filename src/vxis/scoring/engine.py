@@ -274,6 +274,8 @@ class ScoringEngine:
                 "attempt_score": round(attempt_score, 2),
                 "found_score": round(found_score, 2),
                 "unknown_vectors_ignored": len(tracker.vectors_attempted) - valid_attempted,
+                "vectors_attempted_ids": sorted(tracker.vectors_attempted & valid_ids),
+                "vectors_found_ids": sorted(tracker.vectors_found & valid_ids),
                 "category_coverage": category_coverage,
             },
         )
