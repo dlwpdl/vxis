@@ -2,8 +2,8 @@ name: Signal Analyze
 
 on:
   schedule:
-    # Bootstrap mode: twice daily at 00:00 and 12:00 UTC (reduced from every 2h)
-    - cron: "0 0,12 * * *"
+    # Cost guard: weekly analysis only. Use workflow_dispatch for ad hoc runs.
+    - cron: "0 3 * * 1"
   workflow_dispatch:
     inputs:
       force_apply:
@@ -20,6 +20,10 @@ env:
 permissions:
   contents: write
   issues: write
+
+concurrency:
+  group: signal-analyze
+  cancel-in-progress: true
 
 jobs:
   analyze:

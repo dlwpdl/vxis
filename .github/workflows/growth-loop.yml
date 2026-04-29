@@ -1,17 +1,7 @@
 name: VXIS Growth Loop
 
 on:
-  # 매주 일요일 15:00 UTC — 코드 개선 성장 루프
-  schedule:
-    - cron: "0 15 * * 0"
-
-  # src/vxis 변경 시 자동 트리거 (코드가 바뀌면 바로 검증)
-  push:
-    branches: [main]
-    paths:
-      - 'src/vxis/**'
-
-  # Growth Layer가 signal-analyze 후 auto-applied 변경을 검증하려 호출
+  # Cost guard: this job can run for hours. Trigger only when explicitly requested.
   repository_dispatch:
     types: [growth-loop-validate]
 
@@ -38,6 +28,10 @@ env:
 permissions:
   contents: write
   issues: write
+
+concurrency:
+  group: growth-loop
+  cancel-in-progress: true
 
 jobs:
   growth-loop:

@@ -2,7 +2,8 @@ name: Daily Growth Digest
 
 on:
   schedule:
-    - cron: "0 9 * * *"  # 09:00 UTC daily
+    # Cost guard: weekly summary instead of daily.
+    - cron: "0 9 * * 1"
   workflow_dispatch: {}
 
 env:
@@ -10,6 +11,10 @@ env:
 
 permissions:
   contents: read
+
+concurrency:
+  group: growth-digest
+  cancel-in-progress: true
 
 jobs:
   digest:

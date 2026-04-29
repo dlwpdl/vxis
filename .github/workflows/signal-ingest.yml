@@ -1,12 +1,8 @@
 name: Signal Ingest
 
 on:
-  schedule:
-    # Bootstrap mode: every 6 hours (reduced from hourly in full vision)
-    - cron: "0 */6 * * *"
-  workflow_run:
-    workflows: ["CVE Watch", "Upstream Watch", "Domain Intelligence"]
-    types: [completed]
+  # Cost guard: raw ingest is noisy and can burn free-tier minutes quickly.
+  # Run manually after reviewing upstream/domain/CVE digests.
   workflow_dispatch:
 
 env:
@@ -14,6 +10,10 @@ env:
 
 permissions:
   contents: write
+
+concurrency:
+  group: signal-ingest
+  cancel-in-progress: true
 
 jobs:
   ingest:

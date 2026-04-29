@@ -320,6 +320,11 @@ def scan(
         "-o",
         help="Path to write the HTML report (default: reports/report_<target>_<date>.html)",
     ),
+    no_report: bool = typer.Option(
+        False,
+        "--no-report",
+        help="Skip HTML report generation.",
+    ),
     resume: Optional[str] = typer.Option(
         None,
         "--resume",
@@ -342,6 +347,11 @@ def scan(
         "--allow-inject",
         help="Skip the interactive approval gate and auto-approve injection. "
              "ONLY use on targets you own / are explicitly authorized to test.",
+    ),
+    plugins: Optional[str] = typer.Option(
+        None,
+        "--plugins",
+        help="Comma-separated plugin allowlist for compatibility with legacy scan workflows.",
     ),
     kind: str = typer.Option(
         "web",
@@ -398,6 +408,7 @@ def scan(
             "[bold red]Error:[/bold red] Provide a TARGET URL or use --manifest for multi-target scans."
         )
         raise typer.Exit(code=2)
+    selected_plugins = [p.strip() for p in plugins.split(",") if p.strip()] if plugins else None
     # Logging policy: TUI(non-interactive)는 로그를 파일로 보냄 → Live 간섭 0
     # interactive 모드는 stdin/stdout이 JSON 프로토콜이라 stderr로 보내야 함
     log_level = logging.DEBUG if verbose else logging.INFO
@@ -471,6 +482,8 @@ def scan(
     if ghost:
         _p_status = f"[green]✓ {pf.proxy_pool_size} proxies[/green]" if pf.proxy_pool_size else "[yellow]⚠ empty pool (UA only)[/yellow]"
         pf_table.add_row("Proxy Pool:", _p_status)
+    if selected_plugins:
+        pf_table.add_row("Plugins:", ", ".join(selected_plugins))
     if log_path is not None:
         pf_table.add_row("Logs:", f"[dim]{log_path}[/dim] (tail -f to follow)")
 
@@ -657,7 +670,8 @@ def scan(
             injection_approval_callback=_injection_gate,
             approval_callback=_deferred_approval,
             auto_approve_injection=_is_benchmark,
-            report_output_path=output,
+            report_output_path=None if no_report else output,
+            generate_report=not no_report,
         )
 
         refresh_task = _aio.create_task(_refresh_loop())

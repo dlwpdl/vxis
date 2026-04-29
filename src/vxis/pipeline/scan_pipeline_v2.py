@@ -432,6 +432,7 @@ class ScanPipeline:
         injection_approval_callback: Callable[[dict], Awaitable[bool]] | None = None,
         auto_approve_injection: bool = False,
         report_output_path: Path | str | None = None,
+        generate_report: bool = True,
     ) -> None:
         self.brain = brain
         self.config = config
@@ -441,6 +442,7 @@ class ScanPipeline:
         self._injection_approval_callback = injection_approval_callback
         self._auto_approve_injection = auto_approve_injection
         self._report_output_path = report_output_path
+        self._generate_report_enabled = generate_report
 
     def _emit(self, event_type: str, data: dict) -> None:
         if self._event_callback:
@@ -593,10 +595,11 @@ class ScanPipeline:
             await self._run_deferred_gate(ctx)
 
         # 9. Generate the HTML report
-        try:
-            await self._generate_report(ctx)
-        except Exception:
-            logger.exception("Report generation failed — continuing")
+        if self._generate_report_enabled:
+            try:
+                await self._generate_report(ctx)
+            except Exception:
+                logger.exception("Report generation failed — continuing")
 
         # 10. Compute VXIS score
         score_value, grade = _compute_vxis_score(ctx)

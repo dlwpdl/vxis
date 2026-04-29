@@ -1,9 +1,9 @@
 name: Action Bridge
 
 on:
-  # domain-intel daily 완료 후 실행
+  # Cost guard: weekly action bridge. Use workflow_dispatch for ad hoc conversion.
   schedule:
-    - cron: "30 0 * * *"  # 매일 00:30 UTC (domain-intel 00:00 후)
+    - cron: "30 4 * * 1"
 
   workflow_dispatch:
 
@@ -13,6 +13,10 @@ env:
 permissions:
   contents: write
   issues: write
+
+concurrency:
+  group: action-bridge
+  cancel-in-progress: true
 
 jobs:
   bridge:
