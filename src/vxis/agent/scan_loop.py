@@ -3,12 +3,14 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
 
 _TERMINAL_VECTOR_STATUSES = {"found", "clean", "blocked", "dead"}
+_TERMINAL_TODO_STATUSES = {"done", "blocked"}
+_TERMINAL_BRANCH_STATUSES = {"proven", "exhausted", "dead", "blocked"}
 
 
 @dataclass
@@ -68,6 +70,82 @@ class AttemptOutcome:
 
 
 @dataclass
+class ScanTodo:
+    """Operator-facing work item that should stay visible in the TUI."""
+
+    id: str
+    title: str
+    priority: int
+    source_candidate_id: str = ""
+    status: str = "pending"
+    detail: str = ""
+    last_iter: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "title": self.title,
+            "priority": self.priority,
+            "source_candidate_id": self.source_candidate_id,
+            "status": self.status,
+            "detail": self.detail,
+            "last_iter": self.last_iter,
+        }
+
+
+@dataclass
+class BranchState:
+    """Durable attack branch derived from a vector candidate."""
+
+    id: str
+    vector_id: str
+    title: str
+    priority: int
+    owner: str = "root"
+    parent_branch_id: str = ""
+    source_candidate_id: str = ""
+    source_finding_id: str = ""
+    objective: str = ""
+    next_step: str = ""
+    blocker: str = ""
+    crown_jewel: str = ""
+    evidence: str = ""
+    status: str = "open"
+    attempts: int = 0
+    last_tool: str = ""
+    last_summary: str = ""
+    last_report: str = ""
+    child_ids: list[str] = field(default_factory=list)
+    watch_terms: list[str] = field(default_factory=list)
+    last_iter: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "vector_id": self.vector_id,
+            "title": self.title,
+            "priority": self.priority,
+            "owner": self.owner,
+            "parent_branch_id": self.parent_branch_id,
+            "source_candidate_id": self.source_candidate_id,
+            "source_finding_id": self.source_finding_id,
+            "objective": self.objective,
+            "next_step": self.next_step,
+            "blocker": self.blocker,
+            "crown_jewel": self.crown_jewel,
+            "evidence": self.evidence,
+            "status": self.status,
+            "attempts": self.attempts,
+            "last_tool": self.last_tool,
+            "last_summary": self.last_summary,
+            "last_report": self.last_report,
+            "child_ids": list(self.child_ids),
+            "watch_terms": list(self.watch_terms),
+            "last_iter": self.last_iter,
+        }
+
+
+@dataclass
 class ScanLoopState:
     target: str
     messages: list[dict[str, Any]] = field(default_factory=list)
@@ -85,6 +163,10 @@ class ScanLoopState:
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     vector_candidates: dict[str, VectorCandidate] = field(default_factory=dict)
     attempt_outcomes: list[AttemptOutcome] = field(default_factory=list)
+    scan_todos: dict[str, ScanTodo] = field(default_factory=dict)
+    branches: dict[str, BranchState] = field(default_factory=dict)
+    waiting_reason: str = ""
+    shared_notes: list[str] = field(default_factory=list)
 
     def add_message(self, role: str, content: Any) -> None:
         self.messages.append({"role": role, "content": content, "iter": self.iteration})
@@ -106,6 +188,20 @@ class ScanLoopState:
                 existing.evidence = (existing.evidence + "; " + evidence).strip("; ")
             if existing.status in _TERMINAL_VECTOR_STATUSES and existing.status != "found":
                 existing.status = "retryable"
+            self.ensure_scan_todo(
+                candidate_id,
+                title,
+                priority=existing.priority,
+                source_candidate_id=candidate_id,
+            )
+            self.ensure_branch(
+                candidate_id,
+                vector_id,
+                title,
+                priority=existing.priority,
+                evidence=existing.evidence,
+            )
+            self._sync_candidate_control_state(existing)
             return existing
 
         candidate = VectorCandidate(
@@ -118,7 +214,259 @@ class ScanLoopState:
             last_iter=self.iteration,
         )
         self.vector_candidates[candidate_id] = candidate
+        self.ensure_scan_todo(
+            candidate_id,
+            title,
+            priority=priority,
+            source_candidate_id=candidate_id,
+        )
+        self.ensure_branch(
+            candidate_id,
+            vector_id,
+            title,
+            priority=priority,
+            evidence=evidence,
+        )
+        self._sync_candidate_control_state(candidate)
         return candidate
+
+    def ensure_scan_todo(
+        self,
+        todo_id: str,
+        title: str,
+        *,
+        priority: int = 50,
+        source_candidate_id: str = "",
+    ) -> ScanTodo:
+        todo = self.scan_todos.get(todo_id)
+        if todo is None:
+            todo = ScanTodo(
+                id=todo_id,
+                title=title,
+                priority=priority,
+                source_candidate_id=source_candidate_id,
+                last_iter=self.iteration,
+            )
+            self.scan_todos[todo_id] = todo
+            return todo
+        todo.title = title
+        todo.priority = max(todo.priority, priority)
+        if source_candidate_id:
+            todo.source_candidate_id = source_candidate_id
+        todo.last_iter = self.iteration
+        return todo
+
+    def ensure_branch(
+        self,
+        branch_id: str,
+        vector_id: str,
+        title: str,
+        *,
+        priority: int = 50,
+        owner: str = "root",
+        parent_branch_id: str = "",
+        source_candidate_id: str = "",
+        source_finding_id: str = "",
+        objective: str = "",
+        next_step: str = "",
+        blocker: str = "",
+        crown_jewel: str = "",
+        evidence: str = "",
+        watch_terms: list[str] | None = None,
+    ) -> BranchState:
+        branch = self.branches.get(branch_id)
+        if branch is None:
+            branch = BranchState(
+                id=branch_id,
+                vector_id=vector_id,
+                title=title,
+                priority=priority,
+                owner=owner,
+                parent_branch_id=parent_branch_id,
+                source_candidate_id=source_candidate_id,
+                source_finding_id=source_finding_id,
+                objective=objective,
+                next_step=next_step,
+                blocker=blocker,
+                crown_jewel=crown_jewel,
+                evidence=evidence,
+                watch_terms=list(watch_terms or []),
+                last_iter=self.iteration,
+            )
+            self.branches[branch_id] = branch
+            if parent_branch_id and parent_branch_id in self.branches:
+                parent = self.branches[parent_branch_id]
+                if branch_id not in parent.child_ids:
+                    parent.child_ids.append(branch_id)
+            return branch
+        branch.title = title
+        branch.priority = max(branch.priority, priority)
+        branch.owner = owner or branch.owner
+        if parent_branch_id:
+            branch.parent_branch_id = parent_branch_id
+        if source_candidate_id:
+            branch.source_candidate_id = source_candidate_id
+        if source_finding_id:
+            branch.source_finding_id = source_finding_id
+        if objective:
+            branch.objective = objective
+        if next_step:
+            branch.next_step = next_step
+        if blocker:
+            branch.blocker = blocker
+        if crown_jewel:
+            branch.crown_jewel = crown_jewel
+        if evidence and evidence not in branch.evidence:
+            branch.evidence = (branch.evidence + "; " + evidence).strip("; ")
+        if watch_terms:
+            for term in watch_terms:
+                norm = str(term).strip().lower()
+                if norm and norm not in branch.watch_terms:
+                    branch.watch_terms.append(norm)
+        if parent_branch_id and parent_branch_id in self.branches:
+            parent = self.branches[parent_branch_id]
+            if branch_id not in parent.child_ids:
+                parent.child_ids.append(branch_id)
+        branch.last_iter = self.iteration
+        return branch
+
+    def add_shared_note(self, note: str) -> None:
+        clean = note.strip()
+        if not clean:
+            return
+        clean = clean[:160]
+        if clean in self.shared_notes[-4:]:
+            return
+        self.shared_notes.append(clean)
+        if len(self.shared_notes) > 8:
+            self.shared_notes = self.shared_notes[-8:]
+
+    def set_waiting_reason(self, reason: str) -> None:
+        self.waiting_reason = reason.strip()[:180]
+
+    def clear_waiting_reason(self) -> None:
+        self.waiting_reason = ""
+
+    @staticmethod
+    def _todo_status_for_candidate(status: str) -> str:
+        return {
+            "open": "pending",
+            "retryable": "pending",
+            "attempted": "in_progress",
+            "failed": "in_progress",
+            "blocked": "blocked",
+            "found": "done",
+            "clean": "done",
+            "dead": "done",
+        }.get(status, "pending")
+
+    @staticmethod
+    def _branch_status_for_candidate(status: str) -> str:
+        return {
+            "open": "open",
+            "retryable": "retryable",
+            "attempted": "active",
+            "failed": "active",
+            "blocked": "blocked",
+            "found": "proven",
+            "clean": "exhausted",
+            "dead": "dead",
+        }.get(status, "open")
+
+    def _sync_candidate_control_state(self, candidate: VectorCandidate) -> None:
+        todo = self.ensure_scan_todo(
+            candidate.id,
+            candidate.title,
+            priority=candidate.priority,
+            source_candidate_id=candidate.id,
+        )
+        todo.status = self._todo_status_for_candidate(candidate.status)
+        todo.detail = candidate.last_summary[:120] if candidate.last_summary else candidate.evidence[:120]
+        todo.last_iter = self.iteration
+
+        branch = self.ensure_branch(
+            candidate.id,
+            candidate.vector_id,
+            candidate.title,
+            priority=candidate.priority,
+            source_candidate_id=candidate.id,
+            evidence=candidate.evidence,
+            watch_terms=[candidate.vector_id.lower(), candidate.title.lower()],
+        )
+        branch.status = self._branch_status_for_candidate(candidate.status)
+        branch.attempts = candidate.attempts
+        branch.last_tool = candidate.last_tool
+        branch.last_summary = candidate.last_summary
+        branch.last_report = candidate.last_summary[:160]
+        branch.last_iter = self.iteration
+
+    def record_branch_attempt(
+        self,
+        branch_id: str,
+        tool: str,
+        *,
+        status: str,
+        summary: str,
+        blocker: str = "",
+    ) -> None:
+        branch = self.branches.get(branch_id)
+        if branch is None:
+            return
+        branch.attempts += 1
+        branch.last_tool = tool
+        branch.last_summary = summary[:240]
+        branch.last_report = summary[:160]
+        branch.last_iter = self.iteration
+        if blocker:
+            branch.blocker = blocker[:180]
+        if status == "found":
+            branch.status = "proven"
+        elif status == "clean":
+            branch.status = "exhausted"
+        elif status == "blocked":
+            branch.status = "blocked"
+        else:
+            branch.status = "active"
+        todo = self.ensure_scan_todo(
+            branch.id,
+            branch.title,
+            priority=branch.priority,
+            source_candidate_id=branch.source_candidate_id or branch.id,
+        )
+        todo.status = {
+            "proven": "done",
+            "exhausted": "done",
+            "dead": "done",
+            "blocked": "blocked",
+            "active": "in_progress",
+            "open": "pending",
+            "retryable": "pending",
+        }.get(branch.status, "pending")
+        todo.detail = branch.last_report[:120]
+        todo.last_iter = self.iteration
+
+    def active_branches(self) -> list[BranchState]:
+        return sorted(
+            [
+                b for b in self.branches.values()
+                if b.status not in _TERMINAL_BRANCH_STATUSES
+            ],
+            key=lambda b: (-b.priority, b.attempts, b.last_iter, b.id),
+        )
+
+    def scan_todos_as_dicts(self) -> list[dict[str, Any]]:
+        ordered = sorted(
+            self.scan_todos.values(),
+            key=lambda t: (t.status in _TERMINAL_TODO_STATUSES, -t.priority, t.last_iter, t.id),
+        )
+        return [t.to_dict() for t in ordered]
+
+    def branches_as_dicts(self) -> list[dict[str, Any]]:
+        ordered = sorted(
+            self.branches.values(),
+            key=lambda b: (b.status in _TERMINAL_BRANCH_STATUSES, -b.priority, b.attempts, b.id),
+        )
+        return [b.to_dict() for b in ordered]
 
     def record_attempt_outcome(
         self,
@@ -153,6 +501,9 @@ class ScanLoopState:
                 iteration=self.iteration,
             )
         )
+        self._sync_candidate_control_state(candidate)
+        if status == "found":
+            self.add_shared_note(f"{candidate.vector_id}: {summary[:120]}")
 
     def open_vector_candidates(self) -> list[VectorCandidate]:
         """Return candidates that still need proof, retry, or a clear dead-end."""
@@ -169,6 +520,26 @@ class ScanLoopState:
 
     def attempt_outcomes_as_dicts(self) -> list[dict[str, Any]]:
         return [o.to_dict() for o in self.attempt_outcomes]
+
+    def control_plane_snapshot(self, *, limit: int = 4) -> dict[str, Any]:
+        todos = self.scan_todos_as_dicts()
+        branches = self.branches_as_dicts()
+        todo_counts: dict[str, int] = {}
+        branch_counts: dict[str, int] = {}
+        for todo in todos:
+            todo_counts[todo["status"]] = todo_counts.get(todo["status"], 0) + 1
+        for branch in branches:
+            branch_counts[branch["status"]] = branch_counts.get(branch["status"], 0) + 1
+        return {
+            "iteration": self.iteration,
+            "max_iters": self.max_iters,
+            "waiting_reason": self.waiting_reason,
+            "todo_counts": todo_counts,
+            "branch_counts": branch_counts,
+            "todos": todos[:limit],
+            "branches": branches[:limit],
+            "shared_notes": list(self.shared_notes[-3:]),
+        }
 
     def update_peak_size(self) -> int:
         """Sample current messages[] byte size and update peak_context_bytes.
@@ -294,12 +665,14 @@ class ScanAgentLoop:
         brain: Any | None = None,
         critic_interval: int = 6,
         target_kind: Any = None,
+        event_callback: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self.state = ScanLoopState(target=target, max_iters=max_iters)
         self.registry = registry
         self.brain = brain
         self.critic_interval = critic_interval
         self._last_critic_iter = 0
+        self._event_callback = event_callback
         # Surface kind drives skill-sweep filtering. Without it, a desktop
         # scan ends up running test_xss / test_sqli / etc. on a file:// path
         # — wasted iterations + false-positive noise from web skills hitting
@@ -343,6 +716,187 @@ class ScanAgentLoop:
                 priority=priority,
                 evidence="seeded from target surface",
             )
+
+    def _emit_event(self, event_type: str, data: dict[str, Any]) -> None:
+        if self._event_callback is None:
+            return
+        try:
+            self._event_callback(event_type, data)
+        except Exception:
+            logger.debug("scan loop event_callback failed for %s", event_type, exc_info=True)
+
+    @staticmethod
+    def _truncate_ui_text(value: Any, limit: int = 96) -> str:
+        text = str(value).replace("\n", " ").strip()
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3] + "..."
+
+    def _ui_action_details(self, name: str, args: dict[str, Any] | Any) -> tuple[str, str, str, str]:
+        vector_id = name
+        method = "TOOL"
+        endpoint = self.state.target
+        summary = name
+
+        if not isinstance(args, dict):
+            return vector_id, method, endpoint, summary
+
+        if name == "run_skill":
+            skill = self._truncate_ui_text(args.get("skill") or "unknown", 40)
+            vector_id = f"skill:{skill}"
+            method = "SKILL"
+            endpoint = self._truncate_ui_text(args.get("target_url") or self.state.target, 80)
+            summary = f"run_skill {skill}"
+            return vector_id, method, endpoint, summary
+
+        if name == "http_request":
+            method = str(args.get("method") or "HTTP").upper()
+            endpoint = self._truncate_ui_text(args.get("url") or self.state.target, 80)
+            summary = f"{method} {endpoint}"
+            return vector_id, method, endpoint, summary
+
+        if name == "wait":
+            seconds = self._truncate_ui_text(args.get("seconds") or "0", 12)
+            return "scan:wait", "WAIT", f"{seconds}s", f"wait {seconds}s"
+
+        if name.startswith("browser_"):
+            method = "BROWSER"
+            endpoint = self._truncate_ui_text(
+                args.get("url")
+                or args.get("selector")
+                or args.get("form_selector")
+                or args.get("expression")
+                or self.state.target,
+                80,
+            )
+            summary = f"{name} {endpoint}"
+            return vector_id, method, endpoint, summary
+
+        if name in ("shell_exec", "python_exec"):
+            method = "EXEC"
+            endpoint = self._truncate_ui_text(
+                args.get("command") or args.get("cmd") or args.get("code") or self.state.target,
+                80,
+            )
+            summary = f"{name} {endpoint}"
+            return vector_id, method, endpoint, summary
+
+        if name == "report_finding":
+            ftype = self._truncate_ui_text(args.get("finding_type") or "finding", 40)
+            vector_id = f"finding:{ftype}"
+            method = "REPORT"
+            endpoint = self._truncate_ui_text(
+                args.get("affected_component") or args.get("title") or self.state.target,
+                80,
+            )
+            summary = f"report {ftype}"
+            return vector_id, method, endpoint, summary
+
+        if name == "finish_scan":
+            return "scan:finish", "CONTROL", self.state.target, "finish scan"
+
+        for key in (
+            "url",
+            "target_url",
+            "affected_component",
+            "path",
+            "selector",
+            "form_selector",
+            "title",
+            "name",
+        ):
+            value = args.get(key)
+            if value:
+                endpoint = self._truncate_ui_text(value, 80)
+                break
+
+        summary = f"{name} {endpoint}"
+        return vector_id, method, endpoint, summary
+
+    def _emit_brain_status(self, summary: str, *, vector_id: str = "scan_loop") -> None:
+        self._emit_event(
+            "brain_thinking",
+            {
+                "phase": "scan_loop",
+                "iteration": self.state.iteration,
+                "max_iters": self.state.max_iters,
+                "vector_count": 1,
+                "vectors": [
+                    {
+                        "id": vector_id,
+                        "reasoning": self._truncate_ui_text(summary, 220),
+                    }
+                ],
+            },
+        )
+
+    def _emit_iteration_status(self, note: str) -> None:
+        self.state.clear_waiting_reason()
+        active_branches = self.state.active_branches()
+        if active_branches:
+            focus_branch = active_branches[0]
+            self._emit_brain_status(
+                f"iter {self.state.iteration}/{self.state.max_iters} - {note}. "
+                f"Focus branch: {focus_branch.title}",
+                vector_id=focus_branch.id,
+            )
+            self._emit_control_plane(note)
+            return
+        open_candidates = self.state.open_vector_candidates()
+        if open_candidates:
+            focus = open_candidates[0]
+            self._emit_brain_status(
+                f"iter {self.state.iteration}/{self.state.max_iters} - {note}. "
+                f"Focus: {focus.title}",
+                vector_id=focus.id,
+            )
+        else:
+            self._emit_brain_status(
+                f"iter {self.state.iteration}/{self.state.max_iters} - {note}",
+                vector_id="scan_loop",
+            )
+        self._emit_control_plane(note)
+
+    def _emit_action_progress(self, name: str, args: dict[str, Any] | Any, prefix: str) -> None:
+        vector_id, method, endpoint, summary = self._ui_action_details(name, args)
+        self.state.set_waiting_reason(f"{prefix}: {summary}")
+        self._emit_brain_status(
+            f"iter {self.state.iteration}/{self.state.max_iters} - {prefix}: {summary}",
+            vector_id=vector_id,
+        )
+        self._emit_event(
+            "attack",
+            {
+                "vector_id": vector_id,
+                "method": method,
+                "endpoint": endpoint,
+            },
+        )
+        self._emit_control_plane(f"{prefix}: {summary}")
+
+    def _emit_control_plane(self, note: str = "") -> None:
+        telemetry: dict[str, Any] = {}
+        try:
+            from vxis.agent.brain import (
+                get_brain_decision_count as _get_brain_decision_count,
+                get_llm_call_count as _get_llm_call_count,
+                get_llm_usage_stats as _get_llm_usage_stats,
+            )
+
+            telemetry = _get_llm_usage_stats()
+            telemetry["llm_calls"] = _get_llm_call_count()
+            telemetry["brain_decisions"] = _get_brain_decision_count()
+        except Exception:
+            telemetry = {}
+        if not telemetry.get("provider"):
+            telemetry["provider"] = getattr(self.brain, "_provider", "")
+        if not telemetry.get("model"):
+            telemetry["model"] = getattr(self.brain, "_model", "")
+
+        snapshot = self.state.control_plane_snapshot()
+        snapshot["note"] = self._truncate_ui_text(note, 140) if note else ""
+        snapshot["telemetry"] = telemetry
+        self._emit_event("control_plane", snapshot)
 
     @staticmethod
     def _preview_args(args: Any) -> str:
@@ -454,6 +1008,215 @@ class ScanAgentLoop:
                     status="found",
                     summary=f"finding reported: {args.get('title', '')}",
                 )
+
+    def _parent_branch_ids_for_finding(self, args: dict[str, Any]) -> list[str]:
+        ftype = str(args.get("finding_type") or "").lower()
+        title = str(args.get("title") or "").lower()
+        component = str(args.get("affected_component") or "").lower()
+        blob = f"{ftype} {title} {component}"
+        matches: list[str] = []
+        mapping = [
+            (("sql", "sqli"), "web:sqli"),
+            (("auth", "login", "jwt", "session"), "web:auth-bypass"),
+            (("idor", "access", "privilege"), "web:idor"),
+            (("xss",), "web:xss"),
+            (("ssrf",), "web:ssrf"),
+            (("info", "sensitive", "disclosure", "traversal", "config"), "web:sensitive-files"),
+            (("cve",), "web:cve-scan"),
+        ]
+        for needles, cid in mapping:
+            if any(needle in blob for needle in needles):
+                matches.append(cid)
+        seen: set[str] = set()
+        result: list[str] = []
+        for branch_id in matches:
+            if branch_id in self.state.branches and branch_id not in seen:
+                seen.add(branch_id)
+                result.append(branch_id)
+        return result
+
+    def _spawn_followup_branches_from_finding(
+        self,
+        finding_id: str,
+        args: dict[str, Any],
+    ) -> None:
+        ftype = str(args.get("finding_type") or "").lower()
+        title = str(args.get("title") or "").strip()
+        component = str(args.get("affected_component") or "").strip()
+        severity = str(args.get("severity") or "").lower()
+        parent_branch_ids = self._parent_branch_ids_for_finding(args) or ["root"]
+        severity_boost = {"critical": 10, "high": 8, "medium": 5, "low": 2, "informational": 1}.get(severity, 0)
+
+        pivot_rules: list[tuple[tuple[str, ...], list[dict[str, Any]]]] = [
+            (
+                ("auth", "login", "jwt", "session", "credential"),
+                [
+                    {
+                        "suffix": "post-auth-enum",
+                        "vector_id": "WEB-AUTH-PIVOT",
+                        "title": "Expand authenticated route coverage",
+                        "priority": 90,
+                        "objective": "Use the obtained session to map authenticated APIs, admin pages, and role-protected flows.",
+                        "next_step": "Reuse the live session with browser_get_cookies, browser_eval_js, post_auth_enum, then browse /admin and authenticated API paths.",
+                        "crown_jewel": "admin takeover or broad data access",
+                        "watch_terms": ["token", "cookie", "/admin", "/api/users", "post_auth_enum"],
+                    },
+                    {
+                        "suffix": "admin-access-control",
+                        "vector_id": "WEB-AC-PIVOT",
+                        "title": "Probe admin-only access controls with the new session",
+                        "priority": 95,
+                        "objective": "Confirm whether the authenticated state crosses privilege boundaries into admin-only actions.",
+                        "next_step": "Directly test /admin, /admin/users, role changes, and privileged exports with the current session.",
+                        "crown_jewel": "admin takeover",
+                        "watch_terms": ["/admin", "role", "export", "browser_navigate", "http_request"],
+                    },
+                ],
+            ),
+            (
+                ("idor", "access", "privilege"),
+                [
+                    {
+                        "suffix": "write-idor",
+                        "vector_id": "WEB-IDOR-PIVOT",
+                        "title": "Escalate access control weakness into write/delete impact",
+                        "priority": 94,
+                        "objective": "Push the access-control bug past read-only confirmation into write, delete, or role-changing impact.",
+                        "next_step": "Replay the vulnerable object reference against PATCH/PUT/DELETE or role/state-changing endpoints.",
+                        "crown_jewel": "account takeover or broad data manipulation",
+                        "watch_terms": ["put", "patch", "delete", "role", "user", "account", "idor"],
+                    },
+                    {
+                        "suffix": "data-exfil",
+                        "vector_id": "WEB-EXFIL-PIVOT",
+                        "title": "Test whether the access-control gap scales to bulk data access",
+                        "priority": 88,
+                        "objective": "Check whether the same boundary failure opens mass export or neighboring-account traversal.",
+                        "next_step": "Enumerate adjacent IDs, list endpoints, and export/download flows to quantify blast radius.",
+                        "crown_jewel": "full data exfiltration",
+                        "watch_terms": ["list", "export", "download", "users", "orders", "idor"],
+                    },
+                ],
+            ),
+            (
+                ("sql", "sqli"),
+                [
+                    {
+                        "suffix": "credential-pivot",
+                        "vector_id": "WEB-SQLI-PIVOT",
+                        "title": "Harvest credentials or tokens from SQLi impact",
+                        "priority": 96,
+                        "objective": "Turn the injection into usable credentials, session material, or privilege context.",
+                        "next_step": "Dump users/auth tables or config values, then attempt login/session reuse with anything exposed.",
+                        "crown_jewel": "admin takeover or DB dump",
+                        "watch_terms": ["sqlmap", "dump", "users", "token", "password", "select"],
+                    },
+                    {
+                        "suffix": "db-impact",
+                        "vector_id": "WEB-SQLI-IMPACT",
+                        "title": "Expand SQLi toward full database impact",
+                        "priority": 92,
+                        "objective": "Prove the injection reaches crown-jewel data, not just a boolean/oracle condition.",
+                        "next_step": "Enumerate schemas/tables and retrieve high-value rows or admin secrets from the database.",
+                        "crown_jewel": "DB dump",
+                        "watch_terms": ["sqlmap", "schema", "table", "dump", "union select"],
+                    },
+                ],
+            ),
+            (
+                ("info", "sensitive", "disclosure", "traversal", "config", "secret"),
+                [
+                    {
+                        "suffix": "credential-reuse",
+                        "vector_id": "WEB-DISCLOSURE-PIVOT",
+                        "title": "Turn disclosed material into authenticated access",
+                        "priority": 89,
+                        "objective": "Check whether leaked config, keys, or tokens grant privileged access.",
+                        "next_step": "Validate any disclosed credentials, tokens, or internal routes against live login or admin/API endpoints.",
+                        "crown_jewel": "admin takeover",
+                        "watch_terms": ["token", "key", "password", "config", "admin", "login"],
+                    },
+                    {
+                        "suffix": "admin-surface",
+                        "vector_id": "WEB-ADMIN-PIVOT",
+                        "title": "Use the disclosure to map privileged routes and internal surfaces",
+                        "priority": 84,
+                        "objective": "Pivot from leaked route/config hints into direct access checks on privileged endpoints.",
+                        "next_step": "Follow leaked URLs, JS routes, backups, and internal paths to admin consoles or sensitive APIs.",
+                        "crown_jewel": "privileged route exposure",
+                        "watch_terms": ["/admin", "backup", "config", ".env", ".git", "actuator"],
+                    },
+                ],
+            ),
+            (
+                ("xss",),
+                [
+                    {
+                        "suffix": "session-pivot",
+                        "vector_id": "WEB-XSS-PIVOT",
+                        "title": "Turn XSS into session or privileged action impact",
+                        "priority": 90,
+                        "objective": "Move from script execution proof into session theft or admin-only action execution.",
+                        "next_step": "Read cookies/localStorage tokens and test whether the session reaches admin pages or sensitive actions.",
+                        "crown_jewel": "session takeover",
+                        "watch_terms": ["document.cookie", "localStorage", "token", "/admin", "browser_eval_js"],
+                    },
+                ],
+            ),
+        ]
+
+        for parent_branch_id in parent_branch_ids:
+            parent = self.state.branches.get(parent_branch_id)
+            if parent is None:
+                continue
+            parent.status = "active"
+            parent.last_report = f"Finding {finding_id} reported: {title[:120]}"
+            parent.last_summary = parent.last_report
+            if component:
+                parent.evidence = (parent.evidence + "; " + component).strip("; ")
+            for needles, pivots in pivot_rules:
+                if not any(needle in ftype or needle in title.lower() for needle in needles):
+                    continue
+                for pivot in pivots:
+                    branch_id = f"{parent_branch_id}:{pivot['suffix']}"
+                    branch = self.state.ensure_branch(
+                        branch_id,
+                        str(pivot["vector_id"]),
+                        str(pivot["title"]),
+                        priority=int(pivot["priority"]) + severity_boost,
+                        owner="root",
+                        parent_branch_id=parent_branch_id,
+                        source_candidate_id=parent.source_candidate_id or parent_branch_id,
+                        source_finding_id=finding_id,
+                        objective=str(pivot["objective"]),
+                        next_step=str(pivot["next_step"]),
+                        crown_jewel=str(pivot["crown_jewel"]),
+                        evidence=f"{finding_id}: {title} @ {component}".strip(),
+                        watch_terms=list(pivot.get("watch_terms") or []),
+                    )
+                    branch.status = "open"
+                    branch.last_report = f"Spawned from {finding_id}: {title[:100]}"
+                    self.state.ensure_scan_todo(
+                        branch_id,
+                        branch.title,
+                        priority=branch.priority,
+                        source_candidate_id=branch.source_candidate_id or branch_id,
+                    )
+                    self.state.add_shared_note(
+                        f"{parent.vector_id} -> {branch.vector_id}: {branch.title}"
+                    )
+            self._emit_control_plane(f"Root spawned follow-up branches from {finding_id}")
+
+    def _branch_ids_for_action(self, name: str, args: dict[str, Any] | Any) -> list[str]:
+        blob = f"{name} {self._preview_args(args)}"
+        matches: list[str] = []
+        for branch in self.state.active_branches():
+            terms = branch.watch_terms or []
+            if not terms:
+                continue
+            if any(term in blob for term in terms):
+                matches.append(branch.id)
+        return matches
 
     async def _decide(self, state: ScanLoopState) -> list[tuple[str, dict[str, Any]]]:
         """Returns list of (tool_name, args). Delegates to brain.think_in_loop when brain is set."""
@@ -567,9 +1330,31 @@ class ScanAgentLoop:
                     f"attempts={c.attempts}: {c.title}"
                 )
 
+        active_branches = s.active_branches()
+        if active_branches:
+            lines.append("Branch dossiers (root-owned attack paths):")
+            for b in active_branches[:8]:
+                lines.append(
+                    f"  {b.status.upper()} p{b.priority} {b.id} owner={b.owner} "
+                    f"attempts={b.attempts} -> {b.title}"
+                )
+                if b.objective:
+                    lines.append(f"     objective: {b.objective[:110]}")
+                if b.next_step:
+                    lines.append(f"     next: {b.next_step[:110]}")
+                if b.last_report:
+                    lines.append(f"     last: {b.last_report[:110]}")
+                if b.blocker:
+                    lines.append(f"     blocker: {b.blocker[:90]}")
+
         # Endpoints
         if endpoints_seen:
             lines.append(f"Known endpoints: {', '.join(sorted(endpoints_seen)[:8])}")
+
+        if s.shared_notes:
+            lines.append("Shared notes:")
+            for note in s.shared_notes[-4:]:
+                lines.append(f"  - {note[:120]}")
 
         # ── Chain Intelligence section (always on when 2+ findings) ──
         # Brain-First: Brain decides HOW to chain, we just keep the pressure
@@ -709,7 +1494,19 @@ class ScanAgentLoop:
         _chain_pressure = len(reported) >= 2 and not existing_chains
         open_candidates = [c for c in s.open_vector_candidates() if c.attempts == 0]
         retry_candidates = [c for c in s.open_vector_candidates() if c.attempts > 0]
-        if open_candidates and not _chain_pressure:
+        if active_branches and not _chain_pressure:
+            b = active_branches[0]
+            lines.append(f"\n>> PRIMARY GOAL: drive branch {b.id} toward {b.crown_jewel or 'real impact'}.")
+            if b.objective:
+                lines.append(f"   Objective: {b.objective}")
+            if b.next_step:
+                lines.append(f"   Next step: {b.next_step}")
+            if b.last_report:
+                lines.append(f"   Latest report: {b.last_report[:160]}")
+            if b.blocker:
+                lines.append(f"   Current blocker: {b.blocker[:160]}")
+            lines.append("   Stay on this branch until you prove it, exhaust it, or spawn a stronger child branch.")
+        elif open_candidates and not _chain_pressure:
             c = open_candidates[0]
             lines.append(f"\n>> YOUR GOAL: Exhaust vector candidate {c.id}.")
             lines.append(f"   Hypothesis: {c.title}. Evidence: {c.evidence or 'seeded'}")
@@ -940,6 +1737,7 @@ class ScanAgentLoop:
 
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
+            self._emit_iteration_status("Brain choosing next action")
             # LLM memory compression: when history grows beyond token
             # threshold, older messages are summarized by the LLM. Recent
             # messages preserved verbatim. Strix pattern.
@@ -969,8 +1767,10 @@ class ScanAgentLoop:
                         "iter %d: no actions but below min=%d (empty=%d) — nudge",
                         self.state.iteration, _min_iters, _consecutive_empty,
                     )
+                    self._emit_control_plane("Brain returned no action; injected a concrete nudge")
                     continue
                 logger.warning("iter %d: no actions returned, stopping", self.state.iteration)
+                self._emit_control_plane("Brain returned no action; stopping loop")
                 break
             _consecutive_empty = 0  # Reset on successful action batch
             # Strix pattern: 1 tool call per message. Only execute the FIRST
@@ -986,6 +1786,7 @@ class ScanAgentLoop:
                     key = f"{name}::{args!r}"
 
                 _action_candidate_ids = self._candidate_ids_for_action(name, args)
+                _action_branch_ids = self._branch_ids_for_action(name, args)
                 count = _call_counts.get(key, 0) + 1
                 _call_counts[key] = count
 
@@ -1022,10 +1823,19 @@ class ScanAgentLoop:
                             status="blocked",
                             summary=nudge,
                         )
+                    for _bid in _action_branch_ids:
+                        self.state.record_branch_attempt(
+                            _bid,
+                            name,
+                            status="blocked",
+                            summary=nudge,
+                            blocker="dedup guard",
+                        )
                     logger.warning(
                         "iter %d: dedup-blocked repeated call: %s (count=%d)",
                         self.state.iteration, name, count,
                     )
+                    self._emit_control_plane(f"Blocked repeated call: {name}")
                     continue
 
                 # Phase C: egress filter — block shell/python/http commands
@@ -1061,6 +1871,15 @@ class ScanAgentLoop:
                                 status="blocked",
                                 summary=f"egress blocked: {violations}",
                             )
+                        for _bid in _action_branch_ids:
+                            self.state.record_branch_attempt(
+                                _bid,
+                                name,
+                                status="blocked",
+                                summary=f"egress blocked: {violations}",
+                                blocker="egress allowlist",
+                            )
+                        self._emit_control_plane(f"Egress blocked for {name}: {', '.join(violations)}")
                         continue
 
                 # Phase C: auto-evidence-enrichment for report_finding.
@@ -1168,6 +1987,9 @@ class ScanAgentLoop:
                                     self.state.iteration,
                                     args.get("affected_component", "?"),
                                 )
+                                self._emit_control_plane(
+                                    f"Auto-verifier refuted finding: {args.get('title', 'report_finding')}"
+                                )
                                 continue
                     except Exception:
                         logger.exception("auto-verify failed — proceeding with report_finding")
@@ -1225,8 +2047,18 @@ class ScanAgentLoop:
                                 status="blocked",
                                 summary=_block_msg,
                             )
+                        for _bid in _action_branch_ids:
+                            self.state.record_branch_attempt(
+                                _bid,
+                                name,
+                                status="blocked",
+                                summary=_block_msg,
+                                blocker="surface guard",
+                            )
+                        self._emit_control_plane(_block_msg)
                         continue
 
+                self._emit_action_progress(name, args, "Executing")
                 result = await self.registry.dispatch(name, args)
                 self.state.add_message("tool", {"name": name, "args": args, "result": {
                     "ok": result.ok, "summary": result.summary, "data": result.data,
@@ -1239,8 +2071,22 @@ class ScanAgentLoop:
                         status=self._status_from_tool_result(result),
                         summary=result.summary,
                     )
+                for _bid in _action_branch_ids:
+                    self.state.record_branch_attempt(
+                        _bid,
+                        name,
+                        status=self._status_from_tool_result(result),
+                        summary=result.summary,
+                    )
+                self.state.clear_waiting_reason()
+                self._emit_control_plane(f"Result: {result.summary}")
                 if name == "report_finding" and result.ok and isinstance(args, dict):
                     self._mark_candidates_for_finding(args)
+                    finding_id = ""
+                    if isinstance(result.data, dict):
+                        finding_id = str(result.data.get("id") or "")
+                    if finding_id:
+                        self._spawn_followup_branches_from_finding(finding_id, args)
 
                 # Phase Q10: credit Brain-direct run_skill calls so VC isn't
                 # blind to LLM initiative. Pre-Q10 only the auto-exec ladder
@@ -1674,6 +2520,11 @@ class ScanAgentLoop:
                             # Track the real skill even when called via alias,
                             # so the sweep block can detect untouched skills.
                             _real_skills_completed.add(_real_skill)
+                            self._emit_action_progress(
+                                "run_skill",
+                                {"skill": _real_skill, "target_url": self.state.target},
+                                "Auto skill dispatch",
+                            )
                             sr = await self.registry.dispatch("run_skill", {
                                 "skill": _real_skill,
                                 "target_url": self.state.target,
@@ -2040,6 +2891,11 @@ class ScanAgentLoop:
             ):
                 _auto_browser_done = True
                 try:
+                    self._emit_brain_status(
+                        f"iter {self.state.iteration}/{self.state.max_iters} - "
+                        "Auto browser recon: detecting login surface",
+                        vector_id="auto:browser-recon",
+                    )
                     nav_result = await self.registry.dispatch(
                         "browser_navigate", {"url": self.state.target}
                     )
@@ -2240,9 +3096,36 @@ class ScanAgentLoop:
 
                                     _login_failures: list[str] = []
                                     _login_success = False
-                                    for email, pwd in _login_creds:
+                                    _login_nav_timeout_ms = 12_000
+                                    for idx, (email, pwd) in enumerate(_login_creds, start=1):
                                         try:
-                                            await _bp.navigate(_login_target)
+                                            self._emit_brain_status(
+                                                f"iter {self.state.iteration}/{self.state.max_iters} - "
+                                                f"Auto-login attempt {idx}/{len(_login_creds)} on discovered login form",
+                                                vector_id="auto:login",
+                                            )
+                                            self._emit_event(
+                                                "attack",
+                                                {
+                                                    "vector_id": "auto:login",
+                                                    "method": "BROWSER",
+                                                    "endpoint": (
+                                                        f"{self._truncate_ui_text(_login_target, 64)} "
+                                                        f"[{idx}/{len(_login_creds)}]"
+                                                    ),
+                                                },
+                                            )
+                                            logger.info(
+                                                "auto-login attempt %d/%d on %s with user=%s",
+                                                idx,
+                                                len(_login_creds),
+                                                _login_target,
+                                                email[:40],
+                                            )
+                                            await _bp.navigate(
+                                                _login_target,
+                                                timeout=_login_nav_timeout_ms,
+                                            )
                                             import asyncio as _aio
                                             # WebGoat / Spring Security often re-render
                                             # the form; give the DOM a moment to settle.
@@ -2756,6 +3639,7 @@ class ScanAgentLoop:
                     else:
                         _call_counts[d_key] = d_count + 1
                         try:
+                            self._emit_action_progress(d_name, d_args, "Director executing")
                             d_result = await self.registry.dispatch(d_name, d_args)
                             self.state.add_message("tool", {
                                 "name": d_name,
@@ -2791,6 +3675,8 @@ class ScanAgentLoop:
                                     ))
                         except Exception:
                             logger.exception("director action dispatch failed")
+        self.state.clear_waiting_reason()
+        self._emit_control_plane("Scan loop completed")
         return {
             "target": self.state.target,
             "completed": self.state.completed,
@@ -2812,4 +3698,7 @@ class ScanAgentLoop:
             "sandbox_invocations": list(_sandbox_invocations),
             "vector_candidates": self.state.vector_candidates_as_dicts(),
             "attempt_outcomes": self.state.attempt_outcomes_as_dicts(),
+            "scan_todos": self.state.scan_todos_as_dicts(),
+            "branches": self.state.branches_as_dicts(),
+            "shared_notes": list(self.state.shared_notes),
         }

@@ -70,6 +70,128 @@ def _increment_llm_call_count() -> None:
         _LLM_CALL_COUNT += 1
 
 
+# ── Live LLM usage telemetry ───────────────────────────────────
+# TUI/operator visibility needs more than call counts: it should expose
+# provider/model plus token/cost usage while the scan is still running.
+# Costs are estimates unless the upstream provider returns exact usage.
+_LLM_USAGE_LOCK = threading.Lock()
+_LLM_USAGE_STATS: dict[str, Any] = {
+    "provider": "",
+    "model": "",
+    "calls": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "total_tokens": 0,
+    "cost_usd": 0.0,
+    "tokens_estimated": False,
+    "cost_estimated": False,
+}
+
+
+def get_llm_usage_stats() -> dict[str, Any]:
+    """Return cumulative LLM usage telemetry for the current process."""
+    with _LLM_USAGE_LOCK:
+        return dict(_LLM_USAGE_STATS)
+
+
+def reset_llm_usage_stats() -> None:
+    """Reset live LLM usage telemetry (test + per-scan hook)."""
+    with _LLM_USAGE_LOCK:
+        _LLM_USAGE_STATS.update({
+            "provider": "",
+            "model": "",
+            "calls": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "cost_usd": 0.0,
+            "tokens_estimated": False,
+            "cost_estimated": False,
+        })
+
+
+def _estimate_token_count(value: Any) -> int:
+    """Cheap text-length proxy when providers do not return token usage."""
+    if value is None:
+        return 0
+    if isinstance(value, (dict, list, tuple)):
+        try:
+            text = json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            text = str(value)
+    else:
+        text = str(value)
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
+def _estimate_usage_cost(provider: str, total_tokens: int) -> tuple[float, bool]:
+    """Return an estimated cost using coarse provider-level defaults.
+
+    We intentionally label these as estimates in the UI; exact per-model
+    billing is not yet wired into the scan runtime.
+    """
+    if total_tokens <= 0:
+        return 0.0, False
+    if provider in {"ollama", "claude-cli", "gemini-cli", "codex-cli"}:
+        return 0.0, False
+    per_million = {
+        "openai": 0.15,
+        "together": 0.50,
+        "anthropic": 3.00,
+        "gemini": 0.0,
+    }.get(provider)
+    if per_million is None:
+        return 0.0, False
+    return round(per_million * total_tokens / 1_000_000, 4), True
+
+
+def _record_llm_usage(
+    provider: str,
+    model: str,
+    system_prompt: Any,
+    user_prompt: Any,
+    response_text: Any,
+    usage: dict[str, Any] | None = None,
+) -> None:
+    """Accumulate live usage telemetry from a single LLM call."""
+    usage = usage or {}
+    input_tokens = int(
+        usage.get("prompt_tokens")
+        or usage.get("input_tokens")
+        or usage.get("promptTokenCount")
+        or 0
+    )
+    output_tokens = int(
+        usage.get("completion_tokens")
+        or usage.get("output_tokens")
+        or usage.get("candidatesTokenCount")
+        or usage.get("outputTokenCount")
+        or 0
+    )
+    tokens_estimated = False
+    if input_tokens <= 0:
+        input_tokens = _estimate_token_count(system_prompt) + _estimate_token_count(user_prompt)
+        tokens_estimated = True
+    if output_tokens <= 0:
+        output_tokens = _estimate_token_count(response_text)
+        tokens_estimated = True
+    total_tokens = input_tokens + output_tokens
+    cost_usd, cost_estimated = _estimate_usage_cost(provider, total_tokens)
+
+    with _LLM_USAGE_LOCK:
+        _LLM_USAGE_STATS["provider"] = provider
+        _LLM_USAGE_STATS["model"] = model
+        _LLM_USAGE_STATS["calls"] = int(_LLM_USAGE_STATS.get("calls", 0)) + 1
+        _LLM_USAGE_STATS["input_tokens"] = int(_LLM_USAGE_STATS.get("input_tokens", 0)) + input_tokens
+        _LLM_USAGE_STATS["output_tokens"] = int(_LLM_USAGE_STATS.get("output_tokens", 0)) + output_tokens
+        _LLM_USAGE_STATS["total_tokens"] = int(_LLM_USAGE_STATS.get("total_tokens", 0)) + total_tokens
+        _LLM_USAGE_STATS["cost_usd"] = round(float(_LLM_USAGE_STATS.get("cost_usd", 0.0)) + cost_usd, 4)
+        _LLM_USAGE_STATS["tokens_estimated"] = bool(_LLM_USAGE_STATS.get("tokens_estimated", False) or tokens_estimated)
+        _LLM_USAGE_STATS["cost_estimated"] = bool(_LLM_USAGE_STATS.get("cost_estimated", False) or cost_estimated)
+
+
 # ── Benchmark instrumentation: unified brain decision counter ──
 # Incremented once per `think()` entry (after early-return checks) across ALL
 # Brain backends (AgentBrain API path + InteractiveBrain + FileBasedBrain).
@@ -1638,7 +1760,10 @@ class AgentBrain:
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"]
+            text = data["choices"][0]["message"]["content"]
+            usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+            _record_llm_usage(provider, model, system, user_content, text, usage)
+            return text
         except urllib.error.HTTPError as exc:
             try:
                 err_body = exc.read().decode("utf-8", errors="replace")[:400]
@@ -1700,7 +1825,10 @@ class AgentBrain:
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            usage = data.get("usageMetadata") if isinstance(data.get("usageMetadata"), dict) else {}
+            _record_llm_usage("gemini", model, system, parts, text, usage)
+            return text
         except Exception as exc:
             logger.warning("Gemini call failed (%s): %s", model, exc)
             return None
@@ -1737,7 +1865,10 @@ class AgentBrain:
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            return data["choices"][0]["message"]["content"]
+            text = data["choices"][0]["message"]["content"]
+            usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+            _record_llm_usage("deepseek", model, system, user, text, usage)
+            return text
         except Exception as exc:
             logger.warning("DeepSeek call failed (%s): %s", model, exc)
             return None
@@ -2047,6 +2178,7 @@ class AgentBrain:
                 "anthropic": "claude-sonnet-4-6",
                 "gemini": "gemini-2.5-pro",
                 "deepseek": "deepseek-chat",
+                "ollama": os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", "qwen2.5-coder:14b"),
             }
             model = _defaults.get(provider, "")
 
@@ -2129,7 +2261,10 @@ class AgentBrain:
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            return data["content"][0]["text"]
+            text = data["content"][0]["text"]
+            usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+            _record_llm_usage("anthropic", model, system, user_content, text, usage)
+            return text
         except Exception as exc:
             logger.warning("Anthropic agent call failed: %s", exc)
             return None

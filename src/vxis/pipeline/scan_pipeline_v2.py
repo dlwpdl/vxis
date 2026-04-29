@@ -42,14 +42,17 @@ from typing import Any, Awaitable, Callable
 from vxis.agent.brain import (
     get_brain_decision_count,
     get_llm_call_count,
+    get_llm_usage_stats,
     reset_brain_decision_count,
     reset_llm_call_count,
+    reset_llm_usage_stats,
 )
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tools import build_default_registry
 from vxis.agent.tools.finding_tools import _get_chains as _get_chain_dicts
 from vxis.agent.tools.finding_tools import _get_findings as _get_finding_dicts
 from vxis.agent.tools.finding_tools import _reset_for_tests as _reset_finding_store
+from vxis.agent.tools.finding_tools import set_event_callback as _set_finding_event_callback
 from vxis.agent.tools.memory_tools import record_scan_result as _record_scan_memory
 from vxis.interaction.surface import TargetKind
 from vxis.pipeline.context import ScanContext
@@ -496,8 +499,10 @@ class ScanPipeline:
 
         # 2. Reset per-scan state (findings + brain counters + playbook dedup)
         _reset_finding_store()
+        _set_finding_event_callback(self._emit)
         reset_brain_decision_count()
         reset_llm_call_count()
+        reset_llm_usage_stats()
         try:
             from vxis.agent.tools.playbook_tools import _loaded_playbooks
             _loaded_playbooks.clear()
@@ -526,6 +531,7 @@ class ScanPipeline:
             max_iters=max_iters,
             brain=self.brain,
             target_kind=kind,
+            event_callback=self._emit,
         )
 
         loop_result: dict[str, Any] = {}
@@ -534,13 +540,18 @@ class ScanPipeline:
         except Exception as exc:
             logger.exception("ScanAgentLoop failed")
             self._emit("error", {"stage": "scan_loop", "error": str(exc)})
+            _set_finding_event_callback(None)
             # Still attach a score so the CLI doesn't crash
             ctx.vxis_score = _SimpleScore(total=0.0, grade="F")
             return ctx
 
         self._emit(
             "phase_end",
-            {"phase": "scan_loop", "iterations": loop_result.get("iterations", 0)},
+            {
+                "phase": "scan_loop",
+                "iterations": loop_result.get("iterations", 0),
+                "duration_s": time.monotonic() - started,
+            },
         )
 
         # Phase B fix: surface peak_context_bytes from the loop state into ctx.
@@ -559,6 +570,10 @@ class ScanPipeline:
         ctx.skills_completed = loop_result.get("skills_completed", []) or []  # type: ignore[attr-defined]
         ctx.vector_candidates = loop_result.get("vector_candidates", []) or []  # type: ignore[attr-defined]
         ctx.attempt_outcomes = loop_result.get("attempt_outcomes", []) or []  # type: ignore[attr-defined]
+        ctx.scan_todos = loop_result.get("scan_todos", []) or []  # type: ignore[attr-defined]
+        ctx.branches = loop_result.get("branches", []) or []  # type: ignore[attr-defined]
+        ctx.shared_notes = loop_result.get("shared_notes", []) or []  # type: ignore[attr-defined]
+        ctx.llm_usage = get_llm_usage_stats()  # type: ignore[attr-defined]
         # Phase 4: surface sandbox invocations so _compute_vxis_score can
         # credit VC for shell_exec / python_exec usage (sandbox primacy).
         ctx.sandbox_invocations = loop_result.get("sandbox_invocations", []) or []  # type: ignore[attr-defined]
@@ -579,13 +594,6 @@ class ScanPipeline:
                     d, scan_id=ctx.scan_id, target=ctx.target, kind=ctx.kind
                 )
                 ctx.findings.append(f)
-                self._emit(
-                    "hit",
-                    {
-                        "severity": d.get("severity", "medium"),
-                        "title": d.get("title", ""),
-                    },
-                )
             except Exception:
                 logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
 
@@ -620,6 +628,7 @@ class ScanPipeline:
         # 10. Compute VXIS score
         score_value, grade = _compute_vxis_score(ctx)
         ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
+        self._emit("score", {"total": score_value, "grade": grade})
 
         # 10a. Dump full 5-dim breakdown next to the HTML report for benchmark comparison.
         detail = getattr(ctx, "score_detail", None)
@@ -721,6 +730,7 @@ class ScanPipeline:
         except Exception:
             logger.exception("Failed to record scan memory")
 
+        _set_finding_event_callback(None)
         return ctx
 
     async def _run_deferred_gate(self, ctx: ScanContext) -> None:

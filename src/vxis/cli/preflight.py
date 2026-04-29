@@ -8,6 +8,7 @@ import socket
 import subprocess
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
+import urllib.request
 
 
 @dataclass
@@ -95,9 +96,20 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
             return "claude-code", True
         return "claude-code (binary missing)", False
 
-    # AgentBrain path — API key required
+    # AgentBrain path — API key OR local Ollama required
     provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "together")
     model = os.environ.get("UPSTREAM_LLM_MODEL", "")
+    if provider == "ollama":
+        base_url = os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+        model = model or os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", "qwen2.5-coder:14b")
+        try:
+            req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                if 200 <= getattr(resp, "status", 200) < 500:
+                    return f"local:ollama/{model}", True
+        except Exception:
+            return f"local:ollama/{model} (unreachable)", False
+
     api_key_envs = {
         "anthropic": "ANTHROPIC_API_KEY",
         "together":  "TOGETHER_API_KEY",
@@ -115,7 +127,7 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
                 break
 
     if not has_key:
-        return "none (no API key — set TOGETHER_API_KEY or use --interactive)", False
+        return "none (no API key / no local ollama — set API key, use ollama, or use --interactive)", False
 
     label = f"api:{provider}" + (f"/{model}" if model else "")
     return label, True
@@ -173,7 +185,7 @@ def run_preflight(
     result.brain_backend, result.brain_ready = check_brain(interactive=interactive)
     if not result.brain_ready:
         result.errors.append(
-            "No Brain backend available. Install 'claude' CLI or set "
+            "No Brain backend available. Install 'claude' CLI, start Ollama, or set "
             "ANTHROPIC_API_KEY / TOGETHER_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY"
         )
 

@@ -684,10 +684,13 @@ def scan(
             except _aio.CancelledError:
                 pass
 
-        # findings severity 카운팅
+        # findings severity 카운팅 — live hit feed가 이미 올린 값을 다시 누적하지
+        # 말고, 종료 시점의 ctx.findings로 최종값을 덮어쓴다.
+        final_counts = {k: 0 for k in display.findings_count}
         for f in ctx.findings:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
-            display.findings_count[sev] = display.findings_count.get(sev, 0) + 1
+            final_counts[sev] = final_counts.get(sev, 0) + 1
+        display.findings_count = final_counts
         display.total_findings = len(ctx.findings)
         display.refresh()
 
@@ -785,6 +788,18 @@ def scan(
         f"llm_call_count={_llm_calls} brain_decision_count={_brain_decisions} "
         f"findings_count={len(ctx.findings)}[/dim]"
     )
+    _llm_usage = getattr(ctx, "llm_usage", {}) or {}
+    if _llm_usage:
+        _provider = _llm_usage.get("provider") or "?"
+        _model = _llm_usage.get("model") or "?"
+        _tokens = int(_llm_usage.get("total_tokens") or 0)
+        _token_prefix = "~" if _llm_usage.get("tokens_estimated") else ""
+        _cost = float(_llm_usage.get("cost_usd") or 0.0)
+        _cost_prefix = "est. " if _llm_usage.get("cost_estimated") else ""
+        console.print(
+            f"[dim]LLM_USAGE provider={_provider} model={_model} "
+            f"tokens={_token_prefix}{_tokens} cost={_cost_prefix}${_cost:.4f}[/dim]"
+        )
 
     # Report path (Phase 6이 리포트 생성했으면)
     if ctx.findings:

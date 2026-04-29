@@ -11,7 +11,7 @@ Tools:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from vxis.agent.tool_registry import ToolResult
 
@@ -20,15 +20,17 @@ logger = logging.getLogger(__name__)
 # Module-level findings store — Phase A in-memory
 _findings: list[dict[str, Any]] = []
 _chains: list[dict[str, Any]] = []
+_event_callback: Callable[[str, dict[str, Any]], None] | None = None
 
 _VALID_SEVERITIES = ("critical", "high", "medium", "low", "informational")
 
 
 def _reset_for_tests() -> None:
     """Reset module-level state. Called from test fixtures, NOT from production."""
-    global _findings, _chains
+    global _findings, _chains, _event_callback
     _findings = []
     _chains = []
+    _event_callback = None
 
 
 def _get_findings() -> list[dict[str, Any]]:
@@ -39,6 +41,38 @@ def _get_findings() -> list[dict[str, Any]]:
 def _get_chains() -> list[dict[str, Any]]:
     """Public accessor for integration to read the chains list."""
     return list(_chains)
+
+
+def set_event_callback(callback: Callable[[str, dict[str, Any]], None] | None) -> None:
+    """Register a lightweight callback for live TUI events."""
+    global _event_callback
+    _event_callback = callback
+
+
+def _emit_event(event_type: str, data: dict[str, Any]) -> None:
+    if _event_callback is None:
+        return
+    try:
+        _event_callback(event_type, data)
+    except Exception:
+        logger.debug("finding tool event callback failed for %s", event_type, exc_info=True)
+
+
+def _severity_to_level(severity: str) -> int:
+    return {
+        "critical": 4,
+        "high": 3,
+        "medium": 2,
+        "low": 1,
+        "informational": 1,
+    }.get(str(severity).lower(), 1)
+
+
+def _finding_by_id(finding_id: str) -> dict[str, Any] | None:
+    for finding in _findings:
+        if finding.get("id") == finding_id:
+            return finding
+    return None
 
 
 class ReportFindingTool:
@@ -183,6 +217,19 @@ class ReportFindingTool:
         }
         _findings.append(finding)
         logger.info("[Finding] %s [%s] %s — %s", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80])
+        _emit_event(
+            "hit",
+            {
+                "finding_id": finding_id,
+                "vector_id": finding["finding_type"],
+                "level": _severity_to_level(severity),
+                "confidence": severity,
+                "severity": severity,
+                "title": finding["title"],
+                "hint": finding["title"][:60],
+                "endpoint": finding["affected_component"],
+            },
+        )
 
         return ToolResult(
             ok=True,
@@ -305,6 +352,30 @@ class LinkChainTool:
         }
         _chains.append(chain)
         logger.info("[Chain] %s: %s → %s", chain_id, " → ".join(finding_ids), str(crown_jewel)[:60])
+        first = _finding_by_id(finding_ids[0]) or {}
+        _emit_event(
+            "chain_start",
+            {
+                "chain_id": chain_id,
+                "finding_type": str(first.get("finding_type", "chain")),
+                "endpoint": str(first.get("affected_component", "")),
+                "vector_id": str(first.get("finding_type", "chain")),
+                "crown_jewel": str(crown_jewel),
+            },
+        )
+        for fid in finding_ids:
+            finding = _finding_by_id(fid) or {}
+            _emit_event(
+                "chain_step",
+                {
+                    "chain_id": chain_id,
+                    "finding_id": fid,
+                    "vector_id": str(finding.get("finding_type", fid)),
+                    "endpoint": str(finding.get("affected_component", "")),
+                    "level": _severity_to_level(str(finding.get("severity", "low"))),
+                    "reasoning": str(finding.get("title", rationale))[:60],
+                },
+            )
 
         return ToolResult(
             ok=True,

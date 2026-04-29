@@ -34,3 +34,11 @@
 ## [2026-04-17] ingest | ADR-007 Phase 11 activated — legacy PAYLOADS*/XSS_PAYLOADS* removed, docs resynced
 
 ## [2026-04-20] ingest | 2026-04-20 browser_fill_form Angular+PIVOT fix (phase-1/2/3); eyes.md + scan_loop.md code_anchors stale
+
+## [2026-04-29] ingest | scan_loop TUI live sync contract added
+- `scan_loop` module page에 TUI invariant 추가: `brain_thinking` / `attack` / `hit` / `chain_*` 는 scan 중 live 로 흘러야 함.
+- 침묵 상태나 `recent hit=?` 같은 placeholder 노출은 UX 문제가 아니라 contract violation 으로 취급.
+
+## [2026-04-29] ingest | operator control plane concept added from Strix comparison
+- Strix 비교로 확인한 핵심: tool-only 루프, waiting 상태, todo, notes, agent graph, operator 메시지 경로.
+- VXIS 는 clone 이 아니라 `scan_todos / branches / waiting_reason / shared_notes` 중심의 자체 control plane 으로 가야 함.

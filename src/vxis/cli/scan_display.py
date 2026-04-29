@@ -46,6 +46,11 @@ class ScanLiveDisplay:
         self.current_phase: str | None = None
         self.current_vector: str | None = None
         self.current_reasoning: str = ""
+        self.loop_mode = False
+        self.loop_iteration = 0
+        self.loop_max_iters = 0
+        self.loop_status = ""
+        self.waiting_reason = ""
         self.current_objective: str = ""       # Phase guide objective_ko
         self.current_crown_hint: str = ""      # Phase guide crown_hint_ko
         self.attack_feed: deque = deque(maxlen=6)
@@ -56,6 +61,12 @@ class ScanLiveDisplay:
         self.total_findings = 0
         self.total_attacks = 0
         self.total_chains = 0
+        self.todo_counts: dict[str, int] = {}
+        self.branch_counts: dict[str, int] = {}
+        self.todo_items: list[dict] = []
+        self.branch_items: list[dict] = []
+        self.shared_notes: list[str] = []
+        self.telemetry: dict = {}
         self.start_time = time.monotonic()
         self.score: dict | None = None
         self.last_error: str | None = None
@@ -77,6 +88,18 @@ class ScanLiveDisplay:
     def handle_event(self, event_type: str, data: dict) -> None:
         """Pipeline이 emit한 event 처리."""
         if event_type == "phase_start":
+            if data.get("phase") == "scan_loop" or data.get("name") == "ScanAgentLoop":
+                self.loop_mode = True
+                self.current_phase = "Scan Loop"
+                self.phases = [{
+                    "id": "SL",
+                    "name": "Scan Loop",
+                    "status": "running",
+                    "duration": 0.0,
+                    "findings": 0,
+                    "error": "",
+                }]
+                return
             self.current_phase = data["name"]
             # Store guide info for TUI display
             guide = data.get("guide", {})
@@ -89,6 +112,13 @@ class ScanLiveDisplay:
                     break
 
         elif event_type == "phase_end":
+            if self.loop_mode and self.phases:
+                self.phases[0]["status"] = "failed" if data.get("failed") else "done"
+                self.phases[0]["duration"] = data.get("duration_s", self.phases[0]["duration"])
+                self.phases[0]["findings"] = data.get("total_findings", self.total_findings)
+                self.phases[0]["error"] = data.get("error", "")
+                self.current_phase = None
+                return
             for p in self.phases:
                 if p["name"] in (data.get("name") or data.get("phase") or ""):
                     p["status"] = "failed" if data.get("failed") else "done"
@@ -122,27 +152,55 @@ class ScanLiveDisplay:
             self.attack_feed.append(f"[dim]▶[/dim] [cyan]{vector:<18}[/cyan] [yellow]{method:<5}[/yellow] {_ep}")
             self.total_attacks += 1
             self.current_vector = vector
+            self.loop_status = f"{method} {endpoint}"[:100]
 
         elif event_type == "hit":
-            vector = data.get("vector_id", "?")
+            severity = str(data.get("severity", "")).lower()
+            vector = data.get("vector_id") or data.get("title") or data.get("finding_id") or "finding"
             level = data.get("level")
-            conf = data.get("confidence", "")
-            hint = data.get("hint", "")[:35]
+            if not level:
+                level = {
+                    "critical": 4,
+                    "high": 3,
+                    "medium": 2,
+                    "low": 1,
+                    "informational": 1,
+                }.get(severity, 1)
+            conf = data.get("confidence") or severity or "reported"
+            hint = (data.get("hint") or data.get("title") or "")[:35]
             level_str = f"L{level}" if level else ""
             hit_line = f"[bold red]!![/bold red] [cyan]{vector}[/cyan] {level_str} [{conf}]"
             if hint:
                 hit_line += f" → [dim]{hint}[/dim]"
             self.hit_feed.append(hit_line)
+            if severity in self.findings_count:
+                self.findings_count[severity] += 1
+            self.total_findings += 1
 
         elif event_type == "brain_thinking":
-            phase = data.get("phase", "?")
-            count = data.get("vector_count", 0)
+            self.loop_iteration = int(data.get("iteration") or self.loop_iteration or 0)
+            self.loop_max_iters = int(data.get("max_iters") or self.loop_max_iters or 0)
             vectors = data.get("vectors", [])
             # 첫 벡터의 reasoning을 표시
             if vectors:
                 first = vectors[0]
                 self.current_vector = first.get("id", "")
                 self.current_reasoning = first.get("reasoning", "")[:80]
+                self.loop_status = self.current_reasoning
+
+        elif event_type == "control_plane":
+            self.loop_iteration = int(data.get("iteration") or self.loop_iteration or 0)
+            self.loop_max_iters = int(data.get("max_iters") or self.loop_max_iters or 0)
+            self.waiting_reason = (data.get("waiting_reason") or "")[:120]
+            self.todo_counts = dict(data.get("todo_counts") or {})
+            self.branch_counts = dict(data.get("branch_counts") or {})
+            self.todo_items = list(data.get("todos") or [])
+            self.branch_items = list(data.get("branches") or [])
+            self.shared_notes = list(data.get("shared_notes") or [])
+            self.telemetry = dict(data.get("telemetry") or {})
+            note = (data.get("note") or "")[:100]
+            if note:
+                self.loop_status = note
 
         elif event_type == "chain_start":
             chain_id = data.get("chain_id", "?")
@@ -195,6 +253,46 @@ class ScanLiveDisplay:
         return Panel(table, title="[bold cyan]VXIS Scan[/bold cyan]", border_style="cyan")
 
     def _render_phases(self) -> Panel:
+        if self.loop_mode:
+            status = self.phases[0]["status"] if self.phases else "running"
+            icon = {
+                "pending": "[dim]○[/dim]",
+                "running": "[bold yellow]◉[/bold yellow]",
+                "done": "[bold green]✓[/bold green]",
+                "failed": "[bold red]✗[/bold red]",
+                "skipped": "[dim]↷[/dim]",
+            }.get(status, "?")
+            table = Table.grid(padding=(0, 1))
+            table.add_column(style="bold", width=10, no_wrap=True)
+            table.add_column()
+            table.add_row("Status", f"{icon} {status}")
+            if self.loop_max_iters:
+                table.add_row("Iteration", f"{self.loop_iteration}/{self.loop_max_iters}")
+            elif self.loop_iteration:
+                table.add_row("Iteration", str(self.loop_iteration))
+            if self.current_vector:
+                table.add_row("Focus", self.current_vector[:48])
+            if self.loop_status:
+                table.add_row("Latest", self.loop_status[:96])
+            if self.waiting_reason:
+                table.add_row("Block", self.waiting_reason[:96])
+            if self.todo_counts:
+                open_todos = sum(v for k, v in self.todo_counts.items() if k not in ("done", "blocked"))
+                table.add_row("Todos", f"{open_todos} open / {sum(self.todo_counts.values())} total")
+            if self.branch_counts:
+                active_branches = sum(
+                    v for k, v in self.branch_counts.items()
+                    if k not in ("proven", "exhausted", "dead", "blocked")
+                )
+                table.add_row("Branches", f"{active_branches} active / {sum(self.branch_counts.values())} total")
+            table.add_row("Findings", str(self.total_findings))
+            table.add_row("Chains", str(self.total_chains))
+            return Panel(
+                table,
+                title="[bold]Scan Loop[/bold]",
+                border_style="blue",
+            )
+
         table = Table(show_header=False, box=None, padding=(0, 1))
         table.add_column(width=3)  # status icon
         table.add_column(width=6)  # phase ID
@@ -269,6 +367,60 @@ class ScanLiveDisplay:
             content,
             title=f"[bold]Live Attacks[/bold] [dim](total: {self.total_attacks})[/dim]",
             border_style="yellow",
+        )
+
+    def _render_control_plane(self) -> Panel:
+        lines: list[str] = []
+
+        if self.waiting_reason:
+            lines.append(f"[bold yellow]Block:[/bold yellow] {self.waiting_reason}")
+
+        if self.telemetry:
+            provider = self.telemetry.get("provider") or "?"
+            model = self.telemetry.get("model") or "?"
+            total_tokens = int(self.telemetry.get("total_tokens") or 0)
+            token_prefix = "~" if self.telemetry.get("tokens_estimated") else ""
+            llm_calls = int(self.telemetry.get("llm_calls") or self.telemetry.get("calls") or 0)
+            brain_decisions = int(self.telemetry.get("brain_decisions") or 0)
+            cost_usd = float(self.telemetry.get("cost_usd") or 0.0)
+            cost_prefix = "est. " if self.telemetry.get("cost_estimated") else ""
+            lines.append(f"[bold cyan]LLM:[/bold cyan] {provider}/{model}")
+            lines.append(f"[dim]{llm_calls} calls · {brain_decisions} decisions · {token_prefix}{total_tokens:,} tok[/dim]")
+            lines.append(f"[dim]Cost {cost_prefix}${cost_usd:.4f}[/dim]")
+
+        if self.todo_items:
+            lines.append("[bold]Todos[/bold]")
+            icons = {"pending": "○", "in_progress": "◉", "done": "✓", "blocked": "■"}
+            for todo in self.todo_items[:3]:
+                icon = icons.get(todo.get("status", "pending"), "•")
+                title = str(todo.get("title", ""))[:44]
+                lines.append(f"{icon} p{todo.get('priority', 0)} {title}")
+
+        if self.branch_items:
+            lines.append("[bold]Branches[/bold]")
+            for branch in self.branch_items[:3]:
+                title = str(branch.get("vector_id") or branch.get("title") or "?")[:26]
+                status = str(branch.get("status") or "?")
+                attempts = int(branch.get("attempts") or 0)
+                last_tool = str(branch.get("last_tool") or "")[:14]
+                suffix = f" via {last_tool}" if last_tool else ""
+                lines.append(f"{status:<9} {title} a{attempts}{suffix}")
+                next_step = str(branch.get("next_step") or "")[:68]
+                if next_step:
+                    lines.append(f"  [dim]next: {next_step}[/dim]")
+
+        if self.shared_notes:
+            lines.append("[bold]Notes[/bold]")
+            for note in self.shared_notes[-2:]:
+                lines.append(f"[dim]- {note[:70]}[/dim]")
+
+        if not lines:
+            lines = ["[dim]control plane warming up...[/dim]"]
+
+        return Panel(
+            "\n".join(lines),
+            title="[bold]Control Plane[/bold]",
+            border_style="cyan",
         )
 
     def _render_chains(self) -> Panel:
@@ -348,6 +500,10 @@ class ScanLiveDisplay:
             parts.append(f"[bold]Score:[/bold] [cyan]{self.score['total']:.0f}/1000[/cyan] [{self.score['grade']}]")
         if self.last_error:
             parts.append(f"[bold red]Error:[/bold red] [dim]{self.last_error[:60]}[/dim]")
+        if self.telemetry:
+            total_tokens = int(self.telemetry.get("total_tokens") or 0)
+            token_prefix = "~" if self.telemetry.get("tokens_estimated") else ""
+            parts.append(f"[bold]Tokens:[/bold] [cyan]{token_prefix}{total_tokens:,}[/cyan]")
 
         return Panel(" │ ".join(parts), border_style="cyan")
 
@@ -366,6 +522,7 @@ class ScanLiveDisplay:
         # Center column: Brain thinking + Attack feed + Chains
         layout["center"].split(
             Layout(self._render_brain_thinking(), size=9, name="thinking"),
+            Layout(self._render_control_plane(), size=12, name="control"),
             Layout(self._render_attack_feed(), name="attacks"),
             Layout(self._render_chains(), name="chains"),
         )

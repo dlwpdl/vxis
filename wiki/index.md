@@ -32,6 +32,7 @@
 - [VXIS Architecture — Brain / Hands / Eyes / X-Ray](concepts/vxis_architecture.md) — 모듈 역할 분담 / raw httpx 금지 근거 / 어느 컴포넌트가 무엇 담당 / 파이프라인 진입점
 - [AI Context Hygiene — 4 Principles](concepts/ai_context_hygiene.md) — context window 관리 원칙 / tool 결과 dump 금지 / wiki 가 RAG 구현인 이유 / 5-Loop 매핑
 - [Cross-Surface Synthesis](concepts/cross_surface_synthesis.md) — surface boundary marker / desktop+web 체인 / OSILayer.DESKTOP 매핑 / _agent_to_layer 사용처 / Evidence.surface 의미
+- [Operator Control Plane](concepts/operator_control_plane.md) — TUI 가 조용해 보이는 이유 / planning 과 execution 분리 / todo·branch·waiting 상태 필요성 / Strix 비교 근거
 
 ## Entities
 
