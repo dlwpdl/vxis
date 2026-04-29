@@ -9,8 +9,12 @@ build/
 *.db
 *.sqlite
 .env
-data/
+/data/
 reports/
+
+# Benchmark runs — keep score.json as evidence, skip large HTML + verbose logs
+benchmarks/**/*.html
+benchmarks/**/*.log
 
 # Upstream watch — state is cached in CI, digests are committed
 tools/upstream_watch/.state.json
@@ -18,3 +22,6 @@ tools/upstream_watch/.state.json
 .worktrees/
 tools/benchmark/.brain/
 logs/
+
+# Claude Code agent metadata (worker locks, settings)
+.claude/

@@ -195,11 +195,11 @@ jobs:
 
           # ── LLM 코드 개선 패치 생성 ───────────────────────────────────
           _DIM_FILES = {
-              "vector_coverage":    ["src/vxis/scoring/vectors.py", "src/vxis/pipeline/pipeline.py"],
-              "exploitation_reach": ["src/vxis/agent/brain.py"],
-              "chain_intelligence": ["src/vxis/agent/brain.py"],
-              "finding_precision":  ["src/vxis/agent/brain.py"],
-              "completeness":       ["src/vxis/pipeline/pipeline.py"],
+              "vector_coverage":    ["src/vxis/scoring/vectors.py", "src/vxis/pipeline/scan_pipeline_v2.py"],
+              "exploitation_reach": ["src/vxis/agent/brain.py", "src/vxis/agent/scan_loop.py"],
+              "chain_intelligence": ["src/vxis/agent/brain.py", "src/vxis/agent/scan_loop.py"],
+              "finding_precision":  ["src/vxis/agent/brain.py", "src/vxis/agent/tools/verifier_tools.py"],
+              "completeness":       ["src/vxis/pipeline/scan_pipeline_v2.py", "src/vxis/agent/scan_loop.py"],
           }
 
           def llm_generate_patches(weakest_dim: str, dim_score: float, iteration: int) -> list[dict]:

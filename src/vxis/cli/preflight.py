@@ -33,9 +33,26 @@ class PreflightResult:
         return len(self.warnings) > 0
 
 
-def check_target_reachable(target: str, timeout: float = 5.0) -> tuple[bool, float]:
-    """타겟 URL/도메인 도달 가능 여부 체크 — HTTP HEAD 시도."""
+def check_target_reachable(
+    target: str, timeout: float = 5.0, kind: str = "web"
+) -> tuple[bool, float]:
+    """타겟 도달 가능 여부 체크.
+
+    kind="web"  → HTTP HEAD/GET 시도 (URL/도메인 가정)
+    kind="desktop" → 파일 시스템 경로 존재 여부 (.app/.exe/binary path)
+    kind="mobile"/"game" → 일단 web 과 동일 (URL 입력 받는 형태). 후속 phase
+        에서 ipa/apk/proto:port 형태로 분기 추가 예정.
+    """
     import time
+
+    if kind == "desktop":
+        # macOS .app 번들이 들어오면 내부 Mach-O 까지 들어와도 OK,
+        # 단순 디렉토리/파일 경로면 그것만으로 충분.
+        t0 = time.monotonic()
+        if os.path.exists(target):
+            return True, (time.monotonic() - t0) * 1000
+        return False, 0.0
+
     import urllib.request
     import urllib.error
 
@@ -131,14 +148,26 @@ def check_proxy_pool() -> int:
     return len([p for p in pool.split(",") if p.strip()])
 
 
-def run_preflight(target: str, ghost: bool = False, interactive: bool = False) -> PreflightResult:
-    """전체 pre-flight 체크 실행."""
+def run_preflight(
+    target: str,
+    ghost: bool = False,
+    interactive: bool = False,
+    kind: str = "web",
+) -> PreflightResult:
+    """전체 pre-flight 체크 실행.
+
+    `kind` 는 target 의 surface 타입 — desktop 이면 파일 경로 존재 여부로
+    reachability 를 판정한다 (HTTP probe 스킵).
+    """
     result = PreflightResult()
 
     # 1. Target 도달
-    result.target_reachable, result.target_latency_ms = check_target_reachable(target)
+    result.target_reachable, result.target_latency_ms = check_target_reachable(target, kind=kind)
     if not result.target_reachable:
-        result.errors.append(f"Target unreachable: {target}")
+        if kind == "desktop":
+            result.errors.append(f"Desktop target not found on disk: {target}")
+        else:
+            result.errors.append(f"Target unreachable: {target}")
 
     # 2. Brain 백엔드
     result.brain_backend, result.brain_ready = check_brain(interactive=interactive)

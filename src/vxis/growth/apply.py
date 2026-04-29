@@ -85,70 +85,82 @@ def generate_proposals(intel: NewsIntelligence) -> list[Proposal]:
             )
         )
 
-    # Skill payload proposals — map KB patterns to skill files
+    # Skill payload proposals — map KB patterns to JSON data files (ADR-007 Phase 10).
     for i, kb in enumerate(intel.proposed_kb_patterns):
         technique = kb.get("technique", "").lower()
         payload = kb.get("payload", "")
         if not payload:
             continue
 
-        skill_map = {
-            "sqli": "src/vxis/agent/skills/test_injection.py",
-            "sql_injection": "src/vxis/agent/skills/test_injection.py",
-            "xss": "src/vxis/agent/skills/test_injection.py",
-            "rce": "src/vxis/agent/skills/test_injection.py",
-            "ssrf": "src/vxis/agent/skills/test_injection.py",
-            "ssti": "src/vxis/agent/skills/test_injection.py",
-            "cmdi": "src/vxis/agent/skills/test_injection.py",
-            "nosql": "src/vxis/agent/skills/test_injection.py",
-            "xxe": "src/vxis/agent/skills/test_injection.py",
-            "path_traversal": "src/vxis/agent/skills/test_sensitive_files.py",
-            "auth_bypass": "src/vxis/agent/skills/attempt_auth.py",
-            "jwt": "src/vxis/agent/skills/attempt_auth.py",
-            "csrf": "src/vxis/agent/skills/test_injection.py",
-            "idor": "src/vxis/agent/skills/test_idor.py",
-        }
-        target_file = skill_map.get(technique, "")
-        if target_file:
-            proposals.append(
-                Proposal(
-                    proposal_id=f"{intel.signal_id}-skill-{i}",
-                    source_signal_id=intel.signal_id,
-                    change_type="skill_payload_add",
-                    target_file=target_file,
-                    change_data=kb,
-                    confidence=intel.trust_score * 0.8,
-                    risk="low",
-                    rationale_en=(
-                        f"New {technique} payload from "
-                        f"{intel.source_name}: {payload[:60]}"
-                    ),
-                    rationale_ko=(
-                        f"{intel.source_name}에서 새 {technique} "
-                        f"페이로드: {payload[:60]}"
-                    ),
-                    source_url=intel.article_url,
-                )
+        mapping = _TECHNIQUE_TARGETS.get(technique)
+        if mapping is None:
+            continue  # technique not mappable to a data file → skip
+        json_basename, _mode, _arg = mapping
+        target_file = f"src/vxis/data/payloads/{json_basename}.json"
+        proposals.append(
+            Proposal(
+                proposal_id=f"{intel.signal_id}-skill-{i}",
+                source_signal_id=intel.signal_id,
+                change_type="skill_payload_add",
+                target_file=target_file,
+                change_data=kb,
+                confidence=intel.trust_score * 0.8,
+                risk="low",
+                rationale_en=(
+                    f"New {technique} payload from "
+                    f"{intel.source_name}: {payload[:60]}"
+                ),
+                rationale_ko=(
+                    f"{intel.source_name}에서 새 {technique} "
+                    f"페이로드: {payload[:60]}"
+                ),
+                source_url=intel.article_url,
             )
+        )
 
     return [classify_proposal(p) for p in proposals]
 
 
-_AUTO_MARKER = "# --- AUTO-UPDATED"
+_PAYLOAD_DATA_ROOT = Path("src/vxis/data/payloads")
+
+# ADR-007 Phase 10 — technique → (json_basename, insert_mode, mode_arg).
+#
+# Modes map to the two JSON schemas the loader understands
+# (see src/vxis/agent/skills/_payload_loader.py):
+#   "round"          → append dict {type,payload,detect} to rounds[arg]
+#   "dataset"        → append string to datasets[arg]
+#   "dataset_triple" → append [path, severity, desc] to datasets[arg]
+#   "dataset_tuple"  → append [user, pwd] to datasets[arg]
+#
+# Unknown techniques are dropped in generate_proposals — silent skip is
+# correct because the growth loop shouldn't PR into files it can't
+# schema-validate.
+_TECHNIQUE_TARGETS: dict[str, tuple[str, str, str]] = {
+    "sqli":          ("injection",             "round",          "3"),
+    "sql_injection": ("injection",             "round",          "3"),
+    "xss":           ("xss",                   "round",          "3"),
+    "rce":           ("injection",             "round",          "3"),
+    "ssrf":          ("test_ssrf",             "dataset",        "ssrf_payloads"),
+    "ssti":          ("injection",             "round",          "3"),
+    "cmdi":          ("injection",             "round",          "3"),
+    "nosql":         ("injection",             "round",          "3"),
+    "xxe":           ("injection",             "round",          "3"),
+    "path_traversal":("test_sensitive_files",  "dataset_triple", "sensitive_paths"),
+    "auth_bypass":   ("attempt_auth",          "dataset_tuple",  "default_creds"),
+    "jwt":           ("attempt_auth",          "dataset_tuple",  "default_creds"),
+    "csrf":          ("injection",             "round",          "3"),
+}
 
 
 def _apply_skill_payload(proposal: Proposal) -> bool:
-    """Actually insert a payload into a skill Python file.
+    """Append a new payload/dataset entry to the skill's JSON data file.
 
-    Finds the AUTO-UPDATED marker line and inserts the new payload
-    entry just before it. Returns True if successful.
+    ADR-007 Phase 10: the skill `.py` files are frozen — growth loop
+    writes only to `src/vxis/data/payloads/<skill>.json` and the pydantic
+    schema (`_PayloadFile`) is the final gate before a write.
+
+    Returns True if an entry was actually appended.
     """
-    import re
-
-    target = Path(proposal.target_file)
-    if not target.exists():
-        return False
-
     data = proposal.change_data
     if not isinstance(data, dict):
         return False
@@ -158,60 +170,82 @@ def _apply_skill_payload(proposal: Proposal) -> bool:
     if not payload:
         return False
 
-    content = target.read_text(encoding="utf-8")
-    if _AUTO_MARKER not in content:
+    mapping = _TECHNIQUE_TARGETS.get(technique)
+    if mapping is None:
+        return False
+    json_basename, mode, mode_arg = mapping
+
+    target = _PAYLOAD_DATA_ROOT / f"{json_basename}.json"
+    if not target.exists():
         return False
 
-    # Sanitize payload: must be single-line, no unescaped quotes
+    # Sanitize the raw payload — same rules as the legacy .py inserter
+    # used, so regression isolation across the two paths is comparable.
     payload = payload.replace("\n", " ").replace("\r", "").strip()
-    # Truncate overly long payloads
     if len(payload) > 200:
         payload = payload[:200]
 
-    # Build the new entry based on file type
-    if "test_injection" in str(target):
-        # PAYLOADS list format: {"type": "...", "payload": "...", "detect": [...]}
+    try:
+        content = json.loads(target.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+
+    if mode == "round":
         detect = data.get("detect", [])
         if not detect:
             detect = ["sql"] if "sql" in technique else []
-        # Ensure detect is a list of simple strings
         if isinstance(detect, list):
             detect = [str(d)[:60] for d in detect[:5]]
-        escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
-        new_line = f'    {{"type": "{technique}", "payload": "{escaped}", "detect": {detect}}},  # auto-added'
-    elif "test_sensitive_files" in str(target):
-        severity = data.get("severity", "medium")
-        desc = str(data.get("description", f"Auto-added {technique} path"))[:60].replace('"', "'")
-        path_val = payload.replace('"', "")
-        new_line = f'    ("{path_val}", "{severity}", "{desc}"),  # auto-added'
-    elif "attempt_auth" in str(target):
-        pwd = data.get("password", "x")
-        escaped = payload.replace("\\", "\\\\").replace('"', '\\"')
-        new_line = f'    ("{escaped}", "{pwd}"),  # auto-added'
+        entry = {"type": technique, "payload": payload, "detect": detect}
+        bucket = content.setdefault("rounds", {}).setdefault(mode_arg, [])
+        if any(isinstance(p, dict) and p.get("payload") == payload for p in bucket):
+            return False
+        bucket.append(entry)
+
+    elif mode == "dataset":
+        bucket = content.setdefault("datasets", {}).setdefault(mode_arg, [])
+        if payload in bucket:
+            return False
+        bucket.append(payload)
+
+    elif mode == "dataset_triple":
+        severity = str(data.get("severity", "medium")).lower()
+        desc = str(data.get("description", f"Auto-added {technique} path"))[:60]
+        entry = [payload, severity, desc]
+        bucket = content.setdefault("datasets", {}).setdefault(mode_arg, [])
+        if any(isinstance(x, list) and x and x[0] == payload for x in bucket):
+            return False
+        bucket.append(entry)
+
+    elif mode == "dataset_tuple":
+        pwd = str(data.get("password", "x"))
+        entry = [payload, pwd]
+        bucket = content.setdefault("datasets", {}).setdefault(mode_arg, [])
+        if any(isinstance(x, list) and list(x) == entry for x in bucket):
+            return False
+        bucket.append(entry)
+
     else:
         return False
 
-    # Check for duplicates
-    if payload in content:
-        return False  # already exists
-
-    # Insert before the marker line
-    lines = content.split("\n")
-    for i, line in enumerate(lines):
-        if _AUTO_MARKER in line:
-            lines.insert(i, new_line)
-            break
-    else:
-        return False
-
-    new_content = "\n".join(lines)
-    # Syntax validation — reject if insertion breaks Python
+    # Schema validate before writing — fail-closed.
     try:
-        compile(new_content, str(target), "exec")
-    except SyntaxError:
-        logger.warning("Payload insertion would break syntax in %s — skipped", target)
+        from vxis.agent.skills._payload_loader import (
+            _PayloadFile,
+            clear_cache,
+        )
+        _PayloadFile.model_validate(content)
+    except Exception as e:
+        logger.warning(
+            "Growth payload injection fails schema for %s: %s", target, e
+        )
         return False
-    target.write_text(new_content, encoding="utf-8")
+
+    target.write_text(
+        json.dumps(content, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    clear_cache()  # next skill load reads the appended entry
     return True
 
 

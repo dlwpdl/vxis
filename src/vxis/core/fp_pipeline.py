@@ -17,8 +17,7 @@ import asyncio
 import logging
 import re
 
-import httpx
-
+from vxis.interaction.hands import AnalyzedResponse, SessionManager
 from vxis.models.finding import Finding, Severity
 
 logger = logging.getLogger(__name__)
@@ -364,27 +363,25 @@ class FPPipeline:
         if url is None:
             return finding
 
+        # Route through SessionManager so revalidation honors the same
+        # transport / Ghost / WAF-aware throttling as the rest of the scan
+        # (and so the AST guard for raw httpx imports stays clean).
+        mgr = SessionManager()
         try:
-            async with httpx.AsyncClient(
-                timeout=self._revalidation_timeout,
-                verify=False,  # noqa: S501 — targets may use self-signed certs
-                follow_redirects=True,
-                max_redirects=3,
-            ) as client:
-                # Try HEAD first (lightweight), fall back to GET if HEAD is rejected
-                try:
-                    response = await client.head(url)
-                    if response.status_code == 405:  # Method Not Allowed
-                        response = await client.get(url)
-                except httpx.HTTPError:
-                    response = await client.get(url)
+            session = await mgr.get_session(url)
+            try:
+                response = await session.request("HEAD", url)
+                if response.status == 405:
+                    response = await session.request("GET", url)
+            except Exception:
+                response = await session.request("GET", url)
 
             confirmed = self._check_vulnerability_indicators(response, finding)
 
             if confirmed:
                 new_confidence = min(1.0, finding.confidence + _REVALIDATION_CONFIRM_BOOST)
                 note = (
-                    f"[http_revalidation] Confirmed: HTTP {response.status_code} "
+                    f"[http_revalidation] Confirmed: HTTP {response.status} "
                     f"at {url}. Confidence boosted {finding.confidence:.2f} -> "
                     f"{new_confidence:.2f}."
                 )
@@ -392,7 +389,7 @@ class FPPipeline:
             else:
                 new_confidence = max(0.0, finding.confidence - _REVALIDATION_DENY_PENALTY)
                 note = (
-                    f"[http_revalidation] Not confirmed: HTTP {response.status_code} "
+                    f"[http_revalidation] Not confirmed: HTTP {response.status} "
                     f"at {url}. Confidence reduced {finding.confidence:.2f} -> "
                     f"{new_confidence:.2f}."
                 )
@@ -403,12 +400,10 @@ class FPPipeline:
             else:
                 finding.analyst_notes = note
 
-        except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPError) as exc:
-            # Network errors: don't change confidence, just log
-            logger.debug(
-                "HTTP revalidation failed for %s (%s): %s",
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Unexpected error during HTTP revalidation for %s: %s",
                 finding.id,
-                url,
                 exc,
             )
             note = f"[http_revalidation] Skipped: {type(exc).__name__} for {url}."
@@ -416,12 +411,11 @@ class FPPipeline:
                 finding.analyst_notes = finding.analyst_notes + "\n" + note
             else:
                 finding.analyst_notes = note
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Unexpected error during HTTP revalidation for %s: %s",
-                finding.id,
-                exc,
-            )
+        finally:
+            try:
+                await mgr.close_all()
+            except Exception:
+                pass
 
         return finding
 
@@ -470,7 +464,7 @@ class FPPipeline:
 
     @staticmethod
     def _check_vulnerability_indicators(
-        response: httpx.Response,
+        response: AnalyzedResponse,
         finding: Finding,
     ) -> bool:
         """Check whether the HTTP response indicates the vulnerability is present.
@@ -478,18 +472,9 @@ class FPPipeline:
         Heuristics:
         - Status code is in the set of codes that suggest a live vulnerable endpoint
         - Finding-related keywords appear in response headers
-
-        Args:
-            response: The HTTP response from the revalidation request.
-            finding: The original finding being revalidated.
-
-        Returns:
-            True if vulnerability indicators are detected.
         """
-        # Check status code
-        if response.status_code in _VULN_STATUS_CODES:
-            # Look for finding-type keywords in response headers
-            finding_keywords = finding.finding_type.lower().split()
+        if response.status in _VULN_STATUS_CODES:
+            finding_keywords = finding.finding_type.lower().split()  # noqa: F841 — reserved for future header tagging
             for header_name, patterns in _VULN_HEADER_PATTERNS.items():
                 header_value = response.headers.get(header_name, "").lower()
                 if header_value:
@@ -497,12 +482,10 @@ class FPPipeline:
                         if pattern in header_value:
                             return True
 
-            # If status code indicates something interesting (error/auth), count as confirmed
-            if response.status_code in {401, 403, 500, 502, 503}:
+            if response.status in {401, 403, 500, 502, 503}:
                 return True
 
-            # For 200, require more evidence — the endpoint is reachable and live
-            if response.status_code == 200:
+            if response.status == 200:
                 return True
 
         return False

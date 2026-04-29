@@ -18,7 +18,7 @@ in order. Each chapter is one decision or milestone with context → problem →
 decision → execution → result → lessons learned → next.
 
 Current state in one line:
-> 23 tools, Strix-pattern single loop (1 tool/message, LLM compression at 90K tokens, 3-tier smart history), adversarial verifier, MITRE ATT&CK mapping (16 techniques), enterprise egress filter, auto-orchestration safety net, NCC-style HTML report with verification summary + MITRE table.
+> 23 tools, Strix-pattern single loop (1 tool/message, LLM compression at 90K tokens, 3-tier smart history), vector exhaustion toward crown jewels, adversarial verifier, MITRE ATT&CK mapping (16 techniques), enterprise egress filter, auto-orchestration safety net, NCC-style HTML report with verification summary + MITRE table.
 
 ## Latest benchmark — Juice Shop (2026-04-10)
 
@@ -75,8 +75,10 @@ MITRE: 8 techniques / 6 tactics
   - Tier 3 (PINNED): high-value messages regardless of age (dashboard, critic, findings, verify)
 - **Browser tools** (7 new tools): `browser_navigate`, `browser_analyze_dom`, `browser_click`, `browser_fill_form`, `browser_screenshot`, `browser_eval_js`, `browser_get_cookies`
 - **Auto-orchestration safety net**: auto-login (SQLi creds), auto-ffuf (dir bruteforce at iter 10), auto-nuclei (at iter 12), auto-sqlmap (at iter 18+ on 500-error endpoints)
+- **Vector exhaustion pins**: `finish_scan` is rejected with 0 findings, 2+ findings require at least one chain, and `max_iters` timeout is scored as incomplete.
+- **5D score fidelity**: benchmark/growth-loop now compares the same pipeline-emitted score, including attempted vector IDs and auto sandbox invocations.
 
-**Remaining:** Final tuning on exploit chain depth, dashboard format refinement.
+**Remaining:** First-class `vector_candidates` / `attempt_outcomes` state, final tuning on exploit chain depth, dashboard format refinement.
 
 ## Phase E — Strix Patterns (In Progress 🔧)
 

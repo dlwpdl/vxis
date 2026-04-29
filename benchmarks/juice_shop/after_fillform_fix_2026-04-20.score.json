@@ -1,0 +1,76 @@
+{
+  "total": 483.3,
+  "grade": "C",
+  "target_type": "web",
+  "scan_id": "VXIS-20260420-164453",
+  "timestamp": "2026-04-20T07:49:31+00:00",
+  "capture_method": "console_scrape_only",
+  "note": "tools/growth_loop_runner.py does not persist 5-dim score.json; captured from stdout /tmp/vxis_scan/juice_shop_scan.log. Run after phase-1/2/3 fix (commits 0b56c54, b89d0a4, d67ddce).",
+  "dimensions": {
+    "vector_coverage": {
+      "score": 24.1,
+      "max_score": 250.0,
+      "percentage": 0.097
+    },
+    "exploitation_reach": {
+      "score": 159.1,
+      "max_score": 300.0,
+      "percentage": 0.530
+    },
+    "chain_intelligence": {
+      "score": 100.0,
+      "max_score": 150.0,
+      "percentage": 0.667
+    },
+    "finding_precision": {
+      "score": 100.0,
+      "max_score": 200.0,
+      "percentage": 0.5,
+      "post_adr_008_smoothing": true
+    },
+    "completeness": {
+      "score": 100.0,
+      "max_score": 100.0,
+      "percentage": 1.0
+    }
+  },
+  "benchmark_meta": {
+    "findings_count": 23,
+    "llm_call_count": 57,
+    "brain_decision_count": 50,
+    "peak_context_bytes": 194764,
+    "mitre_techniques": 11,
+    "mitre_tactics": 8,
+    "mitre_coverage_pct": 68.8,
+    "vxis_belief_verdicts": {"CONFIRMED": 0, "UNCONFIRMED": 0, "REFUTED": 0}
+  },
+  "juice_shop_internal_challenges_solved": [
+    "loginAdminChallenge (2-star, SQLi auth bypass)",
+    "basketAccessChallenge (2-star, IDOR)",
+    "registerAdminChallenge (3-star, mass assignment)",
+    "errorHandlingChallenge (1-star)",
+    "exposedMetricsChallenge (1-star)",
+    "securityPolicyChallenge (2-star)",
+    "passwordRepeatChallenge (1-star)"
+  ],
+  "comparison": {
+    "baseline": "after_phase11_2026-04-20.score.json",
+    "baseline_total": 375.7,
+    "delta_vs_previous": 107.6,
+    "outside_adr008_noise_range": true,
+    "per_dim_delta": {
+      "vector_coverage": 0.0,
+      "exploitation_reach": 7.5,
+      "chain_intelligence": 100.0,
+      "finding_precision": 0.0,
+      "completeness": 0.0
+    },
+    "mitre_delta": {
+      "techniques": 1,
+      "tactics": 1,
+      "coverage_pct": 6.3
+    },
+    "findings_delta": 4,
+    "interpretation": "Phase 1/2/3 (Angular fill_form + PIVOT + DOM-first prompt) fix verified end-to-end. Juice Shop loginAdminChallenge solved (was failing silently before) → admin session obtained → chain_intelligence jumps 0→100 because Brain linked pre-auth SQLi → post-auth IDOR into attack chain. MITRE tactics coverage expanded from 7 to 8 tactics (Credential Access + Privilege Escalation now represented). +107.6 is far outside ADR-008 ±65pt noise budget — statistically significant improvement, not LLM variance."
+  }
+}

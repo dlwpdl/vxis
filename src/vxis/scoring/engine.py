@@ -25,6 +25,12 @@ _LEVEL_POINTS: dict[int, int] = {
     4: 10,  # Crown Jewel access
 }
 
+# ── Finding Precision: 통계적 신뢰도 임계값 (ADR-008) ──
+# n (total_judged) < _MIN_JUDGMENTS_FOR_CONFIDENCE 일 때는 단일 판정이
+# 전체 precision 점수를 좌우하는 것을 막기 위해 Bayesian smoothing 적용.
+_MIN_JUDGMENTS_FOR_CONFIDENCE: int = 3
+_PRECISION_PRIOR: float = 3.0  # α=β — 중립(0.5) 방향 prior 강도
+
 # ── 등급 임계값 ──
 _GRADE_THRESHOLDS: list[tuple[int, str]] = [
     (900, "S"),
@@ -154,10 +160,10 @@ class ScoringEngine:
     }
 
     def __init__(self, target_type: str) -> None:
-        if target_type not in ("web", "game", "mobile"):
+        if target_type not in ("web", "game", "mobile", "desktop"):
             raise ValueError(
                 f"Unknown target_type: {target_type!r}. "
-                f"Must be one of: web, game, mobile"
+                f"Must be one of: web, game, mobile, desktop"
             )
         self.target_type = target_type
         self._vectors = get_vectors_for_type(target_type)
@@ -268,6 +274,8 @@ class ScoringEngine:
                 "attempt_score": round(attempt_score, 2),
                 "found_score": round(found_score, 2),
                 "unknown_vectors_ignored": len(tracker.vectors_attempted) - valid_attempted,
+                "vectors_attempted_ids": sorted(tracker.vectors_attempted & valid_ids),
+                "vectors_found_ids": sorted(tracker.vectors_found & valid_ids),
                 "category_coverage": category_coverage,
             },
         )
@@ -327,25 +335,34 @@ class ScoringEngine:
         )
 
     def _calc_chain_intelligence(self, tracker: ScoreTracker) -> DimensionScore:
-        """Dimension 3: Chain Intelligence (max 150pts).
+        """Dimension 3: Chain Intelligence (max 150pts) — continuous gradient.
 
-        No chains: 0pts
-        1-2 step chains: 50pts  (max depth across all chains)
-        3-4 step chains: 100pts
-        5+ step full kill chain: 150pts
+        depth_points = min(max_depth * 25, 125)            # 1→25, 5+→125
+        count_bonus  = min((chain_count - 1) * 10, 15)     # 2→+10, 3+→+15
+        crown_bonus  = 25 if any step.level >= 3 else 0    # critical impact
+        score        = min(sum, 150)
+
+        기존 step-function (0/50/100/150) 의 단점:
+          - chain_count 무시 → 여러 체인 구축 무보상
+          - 체인 임팩트 무시 → recon-only 체인과 RCE 체인이 동점
+          - 깊이 1-2 gradient 부재 → 2 step 만 채우면 최대 보상 착각
+
+        경계 보존: 5-depth + crown + 2+chains = 125+15+25 = 165 → clamp 150.
+        See: wiki/sources/incidents/2026_04_20_brain_prompt_prison.md
         """
         max_score = self.MAX_SCORES["chain_intelligence"]
         max_depth = tracker.max_chain_depth
         chain_count = len(tracker.attack_chains)
 
-        if max_depth == 0:
-            score = 0.0
-        elif max_depth <= 2:
-            score = 50.0
-        elif max_depth <= 4:
-            score = 100.0
-        else:
-            score = 150.0
+        depth_points = min(max_depth * 25, 125) if max_depth > 0 else 0
+        count_bonus = min((chain_count - 1) * 10, 15) if chain_count > 1 else 0
+        has_crown = any(
+            step.level >= 3
+            for chain in tracker.attack_chains
+            for step in chain.steps
+        )
+        crown_bonus = 25 if has_crown else 0
+        score = float(min(depth_points + count_bonus + crown_bonus, max_score))
 
         return DimensionScore(
             name="Chain Intelligence",
@@ -356,6 +373,9 @@ class ScoringEngine:
             details={
                 "chain_count": chain_count,
                 "max_chain_depth": max_depth,
+                "depth_points": depth_points,
+                "count_bonus": count_bonus,
+                "crown_bonus": crown_bonus,
                 "chains": [
                     {
                         "chain_id": c.chain_id,
@@ -374,7 +394,11 @@ class ScoringEngine:
     ) -> DimensionScore:
         """Dimension 4: Finding Precision (max 200pts).
 
-        Base = TP / (TP + FP) × 200 (애널리스트 판정이 없으면 1.0으로 가정)
+        ADR-008: 판정 수 부족 시 Bayesian smoothing 으로 noise 축소.
+          total_judged == 0 → 중립 100pts (기존 140pts, perverse incentive 제거)
+          0 < total_judged < MIN_JUDGMENTS_FOR_CONFIDENCE → (tp+α)/(n+2α), α=3
+          total_judged ≥ MIN_JUDGMENTS_FOR_CONFIDENCE → tp/n × 200 (그대로)
+
         Bonus 1: Evidence quality (+최대 20pts, finding당 증거 2개 이상 시)
         Bonus 2: Dedup accuracy (+최대 10pts, ground truth 매칭률)
 
@@ -387,17 +411,28 @@ class ScoringEngine:
         total_judged = tp + fp
         total_findings = len(tracker.exploitation_levels)  # 실제 기록된 findings 수
 
-        # findings가 하나도 없으면 정밀도 0 — 찾지 못한 스캔은 정밀도 점수 없음
+        measurement_valid = False
         if total_findings == 0:
+            # findings가 하나도 없으면 정밀도 측정 대상 없음.
             precision_ratio = 0.0
             base_score = 0.0
         elif total_judged == 0:
-            # findings는 있지만 애널리스트 판정이 없으면 70% 기본
-            precision_ratio = 1.0
-            base_score = max_score * 0.7  # 판정 없이는 최대 70% (140pts)
+            # 판정 0건 → 중립 50% (기존 70% 기본값은 "판정 안 할수록 고득점" 결함).
+            # ADR-008 참조.
+            precision_ratio = 0.5
+            base_score = max_score * 0.5
+        elif total_judged < _MIN_JUDGMENTS_FOR_CONFIDENCE:
+            # 판정 1~2건 → Bayesian smoothing (α=β=_PRECISION_PRIOR) 으로
+            # prior (0.5) 방향으로 shrink. 단일 판정의 극단값(0% 또는 100%)이
+            # 전체 점수를 좌우하지 못하도록. ADR-008 참조.
+            alpha = _PRECISION_PRIOR
+            precision_ratio = (tp + alpha) / (total_judged + 2 * alpha)
+            base_score = precision_ratio * max_score
         else:
+            # 판정 ≥_MIN_JUDGMENTS_FOR_CONFIDENCE 건 → 통계적 의미 있음, 그대로.
             precision_ratio = tp / total_judged
             base_score = precision_ratio * max_score
+            measurement_valid = True
 
         # Bonus 1: Evidence quality (finding당 증거 2개 이상 → 보너스)
         findings_with_good_evidence = sum(
@@ -435,6 +470,9 @@ class ScoringEngine:
                 "ground_truth_bonus": round(gt_bonus, 2),
                 "ground_truth_coverage": len(ground_truth),
                 "analyst_judged_coverage": total_judged,
+                # ADR-008: 통계적 신뢰도 메타데이터.
+                "measurement_valid": measurement_valid,
+                "min_judgments_required": _MIN_JUDGMENTS_FOR_CONFIDENCE,
             },
         )
 

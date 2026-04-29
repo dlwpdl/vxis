@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "skill": "test_auth_deep",
+  "description": "ADR-007 Phase 3-9: externalized datasets from test_auth_deep.py",
+  "datasets": {
+    "jwt_alg_none_headers": [
+      {
+        "alg": "none",
+        "typ": "JWT"
+      },
+      {
+        "alg": "None",
+        "typ": "JWT"
+      },
+      {
+        "alg": "NONE",
+        "typ": "JWT"
+      },
+      {
+        "alg": "nOnE",
+        "typ": "JWT"
+      }
+    ],
+    "reset_paths": [
+      "/api/password-reset",
+      "/api/forgot-password",
+      "/password/reset",
+      "/auth/reset",
+      "/api/auth/forgot",
+      "/users/password"
+    ]
+  }
+}

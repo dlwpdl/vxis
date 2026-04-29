@@ -14,6 +14,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, computed_field, field_validator, model_serializer
 
+from vxis.interaction.surface import TargetKind
+
 
 class Severity(str, Enum):
     """Security finding severity levels with numeric weights for comparison."""
@@ -112,6 +114,13 @@ class Evidence(BaseModel):
     content: str = Field(description="Evidence content or description")
     file_path: str | None = Field(default=None, description="Path to the evidence file if stored on disk")
     content_type: str = Field(default="text/plain", description="MIME type of the evidence content")
+    # phase-G: which Surface produced this evidence (web/desktop/mobile/game).
+    # Default WEB for back-compat — pre-existing evidence/reports validate unchanged;
+    # cross-surface synthesis decorates chains that span >1 distinct surface.
+    surface: TargetKind = Field(
+        default=TargetKind.WEB,
+        description="Surface kind that produced this evidence (web/desktop/mobile/game)",
+    )
 
 
 class Reference(BaseModel):

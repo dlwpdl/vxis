@@ -26,43 +26,49 @@ async def execute(url_pattern: str, token: str | None = None, **kwargs: Any) -> 
             "total_tested": int,
         }
     """
-    import httpx
+    from urllib.parse import urlparse as _urlparse
+    from vxis.interaction.hands import SessionManager
 
     accessible_ids: list[int] = []
     auth_bypass_ids: list[int] = []
     data_samples: list[dict] = []
     max_id = int(kwargs.get("max_id", 20))
 
-    headers_auth = {}
+    headers_auth: dict[str, str] = {}
     if token:
         headers_auth = {"Authorization": f"Bearer {token}", "Cookie": f"token={token}"}
 
-    async with httpx.AsyncClient(timeout=10, verify=False,
-                                  limits=httpx.Limits(max_connections=15)) as c:
-        sem = asyncio.Semaphore(15)
+    # Derive base URL from the url_pattern (strip path+{id} placeholder)
+    _sample_url = url_pattern.replace("{id}", "1")
+    _parsed = _urlparse(_sample_url)
+    _base_url = f"{_parsed.scheme}://{_parsed.netloc}"
 
-        async def check(uid: int) -> None:
-            async with sem:
-                url = url_pattern.replace("{id}", str(uid))
-                try:
-                    # With auth
-                    if headers_auth:
-                        r_auth = await c.get(url, headers=headers_auth)
-                        if r_auth.status_code == 200:
-                            accessible_ids.append(uid)
-                            if uid <= 5:
-                                data_samples.append({
-                                    "id": uid, "preview": r_auth.text[:300],
-                                })
+    _mgr = SessionManager()
+    _session = await _mgr.get_session(_base_url)
+    sem = asyncio.Semaphore(15)
 
-                    # Without auth
-                    r_noauth = await c.get(url)
-                    if r_noauth.status_code == 200 and len(r_noauth.content) > 50:
-                        auth_bypass_ids.append(uid)
-                except Exception:
-                    pass
+    async def check(uid: int) -> None:
+        async with sem:
+            url = url_pattern.replace("{id}", str(uid))
+            try:
+                # With auth
+                if headers_auth:
+                    r_auth = await _session.request("GET", url, headers=headers_auth)
+                    if r_auth.status == 200:
+                        accessible_ids.append(uid)
+                        if uid <= 5:
+                            data_samples.append({
+                                "id": uid, "preview": r_auth.text[:300],
+                            })
 
-        await asyncio.gather(*[check(i) for i in range(1, max_id + 1)])
+                # Without auth
+                r_noauth = await _session.request("GET", url)
+                if r_noauth.status == 200 and r_noauth.body_length > 50:
+                    auth_bypass_ids.append(uid)
+            except Exception:
+                pass
+
+    await asyncio.gather(*[check(i) for i in range(1, max_id + 1)])
 
     accessible_ids.sort()
     auth_bypass_ids.sort()

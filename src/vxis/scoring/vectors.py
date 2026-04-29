@@ -1281,12 +1281,184 @@ MOBILE_VECTORS: tuple[AttackVector, ...] = (
 
 
 # ─────────────────────────────────────────────
+# DESKTOP VECTORS — minimal slice for macOS e2e (phase-J)
+# ─────────────────────────────────────────────
+#
+# 풀 14개 (DESK-LSS/ELC/IPC/UPD/DLK/PIE/PRV/DEP) 정의는 phase-F (Windows
+# 풀 desktop pipeline) 에서 들어옴. 지금은 macOS-only e2e 를 위한 최소
+# 1개 (LSS) 만 등록 — 추가 벡터는 phase-J slice 들이 점진적으로 채움.
+
+DESKTOP_VECTORS: tuple[AttackVector, ...] = (
+    AttackVector(
+        id="DESK-LSS-001", category="information_disclosure",
+        name_en="Local Storage — Plaintext Secret in Application Bundle",
+        name_ko="로컬 스토리지 — 앱 번들 평문 시크릿",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="M9",  # OWASP Mobile/Desktop "Insecure Data Storage"
+    ),
+    # ── Electron Misconfiguration (DESK-ELC-*) ── phase-J slice 2
+    AttackVector(
+        id="DESK-ELC-001", category="misconfiguration",
+        name_en="Electron nodeIntegration enabled",
+        name_ko="Electron nodeIntegration 활성화",
+        target_types=("desktop",), phase="Phase 5", max_depth=4,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-ELC-002", category="misconfiguration",
+        name_en="Electron contextIsolation disabled",
+        name_ko="Electron contextIsolation 비활성화",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-ELC-003", category="misconfiguration",
+        name_en="Electron webSecurity disabled",
+        name_ko="Electron webSecurity 비활성화",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-RECON-001", category="recon",
+        name_en="Binary Recon — Imports / Entitlements / Signature",
+        name_ko="바이너리 정찰 — Imports / Entitlements / Signature",
+        target_types=("desktop",), phase="Phase 4", max_depth=1,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-SIG-001", category="misconfiguration",
+        name_en="Code Signature — Missing or Invalid",
+        name_ko="코드 서명 — 누락 또는 무효",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A08:2021",
+    ),
+    AttackVector(
+        id="DESK-SIG-002", category="misconfiguration",
+        name_en="Unsigned binary",
+        name_ko="서명 안 된 바이너리",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A08:2021",
+    ),
+    AttackVector(
+        id="DESK-SIG-003", category="misconfiguration",
+        name_en="Ad-hoc signed (no Developer ID)",
+        name_ko="Ad-hoc 서명 (Developer ID 없음)",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A08:2021",
+    ),
+    AttackVector(
+        id="DESK-SIG-004", category="misconfiguration",
+        name_en="Hardened Runtime disabled",
+        name_ko="Hardened Runtime 비활성화",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A08:2021",
+    ),
+    # ── Entitlement Audit (DESK-ENT-*) — phase-J slice 3 ──────────────────────
+    AttackVector(
+        id="DESK-ENT-001", category="misconfiguration",
+        name_en="Disabled Library Validation",
+        name_ko="라이브러리 검증 비활성화",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-ENT-002", category="misconfiguration",
+        name_en="Allows DYLD Environment Variables",
+        name_ko="DYLD 환경 변수 허용",
+        target_types=("desktop",), phase="Phase 4", max_depth=4,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-ENT-003", category="misconfiguration",
+        name_en="Allow JIT or Unsigned Executable Memory",
+        name_ko="JIT/서명되지 않은 실행 메모리 허용",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A05:2021",
+    ),
+    # ── Dylib Hijack (DESK-DYL-*) — phase-J slice 5 ───────────────────────────
+    AttackVector(
+        id="DESK-DYL-001", category="misconfiguration",
+        name_en="Writable dylib path",
+        name_ko="쓰기 가능한 dylib 경로",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="A06:2021",
+    ),
+    AttackVector(
+        id="DESK-DYL-002", category="misconfiguration",
+        name_en="Missing dylib (LC_LOAD_WEAK_DYLIB)",
+        name_ko="누락된 dylib (LC_LOAD_WEAK_DYLIB)",
+        target_types=("desktop",), phase="Phase 5", max_depth=2,
+        owasp_id="A06:2021",
+    ),
+    AttackVector(
+        id="DESK-DYL-003", category="misconfiguration",
+        name_en="Multiple RPATH entries",
+        name_ko="다중 RPATH 항목",
+        target_types=("desktop",), phase="Phase 5", max_depth=2,
+        owasp_id="A06:2021",
+    ),
+    # ── Deep Link / URL Scheme Abuse (DESK-DLK-*) — phase-J slice 6 ───────────
+    AttackVector(
+        id="DESK-DLK-001", category="misconfiguration",
+        name_en="Generic URL scheme registered",
+        name_ko="일반적 URL scheme 등록",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A05:2021",
+    ),
+    AttackVector(
+        id="DESK-DLK-002", category="misconfiguration",
+        name_en="Privileged URL scheme without role declaration",
+        name_ko="권한 있는 URL scheme 의 role 미선언",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A01:2021",
+    ),
+    AttackVector(
+        id="DESK-DLK-003", category="misconfiguration",
+        name_en="Multiple URL schemes (collision risk)",
+        name_ko="다중 URL scheme (충돌 위험)",
+        target_types=("desktop",), phase="Phase 4", max_depth=2,
+        owasp_id="A05:2021",
+    ),
+    # ── IPC Injection / XPC Service Abuse (DESK-IPC-*) — phase-F slice 7 ──────
+    AttackVector(
+        id="DESK-IPC-001", category="misconfiguration",
+        name_en="XPC Service Attack Surface — Writable Bundle or Mach Name Typosquat",
+        name_ko="XPC 서비스 공격면 — 쓰기 가능 번들 또는 Mach 이름 타이포스쿼팅",
+        target_types=("desktop",), phase="Phase 5", max_depth=3,
+        owasp_id="A05:2021",
+    ),
+    # ── Binary Protections / Mach-O Hardening (DESK-PIE-*) — phase-F slice 8 ──
+    AttackVector(
+        id="DESK-PIE-001", category="misconfiguration",
+        name_en="Mach-O PIE (Position Independent Executable) disabled",
+        name_ko="Mach-O PIE (위치 독립 실행파일) 비활성화",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A06:2021",
+    ),
+    AttackVector(
+        id="DESK-PIE-002", category="misconfiguration",
+        name_en="Stack Canary not present in Mach-O binary",
+        name_ko="Mach-O 바이너리에 스택 카나리 미적용",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A06:2021",
+    ),
+    AttackVector(
+        id="DESK-PIE-003", category="misconfiguration",
+        name_en="__RESTRICT segment absent — DYLD injection not blocked",
+        name_ko="__RESTRICT 세그먼트 없음 — DYLD 인젝션 차단 안됨",
+        target_types=("desktop",), phase="Phase 4", max_depth=3,
+        owasp_id="A06:2021",
+    ),
+)
+
+
+# ─────────────────────────────────────────────
 # Registry helper
 # ─────────────────────────────────────────────
 
 _ALL_VECTORS: dict[str, AttackVector] = {
     v.id: v
-    for v in (*WEB_VECTORS, *GAME_VECTORS, *MOBILE_VECTORS)
+    for v in (*WEB_VECTORS, *GAME_VECTORS, *MOBILE_VECTORS, *DESKTOP_VECTORS)
 }
 
 
@@ -1296,6 +1468,7 @@ def get_vectors_for_type(target_type: str) -> tuple[AttackVector, ...]:
         "web": WEB_VECTORS,
         "game": GAME_VECTORS,
         "mobile": MOBILE_VECTORS,
+        "desktop": DESKTOP_VECTORS,
     }
     if target_type not in mapping:
         raise ValueError(

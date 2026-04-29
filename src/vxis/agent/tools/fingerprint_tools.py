@@ -264,80 +264,90 @@ class FingerprintTargetTool:
             )
 
         try:
-            import httpx
+            from vxis.interaction.hands import SessionManager
         except ImportError:
             return ToolResult(
                 ok=False,
-                summary="fingerprint_target: httpx not installed",
-                error="no_httpx",
+                summary="fingerprint_target: SessionManager unavailable",
+                error="no_session_manager",
             )
 
-        # Fetch the root page + a known-fake path to detect SPA baseline
+        # Fetch the root page + a known-fake path to detect SPA baseline.
+        # Routed through SessionManager so we obey the no-raw-httpx invariant.
+        mgr = SessionManager()
         try:
-            async with httpx.AsyncClient(timeout=10, follow_redirects=False, verify=False) as c:
-                root = await c.get(url)
-                fake = await c.get(url.rstrip("/") + "/definitely-not-real-xyz-probe")
-        except Exception as e:
-            return ToolResult(
-                ok=False,
-                summary=f"fingerprint_target: fetch failed: {type(e).__name__}: {e}",
-                error="fetch_failed",
+            try:
+                session = await mgr.get_session(url)
+                root = await session.request("GET", url)
+                fake = await session.request("GET", url.rstrip("/") + "/definitely-not-real-xyz-probe")
+            except Exception as e:
+                return ToolResult(
+                    ok=False,
+                    summary=f"fingerprint_target: fetch failed: {type(e).__name__}: {e}",
+                    error="fetch_failed",
+                )
+
+            # Build the raw header block for signal matching
+            header_block = "\n".join(f"{k}: {v}" for k, v in root.headers.items())
+            # Also include Set-Cookie from fake request (some frameworks set cookies
+            # on error paths too)
+            if "set-cookie" in fake.headers:
+                header_block += f"\nSet-Cookie(fake): {fake.headers.get('set-cookie', '')}"
+
+            # Sample first 8k AND last 4k of body — Angular/React apps often
+            # put their <app-root>/<div id="root"> near the end of the HTML
+            body_text = root.text if root.text else ""
+            if len(body_text) > 12000:
+                body_sample = body_text[:8000] + "\n...\n" + body_text[-4000:]
+            else:
+                body_sample = body_text
+
+            scored = _score_playbooks(header_block, body_sample, url)
+
+            # SPA detection: same size on root and fake path
+            root_size = len(root.response.content)
+            fake_size = len(fake.response.content)
+            is_spa = (root_size == fake_size and root.status == 200)
+            spa_note = (
+                f"SPA detected — baseline shell size = {root_size} bytes. "
+                f"Use -fs {root_size} for ffuf filtering."
+                if is_spa
+                else "Not a SPA (responses differ for real vs fake paths)."
             )
 
-        # Build the raw header block for signal matching
-        header_block = "\n".join(f"{k}: {v}" for k, v in root.headers.items())
-        # Also include Set-Cookie from fake request (some frameworks set cookies
-        # on error paths too)
-        if "set-cookie" in fake.headers:
-            header_block += f"\nSet-Cookie(fake): {fake.headers.get('set-cookie', '')}"
+            # Always append generic playbooks as final recommendations
+            recommended = [p[0] for p in scored[:3]]
+            if "generic_sensitive_files" not in recommended:
+                recommended.append("generic_sensitive_files")
+            if "injection_vectors" not in recommended:
+                recommended.append("injection_vectors")
 
-        # Sample first 8k AND last 4k of body — Angular/React apps often
-        # put their <app-root>/<div id="root"> near the end of the HTML
-        body_text = root.text if root.text else ""
-        if len(body_text) > 12000:
-            body_sample = body_text[:8000] + "\n...\n" + body_text[-4000:]
-        else:
-            body_sample = body_text
-
-        scored = _score_playbooks(header_block, body_sample, url)
-
-        # SPA detection: same size on root and fake path
-        is_spa = (len(root.content) == len(fake.content) and root.status_code == 200)
-        spa_note = (
-            f"SPA detected — baseline shell size = {len(root.content)} bytes. "
-            f"Use -fs {len(root.content)} for ffuf filtering."
-            if is_spa
-            else "Not a SPA (responses differ for real vs fake paths)."
-        )
-
-        # Always append generic playbooks as final recommendations
-        recommended = [p[0] for p in scored[:3]]
-        if "generic_sensitive_files" not in recommended:
-            recommended.append("generic_sensitive_files")
-        if "injection_vectors" not in recommended:
-            recommended.append("injection_vectors")
-
-        return ToolResult(
-            ok=True,
-            data={
-                "url": url,
-                "root_status": root.status_code,
-                "root_size": len(root.content),
-                "fake_status": fake.status_code,
-                "fake_size": len(fake.content),
-                "is_spa": is_spa,
-                "spa_note": spa_note,
-                "headers": dict(root.headers),
-                "matches": [
-                    {"playbook": p, "score": s, "signals": sig}
-                    for p, s, sig in scored
-                ],
-                "recommended_playbooks": recommended,
-            },
-            summary=(
-                f"fingerprint: root={root.status_code} ({len(root.content)}B), "
-                f"fake={fake.status_code} ({len(fake.content)}B), "
-                f"spa={'yes' if is_spa else 'no'}. "
-                f"Load these playbooks: {', '.join(recommended)}"
-            ),
-        )
+            return ToolResult(
+                ok=True,
+                data={
+                    "url": url,
+                    "root_status": root.status,
+                    "root_size": root_size,
+                    "fake_status": fake.status,
+                    "fake_size": fake_size,
+                    "is_spa": is_spa,
+                    "spa_note": spa_note,
+                    "headers": dict(root.headers),
+                    "matches": [
+                        {"playbook": p, "score": s, "signals": sig}
+                        for p, s, sig in scored
+                    ],
+                    "recommended_playbooks": recommended,
+                },
+                summary=(
+                    f"fingerprint: root={root.status} ({root_size}B), "
+                    f"fake={fake.status} ({fake_size}B), "
+                    f"spa={'yes' if is_spa else 'no'}. "
+                    f"Load these playbooks: {', '.join(recommended)}"
+                ),
+            )
+        finally:
+            try:
+                await mgr.close_all()
+            except Exception:
+                pass

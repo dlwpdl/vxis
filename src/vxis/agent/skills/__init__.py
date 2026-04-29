@@ -24,6 +24,37 @@ from vxis.agent.skills.test_business_logic import execute as test_business_logic
 from vxis.agent.skills.test_crypto import execute as test_crypto
 from vxis.agent.skills.test_infra import execute as test_infra
 
+# Desktop skills — phase-J slice (macOS-only). Phase-F (Windows full
+# desktop pipeline) ships the remaining 7. We import lazily so that
+# environments without the desktop adapter installed still work.
+try:
+    from vxis.agent.skills.desktop.test_local_storage_secrets import (
+        execute as test_local_storage_secrets,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_local_storage_secrets = None  # type: ignore[assignment]
+
+try:
+    from vxis.agent.skills.desktop.test_electron_misconfig import (
+        execute as test_electron_misconfig,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_electron_misconfig = None  # type: ignore[assignment]
+
+try:
+    from vxis.agent.skills.desktop.test_signature_audit import (
+        execute as test_signature_audit,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_signature_audit = None  # type: ignore[assignment]
+
+try:
+    from vxis.agent.skills.desktop.test_entitlement_audit import (
+        execute as test_entitlement_audit,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_entitlement_audit = None  # type: ignore[assignment]
+
 SKILL_REGISTRY: dict[str, dict] = {
     "enumerate_endpoints": {
         "fn": enumerate_endpoints,
@@ -101,3 +132,129 @@ SKILL_REGISTRY: dict[str, dict] = {
         "args": "target_url (required)",
     },
 }
+
+if test_local_storage_secrets is not None:
+    SKILL_REGISTRY["test_local_storage_secrets"] = {
+        "fn": test_local_storage_secrets,
+        "description": (
+            "Desktop-only: walk the .app bundle / directory / parent-of-binary "
+            "and match each text file against hardcoded-secret patterns "
+            "(AWS, GitHub, JWT, private keys, generic api_key='...'). Use when "
+            "target.kind == desktop."
+        ),
+        "args": "target_url (required — path to .app / dir / binary)",
+    }
+
+if test_electron_misconfig is not None:
+    SKILL_REGISTRY["test_electron_misconfig"] = {
+        "fn": test_electron_misconfig,
+        "description": (
+            "Desktop-only: detect Electron-specific misconfigurations "
+            "(nodeIntegration, contextIsolation, webSecurity). Use when "
+            "target.kind == desktop and the app uses Electron framework."
+        ),
+        "args": (
+            "target_url (required — path to .app bundle or directory containing "
+            "Electron app)"
+        ),
+    }
+
+if test_signature_audit is not None:
+    SKILL_REGISTRY["test_signature_audit"] = {
+        "fn": test_signature_audit,
+        "description": (
+            "Desktop-only: audit code signature (signed/ad-hoc/hardened runtime). "
+            "Use when target.kind == desktop. Quick recon, runs codesign(1)."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
+    }
+
+if test_entitlement_audit is not None:
+    SKILL_REGISTRY["test_entitlement_audit"] = {
+        "fn": test_entitlement_audit,
+        "description": (
+            "Desktop-only: audit dangerous macOS entitlements "
+            "(library validation, DYLD env, JIT). Use when "
+            "target.kind == desktop and the app is signed."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
+    }
+
+try:
+    from vxis.agent.skills.desktop.test_dylib_hijack import (
+        execute as test_dylib_hijack,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_dylib_hijack = None  # type: ignore[assignment]
+
+if test_dylib_hijack is not None:
+    SKILL_REGISTRY["test_dylib_hijack"] = {
+        "fn": test_dylib_hijack,
+        "description": (
+            "Desktop-only: detect macOS dylib hijack opportunities "
+            "(writable @rpath, missing weak dylibs, multi-RPATH search-order). "
+            "Use when target.kind == desktop. Combine with entitlement_audit "
+            "DESK-ENT-001 for full chain."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
+    }
+
+try:
+    from vxis.agent.skills.desktop.test_deeplink_abuse import (
+        execute as test_deeplink_abuse,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_deeplink_abuse = None  # type: ignore[assignment]
+
+if test_deeplink_abuse is not None:
+    SKILL_REGISTRY["test_deeplink_abuse"] = {
+        "fn": test_deeplink_abuse,
+        "description": (
+            "Desktop-only: parse Info.plist URL scheme registrations and flag "
+            "generic/privileged/colliding schemes. Use when target.kind == desktop. "
+            "Static analysis — no app launch."
+        ),
+        "args": (
+            "target_url (required — path to .app or directory containing "
+            "Contents/Info.plist)"
+        ),
+    }
+
+try:
+    from vxis.agent.skills.desktop.test_ipc_injection import (
+        execute as test_ipc_injection,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_ipc_injection = None  # type: ignore[assignment]
+
+if test_ipc_injection is not None:
+    SKILL_REGISTRY["test_ipc_injection"] = {
+        "fn": test_ipc_injection,
+        "description": (
+            "Desktop-only (macOS): detect XPC service attack surface — "
+            "writable XPC bundles (privilege escalation via bundle replacement) "
+            "and Mach service names that impersonate the com.apple.* namespace "
+            "(typosquat / IPC interception). Use when target.kind == desktop."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
+    }
+
+try:
+    from vxis.agent.skills.desktop.test_binary_protections import (
+        execute as test_binary_protections,
+    )
+except ImportError:  # pragma: no cover — desktop skill optional today
+    test_binary_protections = None  # type: ignore[assignment]
+
+if test_binary_protections is not None:
+    SKILL_REGISTRY["test_binary_protections"] = {
+        "fn": test_binary_protections,
+        "description": (
+            "Desktop-only (macOS): check Mach-O binary hardening — PIE/ASLR "
+            "(DESK-PIE-001), stack canary via __stack_chk_guard (DESK-PIE-002), "
+            "and __RESTRICT,__restrict segment for DYLD injection blocking "
+            "(DESK-PIE-003). Requires otool + nm (Xcode CLT). Use when "
+            "target.kind == desktop."
+        ),
+        "args": "target_url (required — path to .app, dir, or Mach-O binary)",
+    }

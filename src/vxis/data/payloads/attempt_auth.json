@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "skill": "attempt_auth",
+  "description": "ADR-007 Phase 3-9: externalized datasets from attempt_auth.py",
+  "datasets": {
+    "default_creds": [
+      [
+        "admin",
+        "admin"
+      ],
+      [
+        "admin",
+        "admin123"
+      ],
+      [
+        "admin",
+        "password"
+      ],
+      [
+        "admin@admin.com",
+        "admin"
+      ],
+      [
+        "admin@admin.com",
+        "admin123"
+      ],
+      [
+        "test",
+        "test"
+      ],
+      [
+        "user",
+        "user"
+      ],
+      [
+        "guest",
+        "guest"
+      ],
+      [
+        "administrator",
+        "administrator"
+      ],
+      [
+        "root",
+        "root"
+      ],
+      [
+        "demo",
+        "demo"
+      ],
+      [
+        "admin",
+        "1234"
+      ],
+      [
+        "admin",
+        "12345"
+      ]
+    ],
+    "sqli_creds": [
+      [
+        "' OR 1=1--",
+        "x"
+      ],
+      [
+        "admin'--",
+        "x"
+      ],
+      [
+        "' OR '1'='1",
+        "x"
+      ],
+      [
+        "admin' OR '1'='1'--",
+        "x"
+      ]
+    ],
+    "login_paths": [
+      "/rest/user/login",
+      "/api/auth/login",
+      "/auth/login",
+      "/login",
+      "/api/login",
+      "/api/v1/auth/login",
+      "/api/sessions",
+      "/api/token",
+      "/oauth/token",
+      "/rest/auth",
+      "/users/sign_in"
+    ],
+    "reset_paths": [
+      "/rest/user/reset-password",
+      "/api/auth/reset",
+      "/forgot-password",
+      "/api/reset-password",
+      "/password/reset"
+    ]
+  }
+}

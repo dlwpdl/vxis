@@ -5,30 +5,13 @@ import logging
 import re
 import ssl
 from typing import Any
+from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-SECRET_PATTERNS: list[dict[str, str]] = [
-    {"pattern": r"(?:api[_-]?key|apikey)\s*[:=]\s*['\"][A-Za-z0-9_\-]{16,}['\"]", "desc": "API key in source"},
-    {"pattern": r"(?:secret|password|passwd|pwd)\s*[:=]\s*['\"][^'\"]{6,}['\"]", "desc": "Hardcoded secret/password"},
-    {"pattern": r"(?:aws_access_key_id|AKIA)[A-Z0-9]{16,}", "desc": "AWS access key"},
-    {"pattern": r"(?:aws_secret_access_key)\s*[:=]\s*['\"][A-Za-z0-9/+=]{30,}['\"]", "desc": "AWS secret key"},
-    {"pattern": r"(?:token|bearer)\s*[:=]\s*['\"][A-Za-z0-9_\-.]{20,}['\"]", "desc": "Hardcoded token"},
-    {"pattern": r"(?:private[_-]?key)\s*[:=]\s*['\"]-----BEGIN", "desc": "Private key in source"},
-    {"pattern": r"ghp_[A-Za-z0-9]{36}", "desc": "GitHub personal access token"},
-    {"pattern": r"sk-[A-Za-z0-9]{20,}", "desc": "OpenAI/Stripe secret key"},
-    {"pattern": r"(?:mongodb|postgres|mysql)://[^\\s'\"]+:[^\\s'\"]+@", "desc": "Database connection string"},
-    {"pattern": r"(?:slack|xoxb|xoxp)-[A-Za-z0-9\-]{10,}", "desc": "Slack token"},
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+SECRET_PATTERNS = _load_ds("test_crypto", "secret_patterns")  # ADR-007 Phase 3-9 — data in data/payloads/test_crypto.json
 
-JS_PATHS = [
-    "/main.js", "/app.js", "/bundle.js", "/vendor.js",
-    "/static/js/main.js", "/static/js/bundle.js",
-    "/assets/index.js", "/dist/app.js",
-    "/js/app.js", "/js/main.js",
-    # --- AUTO-UPDATED PAYLOADS BELOW (managed by growth pipeline) ---
-]
+JS_PATHS = _load_ds("test_crypto", "js_paths")  # ADR-007 Phase 3-9 — data in data/payloads/test_crypto.json
 
 
 async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
@@ -37,8 +20,8 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
     Returns:
         {"vulnerable": bool, "findings": [...], "tested": int}
     """
-    import httpx
     from urllib.parse import urlparse
+    from vxis.interaction.hands import SessionManager
 
     target = target_url.rstrip("/")
     parsed = urlparse(target)
@@ -86,75 +69,77 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                 pass  # Expected: server rejects weak protocol
 
     # --- Scan JS bundles for secrets ---
-    async with httpx.AsyncClient(timeout=10, verify=False) as client:
-        # First get the main page to find JS links
-        js_urls: list[str] = list(JS_PATHS)
-        try:
-            r = await client.get(target)
-            body = r.text
-            # Extract JS file paths from HTML
-            for match in re.finditer(r'src=["\']([^"\']*\.js[^"\']*)["\']', body):
-                js_path = match.group(1)
-                if js_path.startswith("http"):
-                    continue  # Skip external CDNs
-                if not js_path.startswith("/"):
-                    js_path = "/" + js_path
-                js_urls.append(js_path)
-        except Exception:
-            pass
+    _mgr = SessionManager()
+    _session = await _mgr.get_session(target)
 
-        async def scan_js(path: str) -> None:
-            nonlocal tested
-            async with sem:
-                tested += 1
-                try:
-                    r = await client.get(f"{target}{path}")
-                    if r.status_code != 200 or len(r.content) < 50:
-                        return
-                    content = r.text
-                    for sp in SECRET_PATTERNS:
-                        matches = re.findall(sp["pattern"], content, re.IGNORECASE)
-                        if matches:
-                            findings.append({
-                                "type": "hardcoded_secret",
-                                "payload": f"{sp['desc']} in {path}",
-                                "evidence": f"Found {len(matches)} match(es): {matches[0][:60]}...",
-                                "severity": "critical",
-                            })
-                            logger.info("Secret found: %s in %s", sp["desc"], path)
-                            break  # One finding per JS file
-                except Exception:
-                    pass
+    # First get the main page to find JS links
+    js_urls: list[str] = list(JS_PATHS)
+    try:
+        r = await _session.request("GET", target)
+        body = r.text
+        # Extract JS file paths from HTML
+        for match in re.finditer(r'src=["\']([^"\']*\.js[^"\']*)["\']', body):
+            js_path = match.group(1)
+            if js_path.startswith("http"):
+                continue  # Skip external CDNs
+            if not js_path.startswith("/"):
+                js_path = "/" + js_path
+            js_urls.append(js_path)
+    except Exception:
+        pass
 
-        await asyncio.gather(*[scan_js(p) for p in js_urls])
-
-        # --- Check for weak hashes in API responses ---
-        hash_endpoints = ["/api/users", "/api/profile", "/api/account"]
-        for ep in hash_endpoints:
+    async def scan_js(path: str) -> None:
+        nonlocal tested
+        async with sem:
             tested += 1
-            async with sem:
-                try:
-                    r = await client.get(f"{target}{ep}")
-                    body = r.text
-                    # MD5 hash pattern (32 hex)
-                    if re.search(r'"(?:password|hash|passwd)":\s*"[a-f0-9]{32}"', body, re.IGNORECASE):
+            try:
+                r = await _session.request("GET", f"{target}{path}")
+                if r.status != 200 or r.body_length < 50:
+                    return
+                content = r.text
+                for sp in SECRET_PATTERNS:
+                    matches = re.findall(sp["pattern"], content, re.IGNORECASE)
+                    if matches:
                         findings.append({
-                            "type": "weak_hash_md5",
-                            "payload": f"MD5 hash in {ep}",
-                            "evidence": "API response contains MD5-length hash for password field",
-                            "response_preview": body[:300],
-                            "severity": "high",
+                            "type": "hardcoded_secret",
+                            "payload": f"{sp['desc']} in {path}",
+                            "evidence": f"Found {len(matches)} match(es): {matches[0][:60]}...",
+                            "severity": "critical",
                         })
-                    # SHA1 hash pattern (40 hex)
-                    if re.search(r'"(?:password|hash|passwd)":\s*"[a-f0-9]{40}"', body, re.IGNORECASE):
-                        findings.append({
-                            "type": "weak_hash_sha1",
-                            "payload": f"SHA1 hash in {ep}",
-                            "evidence": "API response contains SHA1-length hash for password field",
-                            "response_preview": body[:300],
-                            "severity": "high",
-                        })
-                except Exception:
-                    pass
+                        logger.info("Secret found: %s in %s", sp["desc"], path)
+                        break  # One finding per JS file
+            except Exception:
+                pass
+
+    await asyncio.gather(*[scan_js(p) for p in js_urls])
+
+    # --- Check for weak hashes in API responses ---
+    hash_endpoints = ["/api/users", "/api/profile", "/api/account"]
+    for ep in hash_endpoints:
+        tested += 1
+        async with sem:
+            try:
+                r = await _session.request("GET", f"{target}{ep}")
+                body = r.text
+                # MD5 hash pattern (32 hex)
+                if re.search(r'"(?:password|hash|passwd)":\s*"[a-f0-9]{32}"', body, re.IGNORECASE):
+                    findings.append({
+                        "type": "weak_hash_md5",
+                        "payload": f"MD5 hash in {ep}",
+                        "evidence": "API response contains MD5-length hash for password field",
+                        "response_preview": body[:300],
+                        "severity": "high",
+                    })
+                # SHA1 hash pattern (40 hex)
+                if re.search(r'"(?:password|hash|passwd)":\s*"[a-f0-9]{40}"', body, re.IGNORECASE):
+                    findings.append({
+                        "type": "weak_hash_sha1",
+                        "payload": f"SHA1 hash in {ep}",
+                        "evidence": "API response contains SHA1-length hash for password field",
+                        "response_preview": body[:300],
+                        "severity": "high",
+                    })
+            except Exception:
+                pass
 
     return {"vulnerable": len(findings) > 0, "findings": findings, "tested": tested}

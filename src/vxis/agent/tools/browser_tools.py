@@ -283,10 +283,36 @@ class BrowserFillFormTool:
             return ToolResult(ok=False, summary="browser_fill_form: no page loaded", error="no_page")
 
         try:
-            await _page.fill_form(form_sel, fields)
+            fill_result = await _page.fill_form(form_sel, fields)
+        except Exception as e:
+            return ToolResult(ok=False, summary=f"browser_fill_form: {e}", error=str(e))
+
+        failed = fill_result.get("failed", []) or []
+        filled = fill_result.get("filled", []) or []
+        tried_selectors = fill_result.get("tried_selectors", {}) or {}
+
+        # 일부라도 실패 시 Brain 에 PIVOT signal — submit 은 건너뜀
+        # (빈 필드로 POST 쏘면 noise 만 쌓이고 Brain 은 성공으로 오해)
+        if failed:
+            return ToolResult(
+                ok=False,
+                summary=(
+                    f"browser_fill_form: {len(failed)}/{len(fields)} field(s) "
+                    f"could not be located — filled={filled} failed={failed}. "
+                    "Call browser_analyze_dom to inspect actual form structure."
+                ),
+                error="fields_not_found",
+                data={
+                    "form_selector": form_sel,
+                    "filled": filled,
+                    "failed": failed,
+                    "tried_selectors": tried_selectors,
+                },
+            )
+
+        try:
             if submit_sel:
                 await _page.click(submit_sel)
-                # Wait for navigation/response
                 try:
                     await _page.wait_for_navigation(timeout=5000)
                 except Exception:
@@ -304,9 +330,10 @@ class BrowserFillFormTool:
                 "cookies": [{"name": c.get("name", ""), "value": c.get("value", "")[:50]} for c in snap.cookies[:10]],
                 "form_count": len(snap.forms),
                 "js_errors": snap.js_errors[:5],
+                "filled": filled,
             },
             summary=(
-                f"filled form '{form_sel}' with {len(fields)} field(s)"
+                f"filled form '{form_sel}' with {len(filled)} field(s)"
                 + (f", clicked '{submit_sel}'" if submit_sel else "")
                 + f" → {snap.title} ({snap.url})"
             ),

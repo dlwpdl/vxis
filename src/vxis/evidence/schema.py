@@ -6,6 +6,8 @@ from enum import Enum
 from typing import Optional
 from pydantic import BaseModel, Field, model_validator
 
+from vxis.interaction.surface import TargetKind
+
 
 class Severity(str, Enum):
     CRITICAL = "critical"
@@ -43,6 +45,9 @@ class Evidence(BaseModel):
     poc_script: Optional[str] = None
     tags: list[str] = []
     hash: str = ""
+    # phase-G: surface that produced this evidence. Drives OSILayer.DESKTOP
+    # tagging in CrossProtocolSynthesizer when the agent_id alone is ambiguous.
+    surface: TargetKind = Field(default=TargetKind.WEB)
 
     @model_validator(mode="after")
     def compute_hash(self) -> "Evidence":
