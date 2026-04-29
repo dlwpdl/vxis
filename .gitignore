@@ -25,3 +25,8 @@ logs/
 
 # Claude Code agent metadata (worker locks, settings)
 .claude/
+
+# VXIS ingest raw material is generated state. Commit curated digests instead.
+.vxis/cache/extractions/
+.vxis/signals/inbox/ingest-*.jsonl
+.vxis/signals/inbox/upstream-*.md
