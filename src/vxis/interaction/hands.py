@@ -440,6 +440,7 @@ class TargetSession:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.proxy_url = proxy
         self.auth_state = AuthState.ANONYMOUS
         self.csrf = CSRFTracker()
         self._request_count = 0
@@ -878,7 +879,14 @@ class SessionManager:
     ) -> TargetSession:
         """타겟 URL에 대한 세션 반환 (없으면 생성)."""
         key = urlparse(base_url).netloc
-        if key not in self._sessions:
+        proxy = kwargs.get("proxy")
+        session = self._sessions.get(key)
+        if session is not None and getattr(session, "proxy_url", None) != proxy:
+            await session.close()
+            self._sessions.pop(key, None)
+            session = None
+            logger.info("Session recreated with new proxy: %s (proxy=%s)", base_url, proxy or "direct")
+        if session is None:
             # GhostLayer 활성 시 GhostTransport 주입
             if ghost_layer.is_active() and "transport" not in kwargs:
                 kwargs["transport"] = GhostTransport(ghost_layer)

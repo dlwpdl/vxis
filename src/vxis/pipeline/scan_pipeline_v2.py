@@ -540,6 +540,16 @@ class ScanPipeline:
         except Exception as exc:
             logger.exception("ScanAgentLoop failed")
             self._emit("error", {"stage": "scan_loop", "error": str(exc)})
+            try:
+                from vxis.agent.tools.browser_tools import shutdown_browser
+                await shutdown_browser()
+            except Exception:
+                pass
+            try:
+                from vxis.agent.tools.proxy_runtime import shutdown_proxy_runtime
+                await shutdown_proxy_runtime()
+            except Exception:
+                pass
             _set_finding_event_callback(None)
             # Still attach a score so the CLI doesn't crash
             ctx.vxis_score = _SimpleScore(total=0.0, grade="F")
@@ -611,6 +621,11 @@ class ScanPipeline:
         try:
             from vxis.agent.tools.browser_tools import shutdown_browser
             await shutdown_browser()
+        except Exception:
+            pass
+        try:
+            from vxis.agent.tools.proxy_runtime import shutdown_proxy_runtime
+            await shutdown_proxy_runtime()
         except Exception:
             pass
 

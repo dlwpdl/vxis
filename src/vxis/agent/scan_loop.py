@@ -876,18 +876,22 @@ class ScanAgentLoop:
 
     def _emit_control_plane(self, note: str = "") -> None:
         telemetry: dict[str, Any] = {}
+        proxy_status: dict[str, Any] = {}
         try:
             from vxis.agent.brain import (
                 get_brain_decision_count as _get_brain_decision_count,
                 get_llm_call_count as _get_llm_call_count,
                 get_llm_usage_stats as _get_llm_usage_stats,
             )
+            from vxis.agent.tools.proxy_runtime import get_proxy_status_snapshot
 
             telemetry = _get_llm_usage_stats()
             telemetry["llm_calls"] = _get_llm_call_count()
             telemetry["brain_decisions"] = _get_brain_decision_count()
+            proxy_status = get_proxy_status_snapshot()
         except Exception:
             telemetry = {}
+            proxy_status = {}
         if not telemetry.get("provider"):
             telemetry["provider"] = getattr(self.brain, "_provider", "")
         if not telemetry.get("model"):
@@ -896,7 +900,35 @@ class ScanAgentLoop:
         snapshot = self.state.control_plane_snapshot()
         snapshot["note"] = self._truncate_ui_text(note, 140) if note else ""
         snapshot["telemetry"] = telemetry
+        snapshot["proxy"] = proxy_status
         self._emit_event("control_plane", snapshot)
+
+    async def _maybe_autostart_proxy(self) -> None:
+        import os
+        try:
+            from vxis.interaction.surface import TargetKind as _TK
+            from vxis.agent.tools.proxy_runtime import get_proxy_runtime
+        except Exception:
+            return
+        if os.environ.get("VXIS_PROXY_AUTOSTART", "1").strip().lower() in {"0", "false", "no"}:
+            return
+        if self._target_kind != _TK.WEB and not str(self.state.target).startswith(("http://", "https://")):
+            return
+        try:
+            status = await get_proxy_runtime().start(
+                port=int(os.environ.get("VXIS_PROXY_PORT", "8081")),
+                backend=os.environ.get("VXIS_PROXY_BACKEND", "auto"),
+            )
+        except Exception as exc:
+            logger.info("proxy autostart failed: %s", exc)
+            return
+        if status.get("running"):
+            backend = status.get("backend") or "proxy"
+            proxy_url = status.get("proxy_url") or ""
+            self.state.add_shared_note(f"Proxy online: {backend} {proxy_url}".strip())
+            self._emit_control_plane(f"Proxy online via {backend}")
+        elif status.get("last_error"):
+            self.state.add_shared_note(f"Proxy unavailable: {status.get('last_error')}")
 
     @staticmethod
     def _preview_args(args: Any) -> str:
@@ -1664,6 +1696,7 @@ class ScanAgentLoop:
             "(admin takeover, DB dump, RCE, data exfil). "
             "DO NOT stop early. DO NOT be satisfied with surface-level findings."
         ))
+        await self._maybe_autostart_proxy()
 
         # Phase B fix: code-level anti-repetition. Track hash of (tool, args)
         # so we can detect when Brain is about to run an identical call a 3rd+

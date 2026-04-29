@@ -1,7 +1,8 @@
+import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from vxis.agent.tool_registry import BrainTool, ToolResult
+from vxis.agent.tool_registry import BrainTool
 from vxis.agent.tools.hands_tools import (
     HttpRequestTool,
     BrowserRenderTool,
@@ -140,6 +141,84 @@ async def test_intercept_proxy_flows_when_not_running():
     result = await tool.run(action="flows")
     assert result.ok is True
     assert result.data["count"] == 0
+
+
+def test_intercept_proxy_status_and_request_listing():
+    fake_runtime = MagicMock()
+    fake_runtime.status.return_value = {
+        "backend": "xray",
+        "running": True,
+        "proxy_url": "http://localhost:8081",
+        "flow_count": 2,
+    }
+    fake_runtime.list_requests = AsyncMock(
+        return_value={
+            "backend": "xray",
+            "count": 2,
+            "page": 1,
+            "page_size": 20,
+            "total_count": 2,
+            "requests": [
+                {"id": "mitm-0000", "method": "POST", "path": "/login", "status_code": 302},
+                {"id": "mitm-0001", "method": "GET", "path": "/admin", "status_code": 200},
+            ],
+        }
+    )
+
+    tool = InterceptProxyTool()
+    with patch("vxis.agent.tools.hands_tools.get_proxy_runtime", return_value=fake_runtime):
+        status_result = asyncio.run(tool.run(action="status"))
+        list_result = asyncio.run(tool.run(action="list_requests", filter="method:POST"))
+
+    assert status_result.ok is True
+    assert "running" in status_result.summary
+    assert status_result.data["backend"] == "xray"
+
+    assert list_result.ok is True
+    assert list_result.data["count"] == 2
+    fake_runtime.list_requests.assert_awaited_once()
+
+
+def test_intercept_proxy_view_and_repeat_request():
+    fake_runtime = MagicMock()
+    fake_runtime.view_request = AsyncMock(
+        return_value={
+            "backend": "xray",
+            "request_id": "mitm-0000",
+            "part": "request",
+            "method": "POST",
+            "url": "https://example.test/login",
+            "headers": {"content-type": "application/x-www-form-urlencoded"},
+            "body": "username=admin&password=test",
+            "body_preview": "username=admin&password=test",
+        }
+    )
+    fake_runtime.repeat_request = AsyncMock(
+        return_value={
+            "ok": True,
+            "request_id": "mitm-0000",
+            "status_code": 200,
+            "url": "https://example.test/login",
+            "body_preview": "ok",
+            "body_length": 2,
+        }
+    )
+
+    tool = InterceptProxyTool()
+    with patch("vxis.agent.tools.hands_tools.get_proxy_runtime", return_value=fake_runtime):
+        view_result = asyncio.run(tool.run(action="view_request", request_id="mitm-0000"))
+        repeat_result = asyncio.run(
+            tool.run(
+                action="repeat_request",
+                request_id="mitm-0000",
+                overrides={"body_replacements": {"test": "admin"}},
+            )
+        )
+
+    assert view_result.ok is True
+    assert view_result.data["method"] == "POST"
+    assert repeat_result.ok is True
+    assert repeat_result.data["status_code"] == 200
 
 
 # ── Registry integration ────────────────────────────────────

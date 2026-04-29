@@ -5,18 +5,22 @@ invoke them as tools. No reimplementation of underlying logic.
 """
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from vxis.agent.tool_registry import ToolResult
 from vxis.interaction.hands import SessionManager
+from vxis.agent.tools.proxy_runtime import (
+    get_active_proxy_url,
+    get_proxy_runtime,
+    reset_proxy_runtime_for_tests,
+)
 
 # ── Module-level singletons ─────────────────────────────────────────────
 # Session + proxy state must persist across tool calls within a scan so
 # auth cookies, CSRF tokens, captured flows, etc. aren't lost.
 
 _session_manager: SessionManager | None = None
-_mitm_proxy: Any = None
-_flow_analyzer: Any = None
 
 
 def _get_session_manager() -> SessionManager:
@@ -28,10 +32,9 @@ def _get_session_manager() -> SessionManager:
 
 def _reset_for_tests() -> None:
     """Reset module-level state. Called from test fixtures, NOT production code."""
-    global _session_manager, _mitm_proxy, _flow_analyzer
+    global _session_manager
     _session_manager = None
-    _mitm_proxy = None
-    _flow_analyzer = None
+    reset_proxy_runtime_for_tests()
 
 
 # ── HttpRequestTool ─────────────────────────────────────────────────────
@@ -112,7 +115,7 @@ class HttpRequestTool:
 
         try:
             mgr = _get_session_manager()
-            session = await mgr.get_session(base_url)
+            session = await mgr.get_session(base_url, proxy=get_active_proxy_url())
             resp = await session.request(
                 method=method,
                 path=path,
@@ -186,7 +189,7 @@ class BrowserRenderTool:
             )
 
         try:
-            engine = BrowserEngine()
+            engine = BrowserEngine(proxy=get_active_proxy_url())
             await engine.start()
             try:
                 page = await engine.new_page()
@@ -228,110 +231,231 @@ class BrowserRenderTool:
 class InterceptProxyTool:
     name = "intercept_proxy"
     description = (
-        "Control the X-Ray mitmproxy for passive traffic capture. "
-        "Actions: 'start' (begin capture on a port), 'stop' (end capture), "
-        "'flows' (list captured flows summary)."
+        "Control the live HTTP proxy runtime used by VXIS. Supports X-Ray "
+        "(embedded mitmproxy) and optional external Caido attachment. "
+        "Actions: 'start', 'stop', 'status', 'list_requests', "
+        "'view_request', 'repeat_request', 'scope_rules', "
+        "'list_sitemap', 'view_sitemap_entry'. "
+        "'flows' remains as a compatibility alias for 'list_requests'."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["start", "stop", "flows"]},
+            "action": {
+                "type": "string",
+                "enum": [
+                    "start",
+                    "stop",
+                    "status",
+                    "flows",
+                    "list_requests",
+                    "view_request",
+                    "repeat_request",
+                    "scope_rules",
+                    "list_sitemap",
+                    "view_sitemap_entry",
+                ],
+            },
             "port": {"type": "integer", "minimum": 1024, "maximum": 65535},
+            "backend": {"type": "string", "enum": ["auto", "xray", "caido"]},
+            "filter": {"type": "string"},
+            "request_id": {"type": "string"},
+            "part": {"type": "string", "enum": ["request", "response"]},
+            "page": {"type": "integer", "minimum": 1},
+            "page_size": {"type": "integer", "minimum": 1, "maximum": 200},
+            "overrides": {"type": "object"},
+            "scope_action": {"type": "string", "enum": ["get", "set", "update", "clear"]},
+            "allowlist": {"type": "array", "items": {"type": "string"}},
+            "denylist": {"type": "array", "items": {"type": "string"}},
+            "entry_id": {"type": "string"},
         },
         "required": ["action"],
     }
 
     async def run(self, **kwargs: Any) -> ToolResult:
-        global _mitm_proxy, _flow_analyzer
         action = kwargs.get("action", "")
         port = int(kwargs.get("port", 8081))
-
-        try:
-            # X-Ray exports MitmProxyManager (not MitmProxy) — alias for clarity.
-            from vxis.interaction.xray import FlowAnalyzer, MitmProxyManager as MitmProxy
-        except ImportError as e:
-            return ToolResult(
-                ok=False,
-                summary="intercept_proxy unavailable: mitmproxy not installed",
-                error=f"ImportError: {e}",
-            )
+        runtime = get_proxy_runtime()
+        backend = str(kwargs.get("backend") or "auto").strip().lower() or "auto"
+        filter_expr = str(kwargs.get("filter") or "").strip()
+        page = int(kwargs.get("page") or 1)
+        page_size = int(kwargs.get("page_size") or 20)
 
         if action == "start":
-            if _mitm_proxy is not None:
-                return ToolResult(
-                    ok=True,
-                    data={
-                        "already_running": True,
-                        "proxy_url": getattr(_mitm_proxy, "proxy_url", None),
-                    },
-                    summary="intercept_proxy already running",
-                )
-            if not MitmProxy.is_available():
-                return ToolResult(
-                    ok=False,
-                    summary="intercept_proxy unavailable: mitmproxy runtime not installed",
-                    error="mitmproxy_not_available",
-                )
             try:
-                _flow_analyzer = FlowAnalyzer()
-                _mitm_proxy = MitmProxy(port=port)
-                proxy_url = await _mitm_proxy.start()
-                return ToolResult(
-                    ok=True,
-                    data={"proxy_url": proxy_url, "port": port},
-                    summary=f"intercept_proxy started on {proxy_url}",
-                )
+                status = await runtime.start(port=port, backend=backend)
             except Exception as e:
-                _mitm_proxy = None
-                _flow_analyzer = None
                 return ToolResult(
                     ok=False,
                     summary=f"intercept_proxy start failed: {type(e).__name__}: {e}",
                     error=str(e),
                 )
-
-        if action == "stop":
-            if _mitm_proxy is None:
+            if status.get("running"):
                 return ToolResult(
                     ok=True,
-                    data={"already_stopped": True},
-                    summary="intercept_proxy already stopped",
+                    data=status,
+                    summary=(
+                        f"intercept_proxy started ({status.get('backend')}) on "
+                        f"{status.get('proxy_url') or 'attached backend'}"
+                    ),
                 )
+            err = status.get("last_error") or "proxy_unavailable"
+            return ToolResult(
+                ok=False,
+                data=status,
+                summary=f"intercept_proxy unavailable: {err}",
+                error=str(err),
+            )
+
+        if action == "stop":
             try:
-                await _mitm_proxy.stop()
+                status = await runtime.stop()
             except Exception as e:
                 return ToolResult(
                     ok=False,
                     summary=f"intercept_proxy stop failed: {type(e).__name__}: {e}",
                     error=str(e),
                 )
-            finally:
-                _mitm_proxy = None
-                _flow_analyzer = None
-            return ToolResult(ok=True, summary="intercept_proxy stopped")
+            return ToolResult(ok=True, data=status, summary="intercept_proxy stopped")
 
-        if action == "flows":
-            if _mitm_proxy is None:
-                return ToolResult(
-                    ok=True,
-                    data={"flows": [], "count": 0},
-                    summary="intercept_proxy not running (0 flows)",
-                )
+        if action == "status":
+            status = runtime.status()
+            return ToolResult(
+                ok=True,
+                data=status,
+                summary=(
+                    f"proxy {status.get('backend')} "
+                    f"{'running' if status.get('running') else 'stopped'} "
+                    f"({status.get('flow_count', 0)} flow(s))"
+                ),
+            )
+
+        if action in {"flows", "list_requests"}:
             try:
-                flows = _mitm_proxy.get_captured_flows(_flow_analyzer)
+                result = await runtime.list_requests(
+                    filter_expr=filter_expr,
+                    page=page,
+                    page_size=page_size,
+                )
             except Exception as e:
                 return ToolResult(
                     ok=False,
-                    summary=f"intercept_proxy flows failed: {type(e).__name__}: {e}",
+                    summary=f"intercept_proxy list_requests failed: {type(e).__name__}: {e}",
                     error=str(e),
                 )
             return ToolResult(
                 ok=True,
-                data={
-                    "count": len(flows),
-                    "flows_preview": [str(f)[:200] for f in flows[:10]],
-                },
-                summary=f"intercept_proxy captured {len(flows)} flows",
+                data=result,
+                summary=(
+                    f"intercept_proxy listed {result.get('count', 0)} request(s) "
+                    f"(total {result.get('total_count', 0)})"
+                ),
+            )
+
+        if action == "view_request":
+            request_id = str(kwargs.get("request_id") or "").strip()
+            part = str(kwargs.get("part") or "request").strip()
+            if not request_id:
+                return ToolResult(ok=False, summary="intercept_proxy: request_id required", error="missing_request_id")
+            try:
+                result = await runtime.view_request(request_id, part=part)
+            except Exception as e:
+                return ToolResult(
+                    ok=False,
+                    summary=f"intercept_proxy view_request failed: {type(e).__name__}: {e}",
+                    error=str(e),
+                )
+            if result.get("error"):
+                return ToolResult(ok=False, data=result, summary=str(result["error"]), error=str(result["error"]))
+            return ToolResult(
+                ok=True,
+                data=result,
+                summary=f"intercept_proxy viewed {part} for {request_id}",
+            )
+
+        if action == "repeat_request":
+            request_id = str(kwargs.get("request_id") or "").strip()
+            if not request_id:
+                return ToolResult(ok=False, summary="intercept_proxy: request_id required", error="missing_request_id")
+            overrides = kwargs.get("overrides") or {}
+            try:
+                result = await runtime.repeat_request(request_id, overrides=overrides)
+            except Exception as e:
+                return ToolResult(
+                    ok=False,
+                    summary=f"intercept_proxy repeat_request failed: {type(e).__name__}: {e}",
+                    error=str(e),
+                )
+            if not result.get("ok", False):
+                err = result.get("error") or "repeat_request_failed"
+                return ToolResult(ok=False, data=result, summary=str(err), error=str(err))
+            preview = _tool_json_preview(result)
+            return ToolResult(
+                ok=True,
+                data=result,
+                summary=(
+                    f"replayed {request_id} → {result.get('status_code')} "
+                    f"{preview}"
+                ),
+            )
+
+        if action == "scope_rules":
+            scope_action = str(kwargs.get("scope_action") or "get").strip().lower() or "get"
+            try:
+                result = await runtime.scope_rules(
+                    action=scope_action,
+                    allowlist=kwargs.get("allowlist"),
+                    denylist=kwargs.get("denylist"),
+                )
+            except Exception as e:
+                return ToolResult(
+                    ok=False,
+                    summary=f"intercept_proxy scope_rules failed: {type(e).__name__}: {e}",
+                    error=str(e),
+                )
+            return ToolResult(
+                ok=True,
+                data=result,
+                summary=(
+                    f"proxy scope {scope_action}: "
+                    f"allow={len((result.get('scope') or {}).get('allowlist', []))} "
+                    f"deny={len((result.get('scope') or {}).get('denylist', []))}"
+                ),
+            )
+
+        if action == "list_sitemap":
+            try:
+                result = await runtime.list_sitemap()
+            except Exception as e:
+                return ToolResult(
+                    ok=False,
+                    summary=f"intercept_proxy list_sitemap failed: {type(e).__name__}: {e}",
+                    error=str(e),
+                )
+            return ToolResult(
+                ok=True,
+                data=result,
+                summary=f"proxy sitemap entries: {result.get('count', 0)}",
+            )
+
+        if action == "view_sitemap_entry":
+            entry_id = str(kwargs.get("entry_id") or "").strip()
+            if not entry_id:
+                return ToolResult(ok=False, summary="intercept_proxy: entry_id required", error="missing_entry_id")
+            try:
+                result = await runtime.view_sitemap_entry(entry_id)
+            except Exception as e:
+                return ToolResult(
+                    ok=False,
+                    summary=f"intercept_proxy view_sitemap_entry failed: {type(e).__name__}: {e}",
+                    error=str(e),
+                )
+            if result.get("error"):
+                return ToolResult(ok=False, data=result, summary=str(result["error"]), error=str(result["error"]))
+            return ToolResult(
+                ok=True,
+                data=result,
+                summary=f"proxy sitemap entry {entry_id} has {result.get('request_count', 0)} request(s)",
             )
 
         return ToolResult(
@@ -339,3 +463,16 @@ class InterceptProxyTool:
             summary=f"intercept_proxy: unknown action '{action}'",
             error="unknown_action",
         )
+
+
+def _tool_json_preview(data: dict[str, Any]) -> str:
+    try:
+        return _truncate_json(json.dumps(data, ensure_ascii=False, default=str))
+    except Exception:
+        return ""
+
+
+def _truncate_json(text: str, limit: int = 80) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "..."

@@ -11,7 +11,6 @@ Cleanup is triggered via `shutdown_browser()` called at scan end.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -19,6 +18,7 @@ import tempfile
 from typing import Any
 
 from vxis.agent.tool_registry import ToolResult
+from vxis.agent.tools.proxy_runtime import get_active_proxy_url
 
 logger = logging.getLogger(__name__)
 
@@ -26,13 +26,28 @@ logger = logging.getLogger(__name__)
 _engine: Any = None       # BrowserEngine
 _page: Any = None         # BrowserPage
 _screenshot_dir: str = ""
+_proxy_url: str | None = None
 
 
 async def _ensure_browser() -> tuple[Any, Any]:
     """Lazily start BrowserEngine and create a page."""
-    global _engine, _page, _screenshot_dir
-    if _engine is not None and _page is not None:
+    global _engine, _page, _screenshot_dir, _proxy_url
+    desired_proxy = get_active_proxy_url()
+    current_proxy = getattr(_engine, "_proxy", None) if _engine is not None else None
+    if (
+        _engine is not None
+        and _page is not None
+        and current_proxy == desired_proxy
+    ):
         return _engine, _page
+
+    if _engine is not None and current_proxy != desired_proxy:
+        try:
+            await _engine.stop()
+        except Exception:
+            logger.exception("Browser restart for proxy swap failed during shutdown")
+        _engine = None
+        _page = None
 
     from vxis.interaction.eyes import BrowserEngine, is_available
     if not is_available():
@@ -41,16 +56,21 @@ async def _ensure_browser() -> tuple[Any, Any]:
         )
 
     _screenshot_dir = tempfile.mkdtemp(prefix="vxis_screenshots_")
-    _engine = BrowserEngine(headless=True)
+    _engine = BrowserEngine(headless=True, proxy=desired_proxy)
+    _proxy_url = desired_proxy
     await _engine.start()
     _page = await _engine.new_page(isolated=False)
-    logger.info("Browser started for scan (screenshots → %s)", _screenshot_dir)
+    logger.info(
+        "Browser started for scan (screenshots → %s, proxy=%s)",
+        _screenshot_dir,
+        desired_proxy,
+    )
     return _engine, _page
 
 
 async def shutdown_browser() -> None:
     """Cleanup — called at scan end by ScanPipelineV2."""
-    global _engine, _page
+    global _engine, _page, _proxy_url
     if _engine is not None:
         try:
             await _engine.stop()
@@ -58,6 +78,7 @@ async def shutdown_browser() -> None:
             logger.exception("Browser cleanup failed")
         _engine = None
         _page = None
+        _proxy_url = None
         logger.info("Browser shut down")
 
 

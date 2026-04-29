@@ -75,6 +75,17 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                 "cost_usd": 0.0123,
                 "cost_estimated": True,
             },
+            "proxy": {
+                "backend": "xray",
+                "running": True,
+                "proxy_url": "http://localhost:8081",
+                "flow_count": 7,
+                "auth_flow_count": 2,
+                "recent_requests": [
+                    {"method": "POST", "path": "/login", "status_code": 302},
+                    {"method": "GET", "path": "/admin", "status_code": 200},
+                ],
+            },
         },
     )
 
@@ -93,3 +104,5 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "gpt-5.4-mini" in control_text
     assert "Authentication bypass or weak login" in control_text
     assert "Probe /admin" in control_text
+    assert "xray running" in control_text
+    assert "/login" in control_text

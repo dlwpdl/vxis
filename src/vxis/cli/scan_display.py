@@ -5,13 +5,10 @@ from __future__ import annotations
 import time
 from collections import deque
 
-from rich.console import Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.table import Table
-from rich.text import Text
 
 
 class ScanLiveDisplay:
@@ -67,6 +64,7 @@ class ScanLiveDisplay:
         self.branch_items: list[dict] = []
         self.shared_notes: list[str] = []
         self.telemetry: dict = {}
+        self.proxy: dict = {}
         self.start_time = time.monotonic()
         self.score: dict | None = None
         self.last_error: str | None = None
@@ -198,6 +196,7 @@ class ScanLiveDisplay:
             self.branch_items = list(data.get("branches") or [])
             self.shared_notes = list(data.get("shared_notes") or [])
             self.telemetry = dict(data.get("telemetry") or {})
+            self.proxy = dict(data.get("proxy") or {})
             note = (data.get("note") or "")[:100]
             if note:
                 self.loop_status = note
@@ -388,6 +387,27 @@ class ScanLiveDisplay:
             lines.append(f"[dim]{llm_calls} calls · {brain_decisions} decisions · {token_prefix}{total_tokens:,} tok[/dim]")
             lines.append(f"[dim]Cost {cost_prefix}${cost_usd:.4f}[/dim]")
 
+        if self.proxy:
+            backend = self.proxy.get("backend") or "disabled"
+            running = bool(self.proxy.get("running"))
+            flow_count = int(self.proxy.get("flow_count") or 0)
+            auth_flows = int(self.proxy.get("auth_flow_count") or 0)
+            proxy_url = str(self.proxy.get("proxy_url") or "")[:52]
+            state = "running" if running else "stopped"
+            lines.append("[bold]Proxy[/bold]")
+            lines.append(f"{backend} {state} · {flow_count} flows · {auth_flows} auth")
+            if proxy_url:
+                lines.append(f"[dim]{proxy_url}[/dim]")
+            last_error = str(self.proxy.get("last_error") or "")[:70]
+            if last_error:
+                lines.append(f"[dim]err: {last_error}[/dim]")
+            recent_requests = list(self.proxy.get("recent_requests") or [])
+            for req in recent_requests[-2:]:
+                method = str(req.get("method") or "?")[:6]
+                path = str(req.get("path") or req.get("url") or "")[:42]
+                status = req.get("status_code") or "?"
+                lines.append(f"[dim]{method} {status} {path}[/dim]")
+
         if self.todo_items:
             lines.append("[bold]Todos[/bold]")
             icons = {"pending": "○", "in_progress": "◉", "done": "✓", "blocked": "■"}
@@ -484,7 +504,7 @@ class ScanLiveDisplay:
 
         return Panel(
             sev_table,
-            title=f"[bold]Findings[/bold]",
+            title="[bold]Findings[/bold]",
             border_style="green",
         )
 
