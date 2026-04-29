@@ -45,8 +45,9 @@ Current hard pins:
 - `max_iters` timeout is scored as incomplete.
 - Direct and auto sandbox commands count toward vector coverage.
 - Benchmark/growth-loop compares the same 5D score printed by the pipeline.
+- First-class `vector_candidates` and `attempt_outcomes` live on `ScanLoopState`; attempted, found, clean, blocked, failed, retryable, and dead-end states survive beyond prompt text and are surfaced into scoring.
 
-Next structural step: add first-class `vector_candidates` and `attempt_outcomes` state to `ScanLoopState` so attempted, clean, blocked, failed, retryable, and dead-end candidates are preserved beyond prompt text.
+Next structural step: expand candidate generation from seeded web/desktop hypotheses to target-specific evidence mining so the queue grows from discovered routes, parameters, forms, technologies, and prior failures.
 
 ## Layered view
 

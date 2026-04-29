@@ -8,6 +8,65 @@ from vxis.agent.tool_registry import ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
 
+_TERMINAL_VECTOR_STATUSES = {"found", "clean", "blocked", "dead"}
+
+
+@dataclass
+class VectorCandidate:
+    """A durable attack hypothesis the loop should prove, refute, or exhaust."""
+
+    id: str
+    vector_id: str
+    title: str
+    priority: int
+    evidence: str
+    status: str = "open"
+    attempts: int = 0
+    created_iter: int = 0
+    last_iter: int = 0
+    last_tool: str = ""
+    last_summary: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "vector_id": self.vector_id,
+            "title": self.title,
+            "priority": self.priority,
+            "evidence": self.evidence,
+            "status": self.status,
+            "attempts": self.attempts,
+            "created_iter": self.created_iter,
+            "last_iter": self.last_iter,
+            "last_tool": self.last_tool,
+            "last_summary": self.last_summary,
+        }
+
+
+@dataclass
+class AttemptOutcome:
+    """A single concrete attempt against a vector candidate."""
+
+    candidate_id: str
+    vector_id: str
+    tool: str
+    args_preview: str
+    status: str
+    summary: str
+    iteration: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "candidate_id": self.candidate_id,
+            "vector_id": self.vector_id,
+            "tool": self.tool,
+            "args_preview": self.args_preview,
+            "status": self.status,
+            "summary": self.summary,
+            "iteration": self.iteration,
+        }
+
+
 @dataclass
 class ScanLoopState:
     target: str
@@ -24,9 +83,92 @@ class ScanLoopState:
     verdict_counts: dict[str, int] = field(default_factory=lambda: {"CONFIRMED": 0, "UNCONFIRMED": 0, "REFUTED": 0})
     refuted_findings: list[dict[str, Any]] = field(default_factory=list)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
+    vector_candidates: dict[str, VectorCandidate] = field(default_factory=dict)
+    attempt_outcomes: list[AttemptOutcome] = field(default_factory=list)
 
     def add_message(self, role: str, content: Any) -> None:
         self.messages.append({"role": role, "content": content, "iter": self.iteration})
+
+    def ensure_vector_candidate(
+        self,
+        candidate_id: str,
+        vector_id: str,
+        title: str,
+        *,
+        priority: int = 50,
+        evidence: str = "",
+    ) -> VectorCandidate:
+        """Create or refresh a durable vector candidate."""
+        existing = self.vector_candidates.get(candidate_id)
+        if existing is not None:
+            existing.priority = max(existing.priority, priority)
+            if evidence and evidence not in existing.evidence:
+                existing.evidence = (existing.evidence + "; " + evidence).strip("; ")
+            if existing.status in _TERMINAL_VECTOR_STATUSES and existing.status != "found":
+                existing.status = "retryable"
+            return existing
+
+        candidate = VectorCandidate(
+            id=candidate_id,
+            vector_id=vector_id,
+            title=title,
+            priority=priority,
+            evidence=evidence,
+            created_iter=self.iteration,
+            last_iter=self.iteration,
+        )
+        self.vector_candidates[candidate_id] = candidate
+        return candidate
+
+    def record_attempt_outcome(
+        self,
+        candidate_id: str,
+        tool: str,
+        args: Any,
+        *,
+        status: str,
+        summary: str,
+    ) -> None:
+        """Record a concrete attempt against a candidate and update its state."""
+        candidate = self.vector_candidates.get(candidate_id)
+        if candidate is None:
+            return
+        candidate.attempts += 1
+        candidate.status = status
+        candidate.last_iter = self.iteration
+        candidate.last_tool = tool
+        candidate.last_summary = summary[:240]
+        try:
+            args_preview = json.dumps(args, default=str, ensure_ascii=False, sort_keys=True)[:500]
+        except Exception:
+            args_preview = str(args)[:500]
+        self.attempt_outcomes.append(
+            AttemptOutcome(
+                candidate_id=candidate.id,
+                vector_id=candidate.vector_id,
+                tool=tool,
+                args_preview=args_preview,
+                status=status,
+                summary=summary[:500],
+                iteration=self.iteration,
+            )
+        )
+
+    def open_vector_candidates(self) -> list[VectorCandidate]:
+        """Return candidates that still need proof, retry, or a clear dead-end."""
+        return sorted(
+            [
+                c for c in self.vector_candidates.values()
+                if c.status not in _TERMINAL_VECTOR_STATUSES
+            ],
+            key=lambda c: (-c.priority, c.attempts, c.created_iter, c.id),
+        )
+
+    def vector_candidates_as_dicts(self) -> list[dict[str, Any]]:
+        return [c.to_dict() for c in sorted(self.vector_candidates.values(), key=lambda c: c.id)]
+
+    def attempt_outcomes_as_dicts(self) -> list[dict[str, Any]]:
+        return [o.to_dict() for o in self.attempt_outcomes]
 
     def update_peak_size(self) -> int:
         """Sample current messages[] byte size and update peak_context_bytes.
@@ -165,6 +307,153 @@ class ScanAgentLoop:
         # don't pass it (default = web behaviour).
         from vxis.interaction.surface import TargetKind as _TK
         self._target_kind = target_kind or _TK.WEB
+        self._seed_vector_candidates()
+
+    def _seed_vector_candidates(self) -> None:
+        """Seed the evergreen candidates the loop must exhaust for the surface."""
+        try:
+            from vxis.interaction.surface import TargetKind as _TK
+        except Exception:
+            _TK = None
+
+        if _TK is not None and self._target_kind == _TK.DESKTOP:
+            seeds = [
+                ("desktop:local-storage-secrets", "DESK-LSS-001", "Local storage secrets", 90),
+                ("desktop:signature-audit", "DESK-SIG-001", "Code signature trust boundary", 80),
+                ("desktop:dylib-hijack", "DESK-DYL-001", "Dylib hijack surface", 80),
+                ("desktop:ipc-injection", "DESK-IPC-001", "IPC injection surface", 70),
+            ]
+        else:
+            seeds = [
+                ("web:auth-bypass", "WEB-AUTH-001", "Authentication bypass or weak login", 95),
+                ("web:sqli", "WEB-SQLI-001", "SQL injection toward DB/admin data", 95),
+                ("web:idor", "WEB-AC-001", "IDOR or broken access control", 90),
+                ("web:sensitive-files", "WEB-MISCONF-001", "Sensitive files or exposed config", 85),
+                ("web:dir-bruteforce", "WEB-INFRA-001", "Hidden routes/directories", 75),
+                ("web:xss", "WEB-XSS-001", "XSS toward session theft", 70),
+                ("web:cve-scan", "WEB-INFRA-002", "Known CVE/template scan", 65),
+                ("web:ssrf", "WEB-SSRF-001", "SSRF/internal reachability", 60),
+            ]
+
+        for cid, vid, title, priority in seeds:
+            self.state.ensure_vector_candidate(
+                cid,
+                vid,
+                title,
+                priority=priority,
+                evidence="seeded from target surface",
+            )
+
+    @staticmethod
+    def _preview_args(args: Any) -> str:
+        try:
+            return json.dumps(args, default=str, ensure_ascii=False, sort_keys=True).lower()
+        except Exception:
+            return str(args).lower()
+
+    def _candidate_ids_for_action(self, name: str, args: dict[str, Any] | Any) -> list[str]:
+        """Infer which durable vector candidates a tool call is attempting."""
+        blob = f"{name} {self._preview_args(args)}"
+        candidates: list[str] = []
+
+        if name == "run_skill" and isinstance(args, dict):
+            skill = str(args.get("skill") or "").lower()
+            skill_map = {
+                "attempt_auth": ["web:auth-bypass"],
+                "test_auth_deep": ["web:auth-bypass"],
+                "test_injection": ["web:sqli"],
+                "test_idor": ["web:idor"],
+                "test_sensitive_files": ["web:sensitive-files"],
+                "enumerate_endpoints": ["web:dir-bruteforce"],
+                "test_xss": ["web:xss"],
+                "test_ssrf": ["web:ssrf"],
+                "test_local_storage_secrets": ["desktop:local-storage-secrets"],
+                "test_signature_audit": ["desktop:signature-audit"],
+                "test_dylib_hijack": ["desktop:dylib-hijack"],
+                "test_ipc_injection": ["desktop:ipc-injection"],
+            }
+            candidates.extend(skill_map.get(skill, []))
+
+        keyword_map = [
+            ("sqlmap", "web:sqli"),
+            ("sqli", "web:sqli"),
+            ("union select", "web:sqli"),
+            (" or 1=1", "web:sqli"),
+            ("ffuf", "web:dir-bruteforce"),
+            ("gobuster", "web:dir-bruteforce"),
+            ("dirb", "web:dir-bruteforce"),
+            ("nuclei", "web:cve-scan"),
+            ("/api/users", "web:idor"),
+            ("/api/orders", "web:idor"),
+            ("idor", "web:idor"),
+            ("jwt", "web:auth-bypass"),
+            ("login", "web:auth-bypass"),
+            ("password", "web:auth-bypass"),
+            ("xss", "web:xss"),
+            ("<script", "web:xss"),
+            ("ssrf", "web:ssrf"),
+            ("169.254.169.254", "web:ssrf"),
+            ("../", "web:sensitive-files"),
+            ("/ftp", "web:sensitive-files"),
+            ("backup", "web:sensitive-files"),
+        ]
+        for needle, cid in keyword_map:
+            if needle in blob:
+                candidates.append(cid)
+
+        if name == "browser_fill_form":
+            candidates.append("web:auth-bypass")
+        elif name == "browser_eval_js":
+            candidates.append("web:xss")
+
+        # Preserve order while removing duplicates and unknown candidates.
+        seen: set[str] = set()
+        result: list[str] = []
+        for cid in candidates:
+            if cid in self.state.vector_candidates and cid not in seen:
+                seen.add(cid)
+                result.append(cid)
+        return result
+
+    @staticmethod
+    def _status_from_tool_result(result: ToolResult) -> str:
+        if not result.ok:
+            data = result.data if isinstance(result.data, dict) else {}
+            if any(data.get(k) for k in ("egress_blocked", "surface_guard_blocked", "dedup")):
+                return "blocked"
+            return "failed"
+        text = f"{result.summary} {result.data}".lower()
+        if any(tok in text for tok in (
+            "confirmed", "vulnerable", "succeeded", "jwt payload",
+            "sql injection", "xss", "idor", "admin", "token",
+        )):
+            return "found"
+        if any(tok in text for tok in ("no finding", "not vulnerable", "nothing found", "no issue")):
+            return "clean"
+        return "attempted"
+
+    def _mark_candidates_for_finding(self, args: dict[str, Any]) -> None:
+        ftype = str(args.get("finding_type") or "").lower()
+        title = str(args.get("title") or "").lower()
+        text = f"{ftype} {title}"
+        mapping = [
+            (("sql", "sqli"), "web:sqli"),
+            (("auth", "login", "jwt"), "web:auth-bypass"),
+            (("idor", "access", "privilege"), "web:idor"),
+            (("xss",), "web:xss"),
+            (("ssrf",), "web:ssrf"),
+            (("info", "sensitive", "disclosure", "traversal"), "web:sensitive-files"),
+            (("cve",), "web:cve-scan"),
+        ]
+        for needles, cid in mapping:
+            if any(n in text for n in needles) and cid in self.state.vector_candidates:
+                self.state.record_attempt_outcome(
+                    cid,
+                    "report_finding",
+                    args,
+                    status="found",
+                    summary=f"finding reported: {args.get('title', '')}",
+                )
 
     async def _decide(self, state: ScanLoopState) -> list[tuple[str, dict[str, Any]]]:
         """Returns list of (tool_name, args). Delegates to brain.think_in_loop when brain is set."""
@@ -253,6 +542,31 @@ class ScanAgentLoop:
         for name, status in tested_vectors.items():
             lines.append(f"  {status} {name}")
 
+        # Durable vector candidate queue. This is the stateful contract: Brain
+        # must drive each plausible vector to found/clean/blocked/dead instead
+        # of merely picking from a tool list and forgetting failed hypotheses.
+        candidates = sorted(
+            s.vector_candidates.values(),
+            key=lambda c: (-c.priority, c.status in _TERMINAL_VECTOR_STATUSES, c.attempts, c.id),
+        )
+        if candidates:
+            lines.append("Vector candidates (durable state):")
+            for c in candidates[:10]:
+                marker = {
+                    "open": "OPEN",
+                    "retryable": "RETRY",
+                    "attempted": "TRY",
+                    "failed": "FAIL",
+                    "found": "FOUND",
+                    "clean": "CLEAN",
+                    "blocked": "BLOCK",
+                    "dead": "DEAD",
+                }.get(c.status, c.status.upper())
+                lines.append(
+                    f"  {marker} p{c.priority} {c.id} ({c.vector_id}) "
+                    f"attempts={c.attempts}: {c.title}"
+                )
+
         # Endpoints
         if endpoints_seen:
             lines.append(f"Known endpoints: {', '.join(sorted(endpoints_seen)[:8])}")
@@ -306,7 +620,9 @@ class ScanAgentLoop:
                 placed = False
                 for cat, types in _cat.items():
                     if ft in types or any(ft.startswith(t) for t in types):
-                        _by_cat[cat].append(f); placed = True; break
+                        _by_cat[cat].append(f)
+                        placed = True
+                        break
                 if not placed:
                     _uncat.append(f)
 
@@ -391,7 +707,19 @@ class ScanAgentLoop:
 
         # Current goal — chain pressure never disappears when chains are 0
         _chain_pressure = len(reported) >= 2 and not existing_chains
-        if untested and not _chain_pressure:
+        open_candidates = [c for c in s.open_vector_candidates() if c.attempts == 0]
+        retry_candidates = [c for c in s.open_vector_candidates() if c.attempts > 0]
+        if open_candidates and not _chain_pressure:
+            c = open_candidates[0]
+            lines.append(f"\n>> YOUR GOAL: Exhaust vector candidate {c.id}.")
+            lines.append(f"   Hypothesis: {c.title}. Evidence: {c.evidence or 'seeded'}")
+            lines.append("   Pick any tool that proves/refutes it; do not finish until it is found, clean, blocked, or dead.")
+        elif retry_candidates and not _chain_pressure:
+            c = retry_candidates[0]
+            lines.append(f"\n>> YOUR GOAL: Resolve retryable vector candidate {c.id}.")
+            lines.append(f"   Last try: {c.last_tool} -> {c.last_summary[:160]}")
+            lines.append("   Change route/tool/payload, or mark it blocked/dead through clear evidence.")
+        elif untested and not _chain_pressure:
             goal = untested[0]
             lines.append(f"\n>> YOUR GOAL: Test {goal}.")
             if goal == "SQLi":
@@ -657,6 +985,7 @@ class ScanAgentLoop:
                 except Exception:
                     key = f"{name}::{args!r}"
 
+                _action_candidate_ids = self._candidate_ids_for_action(name, args)
                 count = _call_counts.get(key, 0) + 1
                 _call_counts[key] = count
 
@@ -685,6 +1014,14 @@ class ScanAgentLoop:
                         "summary": nudge,
                         "data": {"dedup": True, "prior_calls": count - 1},
                     }})
+                    for _cid in _action_candidate_ids:
+                        self.state.record_attempt_outcome(
+                            _cid,
+                            name,
+                            args,
+                            status="blocked",
+                            summary=nudge,
+                        )
                     logger.warning(
                         "iter %d: dedup-blocked repeated call: %s (count=%d)",
                         self.state.iteration, name, count,
@@ -716,6 +1053,14 @@ class ScanAgentLoop:
                             "iter %d: egress-blocked %s (violations=%s)",
                             self.state.iteration, name, violations,
                         )
+                        for _cid in _action_candidate_ids:
+                            self.state.record_attempt_outcome(
+                                _cid,
+                                name,
+                                args,
+                                status="blocked",
+                                summary=f"egress blocked: {violations}",
+                            )
                         continue
 
                 # Phase C: auto-evidence-enrichment for report_finding.
@@ -872,12 +1217,30 @@ class ScanAgentLoop:
                             self.state.iteration,
                             _requested_skill,
                         )
+                        for _cid in _action_candidate_ids:
+                            self.state.record_attempt_outcome(
+                                _cid,
+                                name,
+                                args,
+                                status="blocked",
+                                summary=_block_msg,
+                            )
                         continue
 
                 result = await self.registry.dispatch(name, args)
                 self.state.add_message("tool", {"name": name, "args": args, "result": {
                     "ok": result.ok, "summary": result.summary, "data": result.data,
                 }})
+                for _cid in _action_candidate_ids:
+                    self.state.record_attempt_outcome(
+                        _cid,
+                        name,
+                        args,
+                        status=self._status_from_tool_result(result),
+                        summary=result.summary,
+                    )
+                if name == "report_finding" and result.ok and isinstance(args, dict):
+                    self._mark_candidates_for_finding(args)
 
                 # Phase Q10: credit Brain-direct run_skill calls so VC isn't
                 # blind to LLM initiative. Pre-Q10 only the auto-exec ladder
@@ -949,7 +1312,6 @@ class ScanAgentLoop:
                             seen.add(key)
                             code_i = int(code)
                             norm_path = "/" + path.lstrip("/")
-                            base_key = path.split("?", 1)[0].rstrip("/")
                             lower = norm_path.lower()
 
                             if code_i == 500:
@@ -1230,6 +1592,40 @@ class ScanAgentLoop:
                                 _fin_desired, len(_fin_findings),
                             )
                             continue
+                        if self.state.max_iters >= 30:
+                            _open_candidates = [
+                                c for c in self.state.open_vector_candidates()
+                                if c.priority >= 75 and c.attempts == 0
+                            ]
+                            if _open_candidates:
+                                _cand_block = "\n  ".join(
+                                    f"{c.id} ({c.vector_id}) p{c.priority}: {c.title}"
+                                    for c in _open_candidates[:8]
+                                )
+                                self.state.add_message("tool", {
+                                    "name": "finish_scan", "args": {},
+                                    "result": {
+                                        "ok": False,
+                                        "summary": (
+                                            "finish_scan REJECTED — high-priority vector candidates "
+                                            "remain unattempted. Exhaust them first:\n"
+                                            f"  {_cand_block}\n\n"
+                                            "For each candidate: try a concrete tool/payload, then drive it to "
+                                            "found, clean, blocked, or dead before finishing."
+                                        ),
+                                        "data": {
+                                            "unresolved_vector_candidates": [
+                                                c.to_dict() for c in _open_candidates[:8]
+                                            ],
+                                        },
+                                    },
+                                })
+                                logger.warning(
+                                    "iter %d: finish_scan rejected (%d unattempted high-priority candidates)",
+                                    self.state.iteration,
+                                    len(_open_candidates),
+                                )
+                                continue
                     except Exception:
                         logger.exception("finish_scan rejection check failed")
                     if result.ok:
@@ -1921,6 +2317,21 @@ class ScanAgentLoop:
                                                     "description": finding_msg,
                                                     "evidence": evidence,
                                                 })
+                                                self.state.record_attempt_outcome(
+                                                    "web:auth-bypass",
+                                                    "auto-login",
+                                                    {"target": _login_target, "email": email},
+                                                    status="found",
+                                                    summary="auto-login obtained authenticated session",
+                                                )
+                                                if "OR 1=1" in email:
+                                                    self.state.record_attempt_outcome(
+                                                        "web:sqli",
+                                                        "auto-login",
+                                                        {"target": _login_target, "email": email},
+                                                        status="found",
+                                                        summary="SQLi login bypass obtained authenticated session",
+                                                    )
                                                 _login_success = True
                                                 break
                                             else:
@@ -1948,6 +2359,13 @@ class ScanAgentLoop:
                                             f"Discovered form inputs: user_sels={_user_sels[:3]}, pw_sels={_pw_sels[:3]}."
                                         )
                                         self.state.add_message("user", _fail_summary)
+                                        self.state.record_attempt_outcome(
+                                            "web:auth-bypass",
+                                            "auto-login",
+                                            {"target": _login_target, "attempts": len(_login_creds)},
+                                            status="clean",
+                                            summary=_fail_summary,
+                                        )
                                         logger.warning(
                                             "auto-login exhausted after %d creds on %s — telling Brain to pivot",
                                             len(_login_creds), _login_target,
@@ -1990,6 +2408,13 @@ class ScanAgentLoop:
                             "command": ffuf_cmd, "timeout": 60,
                         })
                         _sandbox_invocations.append({"tool": "shell_exec", "cmd": ffuf_cmd})
+                        self.state.record_attempt_outcome(
+                            "web:dir-bruteforce",
+                            "shell_exec",
+                            {"command": ffuf_cmd},
+                            status=self._status_from_tool_result(fr),
+                            summary=fr.summary,
+                        )
                         if fr.ok:
                             stdout = str(fr.data.get("stdout", "")) if fr.data else ""
                             if stdout.strip():
@@ -2043,6 +2468,13 @@ class ScanAgentLoop:
                             "command": nuclei_cmd, "timeout": 120,
                         })
                         _sandbox_invocations.append({"tool": "shell_exec", "cmd": nuclei_cmd})
+                        self.state.record_attempt_outcome(
+                            "web:cve-scan",
+                            "shell_exec",
+                            {"command": nuclei_cmd},
+                            status=self._status_from_tool_result(nr),
+                            summary=nr.summary,
+                        )
                         if nr.ok:
                             self.state.add_message("tool", {
                                 "name": "shell_exec",
@@ -2111,6 +2543,13 @@ class ScanAgentLoop:
                             "command": sqlmap_cmd, "timeout": 180,
                         })
                         _sandbox_invocations.append({"tool": "shell_exec", "cmd": sqlmap_cmd})
+                        self.state.record_attempt_outcome(
+                            "web:sqli",
+                            "shell_exec",
+                            {"command": sqlmap_cmd},
+                            status=self._status_from_tool_result(sr),
+                            summary=sr.summary,
+                        )
                         if sr.ok:
                             stdout = str(sr.data.get("stdout", "")) if sr.data else ""
                             self.state.add_message("tool", {
@@ -2371,4 +2810,6 @@ class ScanAgentLoop:
             # paths.
             "skills_completed": list(_real_skills_completed),
             "sandbox_invocations": list(_sandbox_invocations),
+            "vector_candidates": self.state.vector_candidates_as_dicts(),
+            "attempt_outcomes": self.state.attempt_outcomes_as_dicts(),
         }

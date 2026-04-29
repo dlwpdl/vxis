@@ -17,8 +17,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 
 # ─── Unit: keyword mapping helper ───────────────────────────────────────────
 
@@ -85,6 +83,7 @@ def _make_mock_ctx(sandbox_invocations: list[dict] | None = None) -> MagicMock:
     ctx.attack_chains = []
     ctx.scan_id = "test-phase-4"
     ctx.sandbox_invocations = sandbox_invocations or []
+    ctx.attempt_outcomes = []
     # ScoringEngine 이 읽을 수 있도록 score_detail 을 MagicMock 으로
     ctx.score_detail = None
     # Phase Q5: _compute_vxis_score reads ctx.kind.value (was hardcoded "web"
@@ -118,6 +117,28 @@ def test_sandbox_usage_increases_vector_coverage() -> None:
         f"no-sandbox={score_none}, with-sandbox={score_sandbox}. "
         f"Brain is penalized for using primary tools."
     )
+
+
+def test_attempt_outcomes_increase_vector_coverage() -> None:
+    """First-class vector attempts must count even without sandbox text parsing."""
+    from vxis.pipeline.scan_pipeline_v2 import _compute_vxis_score
+
+    ctx_none = _make_mock_ctx([])
+    ctx_attempt = _make_mock_ctx([])
+    ctx_attempt.attempt_outcomes = [
+        {
+            "candidate_id": "web:sqli",
+            "vector_id": "WEB-SQLI-001",
+            "status": "attempted",
+            "tool": "http_request",
+        }
+    ]
+
+    score_none, _ = _compute_vxis_score(ctx_none)
+    score_attempt, _ = _compute_vxis_score(ctx_attempt)
+
+    assert score_attempt > score_none
+    assert "WEB-SQLI-001" in ctx_attempt.score_detail.vector_coverage.details["vectors_attempted_ids"]
 
 
 def test_missing_sandbox_invocations_field_does_not_crash() -> None:

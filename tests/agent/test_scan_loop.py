@@ -1,5 +1,5 @@
 import pytest
-from vxis.agent.scan_loop import ScanAgentLoop, ScanLoopState
+from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
 from vxis.agent.tools.finding_tools import (
     ReportFindingTool,
@@ -118,3 +118,80 @@ async def test_finish_scan_rejected_when_two_findings_have_no_chain():
         and (m["content"].get("result") or {}).get("data", {}).get("needs_chains")
     ]
     assert chain_rejections, "finish_scan must be rejected until the two findings are chained"
+
+
+@pytest.mark.asyncio
+async def test_vector_candidates_record_attempt_outcomes_for_brain_tools():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+
+    class ShellTool:
+        name = "shell_exec"
+        description = "shell"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            return ToolResult(
+                ok=True,
+                summary="sqlmap confirmed SQL injection",
+                data={"stdout": "parameter q is vulnerable"},
+            )
+
+    reg.register(ShellTool())
+
+    decisions = iter([
+        [("shell_exec", {"command": "sqlmap -u http://localhost:3000/rest/products/search?q=test --batch"})],
+        [("finish_scan", {})],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    outcomes = result["attempt_outcomes"]
+    assert any(o["candidate_id"] == "web:sqli" and o["status"] == "found" for o in outcomes)
+    candidates = {c["id"]: c for c in result["vector_candidates"]}
+    assert candidates["web:sqli"]["attempts"] >= 1
+    assert candidates["web:sqli"]["status"] == "found"
+
+
+@pytest.mark.asyncio
+async def test_finish_scan_rejected_when_high_priority_candidates_unattempted():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "one finding",
+            "severity": "low",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "debug endpoint exposed",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=30)
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    assert result["completed"] is False
+    candidate_rejections = [
+        m for m in loop.state.messages
+        if m.get("role") == "tool"
+        and isinstance(m.get("content"), dict)
+        and (m["content"].get("result") or {}).get("data", {}).get("unresolved_vector_candidates")
+    ]
+    assert candidate_rejections

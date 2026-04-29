@@ -319,6 +319,20 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             for vid in _sandbox_cmd_to_vectors(str(_cmd)):
                 tracker.record_vector_attempt(vid)
 
+        # Phase E: first-class vector candidate state. The scan loop now
+        # preserves durable hypotheses and concrete attempt outcomes, so
+        # vector coverage can credit any real attempt even when it was clean,
+        # blocked, or failed before producing a finding.
+        _attempt_outcomes = getattr(ctx, "attempt_outcomes", []) or []
+        for outcome in _attempt_outcomes:
+            if not isinstance(outcome, dict):
+                continue
+            vid = str(outcome.get("vector_id") or "")
+            if vid:
+                tracker.record_vector_attempt(vid)
+                if str(outcome.get("status") or "") == "found":
+                    tracker.vectors_found.add(vid)
+
         for f in ctx.findings:
             ftype = f.finding_type if hasattr(f, "finding_type") else str(getattr(f, "finding_type", ""))
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
@@ -395,7 +409,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
         return vxis_score.total, vxis_score.grade
 
-    except Exception as e:
+    except Exception:
         import logging
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
@@ -543,6 +557,8 @@ class ScanPipeline:
         ctx.confirmed_findings = loop_result.get("confirmed_findings", []) or []  # type: ignore[attr-defined]
         ctx.refuted_findings = loop_result.get("refuted_findings", []) or []  # type: ignore[attr-defined]
         ctx.skills_completed = loop_result.get("skills_completed", []) or []  # type: ignore[attr-defined]
+        ctx.vector_candidates = loop_result.get("vector_candidates", []) or []  # type: ignore[attr-defined]
+        ctx.attempt_outcomes = loop_result.get("attempt_outcomes", []) or []  # type: ignore[attr-defined]
         # Phase 4: surface sandbox invocations so _compute_vxis_score can
         # credit VC for shell_exec / python_exec usage (sandbox primacy).
         ctx.sandbox_invocations = loop_result.get("sandbox_invocations", []) or []  # type: ignore[attr-defined]
@@ -652,7 +668,7 @@ class ScanPipeline:
         # summary line for operators.
         try:
             from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(finding_dicts_raw if False else _get_finding_dicts())
+            mitre = coverage_report(_get_finding_dicts())
             logger.info(
                 "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
                 len(mitre["techniques_covered"]),

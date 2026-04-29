@@ -76,9 +76,10 @@ MITRE: 8 techniques / 6 tactics
 - **Browser tools** (7 new tools): `browser_navigate`, `browser_analyze_dom`, `browser_click`, `browser_fill_form`, `browser_screenshot`, `browser_eval_js`, `browser_get_cookies`
 - **Auto-orchestration safety net**: auto-login (SQLi creds), auto-ffuf (dir bruteforce at iter 10), auto-nuclei (at iter 12), auto-sqlmap (at iter 18+ on 500-error endpoints)
 - **Vector exhaustion pins**: `finish_scan` is rejected with 0 findings, 2+ findings require at least one chain, and `max_iters` timeout is scored as incomplete.
+- **First-class vector state**: `ScanLoopState.vector_candidates` and `attempt_outcomes` preserve candidate priority, attempts, status, tool, and summary; high-priority unattempted candidates can block `finish_scan`.
 - **5D score fidelity**: benchmark/growth-loop now compares the same pipeline-emitted score, including attempted vector IDs and auto sandbox invocations.
 
-**Remaining:** First-class `vector_candidates` / `attempt_outcomes` state, final tuning on exploit chain depth, dashboard format refinement.
+**Remaining:** Target-specific candidate generation from discovered evidence, final tuning on exploit chain depth, dashboard format refinement.
 
 ## Phase E — Strix Patterns (In Progress 🔧)
 
