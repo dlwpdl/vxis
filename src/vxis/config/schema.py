@@ -176,6 +176,27 @@ class VXISConfig(BaseSettings):
         default="qwen2.5-coder:14b",
         description="Ollama model for uncensored brain mode. Override with VXIS_OLLAMA_UNCENSORED_MODEL.",
     )
+    llamacpp_base_url: str = Field(
+        default="http://localhost:8080",
+        description="llama.cpp server OpenAI-compatible base URL. Default: http://localhost:8080",
+    )
+    llamacpp_model: str = Field(
+        default="huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+        description="Default llama.cpp model id exposed by the local server.",
+    )
+    llamacpp_hf_repo: str = Field(
+        default="shennguyen/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-GGUF",
+        description="Optional Hugging Face repo used to launch llama.cpp locally.",
+    )
+    llamacpp_hf_file: str = Field(
+        default="huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m.gguf",
+        description="Optional GGUF file name used to launch llama.cpp locally.",
+    )
+    llamacpp_context: int = Field(
+        default=2048,
+        ge=512,
+        description="Recommended startup context window for llama.cpp local runs on memory-constrained Macs.",
+    )
 
     # ------------------------------------------------------------------
     # Scan profiles

@@ -50,3 +50,38 @@ def test_check_brain_uses_default_ollama_model_when_not_set() -> None:
 
     assert ready is True
     assert label == "local:ollama/qwen2.5-coder:14b"
+
+
+def test_check_brain_accepts_local_llamacpp_provider() -> None:
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "UPSTREAM_LLM_PROVIDER": "llamacpp",
+                "UPSTREAM_LLM_MODEL": "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+                "VXIS_LLAMACPP_BASE_URL": "http://localhost:8080",
+            },
+            clear=False,
+        ),
+        patch("urllib.request.urlopen", return_value=_FakeResponse()),
+    ):
+        label, ready = check_brain(interactive=False)
+
+    assert ready is True
+    assert label == "local:llamacpp/huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m"
+
+
+def test_check_brain_normalizes_google_to_gemini() -> None:
+    with patch.dict(
+        "os.environ",
+        {
+            "UPSTREAM_LLM_PROVIDER": "google",
+            "UPSTREAM_LLM_MODEL": "gemini-2.5-flash",
+            "GOOGLE_API_KEY": "test-key",
+        },
+        clear=False,
+    ):
+        label, ready = check_brain(interactive=False)
+
+    assert ready is True
+    assert label == "api:gemini/gemini-2.5-flash"

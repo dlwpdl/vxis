@@ -14,6 +14,7 @@ Sources:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,7 @@ class ModelInfo:
     """Canonical metadata for a single LLM model."""
 
     model_id: str
-    provider: str                   # "openai" | "anthropic" | "gemini" | "together" | "ollama"
+    provider: str                   # "openai" | "anthropic" | "gemini" | "together" | "ollama" | "llamacpp"
     context_window: int             # max total tokens (input + output)
     max_output_tokens: int          # max completion tokens
     supports_vision: bool = False
@@ -30,6 +31,17 @@ class ModelInfo:
     family: str = ""                # e.g. "gpt-5.4", "claude-4.6", "gemini-3.1"
     aliases: tuple[str, ...] = field(default_factory=tuple)
     notes: str = ""
+
+
+@dataclass(frozen=True)
+class CompressionPolicy:
+    """Prompt history compression policy for a runtime/model pair."""
+
+    context_window: int
+    compress_threshold_tokens: int
+    preserve_recent_messages: int
+    chunk_size: int
+    summary_max_words: int = 300
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +238,19 @@ _MODELS: tuple[ModelInfo, ...] = (
         family="dolphin",
         notes="Uncensored general-purpose",
     ),
+    # ── llama.cpp (local OpenAI-compatible server) ────────────
+    ModelInfo(
+        model_id="huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+        provider="llamacpp",
+        context_window=8_192,
+        max_output_tokens=4_096,
+        supports_vision=False,
+        supports_json_mode=False,
+        reasoning_model=False,
+        family="huihui-qwen3.6",
+        aliases=("huihui-qwen3.6-35b-a3b",),
+        notes="Run via local llama-server; on 64GB Macs start at 2048 context even though the model can be configured higher.",
+    ),
 )
 
 
@@ -288,8 +313,74 @@ def list_models(provider: str | None = None) -> list[ModelInfo]:
     return list(_MODELS)
 
 
+def _runtime_context_window(provider: str, model_id: str) -> int:
+    """Resolve the effective runtime context window for compression decisions."""
+    provider = (provider or "").lower()
+
+    if provider == "llamacpp":
+        override = os.environ.get("VXIS_LLAMACPP_CONTEXT", "").strip()
+        if override.isdigit():
+            return max(512, int(override))
+        return min(get_context_window(model_id, default=8_192), 8_192)
+
+    if provider == "ollama":
+        override = os.environ.get("VXIS_OLLAMA_CONTEXT", "").strip()
+        if override.isdigit():
+            return max(512, int(override))
+        return get_context_window(model_id, default=32_000)
+
+    return get_context_window(model_id, default=128_000)
+
+
+def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
+    """Return model-aware history compression settings."""
+    provider = (provider or "").lower()
+    if provider == "google":
+        provider = "gemini"
+
+    context_window = _runtime_context_window(provider, model_id)
+
+    if provider == "llamacpp":
+        threshold = max(900, min(context_window - 768, int(context_window * 0.45)))
+        return CompressionPolicy(
+            context_window=context_window,
+            compress_threshold_tokens=threshold,
+            preserve_recent_messages=5,
+            chunk_size=5,
+            summary_max_words=180,
+        )
+
+    if provider == "ollama":
+        threshold = max(2_000, min(context_window - 1_024, int(context_window * 0.65)))
+        return CompressionPolicy(
+            context_window=context_window,
+            compress_threshold_tokens=threshold,
+            preserve_recent_messages=8,
+            chunk_size=8,
+            summary_max_words=220,
+        )
+
+    if provider in {"openai", "anthropic", "gemini", "together", "deepseek"}:
+        threshold = max(12_000, int(context_window * 0.85))
+        return CompressionPolicy(
+            context_window=context_window,
+            compress_threshold_tokens=threshold,
+            preserve_recent_messages=15,
+            chunk_size=10,
+        )
+
+    return CompressionPolicy(
+        context_window=context_window,
+        compress_threshold_tokens=max(8_000, int(context_window * 0.75)),
+        preserve_recent_messages=12,
+        chunk_size=8,
+    )
+
+
 __all__ = [
+    "CompressionPolicy",
     "ModelInfo",
+    "get_compression_policy",
     "get_model_info",
     "get_context_window",
     "get_max_output_tokens",

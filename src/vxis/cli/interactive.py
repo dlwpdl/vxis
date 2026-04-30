@@ -1758,23 +1758,48 @@ def _execute_agent_scan(params: dict) -> None:
     target = params["target"]
     profile = params.get("profile", "standard")
 
-    # Step: LLM 모델 선택
-    llm_choices = [
-        Separator("── Together.ai (통합 게이트웨이) ──"),
-        {"name": "\U0001f9e0 Kimi-K2.5 (1T params, 추론 특화, 권장)", "value": ("together", "moonshotai/Kimi-K2.5")},
-        {"name": "\U0001f9e0 GLM-5 (744B params, 에이전트 특화)", "value": ("together", "zai-org/GLM-5")},
-        {"name": "\U0001f9e0 DeepSeek-R1 (추론 체인)", "value": ("together", "deepseek-ai/DeepSeek-R1")},
-        {"name": "\U0001f9e0 DeepSeek-V3 (범용)", "value": ("together", "deepseek-ai/DeepSeek-V3")},
-        {"name": "\U0001f9e0 Qwen-72B (빠른 응답)", "value": ("together", "Qwen/Qwen2.5-72B-Instruct-Turbo")},
-        {"name": "\U0001f9e0 Llama-3.3-70B (오픈소스)", "value": ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo")},
-        Separator("── 직접 연결 (API 키 필요) ──"),
-        {"name": "\U0001f7e3 Claude Opus 4.6 (Anthropic, 최강)", "value": ("anthropic", "claude-opus-4-6")},
-        {"name": "\U0001f7e3 Claude Sonnet 4.6 (Anthropic, 균형)", "value": ("anthropic", "claude-sonnet-4-6")},
-        {"name": "\U0001f7e2 Gemini 3.1 Pro (Google, 최신)", "value": ("google", "gemini-3.1-pro")},
-        {"name": "\U0001f7e2 Gemini 2.5 Flash (Google, 빠름)", "value": ("google", "gemini-2.5-flash")},
-        {"name": "\U0001f535 GPT-5.4 (OpenAI, 최신)", "value": ("openai", "gpt-5.4")},
-        {"name": "\U0001f535 GPT-4o Mini (OpenAI, 저렴)", "value": ("openai", "gpt-4o-mini")},
-    ]
+    source_class = inquirer.select(
+        message="AI 두뇌 소스를 선택하세요",
+        choices=[
+            {"name": "Cloud API — OpenAI / Anthropic / Gemini / Together", "value": "cloud"},
+            {"name": "Local Runtime — Ollama / llama.cpp", "value": "local"},
+        ],
+        pointer="\u276f",
+        qmark="\U0001f9e0",
+        amark="\u2705",
+        instruction="(↑↓ 방향키)",
+    ).execute()
+
+    if source_class is None:
+        return
+
+    if source_class == "local":
+        llm_choices = [
+            Separator("── Ollama ──"),
+            {"name": "Qwen 2.5 Coder 14B (권장 기본값)", "value": ("ollama", "qwen2.5-coder:14b")},
+            {"name": "WhiteRabbitNeo 13B (무검열 연구)", "value": ("ollama", "whiterabbitneo:13b")},
+            {"name": "Dolphin Mixtral 8x7B (범용)", "value": ("ollama", "dolphin-mixtral:8x7b")},
+            Separator("── llama.cpp 서버 ──"),
+            {"name": "Huihui Qwen3.6 35B A3B Q4_K_M (llama.cpp)", "value": ("llamacpp", "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m")},
+            {"name": "Custom llama.cpp model id", "value": ("llamacpp", "__custom__")},
+        ]
+    else:
+        llm_choices = [
+            Separator("── Together.ai (통합 게이트웨이) ──"),
+            {"name": "\U0001f9e0 Kimi-K2.5 (1T params, 추론 특화, 권장)", "value": ("together", "moonshotai/Kimi-K2.5")},
+            {"name": "\U0001f9e0 GLM-5 (744B params, 에이전트 특화)", "value": ("together", "zai-org/GLM-5")},
+            {"name": "\U0001f9e0 DeepSeek-R1 (추론 체인)", "value": ("together", "deepseek-ai/DeepSeek-R1")},
+            {"name": "\U0001f9e0 DeepSeek-V3 (범용)", "value": ("together", "deepseek-ai/DeepSeek-V3")},
+            {"name": "\U0001f9e0 Qwen-72B (빠른 응답)", "value": ("together", "Qwen/Qwen2.5-72B-Instruct-Turbo")},
+            {"name": "\U0001f9e0 Llama-3.3-70B (오픈소스)", "value": ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo")},
+            Separator("── 직접 연결 (API 키 필요) ──"),
+            {"name": "\U0001f7e3 Claude Opus 4.6 (Anthropic, 최강)", "value": ("anthropic", "claude-opus-4-6")},
+            {"name": "\U0001f7e3 Claude Sonnet 4.6 (Anthropic, 균형)", "value": ("anthropic", "claude-sonnet-4-6")},
+            {"name": "\U0001f7e2 Gemini 3.1 Pro (Google, 최신)", "value": ("gemini", "gemini-3.1-pro")},
+            {"name": "\U0001f7e2 Gemini 2.5 Flash (Google, 빠름)", "value": ("gemini", "gemini-2.5-flash")},
+            {"name": "\U0001f535 GPT-5.4 (OpenAI, 최신)", "value": ("openai", "gpt-5.4")},
+            {"name": "\U0001f535 GPT-4o Mini (OpenAI, 저렴)", "value": ("openai", "gpt-4o-mini")},
+        ]
 
     llm_selection = inquirer.select(
         message="AI 에이전트의 두뇌를 선택하세요",
@@ -1789,16 +1814,38 @@ def _execute_agent_scan(params: dict) -> None:
         return
 
     provider, model = llm_selection
+    if provider == "llamacpp" and model == "__custom__":
+        custom_model = inquirer.text(
+            message="llama.cpp 서버의 model id를 입력하세요",
+            default=os.environ.get(
+                "VXIS_LLAMACPP_MODEL",
+                "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+            ),
+            qmark="\U0001f9e0",
+            amark="\u2705",
+        ).execute()
+        if not custom_model:
+            console.print("[red]model id가 필요합니다.[/red]")
+            return
+        model = custom_model.strip()
+
     os.environ["UPSTREAM_LLM_PROVIDER"] = provider
     os.environ["UPSTREAM_LLM_MODEL"] = model
 
+    if provider == "ollama":
+        os.environ["VXIS_OLLAMA_BASE_URL"] = os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434")
+        os.environ["VXIS_OLLAMA_UNCENSORED_MODEL"] = model
+    elif provider == "llamacpp":
+        os.environ["VXIS_LLAMACPP_BASE_URL"] = os.environ.get("VXIS_LLAMACPP_BASE_URL", "http://localhost:8080")
+        os.environ["VXIS_LLAMACPP_MODEL"] = model
+
     # Check API key
     from tools.upstream_watch.llm import is_available as llm_is_available
-    if not llm_is_available():
+    if provider not in {"ollama", "llamacpp"} and not llm_is_available():
         key_env = {
             "together": "TOGETHER_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
-            "google": "GOOGLE_API_KEY",
+            "gemini": "GOOGLE_API_KEY",
             "openai": "OPENAI_API_KEY",
         }.get(provider, "TOGETHER_API_KEY")
 

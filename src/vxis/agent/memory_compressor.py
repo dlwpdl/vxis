@@ -17,15 +17,15 @@ import json
 import logging
 from typing import Any
 
+from vxis.llm.model_registry import get_compression_policy
+
 logger = logging.getLogger(__name__)
 
 # Rough token estimate: 1 token ≈ 4 chars for English text
 _CHARS_PER_TOKEN = 4
-_MAX_TOKENS = 90_000  # Compress when total exceeds this
-_MIN_RECENT_MESSAGES = 15  # Always keep this many verbatim
-_CHUNK_SIZE = 10  # Summarize in groups of this many messages
 
-_SUMMARIZE_PROMPT = """\
+def _build_summarize_prompt(max_words: int) -> str:
+    return f"""\
 You are summarizing a chunk of penetration testing conversation history.
 Preserve ALL of the following in your summary:
 - Discovered vulnerabilities, endpoints, and attack vectors
@@ -35,7 +35,13 @@ Preserve ALL of the following in your summary:
 - Architecture insights (tech stack, framework, routing patterns)
 
 Be concise but NEVER drop security-relevant details. Output a single
-paragraph summary, max 300 words."""
+paragraph summary, max {max_words} words."""
+
+
+def _resolve_policy(brain: Any) -> Any:
+    provider = getattr(brain, "_provider", "") if brain is not None else ""
+    model = getattr(brain, "_model", "") if brain is not None else ""
+    return get_compression_policy(provider, model)
 
 
 def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -64,25 +70,31 @@ async def compress_history(
         brain: AgentBrain instance (used for LLM summarization calls).
     """
     total_tokens = _estimate_tokens(messages)
-    if total_tokens < _MAX_TOKENS:
+    policy = _resolve_policy(brain)
+    if total_tokens < policy.compress_threshold_tokens:
         return messages
 
     logger.info(
-        "memory_compressor: %d tokens exceeds %d, compressing %d messages",
-        total_tokens, _MAX_TOKENS, len(messages),
+        "memory_compressor: provider=%s model=%s tokens=%d threshold=%d recent=%d chunk=%d",
+        getattr(brain, "_provider", "?") if brain is not None else "?",
+        getattr(brain, "_model", "?") if brain is not None else "?",
+        total_tokens,
+        policy.compress_threshold_tokens,
+        policy.preserve_recent_messages,
+        policy.chunk_size,
     )
 
     # Split: old messages to compress, recent to preserve
-    if len(messages) <= _MIN_RECENT_MESSAGES:
+    if len(messages) <= policy.preserve_recent_messages:
         return messages
 
-    old = messages[:-_MIN_RECENT_MESSAGES]
-    recent = messages[-_MIN_RECENT_MESSAGES:]
+    old = messages[:-policy.preserve_recent_messages]
+    recent = messages[-policy.preserve_recent_messages:]
 
     # Chunk old messages and summarize each chunk
     compressed: list[dict[str, Any]] = []
-    for i in range(0, len(old), _CHUNK_SIZE):
-        chunk = old[i:i + _CHUNK_SIZE]
+    for i in range(0, len(old), policy.chunk_size):
+        chunk = old[i:i + policy.chunk_size]
 
         # Build a text representation of the chunk
         chunk_text_parts: list[str] = []
@@ -108,7 +120,7 @@ async def compress_history(
             try:
                 summary = await asyncio.to_thread(
                     brain._call_llm_with_fallback,
-                    _SUMMARIZE_PROMPT,
+                    _build_summarize_prompt(policy.summary_max_words),
                     f"Conversation chunk (iterations {chunk[0].get('iter', '?')}-{chunk[-1].get('iter', '?')}):\n\n{chunk_text}",
                 )
                 if summary:

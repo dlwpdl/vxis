@@ -1,5 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
+import asyncio
 
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
@@ -130,3 +131,52 @@ def test_think_in_loop_adapter_concatenation_no_brace_explosion():
     assert "shell_exec" in full
     # link_chain is surfaced via the adapter's FINDING REPORT FORMAT section.
     assert "link_chain" in full
+
+
+def test_think_in_loop_trims_history_for_small_llamacpp_context(monkeypatch):
+    from vxis.agent.brain import AgentBrain
+
+    monkeypatch.setenv("VXIS_LLAMACPP_CONTEXT", "8192")
+
+    brain = AgentBrain(
+        provider="llamacpp",
+        model="huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+    )
+
+    captured: dict[str, str] = {}
+
+    def fake_llm(system: str, user: str, **kwargs) -> str:
+        captured["system"] = system
+        captured["user"] = user
+        return (
+            '```json\n'
+            '{"reasoning":"trimmed","actions":[{"tool":"finish_scan","args":{},"reasoning":"done","priority":"low"}]}\n'
+            '```'
+        )
+
+    monkeypatch.setattr(brain, "_call_llm_with_fallback", fake_llm)
+
+    messages = [
+        {"role": "system", "content": "Scan started", "iter": 0},
+    ]
+    for i in range(1, 140):
+        messages.append(
+            {
+                "role": "user",
+                "content": (
+                    f"Iteration {i} " + ("A" * 1400)
+                ),
+                "iter": i,
+            }
+        )
+
+    tool_catalog = [
+        {"name": "finish_scan", "description": "end scan", "input_schema": {"type": "object"}},
+    ]
+
+    actions = asyncio.run(brain.think_in_loop(messages, tool_catalog))
+
+    assert actions == [("finish_scan", {})]
+    assert "PROMPT-BUDGET COMPACTION" in captured["user"]
+    prompt_tokens = (len(captured["system"]) + len(captured["user"])) // 4
+    assert prompt_tokens < 8192

@@ -134,7 +134,7 @@ def _estimate_usage_cost(provider: str, total_tokens: int) -> tuple[float, bool]
     """
     if total_tokens <= 0:
         return 0.0, False
-    if provider in {"ollama", "claude-cli", "gemini-cli", "codex-cli"}:
+    if provider in {"ollama", "llamacpp", "claude-cli", "gemini-cli", "codex-cli"}:
         return 0.0, False
     per_million = {
         "openai": 0.15,
@@ -747,7 +747,9 @@ class AgentBrain:
         self.steps: list[AgentStep] = []
         self.is_done = False
         self._state_lock = threading.Lock()
-        self._provider = provider or os.environ.get("UPSTREAM_LLM_PROVIDER", "together")
+        self._provider = (provider or os.environ.get("UPSTREAM_LLM_PROVIDER", "together")).lower()
+        if self._provider == "google":
+            self._provider = "gemini"
         self._model = model or os.environ.get("UPSTREAM_LLM_MODEL", "")
         self._step_count = 0
         self._memory = memory
@@ -1075,6 +1077,88 @@ class AgentBrain:
 
         return lines
 
+    @staticmethod
+    def _estimate_prompt_tokens(text: str) -> int:
+        text = str(text or "")
+        if not text:
+            return 0
+        return max(1, len(text) // 4)
+
+    def _fit_history_lines_to_budget(
+        self,
+        history_lines: list[str],
+        *,
+        system_prompt: str,
+        task_prompt: str,
+    ) -> list[str]:
+        """Trim history to fit small local context windows before the LLM call.
+
+        Memory compression acts on the stored message list. This helper acts on
+        the final rendered prompt, which also includes large system/tool/task
+        sections. Without this second guard, 8K local models can still overflow
+        even when the raw message history has already been compacted.
+        """
+        if not history_lines:
+            return history_lines
+
+        from vxis.llm.model_registry import get_compression_policy, get_max_output_tokens
+
+        policy = get_compression_policy(self._provider, self._model)
+        context_window = int(policy.context_window or 0)
+        if context_window <= 0:
+            return history_lines
+
+        reserve_output = min(
+            get_max_output_tokens(self._model, default=4000),
+            max(512, int(context_window * 0.20)),
+        )
+        static_tokens = (
+            self._estimate_prompt_tokens(system_prompt)
+            + self._estimate_prompt_tokens(task_prompt)
+            + 96
+        )
+        safety_margin = max(192, int(context_window * 0.12))
+        budget = max(240, context_window - reserve_output - static_tokens - safety_margin)
+
+        total = sum(self._estimate_prompt_tokens(line) for line in history_lines)
+        if total <= budget:
+            return history_lines
+
+        kept_rev: list[str] = []
+        used = 0
+        for line in reversed(history_lines):
+            tokens = self._estimate_prompt_tokens(line)
+            if not kept_rev and tokens > budget:
+                chars = max(200, budget * 4)
+                line = line[:chars]
+                tokens = self._estimate_prompt_tokens(line)
+            if kept_rev and used + tokens > budget:
+                break
+            kept_rev.append(line)
+            used += tokens
+
+        kept = list(reversed(kept_rev))
+        omitted = len(history_lines) - len(kept)
+        if omitted > 0:
+            kept.insert(
+                0,
+                (
+                    "[system] PROMPT-BUDGET COMPACTION: "
+                    f"{omitted} older history line(s) omitted for "
+                    f"{self._provider}/{self._model} ({context_window} ctx)"
+                ),
+            )
+            logger.info(
+                "think_in_loop prompt trim: provider=%s model=%s context=%d budget=%d history=%d→%d lines",
+                self._provider,
+                self._model,
+                context_window,
+                budget,
+                len(history_lines),
+                len(kept),
+            )
+        return kept
+
     async def think_in_loop(
         self,
         messages: list[dict[str, Any]],
@@ -1117,16 +1201,25 @@ class AgentBrain:
         import os as _os
         _long_ctx = _os.environ.get("VXIS_LONG_CONTEXT") == "1"
         history_lines: list[str] = self._build_smart_history(messages, long_context=_long_ctx)
-
-        user_prompt = (
-            "## Conversation history (most recent last)\n"
-            + "\n".join(history_lines)
-            + "\n\n## Your task\n"
+        history_header = "## Conversation history (most recent last)\n"
+        task_prompt = (
+            "\n\n## Your task\n"
             + "Based on the history above, decide the next tool call(s). "
             + "Output EXACTLY this JSON shape (inside a ```json fence):\n"
             + '{"reasoning": "<why>", "actions": [{"tool": "<exact name from catalog>", "args": {...}, "reasoning": "<why>", "priority": "high|medium|low"}]}\n'
             + "To end the scan, emit a single action with tool='finish_scan'.\n"
             + "REMEMBER: only emit tool names that appear in '## Available Tools' above."
+        )
+        history_lines = self._fit_history_lines_to_budget(
+            history_lines,
+            system_prompt=system_prompt,
+            task_prompt=history_header + task_prompt,
+        )
+
+        user_prompt = (
+            history_header
+            + "\n".join(history_lines)
+            + task_prompt
         )
 
         # Phase B fix: skip_refusal_handling=True keeps iterations bounded.
@@ -1661,6 +1754,11 @@ class AgentBrain:
             return self._call_openai_compatible(
                 system_prompt, user_prompt, "ollama", model, base_url=base_url
             )
+        elif provider == "llamacpp":
+            base_url = os.environ.get("VXIS_LLAMACPP_BASE_URL", "http://localhost:8080")
+            return self._call_openai_compatible(
+                system_prompt, user_prompt, "llamacpp", model, base_url=base_url
+            )
         elif provider in ("together", "openai"):
             return self._call_openai_compatible(
                 system_prompt, user_prompt, provider, model, image_path=image_path
@@ -2179,6 +2277,10 @@ class AgentBrain:
                 "gemini": "gemini-2.5-pro",
                 "deepseek": "deepseek-chat",
                 "ollama": os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", "qwen2.5-coder:14b"),
+                "llamacpp": os.environ.get(
+                    "VXIS_LLAMACPP_MODEL",
+                    "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+                ),
             }
             model = _defaults.get(provider, "")
 
