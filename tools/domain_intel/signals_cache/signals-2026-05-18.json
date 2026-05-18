@@ -1,0 +1,422 @@
+[
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] Microsoft BitLocker – YellowKey zero-day exploit",
+    "url": "https://www.tomshardware.com/tech-industry/cyber-security/microsoft-bitlocker-protected-drives-can-now-be-opened-with-just-some-files-on-a-usb-stick-yellowkey-zero-day-exploit-demonstrates-an-apparent-backdoor",
+    "description": "",
+    "relevance_tags": [
+      "exploit",
+      "zero-day"
+    ],
+    "score": 277.0,
+    "timestamp": "2026-05-14T02:45:08Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 277,
+      "comments": 154
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] linux 0-day, access root-owned files as an unprivileged user",
+    "url": "https://github.com/0xdeadbeefnetwork/ssh-keysign-pwn/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 110.0,
+    "timestamp": "2026-05-14T20:14:21.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 110,
+      "comments": 43
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Mullvad exit IPs as a fingerprinting vector",
+    "url": "https://tmctmt.com/posts/mullvad-exit-ips-as-a-fingerprinting-vector/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 45.0,
+    "timestamp": "2026-05-14T22:40:21.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 45,
+      "comments": 2
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] An Engineer's Post Protesting Laptop Surveillance Is Going Viral Inside Meta",
+    "url": "https://www.wired.com/story/meta-employee-protest-mouse-tracking-surveillance-ai-training/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 44.0,
+    "timestamp": "2026-05-14T20:56:40Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 44,
+      "comments": 4
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] The CTF scene is dead",
+    "url": "https://kabir.au/blog/the-ctf-scene-is-dead",
+    "description": "",
+    "relevance_tags": [],
+    "score": 38.0,
+    "timestamp": "2026-05-16T03:51:04.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 38,
+      "comments": 9
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] The Futility of Lava Lamps: What Random Really Means",
+    "url": "https://loup-vaillant.fr/articles/lava-lamps-and-randomness",
+    "description": "",
+    "relevance_tags": [],
+    "score": 37.0,
+    "timestamp": "2026-05-16T12:54:27.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 37,
+      "comments": 31
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Recent Kernel exploits, attack surface reduction, example IPSEC",
+    "url": "https://www.openwall.com/lists/oss-security/2026/05/16/3",
+    "description": "",
+    "relevance_tags": [],
+    "score": 27.0,
+    "timestamp": "2026-05-16T09:18:47.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 27,
+      "comments": 19
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Cheap smart doorbell allows fleet-wide account takeover and call hijacking",
+    "url": "https://www.abgeo.dev/blog/anyone-can-ring-your-doorbell/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 16.0,
+    "timestamp": "2026-05-16T03:57:51.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 16,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] GitHub Actions Security Checklist for Supply Chain Attacks",
+    "url": "https://corgea.com/learn/github-actions-security-checklist",
+    "description": "",
+    "relevance_tags": [],
+    "score": 11.0,
+    "timestamp": "2026-05-14T21:07:40Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 11,
+      "comments": 1
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Researcher says Microsoft secretly built a backdoor into BitLocker",
+    "url": "https://www.techspot.com/news/112410-security-researcher-microsoft-secretly-built-backdoor-bitlocker-releases.html",
+    "description": "",
+    "relevance_tags": [
+      "backdoor"
+    ],
+    "score": 11.0,
+    "timestamp": "2026-05-17T22:06:03.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 11,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] CVE-2026-40369: Arbitrary Kernel Address Increment via NtQuerySystemInformation",
+    "url": "https://github.com/orinimron123/CVE-2026-40369-EXPLOIT",
+    "description": "",
+    "relevance_tags": [],
+    "score": 10.0,
+    "timestamp": "2026-05-16T00:00:21.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 10,
+      "comments": 0
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-42897 — Microsoft Microsoft",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-42897",
+    "description": "Microsoft Exchange Server contains a cross-site scripting vulnerability during web page generation in Outlook Web Access and when certain interaction conditions are met, arbitrary JavaScript can be executed in the browser context.",
+    "relevance_tags": [
+      "cve-2026-42897",
+      "microsoft",
+      "microsoft",
+      "microsoft exchange server cross-site scripting vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-15",
+    "metadata": {
+      "cve_id": "CVE-2026-42897",
+      "vendor": "Microsoft",
+      "product": "Microsoft",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-05-29",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-20182 — Cisco Catalyst SD-WAN",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-20182",
+    "description": "Cisco Catalyst SD-WAN Controller & Manager contain an authentication bypass vulnerability that allows an unauthenticated, remote attacker to bypass authentication and obtain administrative privileges on an affected system.",
+    "relevance_tags": [
+      "cve-2026-20182",
+      "cisco",
+      "catalyst sd-wan",
+      "cisco catalyst sd-wan controller authentication bypass vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-14",
+    "metadata": {
+      "cve_id": "CVE-2026-20182",
+      "vendor": "Cisco",
+      "product": "Catalyst SD-WAN",
+      "action": "Please adhere to CISA’s guidelines to assess exposure and mitigate risks associated with Cisco SD-WAN devices as outlined in CISA’s Emergency Directive 26-03 (URL listed below in Notes) and CISA’s Hunt & Hardening Guidance for Cisco SD-WAN Devices (URL listed below in Notes). Adhere to the applicable BOD 22-01 guidance for cloud services or discontinue use of the product if mitigations are not available.",
+      "due_date": "2026-05-17",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Fast16: Pre-Stuxnet Sabotage Tool Was Built to Subvert Nuclear Weapons Simulations",
+    "url": "https://www.security.com/threat-intelligence/fast16-nuclear-sabotage",
+    "description": "",
+    "relevance_tags": [],
+    "score": 6.0,
+    "timestamp": "2026-05-17T03:30:13.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 6,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] OpenBSD Zoneinfo Sandbox Escape",
+    "url": "https://github.com/ortegaalfredo/vulns-ai/blob/main/OpenBSD_zoneinfo_unveil_sandbox_escape/OpenBSD_Zoneinfo_Sandbox_Escape.txt",
+    "description": "",
+    "relevance_tags": [],
+    "score": 5.0,
+    "timestamp": "2026-05-15T15:16:26.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 5,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Mini Shai-Hulud - TanStack and more npm packages compromised, with SLSA Build Level 3 provenance attestations",
+    "url": "https://www.stepsecurity.io/blog/mini-shai-hulud-is-back-a-self-spreading-supply-chain-attack-hits-the-npm-ecosystem",
+    "description": "",
+    "relevance_tags": [],
+    "score": 5.0,
+    "timestamp": "2026-05-15T09:33:52.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 5,
+      "comments": 1
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] The First CVE Wave: Signs That AI-Assisted Vulnerability Discovery Is Reshaping Disclosure Volumes",
+    "url": "https://www.vulncheck.com/blog/ai-assisted-vulnerability-discovery",
+    "description": "",
+    "relevance_tags": [
+      "vulnerability"
+    ],
+    "score": 5.0,
+    "timestamp": "2026-05-15T02:49:27.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 5,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] New Windows 'MiniPlasma' zero-day exploit gives SYSTEM access, PoC released",
+    "url": "https://www.bleepingcomputer.com/news/microsoft/new-windows-miniplasma-zero-day-exploit-gives-system-access-poc-released/",
+    "description": "A cybersecurity researcher has released a proof-of-concept exploit for a Windows privilege escalation zero-day dubbed \"MiniPlasma\" that lets attackers gain SYSTEM privileges on fully patched Windows systems.  [...]",
+    "relevance_tags": [
+      "exploit",
+      "zero-day"
+    ],
+    "score": 0.0,
+    "timestamp": "Sun, 17 May 2026 18:30:08 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Tycoon2FA hijacks Microsoft 365 accounts via device-code phishing",
+    "url": "https://www.bleepingcomputer.com/news/security/tycoon2fa-hijacks-microsoft-365-accounts-via-device-code-phishing/",
+    "description": "The Tycoon2FA phishing kit now supports device-code phishing attacks and abuses Trustifi click-tracking URLs to hijack Microsoft 365 accounts. [...]",
+    "relevance_tags": [
+      "phishing"
+    ],
+    "score": 0.0,
+    "timestamp": "Sun, 17 May 2026 10:43:10 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Microsoft rejects critical Azure vulnerability report, no CVE issued",
+    "url": "https://www.bleepingcomputer.com/news/security/microsoft-rejects-critical-azure-vulnerability-report-no-cve-issued/",
+    "description": "A security researcher claims Microsoft quietly fixed an Azure Backup for AKS vulnerability after rejecting his report, and without issuing a CVE. Microsoft disputes the claim, telling BleepingComputer the behavior was expected and that \"no product changes were made,\" despite the researcher documenti",
+    "relevance_tags": [
+      "azure",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "Sat, 16 May 2026 16:55:44 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Russian hackers turn Kazuar backdoor into modular P2P botnet",
+    "url": "https://www.bleepingcomputer.com/news/security/russian-hackers-turn-kazuar-backdoor-into-modular-p2p-botnet/",
+    "description": "The Russian hacker group Secret Blizzard has developed its long-running Kazuar backdoor into a modular peer-to-peer (P2P) botnet designed for long-term persistence, stealth, and data collection. [...]",
+    "relevance_tags": [
+      "backdoor"
+    ],
+    "score": 0.0,
+    "timestamp": "Sat, 16 May 2026 10:15:37 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Funnel Builder WordPress plugin bug exploited to steal credit cards",
+    "url": "https://www.bleepingcomputer.com/news/security/funnel-builder-wordpress-plugin-bug-exploited-to-steal-credit-cards/",
+    "description": "A critical vulnerability in the Funnel Builder plugin for WordPress is being actively exploited to inject malicious JavaScript snippets into WooCommerce checkout pages. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 15 May 2026 15:30:33 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Microsoft Exchange, Windows 11 hacked on second day of Pwn2Own",
+    "url": "https://www.bleepingcomputer.com/news/security/pwn2own-day-two-hackers-demo-microsoft-exchange-windows-11-red-had-enterprise-linux-zero-days/",
+    "description": "​During the second day of Pwn2Own Berlin 2026, competitors collected $385,750 in cash awards after exploiting 15 unique zero-day vulnerabilities in multiple products, including Windows 11, Microsoft Exchange, and Red Hat Enterprise Linux for Workstations. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 15 May 2026 13:47:25 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Popular node-ipc npm package compromised to steal credentials",
+    "url": "https://www.bleepingcomputer.com/news/security/popular-node-ipc-npm-package-compromised-to-steal-credentials/",
+    "description": "Hackers have injected credential-stealing malware into newly published versions of node-ipc, a popular inter-process communication package, in a new supply chain attack targeting npm. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 15 May 2026 13:10:42 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Avada Builder WordPress plugin flaws allow site credential theft",
+    "url": "https://www.bleepingcomputer.com/news/security/avada-builder-wordpress-plugin-flaws-allow-site-credential-theft/",
+    "description": "Two vulnerabilities in the Avada Builder plugin for WordPress, with an estimated one million active installations, allow hackers to read arbitrary files and extract sensitive information from the database. [...]",
+    "relevance_tags": [
+      "credential"
+    ],
+    "score": 0.0,
+    "timestamp": "Fri, 15 May 2026 11:56:56 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Microsoft backpedals: Edge to stop loading passwords into memory",
+    "url": "https://www.bleepingcomputer.com/news/microsoft/microsoft-edge-to-stop-loading-cleartext-passwords-in-memory-on-startup/",
+    "description": "Microsoft is updating the Edge web browser to ensure it no longer loads saved passwords into process memory in clear text at startup after previously stating it was \"by design.\" [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 15 May 2026 10:49:39 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Inside the REMUS Infostealer: Session Theft, MaaS, and Rapid Evolution",
+    "url": "https://www.bleepingcomputer.com/news/security/inside-the-remus-infostealer-session-theft-maas-and-rapid-evolution/",
+    "description": "Stolen browser sessions and authentication tokens are becoming more valuable than stolen passwords. Flare explains how the REMUS infostealer evolved around session theft and operational scalability. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 15 May 2026 10:02:12 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  }
+]
