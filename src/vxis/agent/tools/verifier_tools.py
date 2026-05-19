@@ -15,11 +15,44 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from typing import Any
 
 from vxis.agent.tool_registry import ToolResult
 
 logger = logging.getLogger(__name__)
+
+_HTTP_MARKERS = ("HTTP/1.", "HTTP/2", "GET ", "POST ", "PUT ", "PATCH ", "DELETE ")
+_RESULT_MARKERS = (
+    "200 OK",
+    "201 Created",
+    "202 Accepted",
+    "500 Internal Server Error",
+    "Set-Cookie:",
+    "\"token\"",
+    "\"role\"",
+    "\"data\"",
+    "\"status\"",
+    "stack trace",
+    "Traceback",
+    "sqlmap identified",
+    "dumped",
+)
+_CONTROL_MARKERS = (
+    "control",
+    "negative",
+    "baseline",
+    "unauthenticated",
+    "authenticated",
+    "without auth",
+    "with auth",
+    "token:null",
+    "token=\"\"",
+    "id=1",
+    "id=2",
+    "before:",
+    "after:",
+)
 
 
 _REFUTER_SYSTEM_PROMPT = """\
@@ -46,6 +79,9 @@ Decision rubric (apply in order):
    - Evidence contains real sensitive content: actual credentials, API
      keys, private config, stack traces with file paths, SQL errors,
      dumped data rows
+   - The PoC includes both the exploit attempt and the observed result
+     (request + response, payload + reflected output, or command +
+     extracted data) and they line up with the claim
    - HTTP status + body size + content together rule out baseline/shell
      (e.g. 200 OK on /.env with KEY=VALUE lines, or 500 with stack trace
      naming internal modules)
@@ -58,6 +94,8 @@ Decision rubric (apply in order):
 
 3) UNCONFIRMED — genuine ambiguity. Use SPARINGLY, only when:
    - Evidence is suggestive but incomplete (status + size but no body excerpt)
+   - The PoC shows a positive signal but lacks the control comparison
+     expected for auth bypass, IDOR, access-control, or injection claims
    - Could be a real bug or could be environmental noise, and no single
      piece of evidence tips the balance
    - More probing would resolve it but current data doesn't
@@ -105,6 +143,78 @@ response — desktop evidence is subprocess output, file-system walk
 results, and plist dumps. That is the correct shape, not a gap."""
 
 
+def _looks_like_http_exchange(blob: str) -> bool:
+    return any(marker in blob for marker in _HTTP_MARKERS)
+
+
+def _has_observed_result(blob: str) -> bool:
+    lower = blob.lower()
+    return any(marker.lower() in lower for marker in _RESULT_MARKERS)
+
+
+def _has_control_signal(blob: str) -> bool:
+    lower = blob.lower()
+    return any(marker in lower for marker in _CONTROL_MARKERS)
+
+
+def _finding_type_needs_control(finding_type: str) -> bool:
+    ft = finding_type.lower()
+    return any(
+        needle in ft
+        for needle in (
+            "auth",
+            "idor",
+            "access",
+            "privilege",
+            "sql",
+            "xss",
+            "ssrf",
+            "csrf",
+        )
+    )
+
+
+def _normalize_poc_blob(text: str) -> str:
+    blob = str(text or "").strip()
+    if not blob:
+        return ""
+    blob = re.sub(r"\r\n?", "\n", blob)
+    return blob[:4000]
+
+
+def _looks_like_binary_only_evidence(blob: str) -> bool:
+    text = str(blob or "")
+    if not text:
+        return False
+    lower = text.lower()
+    hex_escapes = lower.count("\\x")
+    if hex_escapes < 8:
+        return False
+    readable_markers = (
+        "http/1.1 200",
+        "http 200",
+        "content-type",
+        "server:",
+        "host:",
+        "head",
+        "refs",
+        "description",
+        "[core]",
+        "repositoryformatversion",
+        "remote ",
+        "author ",
+        "commit ",
+        "tree ",
+        "blob ",
+        "name:",
+        "email:",
+    )
+    readable_hits = sum(1 for marker in readable_markers if marker in lower)
+    if readable_hits >= 3:
+        return False
+    return any(token in lower for token in ("git_exposed", ".git/", "compressed", "zlib", "pack")) or hex_escapes >= 16
+
+
 class VerifyFindingTool:
     name = "verify_finding"
     description = (
@@ -123,6 +233,10 @@ class VerifyFindingTool:
             "finding_type": {"type": "string"},
             "affected_component": {"type": "string"},
             "description": {"type": "string"},
+            "impact": {"type": "string"},
+            "technical_analysis": {"type": "string"},
+            "poc_description": {"type": "string"},
+            "poc_script_code": {"type": "string"},
             "evidence": {"type": "string", "description": "Raw HTTP req/resp or tool output that supports the finding"},
             "baseline_size": {
                 "type": "integer",
@@ -147,7 +261,14 @@ class VerifyFindingTool:
         evidence = str(kwargs.get("evidence", ""))
         severity = str(kwargs.get("severity", "unknown"))
         description = str(kwargs.get("description", ""))
+        impact = str(kwargs.get("impact", ""))
+        technical_analysis = str(kwargs.get("technical_analysis", ""))
+        poc_description = str(kwargs.get("poc_description", ""))
+        poc_script_code = _normalize_poc_blob(kwargs.get("poc_script_code", ""))
         baseline_size = kwargs.get("baseline_size")
+
+        if not evidence and poc_script_code:
+            evidence = poc_script_code
 
         if not (finding_type and component and evidence):
             return ToolResult(
@@ -155,6 +276,71 @@ class VerifyFindingTool:
                 summary="verify_finding: finding_type, affected_component, and evidence are required",
                 error="missing_fields",
             )
+
+        if finding_type.lower() in {"misconfiguration", "information_disclosure"} and _looks_like_binary_only_evidence(
+            "\n".join(part for part in (evidence, technical_analysis, poc_script_code) if part)
+        ):
+            return ToolResult(
+                ok=True,
+                data={
+                    "verdict": "REFUTED",
+                    "confidence": "high",
+                    "reasoning": "The captured response is dominated by escaped binary/compressed blob data without readable secret material or clear exposed repository metadata, so this does not yet prove a meaningful disclosure.",
+                    "finding_type": finding_type,
+                    "affected_component": component,
+                    "used_stronger_model": False,
+                    "preflight_blocked": True,
+                },
+                summary="verify_finding: REFUTED (high) — binary blob without readable disclosure",
+            )
+
+        if severity.lower() in {"high", "critical"}:
+            if not all(
+                field.strip()
+                for field in (impact, technical_analysis, poc_description, poc_script_code)
+            ):
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "verdict": "REFUTED",
+                        "confidence": "high",
+                        "reasoning": "High/critical claim is missing structured PoC or analysis fields required by the Strix-style reporting contract.",
+                        "finding_type": finding_type,
+                        "affected_component": component,
+                        "used_stronger_model": False,
+                        "preflight_blocked": True,
+                    },
+                    summary="verify_finding: REFUTED (high) — incomplete high-severity report contract",
+                )
+            if not (_looks_like_http_exchange(poc_script_code) or _has_observed_result(poc_script_code)):
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "verdict": "REFUTED",
+                        "confidence": "high",
+                        "reasoning": "PoC transcript does not show a replayable exploit attempt paired with an observed result.",
+                        "finding_type": finding_type,
+                        "affected_component": component,
+                        "used_stronger_model": False,
+                        "preflight_blocked": True,
+                    },
+                    summary="verify_finding: REFUTED (high) — PoC lacks attempt/result transcript",
+                )
+            combined = "\n".join([technical_analysis, poc_description, poc_script_code])
+            if _finding_type_needs_control(finding_type) and not _has_control_signal(combined):
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "verdict": "UNCONFIRMED",
+                        "confidence": "medium",
+                        "reasoning": "PoC shows a positive signal, but no control comparison is recorded for this finding type.",
+                        "finding_type": finding_type,
+                        "affected_component": component,
+                        "used_stronger_model": False,
+                        "preflight_blocked": True,
+                    },
+                    summary="verify_finding: UNCONFIRMED (medium) — no control comparison recorded",
+                )
 
         if self._brain is None or not hasattr(self._brain, "_call_llm_with_fallback"):
             return ToolResult(
@@ -170,6 +356,10 @@ class VerifyFindingTool:
             f"  severity (claimed): {severity}\n"
             f"  affected_component: {component}\n"
             f"  description: {description[:500]}\n"
+            f"  impact: {impact[:400]}\n"
+            f"  technical_analysis: {technical_analysis[:800]}\n"
+            f"  poc_description: {poc_description[:800]}\n"
+            f"  poc_script_code: {poc_script_code[:1500]}\n"
             f"  evidence (raw): {evidence[:1500]}\n"
         )
         if baseline_size is not None:
@@ -210,6 +400,12 @@ class VerifyFindingTool:
                 ok=False,
                 summary="verify_finding: verifier returned no response",
                 error="no_response",
+            )
+        if not isinstance(response, str):
+            return ToolResult(
+                ok=False,
+                summary=f"verify_finding: verifier returned non-text response ({type(response).__name__})",
+                error="non_text_response",
             )
 
         # Parse the verdict

@@ -18,6 +18,7 @@ async def execute(target_url: str, token: str, **kwargs: Any) -> dict[str, Any]:
             "accessible": [{"path", "status", "size", "was_401_without_auth"}, ...],
             "new_endpoints": [...],  # accessible WITH auth but 401 WITHOUT
             "user_data_exposed": [...],  # endpoints returning user/admin data
+            "control_evidence": {"auth_only": [...], "same_data_without_auth": [...]},
             "total_tested": int,
         }
     """
@@ -29,6 +30,8 @@ async def execute(target_url: str, token: str, **kwargs: Any) -> dict[str, Any]:
     accessible: list[dict] = []
     new_endpoints: list[dict] = []
     user_data_exposed: list[dict] = []
+    auth_only: list[dict] = []
+    same_data_without_auth: list[dict] = []
 
     _mgr = SessionManager()
     _session = await _mgr.get_session(target)
@@ -51,6 +54,8 @@ async def execute(target_url: str, token: str, **kwargs: Any) -> dict[str, Any]:
                     "status_noauth": r_noauth.status,
                     "size_auth": r_auth.body_length,
                     "size_noauth": r_noauth.body_length,
+                    "preview_auth": r_auth.text[:240],
+                    "preview_noauth": r_noauth.text[:240],
                 }
 
                 if r_auth.status == 200:
@@ -60,6 +65,7 @@ async def execute(target_url: str, token: str, **kwargs: Any) -> dict[str, Any]:
                     # Detect broken access control: should need auth but doesn't
                     if r_noauth.status == 200 and r_noauth.text == r_auth.text:
                         entry["issue"] = "no_auth_required"
+                        same_data_without_auth.append(entry)
 
                     # Detect IDOR-able data
                     body = r_auth.text.lower()
@@ -69,6 +75,7 @@ async def execute(target_url: str, token: str, **kwargs: Any) -> dict[str, Any]:
                 # Track newly accessible (auth unlocks)
                 if r_auth.status == 200 and r_noauth.status == 401:
                     new_endpoints.append(entry)
+                    auth_only.append(entry)
 
             except Exception:
                 pass
@@ -84,5 +91,9 @@ async def execute(target_url: str, token: str, **kwargs: Any) -> dict[str, Any]:
         "accessible": accessible,
         "new_endpoints": new_endpoints,
         "user_data_exposed": user_data_exposed,
+        "control_evidence": {
+            "auth_only": auth_only[:5],
+            "same_data_without_auth": same_data_without_auth[:5],
+        },
         "total_tested": len(AUTH_PATHS),
     }

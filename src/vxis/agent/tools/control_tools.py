@@ -23,10 +23,24 @@ _MAX_WAIT_SECONDS = 5.0
 class FinishScanTool:
     name = "finish_scan"
     description = "End the scan. Emit this when reconnaissance and analysis are complete, or when no further productive actions are possible."
-    input_schema: dict[str, Any] = {"type": "object", "properties": {}}
+    input_schema: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "executive_summary": {"type": "string"},
+            "methodology": {"type": "string"},
+            "technical_analysis": {"type": "string"},
+            "recommendations": {"type": "string"},
+        },
+    }
 
     async def run(self, **kwargs: Any) -> ToolResult:
-        return ToolResult(ok=True, data={"final": True}, summary="scan finished")
+        final_report = {
+            "executive_summary": str(kwargs.get("executive_summary", "")).strip(),
+            "methodology": str(kwargs.get("methodology", "")).strip(),
+            "technical_analysis": str(kwargs.get("technical_analysis", "")).strip(),
+            "recommendations": str(kwargs.get("recommendations", "")).strip(),
+        }
+        return ToolResult(ok=True, data={"final": True, "final_report": final_report}, summary="scan finished")
 
 
 class ThinkTool:

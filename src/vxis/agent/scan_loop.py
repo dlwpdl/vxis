@@ -1,9 +1,11 @@
 from __future__ import annotations
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
+from urllib.parse import parse_qs, urlencode, urlparse
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -11,6 +13,27 @@ logger = logging.getLogger(__name__)
 _TERMINAL_VECTOR_STATUSES = {"found", "clean", "blocked", "dead"}
 _TERMINAL_TODO_STATUSES = {"done", "blocked"}
 _TERMINAL_BRANCH_STATUSES = {"proven", "exhausted", "dead", "blocked"}
+
+
+def _sanitize_evidence_text(value: Any, *, limit: int = 1200) -> str:
+    """Render binary-ish evidence into report-safe printable text."""
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text:
+        return ""
+    out: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        if ch in {"\n", "\t"}:
+            out.append(ch)
+            continue
+        if ch.isprintable() and ch != "\x00":
+            out.append(ch)
+            continue
+        if code <= 0xFF:
+            out.append(f"\\x{code:02x}")
+        else:
+            out.append(f"\\u{code:04x}")
+    return "".join(out)[:limit]
 
 
 @dataclass
@@ -101,6 +124,8 @@ class BranchState:
     vector_id: str
     title: str
     priority: int
+    role: str = "recon_worker"
+    phase: str = "surface_mapping"
     owner: str = "root"
     parent_branch_id: str = ""
     source_candidate_id: str = ""
@@ -125,6 +150,8 @@ class BranchState:
             "vector_id": self.vector_id,
             "title": self.title,
             "priority": self.priority,
+            "role": self.role,
+            "phase": self.phase,
             "owner": self.owner,
             "parent_branch_id": self.parent_branch_id,
             "source_candidate_id": self.source_candidate_id,
@@ -142,6 +169,106 @@ class BranchState:
             "child_ids": list(self.child_ids),
             "watch_terms": list(self.watch_terms),
             "last_iter": self.last_iter,
+        }
+
+
+@dataclass
+class ReviewItem:
+    """A verifier/judge escalation that should stay visible across iterations."""
+
+    id: str
+    stage: str
+    status: str
+    title: str
+    reason: str
+    action_hint: str = ""
+    affected_component: str = ""
+    source_finding_type: str = ""
+    iteration: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "stage": self.stage,
+            "status": self.status,
+            "title": self.title,
+            "reason": self.reason,
+            "action_hint": self.action_hint,
+            "affected_component": self.affected_component,
+            "source_finding_type": self.source_finding_type,
+            "iteration": self.iteration,
+        }
+
+
+@dataclass
+class ReviewDecision:
+    """Concrete verifier/judge adjudication recorded as review telemetry."""
+
+    stage: str
+    verdict: str
+    title: str
+    reason: str
+    action_hint: str = ""
+    blocked_action: str = ""
+    affected_component: str = ""
+    source_finding_type: str = ""
+    iteration: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "stage": self.stage,
+            "verdict": self.verdict,
+            "title": self.title,
+            "reason": self.reason,
+            "action_hint": self.action_hint,
+            "blocked_action": self.blocked_action,
+            "affected_component": self.affected_component,
+            "source_finding_type": self.source_finding_type,
+            "iteration": self.iteration,
+        }
+
+
+@dataclass
+class CallbackObservation:
+    """Observed callback / internal reachability evidence for blind or SSRF-style pivots."""
+
+    finding_type: str
+    component: str
+    signal: str
+    payload: str
+    summary: str
+    iteration: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "finding_type": self.finding_type,
+            "component": self.component,
+            "signal": self.signal,
+            "payload": self.payload,
+            "summary": self.summary,
+            "iteration": self.iteration,
+        }
+
+
+@dataclass
+class RetrievalObservation:
+    """Observed credential/data retrieval or exfiltration evidence."""
+
+    finding_type: str
+    component: str
+    retrieval_kind: str
+    summary: str
+    sample: str
+    iteration: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "finding_type": self.finding_type,
+            "component": self.component,
+            "retrieval_kind": self.retrieval_kind,
+            "summary": self.summary,
+            "sample": self.sample,
+            "iteration": self.iteration,
         }
 
 
@@ -165,8 +292,13 @@ class ScanLoopState:
     attempt_outcomes: list[AttemptOutcome] = field(default_factory=list)
     scan_todos: dict[str, ScanTodo] = field(default_factory=dict)
     branches: dict[str, BranchState] = field(default_factory=dict)
+    review_queue: dict[str, ReviewItem] = field(default_factory=dict)
+    review_history: list[ReviewDecision] = field(default_factory=list)
+    callback_observations: list[CallbackObservation] = field(default_factory=list)
+    retrieval_observations: list[RetrievalObservation] = field(default_factory=list)
     waiting_reason: str = ""
     shared_notes: list[str] = field(default_factory=list)
+    blocked_skill_counts: dict[str, int] = field(default_factory=dict)
 
     def add_message(self, role: str, content: Any) -> None:
         self.messages.append({"role": role, "content": content, "iter": self.iteration})
@@ -199,6 +331,7 @@ class ScanLoopState:
                 vector_id,
                 title,
                 priority=existing.priority,
+                role=ScanAgentLoop._infer_branch_role(vector_id=vector_id, title=title),
                 evidence=existing.evidence,
             )
             self._sync_candidate_control_state(existing)
@@ -225,6 +358,7 @@ class ScanLoopState:
             vector_id,
             title,
             priority=priority,
+            role=ScanAgentLoop._infer_branch_role(vector_id=vector_id, title=title),
             evidence=evidence,
         )
         self._sync_candidate_control_state(candidate)
@@ -263,6 +397,8 @@ class ScanLoopState:
         title: str,
         *,
         priority: int = 50,
+        role: str = "recon_worker",
+        phase: str = "",
         owner: str = "root",
         parent_branch_id: str = "",
         source_candidate_id: str = "",
@@ -281,6 +417,15 @@ class ScanLoopState:
                 vector_id=vector_id,
                 title=title,
                 priority=priority,
+                role=role,
+                phase=phase or ScanAgentLoop._infer_branch_phase(
+                    role=role,
+                    vector_id=vector_id,
+                    title=title,
+                    objective=objective,
+                    next_step=next_step,
+                    crown_jewel=crown_jewel,
+                ),
                 owner=owner,
                 parent_branch_id=parent_branch_id,
                 source_candidate_id=source_candidate_id,
@@ -301,6 +446,15 @@ class ScanLoopState:
             return branch
         branch.title = title
         branch.priority = max(branch.priority, priority)
+        branch.role = role or branch.role
+        branch.phase = phase or branch.phase or ScanAgentLoop._infer_branch_phase(
+            role=branch.role,
+            vector_id=vector_id,
+            title=title,
+            objective=objective or branch.objective,
+            next_step=next_step or branch.next_step,
+            crown_jewel=crown_jewel or branch.crown_jewel,
+        )
         branch.owner = owner or branch.owner
         if parent_branch_id:
             branch.parent_branch_id = parent_branch_id
@@ -347,6 +501,133 @@ class ScanLoopState:
     def clear_waiting_reason(self) -> None:
         self.waiting_reason = ""
 
+    def record_blocked_skill(self, skill_name: str) -> None:
+        clean = str(skill_name).strip().lower()
+        if not clean:
+            return
+        self.blocked_skill_counts[clean] = self.blocked_skill_counts.get(clean, 0) + 1
+
+    def record_review_item(
+        self,
+        item_id: str,
+        *,
+        stage: str,
+        status: str,
+        title: str,
+        reason: str,
+        action_hint: str = "",
+        affected_component: str = "",
+        source_finding_type: str = "",
+    ) -> ReviewItem:
+        item = self.review_queue.get(item_id)
+        if item is None:
+            item = ReviewItem(
+                id=item_id,
+                stage=stage,
+                status=status,
+                title=title[:160],
+                reason=reason[:260],
+                action_hint=action_hint[:200],
+                affected_component=affected_component[:200],
+                source_finding_type=source_finding_type[:80],
+                iteration=self.iteration,
+            )
+            self.review_queue[item_id] = item
+            return item
+        item.stage = stage or item.stage
+        item.status = status or item.status
+        item.title = title[:160] or item.title
+        item.reason = reason[:260] or item.reason
+        item.action_hint = action_hint[:200] or item.action_hint
+        item.affected_component = affected_component[:200] or item.affected_component
+        item.source_finding_type = source_finding_type[:80] or item.source_finding_type
+        item.iteration = self.iteration
+        return item
+
+    def review_queue_as_dicts(self) -> list[dict[str, Any]]:
+        return [
+            item.to_dict()
+            for item in sorted(
+                self.review_queue.values(),
+                key=lambda i: (i.status == "closed", -i.iteration, i.id),
+            )
+        ]
+
+    def record_review_decision(
+        self,
+        *,
+        stage: str,
+        verdict: str,
+        title: str,
+        reason: str,
+        action_hint: str = "",
+        blocked_action: str = "",
+        affected_component: str = "",
+        source_finding_type: str = "",
+    ) -> None:
+        self.review_history.append(
+            ReviewDecision(
+                stage=stage[:32],
+                verdict=verdict[:32],
+                title=title[:160],
+                reason=reason[:300],
+                action_hint=action_hint[:200],
+                blocked_action=blocked_action[:80],
+                affected_component=affected_component[:240],
+                source_finding_type=source_finding_type[:80],
+                iteration=self.iteration,
+            )
+        )
+
+    def review_history_as_dicts(self) -> list[dict[str, Any]]:
+        return [item.to_dict() for item in self.review_history]
+
+    def record_callback_observation(
+        self,
+        *,
+        finding_type: str,
+        component: str,
+        signal: str,
+        payload: str,
+        summary: str,
+    ) -> None:
+        self.callback_observations.append(
+            CallbackObservation(
+                finding_type=str(finding_type)[:80],
+                component=str(component)[:240],
+                signal=str(signal)[:120],
+                payload=str(payload)[:300],
+                summary=str(summary)[:500],
+                iteration=self.iteration,
+            )
+        )
+
+    def record_retrieval_observation(
+        self,
+        *,
+        finding_type: str,
+        component: str,
+        retrieval_kind: str,
+        summary: str,
+        sample: str,
+    ) -> None:
+        self.retrieval_observations.append(
+            RetrievalObservation(
+                finding_type=str(finding_type)[:80],
+                component=str(component)[:240],
+                retrieval_kind=str(retrieval_kind)[:80],
+                summary=str(summary)[:500],
+                sample=_sanitize_evidence_text(sample, limit=1200),
+                iteration=self.iteration,
+            )
+        )
+
+    def callback_observations_as_dicts(self) -> list[dict[str, Any]]:
+        return [obs.to_dict() for obs in self.callback_observations]
+
+    def retrieval_observations_as_dicts(self) -> list[dict[str, Any]]:
+        return [obs.to_dict() for obs in self.retrieval_observations]
+
     @staticmethod
     def _todo_status_for_candidate(status: str) -> str:
         return {
@@ -389,6 +670,12 @@ class ScanLoopState:
             candidate.vector_id,
             candidate.title,
             priority=candidate.priority,
+            role=ScanAgentLoop._infer_branch_role(vector_id=candidate.vector_id, title=candidate.title),
+            phase=ScanAgentLoop._infer_branch_phase(
+                role=ScanAgentLoop._infer_branch_role(vector_id=candidate.vector_id, title=candidate.title),
+                vector_id=candidate.vector_id,
+                title=candidate.title,
+            ),
             source_candidate_id=candidate.id,
             evidence=candidate.evidence,
             watch_terms=[candidate.vector_id.lower(), candidate.title.lower()],
@@ -404,6 +691,7 @@ class ScanLoopState:
         self,
         branch_id: str,
         tool: str,
+        args: Any | None = None,
         *,
         status: str,
         summary: str,
@@ -417,6 +705,8 @@ class ScanLoopState:
         branch.last_summary = summary[:240]
         branch.last_report = summary[:160]
         branch.last_iter = self.iteration
+        if branch.role == "post_exploit_worker":
+            branch.phase = ScanAgentLoop._advance_post_exploit_phase(branch.phase, tool, args or {})
         if blocker:
             branch.blocker = blocker[:180]
         if status == "found":
@@ -536,8 +826,20 @@ class ScanLoopState:
             "waiting_reason": self.waiting_reason,
             "todo_counts": todo_counts,
             "branch_counts": branch_counts,
+            "review_counts": {
+                status: sum(1 for item in self.review_queue.values() if item.status == status)
+                for status in {"open", "escalated", "closed"}
+                if any(item.status == status for item in self.review_queue.values())
+            },
+            "review_decision_counts": {
+                stage: sum(1 for item in self.review_history if item.stage == stage)
+                for stage in {"verifier", "judge"}
+                if any(item.stage == stage for item in self.review_history)
+            },
             "todos": todos[:limit],
             "branches": branches[:limit],
+            "reviews": self.review_queue_as_dicts()[:limit],
+            "recent_attempts": self.attempt_outcomes_as_dicts()[-limit:],
             "shared_notes": list(self.shared_notes[-3:]),
         }
 
@@ -655,13 +957,66 @@ _DESKTOP_SKILLS: frozenset[str] = frozenset({
     "test_binary_protections",
 })
 
+_WEB_PIVOT_SKILL_GRAPH: dict[str, tuple[str, ...]] = {
+    "attempt_auth": ("post_auth_enum", "test_idor", "test_api_security", "test_business_logic"),
+    "post_auth_enum": ("test_idor", "test_api_security", "test_business_logic", "test_sensitive_files"),
+    "test_idor": ("test_api_security", "test_business_logic", "test_injection"),
+    "test_injection": ("test_sensitive_files", "test_misconfig", "test_xss", "test_ssrf"),
+    "test_sensitive_files": ("test_infra", "test_misconfig", "test_business_logic"),
+    "test_api_security": ("test_business_logic", "test_idor", "test_auth_deep"),
+}
+
+_DESKTOP_PIVOT_SKILL_GRAPH: dict[str, tuple[str, ...]] = {
+    "test_local_storage_secrets": ("test_deeplink_abuse", "test_ipc_injection", "test_signature_audit"),
+    "test_deeplink_abuse": ("test_ipc_injection", "test_electron_misconfig", "test_dylib_hijack"),
+    "test_signature_audit": ("test_entitlement_audit", "test_dylib_hijack", "test_binary_protections"),
+    "test_electron_misconfig": ("test_local_storage_secrets", "test_deeplink_abuse", "test_ipc_injection"),
+}
+
+_WEB_VECTOR_FAMILY_RULES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
+    ("auth", ("auth", "login", "credential", "session"), ("weak_auth", "broken_access_control", "sql_injection")),
+    ("injection", ("sqli", "sql", "injection", "nosql", "ssti"), ("sql_injection",)),
+    ("idor", ("idor", "object", "access_control"), ("idor", "broken_access_control")),
+    ("disclosure", ("secret", "file", "git", "debug", "config", "disclosure"), ("information_disclosure", "misconfiguration")),
+    ("xss", ("xss",), ("xss", "xss_reflected", "xss_stored", "xss_dom")),
+    ("ssrf", ("ssrf",), ("ssrf",)),
+    ("infra", ("route", "directory", "cve", "template", "infra"), ("misconfiguration", "information_disclosure")),
+)
+
 
 class ScanAgentLoop:
+    _ROLE_ALLOWED_CAPABILITIES: dict[str, set[str]] = {
+        "recon_worker": {
+            "recon", "browse", "probe", "memory", "plan", "control",
+            "report", "review", "chain",
+        },
+        "exploit_worker": {
+            "browse", "probe", "exploit", "report", "review", "chain",
+            "plan", "control",
+        },
+        "post_exploit_worker": {
+            "probe", "exploit", "retrieve", "report", "review", "chain",
+            "memory", "plan", "control",
+        },
+        "review_worker": {
+            "review", "report", "chain", "memory", "plan", "control",
+        },
+    }
+    _POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES: dict[str, set[str]] = {
+        "session_reuse": {"browse", "probe", "retrieve", "report", "review", "plan", "control"},
+        "privilege_probe": {"browse", "probe", "exploit", "retrieve", "report", "review", "chain", "plan", "control"},
+        "data_access": {"probe", "exploit", "retrieve", "report", "review", "chain", "memory", "plan", "control"},
+        "chain_closure": {"report", "review", "chain", "memory", "plan", "control", "probe"},
+    }
+
     def __init__(
         self,
         target: str,
         registry: ToolRegistry,
         max_iters: int = 300,
+        hard_max_iters: int | None = None,
+        adaptive_budget: bool = False,
+        extend_iters: int = 0,
         brain: Any | None = None,
         critic_interval: int = 6,
         target_kind: Any = None,
@@ -673,6 +1028,10 @@ class ScanAgentLoop:
         self.critic_interval = critic_interval
         self._last_critic_iter = 0
         self._event_callback = event_callback
+        self.hard_max_iters = hard_max_iters if hard_max_iters is not None else max_iters
+        self.adaptive_budget = adaptive_budget
+        self.extend_iters = max(0, extend_iters)
+        self._latest_control_plane: dict[str, Any] = {}
         # Surface kind drives skill-sweep filtering. Without it, a desktop
         # scan ends up running test_xss / test_sqli / etc. on a file:// path
         # — wasted iterations + false-positive noise from web skills hitting
@@ -681,6 +1040,131 @@ class ScanAgentLoop:
         from vxis.interaction.surface import TargetKind as _TK
         self._target_kind = target_kind or _TK.WEB
         self._seed_vector_candidates()
+
+    @classmethod
+    def _infer_branch_role(
+        cls,
+        *,
+        vector_id: str,
+        title: str = "",
+        objective: str = "",
+        source_finding_id: str = "",
+        crown_jewel: str = "",
+    ) -> str:
+        blob = " ".join((vector_id, title, objective, crown_jewel)).lower()
+        if source_finding_id or any(
+            token in blob for token in ("admin", "db", "dump", "key theft", "data exfil", "credential", "pivot")
+        ):
+            return "post_exploit_worker"
+        if any(token in blob for token in ("review", "verify", "judge", "attestation", "chain analysis")):
+            return "review_worker"
+        if any(
+            token in blob
+            for token in ("auth", "sqli", "sqli", "xss", "ssrf", "idor", "csrf", "business", "injection")
+        ):
+            return "exploit_worker"
+        return "recon_worker"
+
+    @classmethod
+    def _infer_branch_phase(
+        cls,
+        *,
+        role: str,
+        vector_id: str,
+        title: str = "",
+        objective: str = "",
+        next_step: str = "",
+        crown_jewel: str = "",
+    ) -> str:
+        blob = " ".join((vector_id, title, objective, next_step, crown_jewel)).lower()
+        if role == "post_exploit_worker":
+            if any(token in blob for token in ("cookie", "token", "session", "login", "post_auth_enum")):
+                return "session_reuse"
+            if any(token in blob for token in ("/admin", "role", "privilege", "export", "state-changing")):
+                return "privilege_probe"
+            if any(token in blob for token in ("dump", "data", "rows", "table", "exfil", "download", "enumerate")):
+                return "data_access"
+            return "chain_closure"
+        if role == "exploit_worker":
+            return "exploit_validation"
+        if role == "review_worker":
+            return "adjudication"
+        return "surface_mapping"
+
+    @classmethod
+    def _advance_post_exploit_phase(
+        cls,
+        phase: str,
+        name: str,
+        args: dict[str, Any] | Any,
+    ) -> str:
+        capability = cls._action_capability(name, args)
+        if phase == "session_reuse" and capability in {"browse", "probe", "retrieve"}:
+            blob = f"{name} {args}".lower()
+            if any(token in blob for token in ("/admin", "role", "export", "post_auth_enum", "browser_get_cookies", "cookie", "token")):
+                return "privilege_probe"
+        if phase == "privilege_probe" and capability in {"probe", "exploit", "retrieve"}:
+            blob = f"{name} {args}".lower()
+            if any(token in blob for token in ("dump", "table", "users", "download", "export", "orders", "profile", "sqlmap")):
+                return "data_access"
+        if phase == "data_access" and capability in {"report", "chain", "review"}:
+            return "chain_closure"
+        return phase
+
+    @staticmethod
+    def _action_capability(name: str, args: dict[str, Any] | Any) -> str:
+        if name in {"verify_finding"}:
+            return "review"
+        if name in {"query_findings", "query_scan_memory"}:
+            return "memory"
+        if name in {"link_chain"}:
+            return "chain"
+        if name in {"finish_scan", "think", "wait"}:
+            return "control" if name != "think" else "plan"
+        if name in {"report_finding"}:
+            return "report"
+        if name in {"fingerprint_target", "load_playbook", "list_playbooks"}:
+            return "recon"
+        if name.startswith("browser_"):
+            return "browse"
+        if name in {"http_request"}:
+            return "probe"
+        if name in {"shell_exec", "python_exec"}:
+            return "exploit"
+        if name == "run_skill" and isinstance(args, dict):
+            skill = str(args.get("skill", args.get("_skill_override", ""))).lower()
+            if skill in {"enumerate_endpoints", "test_sensitive_files", "test_infra", "test_misconfig", "fingerprint_target"}:
+                return "recon"
+            if skill in {"post_auth_enum", "test_api_security"}:
+                return "retrieve"
+            if skill in {"test_injection", "attempt_auth", "test_idor", "test_xss", "test_ssrf", "test_auth_deep", "test_business_logic", "test_csrf", "test_crypto"}:
+                return "exploit"
+        return "probe"
+
+    @staticmethod
+    def _normalize_tool_args(name: str, args: dict[str, Any] | Any) -> dict[str, Any] | Any:
+        if not isinstance(args, dict):
+            return args
+        normalized = dict(args)
+        if name == "shell_exec" and not normalized.get("command") and normalized.get("cmd"):
+            normalized["command"] = normalized["cmd"]
+        return normalized
+
+    @classmethod
+    def _role_allows_action(cls, role: str, name: str, args: dict[str, Any] | Any) -> bool:
+        allowed = cls._ROLE_ALLOWED_CAPABILITIES.get(role or "recon_worker", set())
+        if not allowed:
+            return True
+        return cls._action_capability(name, args) in allowed
+
+    @classmethod
+    def _phase_allows_action(cls, branch: BranchState, name: str, args: dict[str, Any] | Any) -> bool:
+        if branch.role != "post_exploit_worker":
+            return True
+        allowed = cls._POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES.get(branch.phase or "chain_closure", set())
+        if not allowed:
+            return True
+        return cls._action_capability(name, args) in allowed
 
     def _seed_vector_candidates(self) -> None:
         """Seed the evergreen candidates the loop must exhaust for the surface."""
@@ -830,6 +1314,488 @@ class ScanAgentLoop:
             },
         )
 
+    def _build_report_finding_args(
+        self,
+        *,
+        title: str,
+        severity: str,
+        finding_type: str,
+        affected_component: str,
+        description: str,
+        impact: str,
+        technical_analysis: str,
+        poc_description: str,
+        poc_script_code: str,
+        remediation_steps: str,
+        endpoint: str = "",
+        method: str = "",
+        cwe: str = "",
+        extra_evidence: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any]:
+        _safe_poc = _sanitize_evidence_text(poc_script_code, limit=4000)
+        args = {
+            "title": title,
+            "severity": severity,
+            "finding_type": finding_type,
+            "affected_component": affected_component,
+            "description": description,
+            "impact": impact,
+            "technical_analysis": technical_analysis,
+            "poc_description": poc_description,
+            "poc_script_code": _safe_poc,
+            "remediation_steps": remediation_steps,
+            "endpoint": endpoint or affected_component,
+            "method": method,
+            "cwe": cwe,
+            # Keep legacy alias populated so older downstream code still sees it.
+            "evidence": _safe_poc,
+        }
+        if extra_evidence:
+            args["extra_evidence"] = list(extra_evidence)
+        return args
+
+    def _compact_local_reasoning_blob(self, value: Any, *, limit: int) -> str:
+        text = _sanitize_evidence_text(str(value or ""), limit=max(120, limit * 2))
+        if not text:
+            return ""
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if len(lines) <= 6 and len(text) <= limit:
+            return text[:limit]
+        picked: list[str] = []
+        keywords = ("http/", "host:", "payload", "baseline", "control", "status", "response", "error", "token", "cookie", "admin", "select", "union")
+        for line in lines:
+            lower = line.lower()
+            if any(token in lower for token in keywords):
+                picked.append(line)
+            if len(picked) >= 6:
+                break
+        if not picked:
+            picked = lines[:6]
+        compact = "\n".join(picked)
+        return compact[:limit]
+
+    def _compact_local_finding_payload(self, args: dict[str, Any]) -> dict[str, Any]:
+        if self._llm_discipline_profile() != "local_strict":
+            return dict(args)
+        compact = dict(args)
+        compact["description"] = str(compact.get("description", ""))[:220]
+        compact["impact"] = str(compact.get("impact", ""))[:240]
+        compact["technical_analysis"] = self._compact_local_reasoning_blob(
+            compact.get("technical_analysis", ""),
+            limit=520,
+        )
+        compact["poc_description"] = self._compact_local_reasoning_blob(
+            compact.get("poc_description", ""),
+            limit=420,
+        )
+        compact["poc_script_code"] = self._compact_local_reasoning_blob(
+            compact.get("poc_script_code", ""),
+            limit=1200,
+        )
+        compact["evidence"] = self._compact_local_reasoning_blob(
+            compact.get("evidence", compact.get("poc_script_code", "")),
+            limit=1200,
+        )
+        if compact.get("extra_evidence"):
+            trimmed_extra: list[dict[str, Any]] = []
+            for item in list(compact.get("extra_evidence") or [])[:2]:
+                if not isinstance(item, dict):
+                    continue
+                trimmed_extra.append({
+                    **item,
+                    "title": str(item.get("title", ""))[:60],
+                    "content": self._compact_local_reasoning_blob(item.get("content", ""), limit=700),
+                })
+            compact["extra_evidence"] = trimmed_extra
+        return compact
+
+    @staticmethod
+    def _callback_evidence_item(*, title: str, signal: str, payload: str, summary: str) -> dict[str, str]:
+        return {
+            "evidence_type": "callback",
+            "title": title,
+            "content_type": "text/plain",
+            "content": (
+                f"Signal: {signal}\n"
+                f"Payload: {payload}\n"
+                f"Summary: {summary}"
+            )[:4000],
+        }
+
+    @staticmethod
+    def _retrieval_evidence_item(*, title: str, retrieval_kind: str, summary: str, sample: str) -> dict[str, str]:
+        return {
+            "evidence_type": "retrieval",
+            "title": title,
+            "content_type": "text/plain",
+            "content": (
+                f"Retrieval kind: {retrieval_kind}\n"
+                f"Summary: {summary}\n\n"
+                f"Sample:\n{_sanitize_evidence_text(sample, limit=3000)}"
+            )[:4000],
+        }
+
+    @staticmethod
+    def _exfil_evidence_item(*, title: str, summary: str, sample: str) -> dict[str, str]:
+        return {
+            "evidence_type": "exfil",
+            "title": title,
+            "content_type": "text/plain",
+            "content": (
+                f"Summary: {summary}\n\n"
+                f"Sample:\n{_sanitize_evidence_text(sample, limit=3000)}"
+            )[:4000],
+        }
+
+    def _build_reflected_get_poc(
+        self,
+        *,
+        url: str,
+        param: str,
+        payload: str,
+        control: dict[str, Any],
+        response_preview: str,
+    ) -> str:
+        parsed = urlparse(url)
+        path = parsed.path or "/"
+        original_params = parse_qs(parsed.query, keep_blank_values=True)
+        original_value = ""
+        if param in original_params and original_params[param]:
+            original_value = original_params[param][0]
+        payload_params = dict(original_params)
+        payload_params[param] = [original_value + payload]
+        baseline_query = urlencode({k: v[0] for k, v in original_params.items()}) if original_params else ""
+        payload_query = urlencode({k: v[0] for k, v in payload_params.items()})
+        baseline_target = path + (f"?{baseline_query}" if baseline_query else "")
+        payload_target = path + (f"?{payload_query}" if payload_query else "")
+        host = parsed.netloc or urlparse(self.state.target).netloc or "target"
+        baseline_preview = str(control.get("baseline_preview", ""))[:500]
+        payload_preview = str(control.get("payload_preview", response_preview))[:700]
+        baseline_status = control.get("baseline_status", "?")
+        payload_status = control.get("payload_status", "?")
+        return (
+            f"GET {baseline_target} HTTP/1.1\n"
+            f"Host: {host}\n\n"
+            f"HTTP/1.1 {baseline_status}\n\n"
+            f"{baseline_preview}\n\n"
+            f"GET {payload_target} HTTP/1.1\n"
+            f"Host: {host}\n\n"
+            f"HTTP/1.1 {payload_status}\n\n"
+            f"{payload_preview}"
+        )
+
+    def _build_simple_http_poc(
+        self,
+        *,
+        url: str,
+        method: str = "GET",
+        status: Any = "?",
+        response_preview: str,
+    ) -> str:
+        parsed = urlparse(url)
+        host = parsed.netloc or urlparse(self.state.target).netloc or "target"
+        target = parsed.path or "/"
+        if parsed.query:
+            target += f"?{parsed.query}"
+        preview = _sanitize_evidence_text(response_preview, limit=2500)
+        return (
+            f"{method.upper()} {target} HTTP/1.1\n"
+            f"Host: {host}\n\n"
+            f"HTTP/1.1 {status}\n\n"
+            f"{preview}"
+        )
+
+    def _settle_branches_after_chain(self, finding_ids: list[str]) -> None:
+        chain_ids = {str(fid) for fid in finding_ids if fid}
+        if not chain_ids:
+            return
+        findings_by_id: dict[str, dict[str, Any]] = {}
+        try:
+            from vxis.agent.tools.finding_tools import _get_findings
+            findings_by_id = {
+                str(item.get("id")): item
+                for item in (_get_findings() or [])
+                if isinstance(item, dict) and item.get("id")
+            }
+        except Exception:
+            findings_by_id = {}
+
+        branch_ids_to_settle: set[str] = set()
+        for fid in chain_ids:
+            finding = findings_by_id.get(fid) or {}
+            if finding:
+                for branch_id in self._parent_branch_ids_for_finding(finding):
+                    branch_ids_to_settle.add(branch_id)
+        for branch in self.state.branches.values():
+            if branch.status in _TERMINAL_BRANCH_STATUSES:
+                continue
+            if branch.source_finding_id and branch.source_finding_id in chain_ids:
+                branch_ids_to_settle.add(branch.id)
+                if branch.parent_branch_id:
+                    branch_ids_to_settle.add(branch.parent_branch_id)
+                branch_ids_to_settle.update(branch.child_ids)
+        for branch_id in list(branch_ids_to_settle):
+            branch = self.state.branches.get(branch_id)
+            if branch is None:
+                continue
+            if branch.parent_branch_id:
+                branch_ids_to_settle.add(branch.parent_branch_id)
+            branch_ids_to_settle.update(branch.child_ids)
+
+        for branch in self.state.branches.values():
+            if branch.status in _TERMINAL_BRANCH_STATUSES:
+                continue
+            if branch.id in branch_ids_to_settle:
+                branch.status = "proven"
+                branch.last_report = (branch.last_report or "linked into attack chain")[:160]
+                continue
+            if branch.parent_branch_id and branch.parent_branch_id in branch_ids_to_settle:
+                branch.status = "exhausted"
+                branch.last_report = (branch.last_report or "superseded by linked attack chain")[:160]
+
+    async def _dispatch_report_finding_checked(
+        self,
+        args: dict[str, Any],
+        *,
+        require_confirmed: bool = True,
+    ) -> ToolResult:
+        args = self._compact_local_finding_payload(args)
+        severity = str(args.get("severity", "")).lower()
+        if severity in {"high", "critical"} and "verify_finding" in self.registry.list_tools():
+            verify_args = {
+                "title": args.get("title", ""),
+                "severity": args.get("severity", ""),
+                "finding_type": args.get("finding_type", ""),
+                "affected_component": args.get("affected_component", ""),
+                "description": args.get("description", ""),
+                "impact": args.get("impact", ""),
+                "technical_analysis": args.get("technical_analysis", ""),
+                "poc_description": args.get("poc_description", ""),
+                "poc_script_code": args.get("poc_script_code", ""),
+                "evidence": args.get("evidence", ""),
+            }
+            verdict_result = await self.registry.dispatch("verify_finding", verify_args)
+            if verdict_result.ok:
+                verdict_data = verdict_result.data or {}
+                verdict = str(verdict_data.get("verdict", "UNCONFIRMED"))
+                reasoning = str(verdict_data.get("reasoning", "")) or f"Verifier returned {verdict}."
+                confidence = str(verdict_data.get("confidence", "low"))
+                self.state.verdict_counts[verdict] = self.state.verdict_counts.get(verdict, 0) + 1
+                _belief_entry = {
+                    "iter": self.state.iteration,
+                    "title": args.get("title", ""),
+                    "severity": args.get("severity", ""),
+                    "finding_type": args.get("finding_type", ""),
+                    "affected_component": args.get("affected_component", ""),
+                    "confidence": confidence,
+                    "reasoning": reasoning[:300],
+                }
+                if verdict == "CONFIRMED":
+                    self.state.confirmed_findings.append(_belief_entry)
+                elif verdict == "REFUTED":
+                    self.state.refuted_findings.append(_belief_entry)
+                self._record_verifier_decision(
+                    args=args,
+                    verdict=verdict,
+                    reasoning=reasoning,
+                    confidence=confidence,
+                )
+                self.state.add_message("tool", {
+                    "name": "verify_finding",
+                    "args": verify_args,
+                    "result": {
+                        "ok": True,
+                        "summary": verdict_result.summary,
+                        "data": verdict_data,
+                    },
+                })
+                if verdict != "CONFIRMED" and require_confirmed:
+                    return ToolResult(
+                        ok=False,
+                        summary=(
+                            "report_finding BLOCKED by auto-verifier "
+                            f"({verdict}). Reason: {reasoning[:220]}"
+                        ),
+                        data={"verifier_blocked": True, "verdict": verdict, "reasoning": reasoning},
+                        error="verifier_blocked",
+                    )
+                if verdict == "REFUTED":
+                    return ToolResult(
+                        ok=False,
+                        summary=(
+                            "report_finding BLOCKED by auto-verifier "
+                            f"(REFUTED). Reason: {reasoning[:220]}"
+                        ),
+                        data={"verifier_blocked": True, "verdict": verdict, "reasoning": reasoning},
+                        error="verifier_blocked",
+                    )
+
+        result = await self.registry.dispatch("report_finding", args)
+        if result.ok:
+            self._mark_candidates_for_finding(args)
+            finding_id = ""
+            if isinstance(result.data, dict):
+                finding_id = str(result.data.get("id") or "")
+            if finding_id:
+                self._spawn_followup_branches_from_finding(finding_id, args)
+                await self._maybe_auto_link_chain(finding_id)
+        return result
+
+    async def _promote_direct_run_skill_result(
+        self,
+        real_skill: str,
+        data: dict[str, Any],
+    ) -> None:
+        if real_skill == "test_injection":
+            for finding in (data.get("findings") or []):
+                inj_sev = finding.get("severity", "medium")
+                if inj_sev not in ("high", "critical"):
+                    continue
+                inj_url = data.get("url", self.state.target)
+                inj_param = data.get("param", finding.get("param", "?"))
+                control = finding.get("control", {}) or {}
+                payload_text = finding.get("payload", "")
+                poc_blob = self._build_reflected_get_poc(
+                    url=inj_url,
+                    param=inj_param,
+                    payload=payload_text,
+                    control=control,
+                    response_preview=finding.get("response_preview", "")[:1200],
+                )
+                args = {
+                    "title": f"{finding['type'].upper()} on {inj_param}",
+                    "severity": inj_sev,
+                    "finding_type": finding["type"],
+                    "affected_component": inj_url,
+                    "description": f"Payload: {payload_text[:80]}",
+                    "evidence": finding.get("response_preview", finding.get("evidence", ""))[:500],
+                }
+                args.update(self._build_report_finding_args(
+                    title=args["title"],
+                    severity=inj_sev,
+                    finding_type=finding["type"],
+                    affected_component=inj_url,
+                    description=f"Injection behavior was observed on parameter {inj_param}.",
+                    impact="Successful injection may expose backend data, execute attacker-controlled logic, or cross trust boundaries depending on the sink.",
+                    technical_analysis=(
+                        f"The injection skill recorded baseline/control data {control} alongside the payload response, "
+                        "which indicates the parameter reacts differently under attacker-controlled input."
+                    ),
+                    poc_description="Replay the payload against the same parameter and compare the baseline response to the injected response or delay/output delta.",
+                    poc_script_code=poc_blob,
+                    remediation_steps="Apply sink-specific input handling such as parameterized queries, output encoding, and strict server-side validation.",
+                    endpoint=inj_url,
+                    method="GET",
+                ))
+                await self._dispatch_report_finding_checked(args)
+            return
+
+        if real_skill == "test_xss":
+            for finding in (data.get("findings") or []):
+                xss_sev = finding.get("severity", "high")
+                xss_url = data.get("url", self.state.target)
+                xss_param = finding.get("param", data.get("param", "?"))
+                payload = finding.get("payload", "")[:200]
+                response_preview = finding.get("response_preview", finding.get("evidence", ""))[:1200]
+                control = finding.get("control", {}) or {}
+                xss_poc = self._build_reflected_get_poc(
+                    url=xss_url,
+                    param=xss_param,
+                    payload=payload,
+                    control=control,
+                    response_preview=response_preview,
+                )
+                args = {
+                    "title": f"XSS ({finding.get('type', 'reflected')}) on {xss_param}",
+                    "severity": xss_sev,
+                    "finding_type": f"xss_{finding.get('type', 'reflected')}",
+                    "affected_component": xss_url,
+                    "description": f"Cross-site scripting payload reflected or executed via parameter {xss_param}.",
+                    "evidence": response_preview,
+                }
+                if xss_sev in ("high", "critical"):
+                    args.update(self._build_report_finding_args(
+                        title=args["title"],
+                        severity=xss_sev,
+                        finding_type=args["finding_type"],
+                        affected_component=xss_url,
+                        description=args["description"],
+                        impact="An attacker may execute script in a victim browser, enabling session theft or authenticated action execution.",
+                        technical_analysis=(
+                            "The XSS skill returned a concrete payload and response evidence indicating that attacker-controlled script content was reflected or executed. "
+                            f"Baseline/control data: {control}."
+                        ),
+                        poc_description="Submit the supplied payload to the vulnerable parameter and confirm that it is reflected/executed in the response context.",
+                        poc_script_code=xss_poc,
+                        remediation_steps="Contextually encode untrusted input, apply output escaping, and deploy CSP as a secondary control.",
+                        endpoint=xss_url,
+                        method="GET",
+                        cwe="CWE-79",
+                    ))
+                await self._dispatch_report_finding_checked(args)
+            return
+
+        if real_skill == "test_ssrf":
+            for finding in (data.get("findings") or []):
+                ssrf_sev = finding.get("severity", "high")
+                ssrf_url = data.get("url", self.state.target)
+                ssrf_param = finding.get("param", data.get("param", "?"))
+                payload = finding.get("payload", "")[:200]
+                response_preview = finding.get("response_preview", finding.get("evidence", ""))[:1200]
+                control = finding.get("control", {}) or {}
+                matched_signal = str(control.get("matched_signal") or finding.get("type", "internal_response"))
+                callback_summary = response_preview[:500] or str(finding.get("evidence", ""))[:500]
+                self.state.record_callback_observation(
+                    finding_type="ssrf",
+                    component=ssrf_url,
+                    signal=matched_signal,
+                    payload=payload,
+                    summary=callback_summary,
+                )
+                ssrf_poc = self._build_reflected_get_poc(
+                    url=ssrf_url,
+                    param=ssrf_param,
+                    payload=payload,
+                    control=control,
+                    response_preview=response_preview,
+                )
+                args = {
+                    "title": f"SSRF via {finding.get('type', 'ssrf')} on {ssrf_param}",
+                    "severity": ssrf_sev,
+                    "finding_type": "ssrf",
+                    "affected_component": ssrf_url,
+                    "description": f"Server-side request behavior was influenced via parameter {ssrf_param}.",
+                    "evidence": response_preview,
+                }
+                if ssrf_sev in ("high", "critical"):
+                    args.update(self._build_report_finding_args(
+                        title=args["title"],
+                        severity=ssrf_sev,
+                        finding_type="ssrf",
+                        affected_component=ssrf_url,
+                        description=args["description"],
+                        impact="Attackers may force the server to reach internal services, cloud metadata endpoints, or trust-bound internal resources.",
+                        technical_analysis=(
+                            "The SSRF skill produced a payload and corresponding response preview suggesting server-side fetching or internal reachability. "
+                            f"Baseline/control data: {control}."
+                        ),
+                        poc_description="Submit the SSRF payload to the target parameter and confirm that the server fetches or leaks data from the supplied internal URL.",
+                        poc_script_code=ssrf_poc,
+                        remediation_steps="Restrict outbound requests, enforce URL allowlists, and block internal address spaces from user-controlled fetches.",
+                        endpoint=ssrf_url,
+                        method="GET",
+                        cwe="CWE-918",
+                        extra_evidence=[
+                            self._callback_evidence_item(
+                                title="Callback / Internal Reachability",
+                                signal=matched_signal,
+                                payload=payload,
+                                summary=callback_summary,
+                            )
+                        ],
+                    ))
+                await self._dispatch_report_finding_checked(args)
+
     def _emit_iteration_status(self, note: str) -> None:
         self.state.clear_waiting_reason()
         active_branches = self.state.active_branches()
@@ -875,6 +1841,8 @@ class ScanAgentLoop:
         self._emit_control_plane(f"{prefix}: {summary}")
 
     def _emit_control_plane(self, note: str = "") -> None:
+        import os
+
         telemetry: dict[str, Any] = {}
         proxy_status: dict[str, Any] = {}
         try:
@@ -883,11 +1851,13 @@ class ScanAgentLoop:
                 get_llm_call_count as _get_llm_call_count,
                 get_llm_usage_stats as _get_llm_usage_stats,
             )
+            from vxis.agent.memory_compressor import get_memory_compression_stats
             from vxis.agent.tools.proxy_runtime import get_proxy_status_snapshot
 
             telemetry = _get_llm_usage_stats()
             telemetry["llm_calls"] = _get_llm_call_count()
             telemetry["brain_decisions"] = _get_brain_decision_count()
+            telemetry["memory_compression"] = get_memory_compression_stats()
             proxy_status = get_proxy_status_snapshot()
         except Exception:
             telemetry = {}
@@ -896,11 +1866,57 @@ class ScanAgentLoop:
             telemetry["provider"] = getattr(self.brain, "_provider", "")
         if not telemetry.get("model"):
             telemetry["model"] = getattr(self.brain, "_model", "")
+        if not telemetry.get("base_url"):
+            provider = str(telemetry.get("provider") or "").strip().lower()
+            if provider == "ollama":
+                telemetry["base_url"] = os.environ.get("VXIS_OLLAMA_BASE_URL", "").rstrip("/")
+            elif provider == "llamacpp":
+                telemetry["base_url"] = os.environ.get("VXIS_LLAMACPP_BASE_URL", "").rstrip("/")
+        telemetry["discipline_profile"] = self._llm_discipline_profile()
 
         snapshot = self.state.control_plane_snapshot()
+        focus = self._focus_branch()
+        if focus is not None:
+            snapshot["focus_branch"] = {
+                "id": focus.id,
+                "title": focus.title,
+                "vector_id": focus.vector_id,
+                "role": focus.role,
+                "phase": focus.phase,
+                "status": focus.status,
+                "objective": focus.objective,
+                "next_step": focus.next_step,
+                "crown_jewel": focus.crown_jewel,
+                "blocker": focus.blocker,
+                "owner": focus.owner,
+            }
+        snapshot["blocking_branches"] = [
+            {
+                "id": branch.id,
+                "title": branch.title,
+                "vector_id": branch.vector_id,
+                "status": branch.status,
+                "role": branch.role,
+                "phase": branch.phase,
+                "priority": branch.priority,
+                "attempts": branch.attempts,
+                "objective": branch.objective,
+                "next_step": branch.next_step,
+                "blocker": branch.blocker,
+            }
+            for branch in self._blocking_finish_branches()[:4]
+        ]
+        snapshot["campaign_groups"] = self._campaign_groups_for_ui(limit=4)
+        snapshot["focus_campaign"] = self._focus_campaign_for_ui()
+        snapshot["memory_directives"] = [
+            note for note in self.state.shared_notes
+            if str(note).startswith("memory")
+        ][-4:]
+        snapshot["chain_candidates"] = self._suggest_chain_candidates(limit=3)
         snapshot["note"] = self._truncate_ui_text(note, 140) if note else ""
         snapshot["telemetry"] = telemetry
         snapshot["proxy"] = proxy_status
+        self._latest_control_plane = dict(snapshot)
         self._emit_event("control_plane", snapshot)
 
     async def _maybe_autostart_proxy(self) -> None:
@@ -939,6 +1955,8 @@ class ScanAgentLoop:
 
     def _candidate_ids_for_action(self, name: str, args: dict[str, Any] | Any) -> list[str]:
         """Infer which durable vector candidates a tool call is attempting."""
+        if name == "finish_scan":
+            return []
         blob = f"{name} {self._preview_args(args)}"
         candidates: list[str] = []
 
@@ -1005,7 +2023,9 @@ class ScanAgentLoop:
     def _status_from_tool_result(result: ToolResult) -> str:
         if not result.ok:
             data = result.data if isinstance(result.data, dict) else {}
-            if any(data.get(k) for k in ("egress_blocked", "surface_guard_blocked", "dedup")):
+            if any(data.get(k) for k in ("egress_blocked", "surface_guard_blocked", "dedup", "blocked")):
+                return "blocked"
+            if str(result.error or "").strip().lower() in {"stuck_loop", "non_text_response"}:
                 return "blocked"
             return "failed"
         text = f"{result.summary} {result.data}".lower()
@@ -1040,6 +2060,56 @@ class ScanAgentLoop:
                     status="found",
                     summary=f"finding reported: {args.get('title', '')}",
                 )
+
+    def _mark_retryable_candidate(
+        self,
+        candidate_id: str,
+        *,
+        tool: str,
+        summary: str,
+        evidence: str = "",
+    ) -> None:
+        candidate = self.state.vector_candidates.get(candidate_id)
+        if candidate is None:
+            return
+        candidate.status = "retryable"
+        candidate.last_tool = tool[:80]
+        candidate.last_summary = summary[:240]
+        candidate.last_iter = self.state.iteration
+        if evidence and evidence not in candidate.evidence:
+            candidate.evidence = (candidate.evidence + "; " + evidence).strip("; ")
+        self.state._sync_candidate_control_state(candidate)
+
+    def _mark_family_probe_retryable(
+        self,
+        skill_name: str,
+        *,
+        url: str = "",
+        round_num: int = 1,
+        tested_params: list[str] | None = None,
+    ) -> None:
+        skill = str(skill_name).strip().lower()
+        candidate_map = {
+            "test_injection": "web:sqli",
+            "test_xss": "web:xss",
+            "test_ssrf": "web:ssrf",
+        }
+        candidate_id = candidate_map.get(skill)
+        if not candidate_id:
+            return
+        params = ", ".join((tested_params or [])[:4]) or "default params"
+        retry_summary = (
+            f"{skill} remained inconclusive at round {round_num}; "
+            f"retry with stronger payload variant on {url or self.state.target} "
+            f"against params [{params}]"
+        )
+        self._mark_retryable_candidate(
+            candidate_id,
+            tool=skill,
+            summary=retry_summary,
+            evidence=f"{url} round={round_num} params={params}".strip(),
+        )
+        self.state.add_shared_note(f"Retryable {candidate_id}: round {round_num} inconclusive on {url or self.state.target}")
 
     def _parent_branch_ids_for_finding(self, args: dict[str, Any]) -> list[str]:
         ftype = str(args.get("finding_type") or "").lower()
@@ -1210,12 +2280,25 @@ class ScanAgentLoop:
                 if not any(needle in ftype or needle in title.lower() for needle in needles):
                     continue
                 for pivot in pivots:
-                    branch_id = f"{parent_branch_id}:{pivot['suffix']}"
+                    branch_id = self._reuse_or_allocate_followup_branch_id(
+                        parent_branch_id=parent_branch_id,
+                        finding_id=finding_id,
+                        vector_id=str(pivot["vector_id"]),
+                        suffix=str(pivot["suffix"]),
+                        crown_jewel=str(pivot["crown_jewel"]),
+                    )
                     branch = self.state.ensure_branch(
                         branch_id,
                         str(pivot["vector_id"]),
                         str(pivot["title"]),
                         priority=int(pivot["priority"]) + severity_boost,
+                        role=self._infer_branch_role(
+                            vector_id=str(pivot["vector_id"]),
+                            title=str(pivot["title"]),
+                            objective=str(pivot["objective"]),
+                            source_finding_id=finding_id,
+                            crown_jewel=str(pivot["crown_jewel"]),
+                        ),
                         owner="root",
                         parent_branch_id=parent_branch_id,
                         source_candidate_id=parent.source_candidate_id or parent_branch_id,
@@ -1239,6 +2322,25 @@ class ScanAgentLoop:
                     )
             self._emit_control_plane(f"Root spawned follow-up branches from {finding_id}")
 
+    def _reuse_or_allocate_followup_branch_id(
+        self,
+        *,
+        parent_branch_id: str,
+        finding_id: str,
+        vector_id: str,
+        suffix: str,
+        crown_jewel: str,
+    ) -> str:
+        for branch in self.state.branches.values():
+            if branch.source_finding_id != finding_id:
+                continue
+            if str(branch.vector_id) != str(vector_id):
+                continue
+            if str(branch.crown_jewel) != str(crown_jewel):
+                continue
+            return branch.id
+        return f"{parent_branch_id}:{suffix}"
+
     def _branch_ids_for_action(self, name: str, args: dict[str, Any] | Any) -> list[str]:
         blob = f"{name} {self._preview_args(args)}"
         matches: list[str] = []
@@ -1250,6 +2352,272 @@ class ScanAgentLoop:
                 matches.append(branch.id)
         return matches
 
+    def _fallback_branch_ids_for_candidates(self, candidate_ids: list[str]) -> list[str]:
+        if not candidate_ids:
+            return []
+        matches: list[str] = []
+        seen: set[str] = set()
+        candidate_set = {str(cid) for cid in candidate_ids if cid}
+        for branch in self.state.active_branches():
+            if (
+                branch.id in candidate_set
+                or branch.source_candidate_id in candidate_set
+                or branch.parent_branch_id in candidate_set
+            ):
+                if branch.id not in seen:
+                    seen.add(branch.id)
+                    matches.append(branch.id)
+        return matches
+
+    @staticmethod
+    def _chain_candidate_for_pair(prior: dict[str, Any], current: dict[str, Any]) -> dict[str, Any] | None:
+        try:
+            from vxis.agent.tools.finding_tools import _canonical_finding_type
+        except Exception:
+            def _canonical_finding_type(value: str) -> str:
+                return str(value or "").lower().strip()
+
+        prior_type = _canonical_finding_type(str(prior.get("finding_type", "")))
+        current_type = _canonical_finding_type(str(current.get("finding_type", "")))
+        prior_blob = " ".join(
+            str(prior.get(key, "")).lower()
+            for key in ("title", "description", "impact", "technical_analysis")
+        )
+        current_blob = " ".join(
+            str(current.get(key, "")).lower()
+            for key in ("title", "description", "impact", "technical_analysis")
+        )
+
+        if current_type in {"broken_access_control", "idor"}:
+            if prior_type in {"weak_auth", "sql_injection"} and any(
+                token in prior_blob for token in ("authentication bypass", "authenticated", "login", "token", "session")
+            ):
+                return {
+                    "score": 300,
+                    "rationale": "A proven authentication foothold was immediately reused to access data-bearing authenticated endpoints, demonstrating a concrete post-auth pivot.",
+                    "crown_jewel": "authenticated data exfiltration",
+                }
+            if prior_type in {"weak_auth", "sql_injection"}:
+                return {
+                    "score": 240,
+                    "rationale": "The initial foothold enables unauthorized object access and broader post-authenticated data reach.",
+                    "crown_jewel": "account takeover or data exfiltration",
+                }
+            if prior_type == "information_disclosure":
+                return {
+                    "score": 170,
+                    "rationale": "Leaked context shortened the path to unauthorized object access and wider data retrieval.",
+                    "crown_jewel": "sensitive record exposure",
+                }
+        if current_type == "weak_auth":
+            if prior_type in {"information_disclosure", "misconfiguration"}:
+                return {
+                    "score": 180,
+                    "rationale": "Leaked deployment details or exposed configuration shortened the path to a working authentication bypass.",
+                    "crown_jewel": "authenticated foothold",
+                }
+        if current_type == "sql_injection":
+            if prior_type == "information_disclosure":
+                return {
+                    "score": 150,
+                    "rationale": "Exposed routes or configuration pointed the attacker toward an injectable surface that now yields backend data.",
+                    "crown_jewel": "DB dump",
+                }
+        if current_type == "ssrf":
+            if prior_type in {"information_disclosure", "misconfiguration"}:
+                return {
+                    "score": 160,
+                    "rationale": "Recon or exposed infrastructure details feed into a server-side fetch pivot toward internal resources.",
+                    "crown_jewel": "internal service access",
+                }
+        if current_type == "xss":
+            if prior_type in {"weak_auth", "broken_access_control", "information_disclosure"}:
+                return {
+                    "score": 130,
+                    "rationale": "The existing session or weak authorization context makes script execution materially useful for takeover or privileged action abuse.",
+                    "crown_jewel": "session takeover",
+                }
+        if prior_type == "sql_injection" and current_type in {"broken_access_control", "idor"} and any(
+            token in current_blob for token in ("authenticated", "user data", "post-auth", "token", "session")
+        ):
+            return {
+                "score": 220,
+                "rationale": "The injection-derived foothold opened post-authenticated data-bearing endpoints, turning code/data execution into concrete data access.",
+                "crown_jewel": "privileged data exfiltration",
+            }
+        return None
+
+    async def _maybe_auto_link_chain(self, finding_id: str) -> None:
+        try:
+            from vxis.agent.tools.finding_tools import (
+                _get_chains,
+                _get_findings,
+            )
+        except Exception:
+            return
+
+        findings = _get_findings()
+        current = next((f for f in findings if f.get("id") == finding_id), None)
+        if not current:
+            return
+
+        existing_pairs = {
+            tuple(c.get("finding_ids", []))
+            for c in _get_chains()
+            if isinstance(c.get("finding_ids"), list)
+        }
+        severity = str(current.get("severity", "low")).lower()
+        if severity not in {"critical", "high", "medium"}:
+            return
+        best_candidate: dict[str, Any] | None = None
+        for prior in reversed(findings[:-1]):
+            pair = (str(prior["id"]), finding_id)
+            if pair in existing_pairs:
+                continue
+            candidate = self._chain_candidate_for_pair(prior, current)
+            if not candidate:
+                continue
+            candidate.update({"source_id": pair[0], "target_id": pair[1]})
+            if best_candidate is None or int(candidate["score"]) > int(best_candidate["score"]):
+                best_candidate = candidate
+        if best_candidate is None:
+            return
+        result = await self.registry.dispatch("link_chain", {
+            "finding_ids": [best_candidate["source_id"], best_candidate["target_id"]],
+            "rationale": best_candidate["rationale"],
+            "crown_jewel": best_candidate["crown_jewel"],
+        })
+        if result.ok:
+            self._settle_branches_after_chain([best_candidate["source_id"], best_candidate["target_id"]])
+            logger.info("auto-linked chain %s -> %s", best_candidate["source_id"], finding_id)
+
+    def _suggest_chain_candidates(self, *, limit: int = 3) -> list[dict[str, str]]:
+        try:
+            from vxis.agent.tools.finding_tools import _get_chains, _get_findings
+        except Exception:
+            return []
+
+        findings = list(_get_findings() or [])
+        if len(findings) < 2:
+            return []
+
+        existing_pairs = {
+            tuple(c.get("finding_ids", []))
+            for c in _get_chains()
+            if isinstance(c.get("finding_ids"), list)
+        }
+        suggestions: list[dict[str, Any]] = []
+        for current in reversed(findings):
+            severity = str(current.get("severity", "low")).lower()
+            if severity not in {"critical", "high", "medium"}:
+                continue
+            for prior in reversed(findings):
+                if prior.get("id") == current.get("id"):
+                    continue
+                pair = (str(prior.get("id", "")), str(current.get("id", "")))
+                if not pair[0] or not pair[1] or pair in existing_pairs:
+                    continue
+                candidate = self._chain_candidate_for_pair(prior, current)
+                if not candidate:
+                    continue
+                suggestions.append({
+                    "source_id": pair[0],
+                    "target_id": pair[1],
+                    "source_type": str(prior.get("finding_type", "")),
+                    "target_type": str(current.get("finding_type", "")),
+                    "source_title": str(prior.get("title", "")),
+                    "target_title": str(current.get("title", "")),
+                    "source_component": str(prior.get("affected_component", "")),
+                    "target_component": str(current.get("affected_component", "")),
+                    "rationale": candidate["rationale"],
+                    "crown_jewel": candidate["crown_jewel"],
+                    "score": candidate["score"],
+                })
+        suggestions.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
+        deduped: list[dict[str, Any]] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        seen_target_paths: set[tuple[str, str, str]] = set()
+        seen_target_families: set[tuple[str, str]] = set()
+        seen_family_pairs: set[tuple[str, str, str]] = set()
+        for item in suggestions:
+            pair = (str(item["source_id"]), str(item["target_id"]))
+            if pair in seen_pairs:
+                continue
+            target_sig = (
+                str(item.get("target_id", "")),
+                str(item.get("target_type", "")),
+                str(item.get("crown_jewel", "")),
+            )
+            if target_sig in seen_target_paths:
+                continue
+            family_sig = (
+                str(item.get("target_type", "")),
+                str(item.get("crown_jewel", "")),
+            )
+            if family_sig in seen_target_families:
+                continue
+            family_pair_sig = (
+                str(item.get("source_type", "")),
+                str(item.get("target_type", "")),
+                str(item.get("crown_jewel", "")),
+            )
+            if family_pair_sig in seen_family_pairs:
+                continue
+            seen_pairs.add(pair)
+            seen_target_paths.add(target_sig)
+            seen_target_families.add(family_sig)
+            seen_family_pairs.add(family_pair_sig)
+            deduped.append(item)
+            if len(deduped) >= limit:
+                break
+        return [
+            {
+                "source_id": str(item["source_id"]),
+                "target_id": str(item["target_id"]),
+                "source_type": str(item.get("source_type", "")),
+                "target_type": str(item.get("target_type", "")),
+                "source_title": str(item.get("source_title", "")),
+                "target_title": str(item.get("target_title", "")),
+                "source_component": str(item.get("source_component", "")),
+                "target_component": str(item.get("target_component", "")),
+                "rationale": str(item["rationale"]),
+                "crown_jewel": str(item["crown_jewel"]),
+            }
+            for item in deduped
+        ]
+
+    async def _maybe_auto_link_suggested_chain(self) -> dict[str, Any] | None:
+        candidates = self._suggest_chain_candidates(limit=3)
+        if not candidates:
+            return None
+        candidate = candidates[0]
+        result = await self.registry.dispatch("link_chain", {
+            "finding_ids": [candidate["source_id"], candidate["target_id"]],
+            "rationale": candidate["rationale"],
+            "crown_jewel": candidate["crown_jewel"],
+        })
+        if not result.ok:
+            return None
+        if isinstance(result.data, dict) and result.data.get("dedup"):
+            return None
+        self._settle_branches_after_chain([candidate["source_id"], candidate["target_id"]])
+        logger.info(
+            "judge auto-linked suggested chain %s -> %s",
+            candidate["source_id"],
+            candidate["target_id"],
+        )
+        self.state.add_message("system", {
+            "hint": (
+                f"SYSTEM HINT: auto-linked chain {candidate['source_id']} -> {candidate['target_id']} "
+                f"toward {candidate['crown_jewel']}. Re-evaluate whether finish_scan is now justified."
+            ),
+        })
+        return {
+            "source_id": candidate["source_id"],
+            "target_id": candidate["target_id"],
+            "crown_jewel": candidate["crown_jewel"],
+        }
+
     async def _decide(self, state: ScanLoopState) -> list[tuple[str, dict[str, Any]]]:
         """Returns list of (tool_name, args). Delegates to brain.think_in_loop when brain is set."""
         if self.brain is None:
@@ -1260,7 +2628,85 @@ class ScanAgentLoop:
         # gives it a complete picture in <40 lines.
         dashboard = self._build_scan_dashboard()
         messages = state.messages + [{"role": "user", "content": dashboard, "iter": state.iteration}]
-        return await self.brain.think_in_loop(messages, self.registry.describe_all())
+        return await self.brain.think_in_loop(messages, self._brain_tool_catalog())
+
+    def _brain_tool_catalog(self) -> list[dict[str, Any]]:
+        catalog = self.registry.describe_all()
+        profile = self._llm_discipline_profile()
+        if profile != "local_strict":
+            return catalog
+
+        focus = self._focus_branch()
+        findings_count = len(self.state.findings)
+        early = self.state.iteration <= self._focus_grace_iterations() and findings_count == 0
+
+        core = {
+            "finish_scan",
+            "think",
+            "wait",
+            "report_finding",
+            "query_findings",
+            "link_chain",
+            "verify_finding",
+            "run_skill",
+        }
+        recon = {
+            "fingerprint_target",
+            "list_playbooks",
+            "load_playbook",
+            "http_request",
+            "browser_render",
+            "browser_navigate",
+            "browser_analyze_dom",
+            "shell_exec",
+        }
+        auth = {
+            "browser_fill_form",
+            "browser_get_cookies",
+            "browser_eval_js",
+            "http_request",
+            "browser_navigate",
+            "shell_exec",
+            "run_skill",
+        }
+        post_auth = {
+            "browser_get_cookies",
+            "browser_eval_js",
+            "browser_navigate",
+            "http_request",
+            "shell_exec",
+            "python_exec",
+            "run_skill",
+            "query_scan_memory",
+        }
+        xss_ssrf = {
+            "browser_render",
+            "browser_navigate",
+            "browser_eval_js",
+            "http_request",
+            "shell_exec",
+            "python_exec",
+            "run_skill",
+        }
+
+        allowed = set(core)
+        if early or focus is None:
+            allowed |= recon
+        if focus is not None:
+            family = self._branch_family(focus)
+            if family in {"auth", "injection"}:
+                allowed |= auth
+            if focus.role == "post_exploit_worker" or focus.phase in {"session_reuse", "privilege_probe", "data_access"}:
+                allowed |= post_auth
+            if family in {"xss", "ssrf"}:
+                allowed |= xss_ssrf
+            if family == "disclosure":
+                allowed |= {"http_request", "browser_navigate", "shell_exec", "run_skill", "query_scan_memory"}
+            if family == "idor":
+                allowed |= {"http_request", "browser_navigate", "browser_get_cookies", "run_skill", "shell_exec"}
+
+        filtered = [tool for tool in catalog if str(tool.get("name") or "") in allowed]
+        return filtered or catalog
 
     def _build_scan_dashboard(self) -> str:
         """Build a compact scan-progress dashboard injected every iteration.
@@ -1270,6 +2716,13 @@ class ScanAgentLoop:
         what should your next GOAL be.
         """
         s = self.state
+        local_strict = self._llm_discipline_profile() == "local_strict"
+        finding_limit = 3 if local_strict else 5
+        candidate_limit = 6 if local_strict else 10
+        branch_limit = 4 if local_strict else 8
+        review_limit = 3 if local_strict else 5
+        endpoint_limit = 4 if local_strict else 8
+        note_limit = 2 if local_strict else 4
 
         # Collect state from messages
         tools_used: set[str] = set()
@@ -1322,12 +2775,13 @@ class ScanAgentLoop:
         except Exception:
             existing_chains = []
 
-        lines: list[str] = [f"═══ SCAN DASHBOARD (iter {s.iteration}) ═══"]
+        header = "SCAN DASHBOARD" if not local_strict else "LOCAL SCAN DASHBOARD"
+        lines: list[str] = [f"═══ {header} (iter {s.iteration}) ═══"]
 
         # Findings
         if reported:
             lines.append(f"Findings ({len(reported)}):")
-            for f in reported[-5:]:
+            for f in reported[-finding_limit:]:
                 lines.append(f"  [{f.get('severity','?').upper()}] {f['id']}: {f.get('title','?')[:60]}")
         else:
             lines.append("Findings: 0")
@@ -1346,7 +2800,7 @@ class ScanAgentLoop:
         )
         if candidates:
             lines.append("Vector candidates (durable state):")
-            for c in candidates[:10]:
+            for c in candidates[:candidate_limit]:
                 marker = {
                     "open": "OPEN",
                     "retryable": "RETRY",
@@ -1365,35 +2819,60 @@ class ScanAgentLoop:
         active_branches = s.active_branches()
         if active_branches:
             lines.append("Branch dossiers (root-owned attack paths):")
-            for b in active_branches[:8]:
+            for b in active_branches[:branch_limit]:
                 lines.append(
-                    f"  {b.status.upper()} p{b.priority} {b.id} owner={b.owner} "
+                    f"  {b.status.upper()} p{b.priority} {b.id} role={b.role} phase={b.phase} owner={b.owner} "
                     f"attempts={b.attempts} -> {b.title}"
                 )
                 if b.objective:
-                    lines.append(f"     objective: {b.objective[:110]}")
+                    lines.append(f"     objective: {b.objective[:80 if local_strict else 110]}")
                 if b.next_step:
-                    lines.append(f"     next: {b.next_step[:110]}")
+                    lines.append(f"     next: {b.next_step[:80 if local_strict else 110]}")
                 if b.last_report:
-                    lines.append(f"     last: {b.last_report[:110]}")
+                    lines.append(f"     last: {b.last_report[:80 if local_strict else 110]}")
                 if b.blocker:
-                    lines.append(f"     blocker: {b.blocker[:90]}")
+                    lines.append(f"     blocker: {b.blocker[:70 if local_strict else 90]}")
 
         # Endpoints
         if endpoints_seen:
-            lines.append(f"Known endpoints: {', '.join(sorted(endpoints_seen)[:8])}")
+            lines.append(f"Known endpoints: {', '.join(sorted(endpoints_seen)[:endpoint_limit])}")
 
         if s.shared_notes:
             lines.append("Shared notes:")
-            for note in s.shared_notes[-4:]:
-                lines.append(f"  - {note[:120]}")
+            for note in s.shared_notes[-note_limit:]:
+                lines.append(f"  - {note[:80 if local_strict else 120]}")
+            memory_notes = [note for note in s.shared_notes if note.startswith("memory")]
+            if memory_notes:
+                lines.append("Memory directives:")
+                strategy = next((note for note in memory_notes if note.startswith("memory strategy:")), "")
+                if strategy:
+                    lines.append(f"  {strategy[:90 if local_strict else 160]}")
+                refuted = [note for note in memory_notes if note.startswith("memory refuted:")][:2 if local_strict else 3]
+                for note in refuted:
+                    lines.append(f"  {note[:90 if local_strict else 160]}")
+                branch_reopens = [note for note in memory_notes if note.startswith("memory branch:")][:2 if local_strict else 3]
+                for note in branch_reopens:
+                    lines.append(f"  {note[:90 if local_strict else 160]}")
+
+        review_items = s.review_queue_as_dicts()
+        if review_items:
+            lines.append("AI review queue:")
+            for item in review_items[:review_limit]:
+                lines.append(
+                    f"  {item['status'].upper()} {item['stage']} {item['id']}: "
+                    f"{item['title'][:48 if local_strict else 70]}"
+                )
+                if item.get("reason"):
+                    lines.append(f"     reason: {str(item['reason'])[:72 if local_strict else 120]}")
+                if item.get("action_hint"):
+                    lines.append(f"     next: {str(item['action_hint'])[:72 if local_strict else 120]}")
 
         # ── Chain Intelligence section (always on when 2+ findings) ──
         # Brain-First: Brain decides HOW to chain, we just keep the pressure
         # on every iteration. No "fire once and forget" — chain awareness must
         # persist in Brain's working context for the entire scan.
         _desired_chains = max(3, len(reported) // 3)
-        if len(reported) >= 2:
+        if len(reported) >= 2 and not local_strict:
             lines.append("")
             lines.append("═══ CHAIN INTELLIGENCE ═══")
             if existing_chains:
@@ -1538,6 +3017,8 @@ class ScanAgentLoop:
             if b.blocker:
                 lines.append(f"   Current blocker: {b.blocker[:160]}")
             lines.append("   Stay on this branch until you prove it, exhaust it, or spawn a stronger child branch.")
+            if b.owner == "memory":
+                lines.append("   This is a carry-over memory branch: revalidate it quickly, then push past previously known depth.")
         elif open_candidates and not _chain_pressure:
             c = open_candidates[0]
             lines.append(f"\n>> YOUR GOAL: Exhaust vector candidate {c.id}.")
@@ -1568,6 +3049,7 @@ class ScanAgentLoop:
             lines.append("   DO NOT call finish_scan until you've tried every chain above.")
             if untested:
                 lines.append(f"   Secondary: also test {untested[0]} when you run out of chain ideas.")
+
         elif reported:
             lines.append("\n>> Good progress. But DO NOT stop here.")
             lines.append("   The more findings you discover, the better the report.")
@@ -1582,6 +3064,1931 @@ class ScanAgentLoop:
 
         lines.append("═══ Use ALL your knowledge. Every finding matters. Keep digging. ═══")
         return "\n".join(lines)
+
+    def _blocking_finish_branches(self) -> list[BranchState]:
+        """Return active branches that still represent unfinished proof work.
+
+        Strix's root agent does not finish while meaningful work remains active.
+        Mirror that here by treating high-priority unresolved branches as
+        finish blockers, especially pivot branches spawned from confirmed
+        findings that still need impact expansion.
+        """
+        blockers: list[BranchState] = []
+        for branch in self.state.active_branches():
+            if self._should_exhaust_stale_root_branch(branch):
+                branch.status = "exhausted"
+                branch.last_report = (
+                    branch.last_report
+                    or "exhausted after linked candidate terminated and no live child pivots remained"
+                )[:160]
+                continue
+            if branch.priority < 85:
+                continue
+            if not self._branch_has_finish_blocking_yield(branch):
+                branch.status = "exhausted"
+                branch.last_report = (
+                    branch.last_report
+                    or "exhausted after low expected yield and no remaining platform-appropriate pivots"
+                )[:160]
+                continue
+            blockers.append(branch)
+        return self._dedupe_blocking_campaign_branches(blockers)
+
+    def _dedupe_blocking_campaign_branches(self, blockers: list[BranchState]) -> list[BranchState]:
+        deduped: list[BranchState] = []
+        seen: set[tuple[str, str]] = set()
+        for branch in blockers:
+            if branch.source_finding_id:
+                key = (branch.source_finding_id, branch.phase or "surface")
+                if key in seen:
+                    continue
+                seen.add(key)
+            deduped.append(branch)
+        return deduped
+
+    def _has_live_child_branch(self, branch: BranchState) -> bool:
+        for child_id in branch.child_ids:
+            child = self.state.branches.get(child_id)
+            if child is None:
+                continue
+            if child.status not in _TERMINAL_BRANCH_STATUSES:
+                return True
+        return False
+
+    def _linked_candidate_for_branch(self, branch: BranchState) -> VectorCandidate | None:
+        for candidate_id in (branch.source_candidate_id, branch.id):
+            if not candidate_id:
+                continue
+            candidate = self.state.vector_candidates.get(candidate_id)
+            if candidate is not None:
+                return candidate
+        return None
+
+    def _latest_report_finding_args(self) -> dict[str, Any] | None:
+        for message in reversed(self.state.messages):
+            if message.get("role") != "tool":
+                continue
+            content = message.get("content", {})
+            if not isinstance(content, dict) or content.get("name") != "report_finding":
+                continue
+            args = content.get("args", {})
+            if isinstance(args, dict):
+                return dict(args)
+        return None
+
+    def _hydrate_verify_finding_args(self, args: dict[str, Any]) -> dict[str, Any]:
+        merged = dict(args or {})
+        if all(str(merged.get(key, "")).strip() for key in ("finding_type", "affected_component", "evidence")):
+            return merged
+        source: dict[str, Any] | None = None
+        latest = self._latest_report_finding_args()
+        if latest is not None:
+            source = latest
+        try:
+            from vxis.agent.tools.finding_tools import _get_findings
+            findings = list(_get_findings() or [])
+        except Exception:
+            findings = []
+        wanted_type = str(merged.get("finding_type", "")).strip().lower()
+        wanted_component = str(merged.get("affected_component", "")).strip()
+        wanted_title = str(merged.get("title", "")).strip().lower()
+        best_score = -1
+        for finding in findings:
+            if not isinstance(finding, dict):
+                continue
+            score = 0
+            f_type = str(finding.get("finding_type", "")).strip().lower()
+            f_component = str(finding.get("affected_component", "")).strip()
+            f_title = str(finding.get("title", "")).strip().lower()
+            if wanted_type and wanted_type == f_type:
+                score += 5
+            if wanted_component and wanted_component == f_component:
+                score += 6
+            if wanted_title and wanted_title == f_title:
+                score += 4
+            if wanted_title and wanted_title and wanted_title in f_title:
+                score += 2
+            if wanted_component and wanted_component and wanted_component in f_component:
+                score += 2
+            if score > best_score:
+                best_score = score
+                source = finding
+        if source is None:
+            return merged
+        field_map = {
+            "title": "title",
+            "severity": "severity",
+            "finding_type": "finding_type",
+            "affected_component": "affected_component",
+            "description": "description",
+            "impact": "impact",
+            "technical_analysis": "technical_analysis",
+            "poc_description": "poc_description",
+            "poc_script_code": "poc_script_code",
+            "evidence": "evidence",
+        }
+        for target_key, source_key in field_map.items():
+            if not str(merged.get(target_key, "")).strip() and str(source.get(source_key, "")).strip():
+                merged[target_key] = source.get(source_key, "")
+        return merged
+
+    def _should_exhaust_stale_root_branch(self, branch: BranchState) -> bool:
+        if branch.source_finding_id:
+            return False
+        if branch.owner != "root":
+            return False
+        if self._has_live_child_branch(branch):
+            return False
+        candidate = self._linked_candidate_for_branch(branch)
+        if candidate is None:
+            return False
+        if candidate.status not in {"failed", "blocked", "dead", "clean", "found"}:
+            return False
+        if self._forced_branch_action(branch) is not None:
+            return False
+        family = self._branch_family(branch)
+        if branch.role == "recon_worker" or family in {"infra", "disclosure"}:
+            return True
+        if branch.attempts >= 2 and candidate.status == "found":
+            try:
+                from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
+            except Exception:
+                _canon_ft = lambda value: str(value or "").strip().lower()
+            related_types = self._family_related_types(family)
+            found_types = {
+                _canon_ft(str(item.get("finding_type", "")))
+                for item in self.state.findings
+                if isinstance(item, dict)
+            }
+            if related_types and (related_types & found_types):
+                return True
+        return False
+
+    def _branch_expected_yield_score(self, branch: BranchState) -> int:
+        try:
+            from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
+        except Exception:
+            _canon_ft = lambda value: str(value or "").strip().lower()
+        score = int(branch.priority)
+        if branch.source_finding_id:
+            score += 10
+        if branch.role == "post_exploit_worker":
+            score += 8
+        if branch.phase in {"data_access", "chain_closure"}:
+            score += 5
+        score -= max(0, branch.attempts - 1) * 12
+        if branch.status == "blocked":
+            score -= 18
+        if branch.last_tool == "run_skill" and "blocked" in str(branch.last_summary).lower():
+            score -= 20
+        if branch.blocker:
+            score -= 8
+        next_action = self._forced_branch_action(branch)
+        if next_action is None:
+            score -= 28
+        else:
+            score += 6
+        family = self._branch_family(branch)
+        related_types = self._family_related_types(family)
+        related_skills = self._family_related_skills(family)
+        found_types = {
+            _canon_ft(str(item.get("finding_type", "")))
+            for item in self.state.findings
+            if isinstance(item, dict)
+        }
+        covered_family = bool(related_types & found_types)
+        is_memory_branch = branch.owner == "memory" or branch.id.startswith("carry:")
+        if covered_family:
+            if is_memory_branch:
+                score -= 34
+                if not branch.source_finding_id:
+                    score -= 18
+                if branch.attempts > 0:
+                    score -= 12
+            elif branch.status == "blocked" and not branch.source_finding_id:
+                score -= 24
+        if related_skills and all(self._recent_blocked_skill_count(skill) >= 3 for skill in related_skills):
+            score -= 18
+            if is_memory_branch:
+                score -= 14
+        if branch.owner == "memory":
+            score -= 10
+        if branch.id.startswith("carry:"):
+            score -= 12
+        if branch.attempts == 0:
+            score += 8
+        if family == "disclosure" and self._has_stronger_foothold_than_disclosure():
+            score -= 26
+            if branch.source_finding_id:
+                score -= 10
+        if family == "disclosure" and self._disclosure_campaign_lacks_reusable_material():
+            score -= 34
+            if branch.source_finding_id:
+                score -= 12
+        if family == "injection" and self._branch_lacks_meaningful_db_impact(branch):
+            score -= 40
+        if self._branch_is_redundant_family_root(branch):
+            score -= 40
+        if self._branch_is_redundant_memory_revalidation(branch):
+            score -= 48
+        return score
+
+    def _branch_is_redundant_family_root(self, branch: BranchState) -> bool:
+        if branch.source_finding_id:
+            return False
+        if branch.owner not in {"root", ""}:
+            return False
+        if branch.parent_branch_id:
+            return False
+        family = self._branch_family(branch)
+        if family == "generic":
+            return False
+        if branch.attempts >= 1 and any(
+            other.id != branch.id
+            and other.status not in {"proven", "exhausted", "dead", "blocked"}
+            and self._branch_family(other) == family
+            and bool(other.source_finding_id)
+            and other.role == "post_exploit_worker"
+            for other in self.state.branches.values()
+        ):
+            return True
+        if branch.attempts < 2:
+            return False
+        children = [
+            self.state.branches.get(child_id)
+            for child_id in branch.child_ids
+        ]
+        live_children = [
+            child for child in children
+            if child is not None and child.status not in {"proven", "exhausted", "dead", "blocked"}
+        ]
+        if not live_children:
+            return False
+        if not any(child.source_finding_id for child in live_children):
+            return False
+        sibling_or_child_coverage = any(
+            self._branch_family(child) == family and child.role == "post_exploit_worker"
+            for child in live_children
+        )
+        return sibling_or_child_coverage
+
+    def _branch_is_redundant_memory_revalidation(self, branch: BranchState) -> bool:
+        if not (branch.owner == "memory" or branch.id.startswith("carry:") or branch.id.startswith("memory:")):
+            return False
+        family = self._branch_family(branch)
+        if family == "generic":
+            return False
+        try:
+            from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
+        except Exception:
+            _canon_ft = lambda value: str(value or "").strip().lower()
+        related_types = self._family_related_types(family)
+        found_types = {
+            _canon_ft(str(item.get("finding_type", "")))
+            for item in self.state.findings
+            if isinstance(item, dict)
+        }
+        if branch.attempts == 0 and related_types and (related_types & found_types):
+            return True
+        if any(
+            other.id != branch.id
+            and other.status not in {"proven", "exhausted", "dead", "blocked"}
+            and self._branch_family(other) == family
+            and other.owner != "memory"
+            and not other.id.startswith(("carry:", "memory:"))
+            for other in self.state.branches.values()
+        ):
+            return True
+        return any(
+            other.id != branch.id
+            and other.status not in {"proven", "exhausted", "dead", "blocked"}
+            and self._branch_family(other) == family
+            and other.owner != "memory"
+            and not other.id.startswith(("carry:", "memory:"))
+            and (
+                other.source_finding_id
+                or other.role == "post_exploit_worker"
+                or other.attempts > 0
+            )
+            for other in self.state.branches.values()
+        )
+
+    def _branch_has_finish_blocking_yield(self, branch: BranchState) -> bool:
+        score = self._branch_expected_yield_score(branch)
+        if branch.owner == "memory" or branch.id.startswith(("carry:", "memory:")):
+            return score >= 82
+        if branch.source_finding_id:
+            return score >= 65
+        if self._branch_family(branch) == "disclosure" and self._has_stronger_foothold_than_disclosure():
+            return score >= 78
+        if self._branch_family(branch) == "disclosure" and self._disclosure_campaign_lacks_reusable_material():
+            return score >= 82
+        return branch.attempts < 2 or score >= 78
+
+    def _campaign_groups_for_ui(self, limit: int = 4) -> list[dict[str, Any]]:
+        groups: list[dict[str, Any]] = []
+        by_key: dict[tuple[str, str], dict[str, Any]] = {}
+        blockers = {branch.id for branch in self._blocking_finish_branches()}
+        for branch in self.state.active_branches():
+            key = (
+                branch.source_finding_id or branch.parent_branch_id or branch.id,
+                branch.crown_jewel or self._branch_family(branch) or "generic",
+            )
+            group = by_key.get(key)
+            if group is None:
+                group = {
+                    "campaign_id": key[0],
+                    "crown_jewel": key[1],
+                    "family": self._branch_family(branch),
+                    "source_finding_id": branch.source_finding_id,
+                    "branch_ids": [],
+                    "roles": set(),
+                    "phases": set(),
+                    "blockers": 0,
+                    "max_priority": 0,
+                    "headline": branch.title,
+                    "next_step": branch.next_step,
+                    "objective": branch.objective,
+                }
+                by_key[key] = group
+                groups.append(group)
+            group["branch_ids"].append(branch.id)
+            group["roles"].add(branch.role)
+            group["phases"].add(branch.phase or "surface")
+            group["max_priority"] = max(int(group["max_priority"]), int(branch.priority))
+            if branch.id in blockers:
+                group["blockers"] = int(group["blockers"]) + 1
+            if branch.source_finding_id and branch.next_step:
+                group["next_step"] = branch.next_step
+            if branch.source_finding_id and branch.objective:
+                group["objective"] = branch.objective
+        scored = sorted(
+            groups,
+            key=lambda item: (
+                int(item["blockers"]) > 0,
+                int(item["max_priority"]),
+                len(item["branch_ids"]),
+            ),
+            reverse=True,
+        )
+        out: list[dict[str, Any]] = []
+        for item in scored[:limit]:
+            out.append({
+                "campaign_id": item["campaign_id"],
+                "headline": str(item["headline"])[:84],
+                "source_finding_id": item["source_finding_id"],
+                "crown_jewel": str(item["crown_jewel"])[:72],
+                "family": item["family"],
+                "roles": sorted(str(role) for role in item["roles"]),
+                "phases": sorted(str(phase) for phase in item["phases"]),
+                "branch_count": len(item["branch_ids"]),
+                "blocking_count": int(item["blockers"]),
+                "max_priority": int(item["max_priority"]),
+                "objective": str(item["objective"])[:96],
+                "next_step": str(item["next_step"])[:96],
+            })
+        return out
+
+    def _focus_campaign_for_ui(self) -> dict[str, Any] | None:
+        groups = self._campaign_groups_for_ui(limit=8)
+        if not groups:
+            return None
+        focus = self._focus_branch()
+        selected = groups[0]
+        if focus is not None:
+            focus_family = self._branch_family(focus)
+            for group in groups:
+                campaign_id = str(group.get("campaign_id") or "")
+                if focus.source_finding_id and campaign_id == focus.source_finding_id:
+                    selected = group
+                    break
+                if not focus.source_finding_id and campaign_id == (focus.parent_branch_id or focus.id):
+                    selected = group
+                    break
+                if str(group.get("family") or "") == focus_family:
+                    selected = group
+                    break
+        family = str(selected.get("family") or "")
+        reviews: list[dict[str, Any]] = []
+        for item in self.state.review_queue_as_dicts():
+            source_type = str(item.get("source_finding_type") or "").lower()
+            reason = str(item.get("reason") or "").lower()
+            affected = str(item.get("affected_component") or "").lower()
+            if family and (family in source_type or family in reason or family in affected):
+                reviews.append({
+                    "stage": item.get("stage", ""),
+                    "status": item.get("status", ""),
+                    "title": str(item.get("title") or "")[:72],
+                    "reason": str(item.get("reason") or "")[:120],
+                })
+        findings: list[dict[str, Any]] = []
+        for finding in self.state.findings[-12:]:
+            if not isinstance(finding, dict):
+                continue
+            blob = " ".join(
+                str(finding.get(key, ""))
+                for key in ("finding_type", "title", "affected_component", "impact")
+            ).lower()
+            if family and family in blob:
+                findings.append({
+                    "id": finding.get("id", ""),
+                    "title": str(finding.get("title") or "")[:88],
+                    "finding_type": finding.get("finding_type", ""),
+                    "severity": finding.get("severity", ""),
+                    "affected_component": str(finding.get("affected_component") or "")[:88],
+                })
+        detail = dict(selected)
+        detail["reviews"] = reviews[:3]
+        detail["findings"] = findings[-3:]
+        return detail
+
+    def _has_stronger_foothold_than_disclosure(self) -> bool:
+        blobs = []
+        for finding in self.state.findings:
+            if not isinstance(finding, dict):
+                continue
+            blobs.append(" ".join(
+                str(finding.get(key, ""))
+                for key in ("finding_type", "title", "impact", "technical_analysis", "poc_description")
+            ).lower())
+        return any(
+            any(token in blob for token in ("authentication bypass", "authenticated foothold", "session takeover", "token acquired"))
+            or ("sql_injection" in blob and any(token in blob for token in ("authenticated", "login", "token", "session")))
+            for blob in blobs
+        )
+
+    def _disclosure_campaign_lacks_reusable_material(self) -> bool:
+        reasons: list[str] = []
+        for item in self.state.review_queue.values():
+            if str(item.source_finding_type or "").lower() in {"information_disclosure", "misconfiguration"}:
+                reasons.append(str(item.reason or "").lower())
+        for item in self.state.review_history:
+            if str(item.source_finding_type or "").lower() in {"information_disclosure", "misconfiguration"}:
+                reasons.append(str(item.reason or "").lower())
+        binary_only_hits = sum(
+            1
+            for reason in reasons
+            if "binary/compressed blob" in reason or "without readable secret material" in reason
+        )
+        if binary_only_hits < 2:
+            return False
+        finding_blob = " ".join(
+            " ".join(
+                str(finding.get(key, ""))
+                for key in ("title", "impact", "technical_analysis", "poc_description", "poc_script_code")
+            ).lower()
+            for finding in self.state.findings
+            if isinstance(finding, dict)
+            and str(finding.get("finding_type", "")).lower() in {"information_disclosure", "misconfiguration"}
+        )
+        reusable_markers = (
+            "password", "token", "jwt", "apikey", "api key", "secret", "credential",
+            "session", "bearer", "admin", "login", "cookie",
+        )
+        return not any(marker in finding_blob for marker in reusable_markers)
+
+    def _branch_lacks_meaningful_db_impact(self, branch: BranchState) -> bool:
+        if "db" not in " ".join((branch.id, branch.title, branch.crown_jewel, branch.objective)).lower():
+            return False
+        if branch.attempts < 2:
+            return False
+        blob = " ".join((
+            branch.last_summary,
+            branch.last_report,
+            branch.evidence,
+        )).lower()
+        strong_markers = (
+            "table", "schema", "database", "dump", "union select", "sqlmap", "credential", "admin", "user"
+        )
+        if any(marker in blob for marker in strong_markers):
+            return False
+        for finding in self.state.findings:
+            if not isinstance(finding, dict):
+                continue
+            if branch.source_finding_id and str(finding.get("id", "")) == branch.source_finding_id:
+                continue
+            finding_blob = " ".join(
+                str(finding.get(key, ""))
+                for key in ("finding_type", "title", "impact", "technical_analysis", "poc_script_code")
+            ).lower()
+            if any(marker in finding_blob for marker in strong_markers):
+                return False
+        return True
+
+    def _latest_auth_token(self) -> str:
+        for message in reversed(self.state.messages[-96:]):
+            if message.get("role") != "tool":
+                continue
+            content = message.get("content", {})
+            if not isinstance(content, dict) or content.get("name") != "run_skill":
+                continue
+            result = content.get("result", {})
+            if not isinstance(result, dict):
+                continue
+            data = result.get("data", {})
+            if not isinstance(data, dict):
+                continue
+            token = str(data.get("token") or "").strip()
+            if token:
+                return token
+        return ""
+
+    def _candidate_expected_yield_score(self, candidate: VectorCandidate, findings: list[dict[str, Any]]) -> int:
+        try:
+            from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
+        except Exception:
+            _canon_ft = lambda value: str(value or "").strip().lower()
+        score = int(candidate.priority)
+        if candidate.attempts > 0:
+            score -= candidate.attempts * 12
+        family = self._candidate_family(candidate)
+        related_types = self._family_related_types(family)
+        related_skills = self._family_related_skills(family)
+        if family == "infra":
+            related_skills.add("enumerate_endpoints")
+        found_types = {
+            _canon_ft(str(item.get("finding_type", "")))
+            for item in findings
+            if isinstance(item, dict)
+        }
+        covered_family = bool(related_types & found_types)
+        is_memory_candidate = str(candidate.id).startswith("memory:")
+        if covered_family:
+            score -= 32
+            if is_memory_candidate:
+                score -= 28
+        if related_skills and all(self._recent_blocked_skill_count(skill) >= 3 for skill in related_skills):
+            score -= 28
+            if is_memory_candidate:
+                score -= 14
+        if is_memory_candidate and candidate.attempts == 0:
+            score -= 10
+        if candidate.status in {"blocked", "failed", "dead"}:
+            score -= 18
+        return score
+
+    def _candidate_family(self, candidate: VectorCandidate) -> str:
+        vector_blob = " ".join((candidate.id, candidate.vector_id)).lower()
+        blob = " ".join((candidate.vector_id, candidate.title, candidate.evidence)).lower()
+        return self._family_from_blobs(vector_blob, blob)
+
+    def _branch_family(self, branch: BranchState) -> str:
+        vector_blob = " ".join((
+            branch.id,
+            branch.vector_id,
+            branch.source_candidate_id,
+            branch.source_finding_id,
+        )).lower()
+        blob = " ".join((
+            branch.vector_id,
+            branch.title,
+            branch.objective,
+            branch.next_step,
+            branch.evidence,
+            branch.blocker,
+            branch.crown_jewel,
+        )).lower()
+        return self._family_from_blobs(vector_blob, blob)
+
+    def _family_from_blobs(self, vector_blob: str, blob: str) -> str:
+        explicit_map = {
+            "web:xss": "xss",
+            "web:ssrf": "ssrf",
+            "web:sqli": "injection",
+            "web-sqli": "injection",
+            "web-xss": "xss",
+            "web-ssrf": "ssrf",
+            "web:idor": "idor",
+            "web-idor": "idor",
+            "web:auth-bypass": "auth",
+            "web-auth": "auth",
+            "web:sensitive-files": "disclosure",
+            "web-misconf": "disclosure",
+            "web:dir-bruteforce": "infra",
+            "web-cve": "infra",
+        }
+        for needle, family in explicit_map.items():
+            if needle in vector_blob:
+                return family
+        for family, tokens, _types in _WEB_VECTOR_FAMILY_RULES:
+            if any(token in blob for token in tokens):
+                return family
+        return "generic"
+
+    def _family_related_types(self, family: str) -> set[str]:
+        for rule_family, _tokens, family_types in _WEB_VECTOR_FAMILY_RULES:
+            if family == rule_family:
+                return set(family_types)
+        return set()
+
+    def _family_related_skills(self, family: str) -> set[str]:
+        if family == "auth":
+            return {"attempt_auth", "post_auth_enum"}
+        if family == "injection":
+            return {"test_injection"}
+        if family == "idor":
+            return {"test_idor"}
+        if family == "disclosure":
+            return {"test_sensitive_files", "test_infra"}
+        if family == "xss":
+            return {"test_xss"}
+        if family == "ssrf":
+            return {"test_ssrf"}
+        if family == "infra":
+            return {"test_infra"}
+        return set()
+
+    def _candidate_has_finish_blocking_yield(self, candidate: VectorCandidate, findings: list[dict[str, Any]]) -> bool:
+        if candidate.priority < 75 or candidate.attempts > 0:
+            return False
+        threshold = 78 if str(candidate.id).startswith("memory:") else 72
+        return self._candidate_expected_yield_score(candidate, findings) >= threshold
+
+    def _remaining_high_yield_family_candidates(self, findings: list[dict[str, Any]]) -> list[VectorCandidate]:
+        open_candidates = [
+            c for c in self.state.open_vector_candidates()
+            if self._candidate_has_finish_blocking_yield(c, findings)
+        ]
+        deduped: list[VectorCandidate] = []
+        seen_families: set[str] = set()
+        for candidate in open_candidates:
+            family = self._candidate_family(candidate)
+            if family in seen_families and family != "generic":
+                continue
+            seen_families.add(family)
+            deduped.append(candidate)
+        return deduped
+
+    def _retryable_family_candidates(self, findings: list[dict[str, Any]]) -> list[VectorCandidate]:
+        retryable = [
+            c for c in self.state.open_vector_candidates()
+            if c.status == "retryable" and self._candidate_expected_yield_score(c, findings) >= 48
+        ]
+        deduped: list[VectorCandidate] = []
+        seen_families: set[str] = set()
+        for candidate in retryable:
+            family = self._candidate_family(candidate)
+            if family in seen_families and family != "generic":
+                continue
+            seen_families.add(family)
+            deduped.append(candidate)
+        return deduped
+
+    def _next_retry_round(self, skill_name: str, candidate: VectorCandidate | None = None) -> int | None:
+        skill = str(skill_name).strip().lower()
+        if skill not in {"test_injection", "test_xss", "test_ssrf"}:
+            return None
+        seen_round = 1
+        if candidate is not None:
+            match = re.search(r"round\s+(\d+)", str(candidate.last_summary or ""), re.IGNORECASE)
+            if match:
+                try:
+                    seen_round = max(seen_round, int(match.group(1)))
+                except Exception:
+                    pass
+        for message in self.state.messages[-48:]:
+            if message.get("role") != "tool":
+                continue
+            content = message.get("content", {})
+            if not isinstance(content, dict) or content.get("name") != "run_skill":
+                continue
+            args = content.get("args", {})
+            if not isinstance(args, dict):
+                continue
+            if str(args.get("skill") or "").strip().lower() != skill:
+                continue
+            params = args.get("params", {})
+            if isinstance(params, dict):
+                try:
+                    seen_round = max(seen_round, int(params.get("round", 1)))
+                except Exception:
+                    pass
+        return min(seen_round + 1, 3)
+
+    def _maybe_finalize_budget_exhausted_scan(self) -> bool:
+        if self.state.completed:
+            return True
+        try:
+            from vxis.agent.tools.finding_tools import _get_chains, _get_findings
+            findings = list(_get_findings() or [])
+            chains = list(_get_chains() or [])
+        except Exception:
+            findings = list(self.state.findings or [])
+            chains = []
+        if not findings:
+            return False
+        if self._blocking_finish_branches():
+            return False
+        open_candidates = self._remaining_high_yield_family_candidates(findings)
+        if open_candidates:
+            return False
+        desired = self._desired_chain_count(findings)
+        if desired > 0 and len(chains) < desired:
+            return False
+        self.state.completed = True
+        self.state.record_review_decision(
+            stage="judge",
+            verdict="ACCEPTED",
+            title="budget_exhausted_completion",
+            reason=(
+                "Scan budget was exhausted after meaningful branches were resolved and no high-yield blockers remained."
+            ),
+            action_hint="Finalize reporting; remaining work is low-yield relative to the exhausted budget.",
+            blocked_action="finish_scan",
+            affected_component=self.state.target,
+        )
+        for item in self.state.review_queue.values():
+            if item.stage == "judge" and item.title in {
+                "unfinished_branches",
+                "needs_chains",
+                "unattempted_candidates",
+                "premature_finish",
+            }:
+                item.status = "closed"
+        self.state.add_message("system", {
+            "hint": (
+                "SYSTEM HINT: scan budget exhausted with no meaningful blockers remaining. "
+                "Accepting completion and finalizing the current report set."
+            ),
+        })
+        return True
+
+    @staticmethod
+    def _finish_branch_guard_until(max_iters: int) -> int:
+        """Keep branch pressure high on real scans without deadlocking short smokes."""
+        return min(max_iters, min(60, max(3, max_iters - 5)))
+
+    @staticmethod
+    def _error_oracle_preview_is_actionable(preview: str) -> bool:
+        """Only promote 500s that leak concrete backend details."""
+        if not preview:
+            return False
+        lower = preview.lower()
+        markers = (
+            "traceback",
+            "stack trace",
+            "exception:",
+            "sql",
+            "sqlite",
+            "mysql",
+            "postgres",
+            "ora-",
+            "syntax error",
+            "sequelize",
+            "typeorm",
+            "prisma",
+            "undefined",
+            "cannot read",
+        )
+        return any(marker in lower for marker in markers)
+
+    def _record_judge_escalation(
+        self,
+        *,
+        title: str,
+        reason: str,
+        action_hint: str,
+        affected_component: str = "",
+    ) -> None:
+        self.state.record_review_item(
+            f"judge:{title}:{affected_component or self.state.target}",
+            stage="judge",
+            status="escalated",
+            title=title,
+            reason=reason,
+            action_hint=action_hint,
+            affected_component=affected_component or self.state.target,
+        )
+
+    def _record_verifier_decision(
+        self,
+        *,
+        args: dict[str, Any],
+        verdict: str,
+        reasoning: str,
+        confidence: str = "",
+    ) -> None:
+        stage = "verifier"
+        title = str(args.get("title", "finding review"))
+        component = str(args.get("affected_component", ""))
+        source_finding_type = str(args.get("finding_type", ""))
+        action_hint = {
+            "CONFIRMED": "Keep chaining this finding toward impact.",
+            "UNCONFIRMED": "Gather control pairs or stronger exploit transcript before reporting again.",
+            "REFUTED": "Do not report this again unless you obtain materially different evidence.",
+        }.get(verdict, "")
+        item_status = "open" if verdict == "UNCONFIRMED" else "closed"
+        if verdict == "CONFIRMED":
+            item_status = "closed"
+        self.state.record_review_item(
+            f"verify:{title}:{component}",
+            stage=stage,
+            status=item_status,
+            title=title,
+            reason=reasoning or f"Verifier returned {verdict}.",
+            action_hint=action_hint,
+            affected_component=component,
+            source_finding_type=source_finding_type,
+        )
+        self.state.record_review_decision(
+            stage=stage,
+            verdict=verdict,
+            title=title,
+            reason=(f"[{confidence}] " if confidence else "") + (reasoning or f"Verifier returned {verdict}."),
+            action_hint=action_hint,
+            blocked_action="report_finding" if verdict == "REFUTED" else "",
+            affected_component=component,
+            source_finding_type=source_finding_type,
+        )
+
+    def _reject_finish_scan(
+        self,
+        *,
+        title: str,
+        reason: str,
+        action_hint: str,
+        summary: str,
+        data: dict[str, Any],
+        affected_component: str = "",
+    ) -> None:
+        component = affected_component or self.state.target
+        self._record_judge_escalation(
+            title=title,
+            reason=reason,
+            action_hint=action_hint,
+            affected_component=component,
+        )
+        self.state.record_review_decision(
+            stage="judge",
+            verdict="REJECTED",
+            title=title,
+            reason=reason,
+            action_hint=action_hint,
+            blocked_action="finish_scan",
+            affected_component=component,
+        )
+        self.state.add_message("tool", {
+            "name": "finish_scan", "args": {},
+            "result": {
+                "ok": False,
+                "summary": summary,
+                "data": data,
+            },
+        })
+
+    def _recent_finish_rejections(self, *, limit: int = 3) -> list[ReviewDecision]:
+        items = [
+            item for item in self.state.review_history
+            if item.stage == "judge" and item.blocked_action == "finish_scan"
+        ]
+        return items[-limit:]
+
+    def _judge_replan_hint(self) -> str:
+        focus = self._focus_branch()
+        if focus and focus.status not in {"proven", "exhausted", "dead", "blocked"}:
+            return (
+                f"Focus on branch {focus.id} [{focus.role}/{focus.phase}] and advance it with a concrete "
+                f"exploit, data-access, or chain-building step before trying to finish again."
+            )
+        findings = list(self.state.findings or [])
+        auth_titles = " ".join(str(f.get("title", "")).lower() for f in findings)
+        finding_types = {str(f.get("finding_type", "")).lower() for f in findings}
+        if (
+            any(token in auth_titles for token in ("authentication bypass", "authenticated", "token acquired"))
+            or "weak_auth" in finding_types
+            or "broken_access_control" in finding_types
+        ):
+            return (
+                "Reuse the foothold now: validate post-authenticated data access, enumerate admin/API routes, "
+                "and link the auth finding to the post-auth data exposure before trying finish_scan again."
+            )
+        for item in reversed(self.state.review_queue_as_dicts()):
+            title = str(item.get("title", "")).lower()
+            if title == "needs_chains":
+                return (
+                    "Build or validate an attack chain next. Link confirmed findings together or push a "
+                    "post-exploit branch until it proves a concrete pivot."
+                )
+            if title == "unfinished_branches":
+                return "Close the highest-priority open branch by proving, exhausting, or blocking it with evidence."
+            if title == "unattempted_candidates":
+                return "Exercise at least one unresolved high-priority vector candidate with a concrete payload."
+        return "Perform one concrete high-signal action before attempting finish_scan again."
+
+    def _forced_candidate_action(self, candidate: VectorCandidate) -> tuple[str, dict[str, Any]] | None:
+        allowed = self._platform_allowed_skills()
+        if "run_skill" not in self.registry.list_tools() or not allowed:
+            return None
+        blob = f"{candidate.vector_id} {candidate.title} {candidate.evidence}".lower()
+        target = str(self.state.target)
+        kind = self._target_kind_name()
+        family = self._candidate_family(candidate)
+        if kind == "desktop":
+            if any(token in blob for token in ("secret", "storage", "keychain", "token")):
+                skill = self._pivoted_skill_name("test_local_storage_secrets")
+                if skill:
+                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            if any(token in blob for token in ("deep", "link", "url", "scheme")):
+                skill = self._pivoted_skill_name("test_deeplink_abuse")
+                if skill:
+                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            if any(token in blob for token in ("signature", "trust", "entitlement", "binary")):
+                skill = self._pivoted_skill_name("test_signature_audit")
+                if skill:
+                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            skill = self._pivoted_skill_name("test_ipc_injection") or self._pivoted_skill_name("test_binary_protections")
+            if skill:
+                return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            return None
+        if kind != "web":
+            return None
+        family_skill_map = {
+            "auth": "attempt_auth",
+            "idor": "test_idor",
+            "injection": "test_injection",
+            "xss": "test_xss",
+            "ssrf": "test_ssrf",
+            "disclosure": "test_sensitive_files",
+            "infra": "enumerate_endpoints",
+        }
+        family_skill = family_skill_map.get(family)
+        if family_skill:
+            skill = self._pivoted_skill_name(family_skill)
+            if skill:
+                params = self._best_skill_params(skill, hint_blob=blob)
+                if candidate.status == "retryable":
+                    next_round = self._next_retry_round(skill, candidate)
+                    if next_round is not None:
+                        params["round"] = next_round
+                if skill == "attempt_auth" and not params:
+                    params = {}
+                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+        if any(token in blob for token in ("auth", "login", "credential", "session")):
+            skill = self._pivoted_skill_name("attempt_auth")
+            if skill:
+                params = self._best_skill_params(skill, hint_blob=blob)
+                if skill == "attempt_auth" and not params:
+                    params = {}
+                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+            return None
+        if any(token in blob for token in ("idor", "access_control", "broken_access_control", "object")):
+            skill = self._pivoted_skill_name("test_idor")
+            if skill:
+                params = self._best_skill_params(skill, hint_blob=blob)
+                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+            return None
+        if any(token in blob for token in ("sqli", "sql", "injection", "nosql", "ssti")):
+            skill = self._pivoted_skill_name("test_injection")
+            if skill:
+                params = self._best_skill_params(skill, hint_blob=blob)
+                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+            return None
+        if any(token in blob for token in ("xss",)):
+            skill = self._pivoted_skill_name("test_xss")
+            if skill:
+                return ("run_skill", {"skill": skill, "target_url": target, "params": self._best_skill_params(skill, hint_blob=blob)})
+            return None
+        if any(token in blob for token in ("ssrf",)):
+            skill = self._pivoted_skill_name("test_ssrf")
+            if skill:
+                return ("run_skill", {"skill": skill, "target_url": target, "params": self._best_skill_params(skill, hint_blob=blob)})
+            return None
+        if any(token in blob for token in ("secret", "file", "git", "debug", "config", "exposed", "disclosure")):
+            skill = self._pivoted_skill_name("test_sensitive_files")
+            if skill:
+                return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            return None
+        skill = self._pivoted_skill_name("enumerate_endpoints")
+        if skill:
+            return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+        return None
+
+    def _forced_branch_action(self, branch: BranchState) -> tuple[str, dict[str, Any]] | None:
+        allowed = self._platform_allowed_skills()
+        if "run_skill" not in self.registry.list_tools() or not allowed:
+            return None
+        target = str(self.state.target)
+        role = str(branch.role).lower()
+        phase = str(branch.phase).lower()
+        kind = self._target_kind_name()
+        blob = " ".join(
+            [
+                str(branch.vector_id or ""),
+                str(branch.title or ""),
+                str(branch.objective or ""),
+                str(branch.next_step or ""),
+                str(branch.crown_jewel or ""),
+            ]
+        ).lower()
+        shell_exec_failed = branch.last_tool == "shell_exec" and "exit=" in str(branch.last_summary).lower()
+        if kind == "desktop":
+            if any(token in blob for token in ("secret", "storage", "keychain")):
+                skill = self._pivoted_skill_name("test_local_storage_secrets")
+                if skill:
+                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            if any(token in blob for token in ("ipc", "deeplink", "url scheme")):
+                skill = self._pivoted_skill_name("test_ipc_injection") or self._pivoted_skill_name("test_deeplink_abuse")
+                if skill:
+                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            skill = self._pivoted_skill_name("test_signature_audit") or self._pivoted_skill_name("test_binary_protections")
+            if skill:
+                return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            return None
+        if kind != "web":
+            return None
+        if role == "post_exploit_worker" or any(token in phase for token in ("privilege_probe", "data_access", "chain_closure")):
+            if shell_exec_failed and any(token in blob for token in ("admin", "token", "session", "credential", "role", "export")):
+                return ("http_request", {"method": "GET", "url": target.rstrip("/") + "/rest/user/whoami"})
+            skill = self._pivoted_skill_name("post_auth_enum")
+            if skill:
+                params = self._best_skill_params(skill, hint_blob=blob)
+                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+            return None
+        if any(token in blob for token in ("idor", "access_control", "broken access control", "object")):
+            skill = self._pivoted_skill_name("test_idor")
+            if skill:
+                params = self._best_skill_params(skill, hint_blob=blob)
+                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+            return None
+        if any(token in blob for token in ("auth", "login", "session", "token")):
+            skill = self._pivoted_skill_name("attempt_auth")
+            if skill:
+                params = self._best_skill_params(skill, hint_blob=blob)
+                if skill == "attempt_auth" and not params:
+                    params = {}
+                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+            return None
+        if any(token in blob for token in ("admin", "data", "profile", "account")):
+            skill = self._pivoted_skill_name("post_auth_enum")
+            if skill:
+                params = self._best_skill_params(skill, hint_blob=blob)
+                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+            return None
+        if any(token in blob for token in ("sqli", "sql", "injection", "nosql", "ssti")):
+            skill = self._pivoted_skill_name("test_injection")
+            if skill:
+                params = self._best_skill_params(skill, hint_blob=blob)
+                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+            return None
+        return None
+
+    def _recent_blocked_skill_count(self, skill_name: str, *, window: int = 12) -> int:
+        skill = str(skill_name).strip().lower()
+        if not skill:
+            return 0
+        counted = int(self.state.blocked_skill_counts.get(skill, 0))
+        total = 0
+        for item in self.state.attempt_outcomes[-window:]:
+            if item.tool != "run_skill" or item.status != "blocked":
+                continue
+            if f"\"skill\": \"{skill}\"" in item.args_preview or f"'skill': '{skill}'" in item.args_preview:
+                total += 1
+        return max(total, counted)
+
+    def _target_kind_name(self) -> str:
+        try:
+            return str(getattr(self._target_kind, "value", self._target_kind)).lower()
+        except Exception:
+            return "web"
+
+    def _platform_allowed_skills(self) -> set[str]:
+        all_tools = set(self.registry.list_tools())
+        if "run_skill" not in all_tools:
+            return set()
+        kind = self._target_kind_name()
+        if kind == "desktop":
+            return set(_DESKTOP_SKILLS)
+        if kind == "web":
+            return {
+                "enumerate_endpoints",
+                "test_sensitive_files",
+                "test_infra",
+                "attempt_auth",
+                "post_auth_enum",
+                "test_injection",
+                "test_xss",
+                "test_ssrf",
+                "test_idor",
+                "test_auth_deep",
+                "test_csrf",
+                "test_misconfig",
+                "test_api_security",
+                "test_business_logic",
+                "test_crypto",
+            }
+        if kind in {"mobile", "code", "game"}:
+            return set()
+        return set()
+
+    def _platform_skill_pivot_graph(self) -> dict[str, tuple[str, ...]]:
+        kind = self._target_kind_name()
+        if kind == "desktop":
+            return _DESKTOP_PIVOT_SKILL_GRAPH
+        if kind == "web":
+            return _WEB_PIVOT_SKILL_GRAPH
+        return {}
+
+    def _pivoted_skill_name(self, requested_skill: str) -> str:
+        skill = str(requested_skill).strip().lower()
+        if not skill:
+            return ""
+        allowed = self._platform_allowed_skills()
+        if skill not in allowed:
+            return ""
+        graph = self._platform_skill_pivot_graph()
+        blocked = self._recent_blocked_skill_count(skill)
+        if blocked < 3:
+            return skill
+        for alt in graph.get(skill, ()):
+            if alt in allowed and self._recent_blocked_skill_count(alt) < 3:
+                return alt
+        return ""
+
+    def _normalize_skill_params(self, skill_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+        skill = str(skill_name).strip().lower()
+        normalized = dict(params or {})
+        target = str(self.state.target)
+        if skill in {"post_auth_enum", "test_idor"}:
+            if not any(key in normalized for key in ("base_url", "url_pattern", "token")):
+                normalized["base_url"] = target
+        elif skill in {
+            "test_injection",
+            "test_xss",
+            "test_ssrf",
+            "test_api_security",
+            "test_business_logic",
+        }:
+            if "url" not in normalized and "url_pattern" not in normalized:
+                normalized["url"] = target
+        return normalized
+
+    def _known_surface_urls(self) -> list[str]:
+        urls: list[str] = []
+        seen: set[str] = set()
+
+        def _remember(value: str) -> None:
+            clean = str(value or "").strip()
+            if not clean or clean in seen:
+                return
+            seen.add(clean)
+            urls.append(clean)
+
+        for message in self.state.messages:
+            content = message.get("content", {})
+            if not isinstance(content, dict):
+                continue
+            args = content.get("args", {})
+            result = content.get("result", {})
+            if isinstance(args, dict):
+                for key in ("url", "target_url", "affected_component"):
+                    if args.get(key):
+                        _remember(str(args[key]))
+            if isinstance(result, dict):
+                data = result.get("data", {})
+                if isinstance(data, dict):
+                    for key in ("url", "affected_component"):
+                        if data.get(key):
+                            _remember(str(data[key]))
+                    for ep in data.get("accessible", []) or []:
+                        if isinstance(ep, dict) and ep.get("path"):
+                            path = str(ep["path"])
+                            if path.startswith("http"):
+                                _remember(path)
+                            else:
+                                _remember(self.state.target.rstrip("/") + path)
+        for finding in self.state.findings:
+            component = str(finding.get("affected_component", "") or "")
+            if component:
+                _remember(component)
+        return urls
+
+    def _recent_skill_surface_counts(self, skill_name: str, *, window: int = 24) -> dict[str, int]:
+        skill = str(skill_name).strip().lower()
+        if not skill:
+            return {}
+        counts: dict[str, int] = {}
+        for message in self.state.messages[-window:]:
+            if message.get("role") != "tool":
+                continue
+            content = message.get("content", {})
+            if not isinstance(content, dict) or content.get("name") != "run_skill":
+                continue
+            args = content.get("args", {})
+            if not isinstance(args, dict):
+                continue
+            real_skill = str(args.get("skill") or "").strip().lower()
+            if real_skill != skill:
+                continue
+            params = args.get("params", {}) if isinstance(args.get("params"), dict) else {}
+            surface = str(
+                params.get("url")
+                or params.get("url_pattern")
+                or params.get("base_url")
+                or args.get("target_url")
+                or ""
+            ).strip()
+            if not surface:
+                continue
+            counts[surface] = counts.get(surface, 0) + 1
+        return counts
+
+    def _surface_candidates_for_skill(self, skill_name: str, *, hint_blob: str = "") -> list[str]:
+        skill = str(skill_name).strip().lower()
+        target = str(self.state.target).rstrip("/")
+        urls = self._known_surface_urls()
+        blob = hint_blob.lower()
+        seen: set[str] = set()
+        ordered: list[str] = []
+
+        def _push(url: str) -> None:
+            clean = str(url or "").strip()
+            if not clean or clean in seen:
+                return
+            seen.add(clean)
+            ordered.append(clean)
+
+        def _matches(url: str) -> bool:
+            lower = url.lower()
+            if skill == "test_injection":
+                return "?" in lower and any(token in lower for token in ("search", "login", "q=", "query", "filter"))
+            if skill == "test_xss":
+                return "?" in lower and any(token in lower for token in ("search", "q=", "query", "return", "redirect", "next", "message", "comment"))
+            if skill == "test_ssrf":
+                return any(token in lower for token in ("url=", "uri=", "dest=", "redirect", "next=", "callback", "return", "proxy", "fetch"))
+            if skill in {"test_api_security", "test_business_logic"}:
+                return any(token in lower for token in ("/api/", "order", "cart", "checkout", "profile", "account"))
+            return False
+
+        if blob:
+            for url in urls:
+                lower = url.lower()
+                if any(token and token in lower for token in re.split(r"[^a-z0-9_/.-]+", blob) if len(token) >= 4):
+                    _push(url)
+
+        for url in urls:
+            if _matches(url):
+                _push(url)
+        for url in urls:
+            if "?" in url:
+                _push(url)
+        if skill == "test_injection":
+            _push(f"{target}/search?q=test")
+        elif skill == "test_xss":
+            _push(f"{target}/search?q=test")
+            _push(f"{target}/redirect?next=/profile")
+        elif skill == "test_ssrf":
+            _push(f"{target}/redirect?url=http://example.com")
+            _push(f"{target}/proxy?url=http://example.com")
+        elif skill in {"test_api_security", "test_business_logic"}:
+            _push(target)
+        return ordered
+
+    def _best_skill_params(self, skill_name: str, *, hint_blob: str = "") -> dict[str, Any]:
+        skill = str(skill_name).strip().lower()
+        target = str(self.state.target).rstrip("/")
+        urls = self._known_surface_urls()
+        blob = hint_blob.lower()
+
+        def _pick(predicate: Callable[[str], bool]) -> str | None:
+            for url in urls:
+                lower = url.lower()
+                if predicate(lower):
+                    return url
+            return None
+
+        def _seed_paths(limit: int = 8) -> list[str]:
+            seen: set[str] = set()
+            out: list[str] = []
+            for url in urls:
+                parsed = urlparse(url)
+                path = (parsed.path or "/").strip()
+                if not path or path == "/":
+                    continue
+                if len(path) > 1:
+                    path = path.rstrip("/")
+                if path in seen:
+                    continue
+                seen.add(path)
+                out.append(path)
+                if len(out) >= limit:
+                    break
+            return out
+
+        def _pick_untried(candidates: list[str]) -> str | None:
+            recent = self._recent_skill_surface_counts(skill)
+            scored = sorted(
+                enumerate(candidates),
+                key=lambda item: (recent.get(item[1], 0), item[0]),
+            )
+            return scored[0][1] if scored else None
+
+        if skill == "test_injection":
+            picked = _pick_untried(self._surface_candidates_for_skill(skill, hint_blob=blob)) or (
+                _pick(lambda u: "?" in u and any(token in u for token in ("search", "login", "q=", "query", "filter")))
+                or _pick(lambda u: "?" in u)
+                or f"{target}/search?q=test"
+            )
+            return {"url": picked}
+        if skill == "test_xss":
+            picked = _pick_untried(self._surface_candidates_for_skill(skill, hint_blob=blob)) or (
+                _pick(lambda u: "?" in u and any(token in u for token in ("search", "q=", "query", "return", "redirect", "next")))
+                or _pick(lambda u: "?" in u)
+                or f"{target}/search?q=test"
+            )
+            return {"url": picked}
+        if skill == "test_ssrf":
+            picked = _pick_untried(self._surface_candidates_for_skill(skill, hint_blob=blob)) or (
+                _pick(lambda u: any(token in u for token in ("url=", "uri=", "dest=", "redirect", "next=", "callback", "return")))
+                or f"{target}/redirect?url=http://example.com"
+            )
+            return {"url": picked}
+        if skill == "test_idor":
+            picked = _pick(lambda u: bool(re.search(r"/\d+(?:/|$)", u)))
+            token = self._latest_auth_token()
+            if picked:
+                pattern = re.sub(r"/\d+(?=(/|$))", "/{id}", picked, count=1)
+                params = {"url_pattern": pattern}
+                if token:
+                    params["token"] = token
+                    params["max_id"] = 30
+                return params
+            params = {"base_url": target}
+            if token:
+                params["token"] = token
+                params["max_id"] = 30
+            return params
+        if skill in {"test_api_security", "test_business_logic"}:
+            picked = (
+                _pick(lambda u: any(token in u for token in ("/api/", "order", "cart", "checkout", "profile", "account")))
+                or target
+            )
+            return {"url": picked}
+        if skill == "post_auth_enum":
+            return {"base_url": target}
+        if skill == "test_infra":
+            return {"seed_paths": _seed_paths()}
+        return {}
+
+    def _skill_supports_surface_retry(self, skill_name: str) -> bool:
+        return str(skill_name).strip().lower() in {
+            "test_injection",
+            "test_xss",
+            "test_ssrf",
+            "test_api_security",
+            "test_business_logic",
+        }
+
+    def _should_retry_skill_on_fresh_surface(
+        self,
+        skill_name: str,
+        current_params: dict[str, Any] | None = None,
+    ) -> bool:
+        skill = str(skill_name).strip().lower()
+        if not self._skill_supports_surface_retry(skill):
+            return False
+        params = dict(current_params or {})
+        current_surface = str(
+            params.get("url") or params.get("url_pattern") or params.get("base_url") or ""
+        ).strip()
+        alternatives = self._surface_candidates_for_skill(skill)
+        if current_surface and any(surface != current_surface for surface in alternatives):
+            return True
+        fresh = self._best_skill_params(skill)
+        next_surface = str(
+            fresh.get("url") or fresh.get("url_pattern") or fresh.get("base_url") or ""
+        ).strip()
+        if not current_surface or not next_surface:
+            return False
+        return current_surface != next_surface
+
+    def _alternate_surface_params(
+        self,
+        skill_name: str,
+        current_params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        skill = str(skill_name).strip().lower()
+        params = dict(current_params or {})
+        current_surface = str(
+            params.get("url") or params.get("url_pattern") or params.get("base_url") or ""
+        ).strip()
+        for surface in self._surface_candidates_for_skill(skill):
+            if surface and surface != current_surface:
+                if skill == "test_idor":
+                    return {"url_pattern": surface}
+                if skill == "post_auth_enum":
+                    return {"base_url": surface}
+                return {"url": surface}
+        return self._best_skill_params(skill)
+
+    def _reroute_blocked_skill(
+        self,
+        requested_skill: str,
+        params: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
+        skill = str(requested_skill).strip().lower()
+        if not skill:
+            return "", dict(params or {})
+        if self._recent_blocked_skill_count(skill) >= 3 and self._should_retry_skill_on_fresh_surface(skill, params):
+            return skill, self._normalize_skill_params(skill, self._alternate_surface_params(skill, params))
+        rerouted = self._pivoted_skill_name(skill)
+        if not rerouted:
+            if self._recent_blocked_skill_count(skill) >= 3:
+                return "", dict(params or {})
+            rerouted = skill
+        return rerouted, self._normalize_skill_params(rerouted, params)
+
+    def _forced_replan_action(self, rejection_title: str) -> tuple[str, dict[str, Any], str] | None:
+        title = str(rejection_title or "").strip().lower()
+        if title == "needs_chains" and "link_chain" in self.registry.list_tools():
+            candidates = self._suggest_chain_candidates(limit=1)
+            if candidates:
+                cand = candidates[0]
+                return (
+                    "link_chain",
+                    {
+                        "finding_ids": [cand["source_id"], cand["target_id"]],
+                        "rationale": cand["rationale"],
+                        "crown_jewel": cand["crown_jewel"],
+                    },
+                    f"forcing chain link {cand['source_id']} -> {cand['target_id']}",
+                )
+        if title == "unfinished_branches":
+            focus = self._focus_branch()
+            if focus is None:
+                blockers = self._blocking_finish_branches()
+                focus = blockers[0] if blockers else None
+            if focus is not None:
+                forced = self._forced_branch_action(focus)
+                if forced is not None:
+                    return forced[0], forced[1], f"forcing branch advancement on {focus.id}"
+            try:
+                from vxis.agent.tools.finding_tools import _get_findings
+                findings = list(_get_findings() or [])
+            except Exception:
+                findings = []
+            retryable_candidates = self._retryable_family_candidates(findings)
+            if retryable_candidates:
+                forced = self._forced_candidate_action(retryable_candidates[0])
+                if forced is not None:
+                    family = self._candidate_family(retryable_candidates[0])
+                    return forced[0], forced[1], f"forcing deeper retry on {family} family via {retryable_candidates[0].id}"
+            family_candidates = self._remaining_high_yield_family_candidates(findings)
+            if family_candidates:
+                forced = self._forced_candidate_action(family_candidates[0])
+                if forced is not None:
+                    family = self._candidate_family(family_candidates[0])
+                    return forced[0], forced[1], f"forcing remaining {family} family exploration via {family_candidates[0].id}"
+        if title == "unattempted_candidates":
+            try:
+                from vxis.agent.tools.finding_tools import _get_findings
+                findings = list(_get_findings() or [])
+            except Exception:
+                findings = []
+            retryable_candidates = self._retryable_family_candidates(findings)
+            if retryable_candidates:
+                forced = self._forced_candidate_action(retryable_candidates[0])
+                if forced is not None:
+                    return forced[0], forced[1], f"forcing retryable candidate {retryable_candidates[0].id}"
+            open_candidates = self._remaining_high_yield_family_candidates(findings)
+            if open_candidates:
+                forced = self._forced_candidate_action(open_candidates[0])
+                if forced is not None:
+                    return forced[0], forced[1], f"forcing first attempt on {open_candidates[0].id}"
+        return None
+
+    @staticmethod
+    def _chainable_findings(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Return findings that are realistic building blocks for attack chains."""
+        try:
+            from vxis.agent.tools.finding_tools import _canonical_finding_type
+        except Exception:
+            def _canonical_finding_type(value: str) -> str:
+                return str(value or "").lower().strip()
+
+        chainable_types = {
+            "weak_auth",
+            "information_disclosure",
+            "misconfiguration",
+            "broken_access_control",
+            "idor",
+            "sql_injection",
+            "xss",
+            "ssrf",
+            "csrf",
+            "insecure_deserialization",
+            "command_injection",
+            "path_traversal",
+            "business_logic",
+        }
+        out: list[dict[str, Any]] = []
+        for finding in findings:
+            severity = str(finding.get("severity", "low")).lower()
+            if severity not in {"critical", "high", "medium"}:
+                continue
+            ftype = _canonical_finding_type(str(finding.get("finding_type", "")))
+            if ftype in chainable_types:
+                out.append(finding)
+        return out
+
+    def _desired_chain_count(self, findings: list[dict[str, Any]]) -> int:
+        chainable = self._chainable_findings(findings)
+        if len(chainable) < 2:
+            return 0
+        if len(chainable) < 4:
+            return 1
+        return max(2, len(chainable) // 3)
+
+    def _focus_branch(self) -> BranchState | None:
+        active = self.state.active_branches()
+        if not active:
+            return None
+        return active[0]
+
+    def _llm_discipline_profile(self) -> str:
+        provider = str(getattr(self.brain, "_provider", "") or "").lower()
+        model = str(getattr(self.brain, "_model", "") or "").lower()
+        if provider in {"llamacpp", "ollama"}:
+            return "local_strict"
+        if (
+            provider in {"openai", "anthropic", "gemini", "google"}
+            and (
+                any(token in model for token in ("gpt-5.5", "gpt-5.4", "claude-opus", "claude-sonnet", "gemini-2.5-pro"))
+                or "opus" in model
+                or "sonnet" in model
+            )
+        ):
+            return "frontier_loose"
+        if provider:
+            return "cloud_balanced"
+        return "default"
+
+    def _focus_grace_iterations(self) -> int:
+        base = min(8, max(3, self.state.max_iters // 12))
+        profile = self._llm_discipline_profile()
+        if profile == "local_strict":
+            return max(2, base - 2)
+        if profile == "cloud_balanced":
+            return min(10, base + 1)
+        if profile == "frontier_loose":
+            return min(12, base + 3)
+        return base
+
+    def _focus_drift_block_threshold(self) -> int:
+        profile = self._llm_discipline_profile()
+        if profile == "local_strict":
+            return 2
+        if profile == "cloud_balanced":
+            return 3
+        if profile == "frontier_loose":
+            return 4
+        return 2
+
+    def _off_branch_capability_thresholds(self) -> tuple[int, int, int]:
+        profile = self._llm_discipline_profile()
+        if profile == "local_strict":
+            return (18, 20, 14)
+        if profile == "cloud_balanced":
+            return (14, 18, 0)
+        if profile == "frontier_loose":
+            return (10, 16, 0)
+        return (12, 18, 0)
+
+    def _action_capability_score(self, name: str, args: dict[str, Any] | Any) -> int:
+        capability = self._action_capability(name, args)
+        return {
+            "recon": 22,
+            "plan": 18,
+            "probe": 14,
+            "browse": 12,
+            "review": 10,
+            "report": 8,
+            "chain": 8,
+            "exploit": 6,
+            "retrieve": 6,
+            "control": 4,
+            "memory": 4,
+        }.get(capability, 0)
+
+    def _should_allow_off_branch_action(
+        self,
+        branch: BranchState | None,
+        name: str,
+        args: dict[str, Any] | Any,
+        matched_branch_ids: list[str],
+        matched_candidate_ids: list[str],
+    ) -> bool:
+        if branch is None:
+            return True
+        if name in {"finish_scan", "link_chain"}:
+            return True
+        findings_count = len(self.state.findings)
+        cap_score = self._action_capability_score(name, args)
+        grace_threshold, free_threshold, uncovered_family_floor = self._off_branch_capability_thresholds()
+        if self.state.iteration <= self._focus_grace_iterations() and findings_count == 0:
+            return cap_score >= grace_threshold
+        if cap_score >= free_threshold:
+            return True
+        if matched_branch_ids and any(self._branch_same_campaign(branch, branch_id) for branch_id in matched_branch_ids):
+            return True
+        if self._is_high_value_cross_campaign_exception(
+            branch,
+            matched_branch_ids=matched_branch_ids,
+            matched_candidate_ids=matched_candidate_ids,
+            capability_score=cap_score,
+        ):
+            return True
+        if matched_candidate_ids:
+            focus_family = self._branch_family(branch)
+            for candidate_id in matched_candidate_ids:
+                candidate = self.state.vector_candidates.get(candidate_id)
+                if candidate is None:
+                    continue
+                candidate_family = self._candidate_family(candidate)
+                if candidate_family != focus_family and candidate_family != "generic":
+                    related = self._family_related_types(candidate_family)
+                    found_types = {
+                        str(item.get("finding_type", "")).strip().lower()
+                        for item in self.state.findings
+                        if isinstance(item, dict)
+                    }
+                    if not (related & found_types):
+                        if uncovered_family_floor and cap_score < uncovered_family_floor:
+                            continue
+                        return True
+        if matched_branch_ids and any(str(branch_id).startswith(("memory:", "carry:")) for branch_id in matched_branch_ids):
+            return True
+        return False
+
+    def _is_high_value_cross_campaign_exception(
+        self,
+        branch: BranchState,
+        *,
+        matched_branch_ids: list[str],
+        matched_candidate_ids: list[str],
+        capability_score: int,
+    ) -> bool:
+        if capability_score < 12:
+            return False
+        focus_family = self._branch_family(branch)
+        if focus_family not in {"auth", "injection"}:
+            return False
+        if branch.role != "post_exploit_worker" and branch.phase not in {"session_reuse", "privilege_probe", "data_access"}:
+            return False
+        target_families: set[str] = set()
+        for branch_id in matched_branch_ids:
+            other = self.state.branches.get(branch_id)
+            if other is None:
+                continue
+            target_families.add(self._branch_family(other))
+        for candidate_id in matched_candidate_ids:
+            candidate = self.state.vector_candidates.get(candidate_id)
+            if candidate is None:
+                continue
+            target_families.add(self._candidate_family(candidate))
+        target_families.discard("generic")
+        target_families.discard(focus_family)
+        if not target_families:
+            return False
+        if not (target_families & {"idor", "disclosure", "xss", "ssrf"}):
+            return False
+        try:
+            from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
+        except Exception:
+            _canon_ft = lambda value: str(value or "").strip().lower()
+        found_types = {
+            _canon_ft(str(item.get("finding_type", "")))
+            for item in self.state.findings
+            if isinstance(item, dict)
+        }
+        if focus_family == "injection" and "sql_injection" not in found_types:
+            return False
+        if focus_family == "auth" and not ({"weak_auth", "sql_injection"} & found_types):
+            return False
+        return True
+
+    @staticmethod
+    def _branch_lineage_match(branch: BranchState, branch_id: str) -> bool:
+        if not branch_id:
+            return False
+        return (
+            branch_id == branch.id
+            or branch_id.startswith(f"{branch.id}:")
+            or branch.id.startswith(f"{branch_id}:")
+        )
+
+    def _branch_same_campaign(self, branch: BranchState, branch_id: str) -> bool:
+        other = self.state.branches.get(branch_id)
+        if other is None:
+            return False
+        if branch.source_finding_id and other.source_finding_id and branch.source_finding_id == other.source_finding_id:
+            return True
+        if branch.parent_branch_id and other.parent_branch_id and branch.parent_branch_id == other.parent_branch_id:
+            return True
+        if branch.source_candidate_id and other.source_candidate_id and branch.source_candidate_id == other.source_candidate_id:
+            return True
+        return False
+
+    def _branch_focus_terms(self, branch: BranchState) -> list[str]:
+        terms: list[str] = []
+        terms.extend(branch.watch_terms or [])
+        raw_fields = [
+            branch.vector_id,
+            branch.title,
+            branch.objective,
+            branch.next_step,
+            branch.crown_jewel,
+            branch.evidence,
+        ]
+        for field_value in raw_fields:
+            blob = str(field_value or "").lower()
+            if blob:
+                terms.append(blob)
+                terms.extend(
+                    token for token in re.findall(r"[a-z0-9_./:-]{4,}", blob)
+                    if token not in {
+                        "http",
+                        "https",
+                        "with",
+                        "then",
+                        "into",
+                        "from",
+                        "that",
+                        "this",
+                        "real",
+                        "impact",
+                    }
+                )
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for term in terms:
+            clean = str(term).strip().lower()
+            if len(clean) < 4 or clean in seen:
+                continue
+            seen.add(clean)
+            deduped.append(clean)
+        return deduped
+
+    def _action_advances_focus_branch(
+        self,
+        branch: BranchState | None,
+        name: str,
+        args: dict[str, Any] | Any,
+        matched_branch_ids: list[str],
+    ) -> bool:
+        if branch is None:
+            return True
+        if name in {"finish_scan", "link_chain"}:
+            return True
+        if not self._role_allows_action(branch.role, name, args):
+            return False
+        if not self._phase_allows_action(branch, name, args):
+            return False
+        if name == "report_finding":
+            return bool(matched_branch_ids) or bool(branch.source_candidate_id or branch.source_finding_id)
+        if any(self._branch_lineage_match(branch, branch_id) for branch_id in matched_branch_ids):
+            return True
+        blob = f"{name} {self._preview_args(args)}".lower()
+        return any(term in blob for term in self._branch_focus_terms(branch))
+
+    def _memory_profile(self) -> dict[str, Any]:
+        profile = getattr(self, "_target_memory_profile", None)
+        return profile if isinstance(profile, dict) else {}
+
+    def _matches_refuted_memory_pattern(self, args: dict[str, Any]) -> dict[str, Any] | None:
+        profile = self._memory_profile()
+        refuted = list(profile.get("refuted_patterns") or [])
+        if not refuted:
+            return None
+        ftype = str(args.get("finding_type", "")).lower().strip()
+        component = str(args.get("affected_component", "")).strip().lower()
+        for item in refuted:
+            if not isinstance(item, dict):
+                continue
+            mem_type = str(item.get("finding_type", "")).lower().strip()
+            mem_component = str(item.get("affected_component", "")).strip().lower()
+            if not mem_type or not mem_component:
+                continue
+            if mem_type == ftype and mem_component == component:
+                return item
+        return None
+
+    def _memory_action_components(self, name: str, args: dict[str, Any] | Any) -> list[str]:
+        if not isinstance(args, dict):
+            return []
+        components: list[str] = []
+        if name == "report_finding":
+            component = str(args.get("affected_component", "")).strip().lower()
+            if component:
+                components.append(component)
+        elif name == "run_skill":
+            target_url = str(args.get("target_url", "")).strip().lower()
+            if target_url:
+                components.append(target_url)
+            params = args.get("params") or {}
+            if isinstance(params, dict):
+                for key in ("url", "url_pattern", "path", "endpoint"):
+                    value = str(params.get(key, "")).strip().lower()
+                    if value:
+                        components.append(value)
+        else:
+            for key in ("url", "target_url", "path", "endpoint"):
+                value = str(args.get(key, "")).strip().lower()
+                if value:
+                    components.append(value)
+        deduped: list[str] = []
+        for value in components:
+            if value and value not in deduped:
+                deduped.append(value)
+        return deduped
+
+    def _memory_action_finding_types(self, name: str, args: dict[str, Any] | Any) -> list[str]:
+        if not isinstance(args, dict):
+            return []
+        if name == "report_finding":
+            value = str(args.get("finding_type", "")).strip().lower()
+            return [value] if value else []
+        if name != "run_skill":
+            return []
+        skill = str(args.get("skill", "")).strip().lower()
+        skill_map = {
+            "enumerate_endpoints": ["error_oracle"],
+            "test_sensitive_files": ["information_disclosure"],
+            "test_injection": ["sql_injection", "xss_reflected", "ssti", "nosql", "error_oracle"],
+            "test_xss": ["xss_reflected"],
+            "test_ssrf": ["ssrf"],
+            "attempt_auth": ["weak_auth", "auth_bypass"],
+            "test_idor": ["idor", "broken_access_control"],
+            "post_auth_enum": ["information_disclosure", "broken_access_control"],
+            "test_auth_deep": ["weak_auth", "auth_bypass"],
+            "test_api_security": ["mass_assignment", "weak_auth"],
+            "test_misconfig": ["information_disclosure", "error_oracle"],
+        }
+        return list(skill_map.get(skill, []))
+
+    def _matches_refuted_memory_action(self, name: str, args: dict[str, Any] | Any) -> dict[str, Any] | None:
+        profile = self._memory_profile()
+        refuted = list(profile.get("refuted_patterns") or [])
+        if not refuted:
+            return None
+        action_types = self._memory_action_finding_types(name, args)
+        action_components = self._memory_action_components(name, args)
+        if not action_types or not action_components:
+            return None
+        for item in refuted:
+            if not isinstance(item, dict):
+                continue
+            mem_type = str(item.get("finding_type", "")).strip().lower()
+            mem_component = str(item.get("affected_component", "")).strip().lower()
+            if not mem_type or not mem_component or mem_type not in action_types:
+                continue
+            if any(mem_component in component or component in mem_component for component in action_components):
+                return item
+        return None
+
+    def _matching_successful_memory_tactic(self, name: str, args: dict[str, Any] | Any) -> dict[str, Any] | None:
+        profile = self._memory_profile()
+        tactics = list(profile.get("successful_tactics") or [])
+        if not tactics:
+            return None
+        action_types = self._memory_action_finding_types(name, args)
+        action_components = self._memory_action_components(name, args)
+        if not action_types and not action_components:
+            return None
+        for item in tactics:
+            if not isinstance(item, dict):
+                continue
+            mem_type = str(item.get("finding_type", "")).strip().lower()
+            mem_component = str(item.get("affected_component", "")).strip().lower()
+            if action_types and mem_type and mem_type not in action_types:
+                continue
+            if action_components and mem_component:
+                if not any(mem_component in component or component in mem_component for component in action_components):
+                    continue
+            return item
+        return None
+
+    def _should_pressure_memory_revalidation(
+        self,
+        name: str,
+        args: dict[str, Any] | Any,
+        matched_branch_ids: list[str],
+    ) -> bool:
+        if self.state.iteration > 6:
+            return False
+        profile = self._memory_profile()
+        if not profile.get("target_known"):
+            return False
+        if not (profile.get("known_findings") or profile.get("branch_leads")):
+            return False
+        if any(str(branch_id).startswith("carry:") or str(branch_id).startswith("memory:") for branch_id in matched_branch_ids):
+            return False
+        if name in {"finish_scan", "link_chain", "query_scan_memory"}:
+            return False
+        if self._action_capability(name, args) in {"report", "review", "chain"}:
+            return False
+        if self._matching_successful_memory_tactic(name, args) is not None:
+            return False
+        return True
 
     async def _director_decide(self) -> tuple[str, dict[str, Any]] | None:
         """Strategic Director: stronger model decides the EXACT next tool call.
@@ -1682,6 +5089,11 @@ class ScanAgentLoop:
     async def run(self) -> dict[str, Any]:
         import json as _json
         import re as _re
+        try:
+            from vxis.agent.memory_compressor import reset_memory_compression_stats
+            reset_memory_compression_stats()
+        except Exception:
+            pass
         from vxis.interaction.surface import TargetKind as _TK
 
         self.state.add_message("system", f"Scan started on {self.state.target}")
@@ -1722,6 +5134,8 @@ class ScanAgentLoop:
         # Track which iteration we last emitted a sticky re-injection on, so
         # multi-action iterations don't spam the same nudge N times.
         _sticky_last_iter: int = 0
+        _focus_drift_count: int = 0
+        _focus_branch_id: str = ""
 
         # Phase C: enterprise egress allowlist. No-op unless VXIS_EGRESS_STRICT=1.
         from vxis.agent.egress import build_allowlist, check_violations, is_strict_mode
@@ -1761,12 +5175,37 @@ class ScanAgentLoop:
         # never even attempted so it can force-queue them with defaults.
         _real_skills_completed: set[str] = set()
         _all_skill_names = {s[0] for s in _skill_sequence}
+        _skill_promotion_replays: set[str] = set()
         _auth_token: str | None = None
+        _priority_action_lane: tuple[str, dict[str, Any], str] | None = None
         # Phase 4: track every shell_exec / python_exec invocation so the
         # scoring layer can credit VC for sandbox-based attacks. Each entry
         # is {"tool": name, "cmd"|"code": str}. Brain gets rewarded for
         # creative sandbox use instead of penalized (prior behavior).
         _sandbox_invocations: list[dict[str, str]] = []
+
+        def _queue_skill(skill_name: str, trigger_iter: int, params: dict[str, Any] | None = None, *, alias: str | None = None) -> bool:
+            queue_params = dict(params or {})
+            requested = str(queue_params.get("_skill_override") or skill_name).strip().lower()
+            if not requested:
+                return False
+            rerouted, queue_params = self._reroute_blocked_skill(requested, queue_params)
+            if not rerouted:
+                logger.info(
+                    "iter %d: skip queueing blocked skill=%s alias=%s",
+                    self.state.iteration,
+                    requested,
+                    alias or skill_name,
+                )
+                return False
+            if rerouted != requested:
+                queue_params["_skill_override"] = rerouted
+            elif queue_params.get("_skill_override") == requested:
+                queue_params.pop("_skill_override", None)
+            queue_name = alias or skill_name
+            _skill_sequence.append((queue_name, trigger_iter, queue_params))
+            _all_skill_names.add(queue_name)
+            return True
 
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
@@ -1781,7 +5220,17 @@ class ScanAgentLoop:
                 )
             except Exception:
                 pass  # compression is best-effort
-            actions = await self._decide(self.state)
+            if _priority_action_lane is not None:
+                self.state.add_message("system", {
+                    "hint": (
+                        f"PRIORITY ACTION LANE: execute {_priority_action_lane[0]} next "
+                        f"because the judge escalated this path: {_priority_action_lane[2]}"
+                    ),
+                })
+                actions = [(_priority_action_lane[0], dict(_priority_action_lane[1]))]
+                _priority_action_lane = None
+            else:
+                actions = await self._decide(self.state)
             if not actions:
                 _consecutive_empty += 1
                 _min_iters = min(50, self.state.max_iters // 2)
@@ -1812,6 +5261,7 @@ class ScanAgentLoop:
             # fires 5 tools without reading any results.
             actions = actions[:1]
             for name, args in actions:
+                args = self._normalize_tool_args(name, args)
                 # Compute a stable hash key for the (tool, args) pair
                 try:
                     key = f"{name}::{_json.dumps(args, sort_keys=True, default=str)}"
@@ -1820,8 +5270,93 @@ class ScanAgentLoop:
 
                 _action_candidate_ids = self._candidate_ids_for_action(name, args)
                 _action_branch_ids = self._branch_ids_for_action(name, args)
+                if not _action_branch_ids and _action_candidate_ids:
+                    _action_branch_ids = self._fallback_branch_ids_for_candidates(_action_candidate_ids)
+                _focus_branch = self._focus_branch()
+                if _focus_branch is None:
+                    _focus_drift_count = 0
+                    _focus_branch_id = ""
+                elif _focus_branch.id != _focus_branch_id:
+                    _focus_branch_id = _focus_branch.id
+                    _focus_drift_count = 0
+                _focus_related = self._action_advances_focus_branch(
+                    _focus_branch,
+                    name,
+                    args,
+                    _action_branch_ids,
+                )
+                _off_branch_allowed = self._should_allow_off_branch_action(
+                    _focus_branch,
+                    name,
+                    args,
+                    _action_branch_ids,
+                    _action_candidate_ids,
+                )
+                if self._should_pressure_memory_revalidation(name, args, _action_branch_ids):
+                    self.state.add_message("system", {
+                        "hint": (
+                            "MEMORY PRIORITY HINT: this target has prior confirmed leads or unfinished branches. "
+                            "Revalidate one carry-over memory branch or memory-seeded candidate first, then explore new surface."
+                        ),
+                    })
+                if _focus_branch and (_focus_related or _off_branch_allowed):
+                    _focus_drift_count = 0
                 count = _call_counts.get(key, 0) + 1
                 _call_counts[key] = count
+
+                if (
+                    _focus_branch
+                    and not _focus_related
+                    and not _off_branch_allowed
+                    and name != "finish_scan"
+                    and _focus_branch.priority >= 85
+                ):
+                    _focus_drift_count += 1
+                    _branch_summary = (
+                        f"Focus branch { _focus_branch.id } [{_focus_branch.title}] "
+                        f"role={_focus_branch.role} "
+                        f"phase={_focus_branch.phase} "
+                        f"objective={_focus_branch.objective[:100]} "
+                        f"next={_focus_branch.next_step[:100]}"
+                    )
+                    _drift_msg = (
+                        "BRANCH DISCIPLINE: your selected action does not advance the current "
+                        f"highest-priority branch.\n\n{_branch_summary}\n\n"
+                        "Strix-style rule: do not abandon a live exploit path just because a "
+                        "new idea appeared. Stay on this branch until you either prove deeper "
+                        "impact, hit a clear blocker, or spawn a stronger child branch."
+                    )
+                    if _focus_drift_count >= self._focus_drift_block_threshold():
+                        self.state.add_message("tool", {
+                            "name": name,
+                            "args": args,
+                            "result": {
+                                "ok": False,
+                                "summary": _drift_msg,
+                                "data": {
+                                    "focus_branch_blocked": True,
+                                    "focus_branch": _focus_branch.to_dict(),
+                                    "drift_count": _focus_drift_count,
+                                },
+                            },
+                        })
+                        logger.warning(
+                            "iter %d: blocked off-branch action %s while focus=%s",
+                            self.state.iteration,
+                            name,
+                            _focus_branch.id,
+                        )
+                        self._emit_control_plane(
+                            f"Blocked off-branch action {name}; refocus on {_focus_branch.id}"
+                        )
+                        continue
+                    self.state.add_message("system", {"hint": _drift_msg})
+                    logger.info(
+                        "iter %d: warned about off-branch action %s while focus=%s",
+                        self.state.iteration,
+                        name,
+                        _focus_branch.id,
+                    )
 
                 if count >= 5 and name != "finish_scan":
                     # Third or later time we're seeing this exact call. Skip the
@@ -1860,6 +5395,7 @@ class ScanAgentLoop:
                         self.state.record_branch_attempt(
                             _bid,
                             name,
+                            args,
                             status="blocked",
                             summary=nudge,
                             blocker="dedup guard",
@@ -1908,6 +5444,7 @@ class ScanAgentLoop:
                             self.state.record_branch_attempt(
                                 _bid,
                                 name,
+                                args,
                                 status="blocked",
                                 summary=f"egress blocked: {violations}",
                                 blocker="egress allowlist",
@@ -1942,6 +5479,9 @@ class ScanAgentLoop:
                         except Exception:
                             pass  # enrichment is best-effort
 
+                if name == "verify_finding" and isinstance(args, dict):
+                    args = self._hydrate_verify_finding_args(args)
+
                 # Phase C: auto-verify HIGH/CRITICAL report_finding calls
                 # before dispatch. If verify_finding is available in the
                 # registry and the severity is high or critical, run the
@@ -1959,6 +5499,10 @@ class ScanAgentLoop:
                             "finding_type": args.get("finding_type", ""),
                             "affected_component": args.get("affected_component", ""),
                             "description": args.get("description", ""),
+                            "impact": args.get("impact", ""),
+                            "technical_analysis": args.get("technical_analysis", ""),
+                            "poc_description": args.get("poc_description", ""),
+                            "poc_script_code": args.get("poc_script_code", ""),
                             "evidence": args.get("evidence", ""),
                         }
                         if _baseline_size is not None:
@@ -1967,6 +5511,8 @@ class ScanAgentLoop:
                         if verdict_result.ok:
                             verdict_data = verdict_result.data or {}
                             verdict = verdict_data.get("verdict", "UNCONFIRMED")
+                            reasoning = str(verdict_data.get("reasoning", "")) or f"Verifier returned {verdict}."
+                            confidence = str(verdict_data.get("confidence", "low"))
                             # Phase C belief state: track verdict counts
                             self.state.verdict_counts[verdict] = self.state.verdict_counts.get(verdict, 0) + 1
                             _belief_entry = {
@@ -1975,13 +5521,21 @@ class ScanAgentLoop:
                                 "severity": args.get("severity", ""),
                                 "finding_type": args.get("finding_type", ""),
                                 "affected_component": args.get("affected_component", ""),
-                                "confidence": verdict_data.get("confidence", "low"),
-                                "reasoning": str(verdict_data.get("reasoning", ""))[:300],
+                                "confidence": confidence,
+                                "reasoning": reasoning[:300],
                             }
                             if verdict == "CONFIRMED":
                                 self.state.confirmed_findings.append(_belief_entry)
+                            elif verdict == "UNCONFIRMED":
+                                pass
                             elif verdict == "REFUTED":
                                 self.state.refuted_findings.append(_belief_entry)
+                            self._record_verifier_decision(
+                                args=args,
+                                verdict=verdict,
+                                reasoning=reasoning,
+                                confidence=confidence,
+                            )
                             self.state.add_message("tool", {
                                 "name": "verify_finding",
                                 "args": verify_args,
@@ -2026,6 +5580,39 @@ class ScanAgentLoop:
                                 continue
                     except Exception:
                         logger.exception("auto-verify failed — proceeding with report_finding")
+
+                if name == "report_finding" and isinstance(args, dict):
+                    _refuted_match = self._matches_refuted_memory_pattern(args)
+                    if _refuted_match is not None:
+                        _reason = (
+                            "report_finding BLOCKED by target memory: this same finding_type/component "
+                            "was previously refuted on this target. Bring materially different evidence "
+                            "before reporting it again."
+                        )
+                        self.state.record_review_decision(
+                            stage="memory",
+                            verdict="SUPPRESSED",
+                            title=str(args.get("title", "memory-suppressed finding")),
+                            reason=_reason,
+                            action_hint="Reproduce with stronger control evidence or pivot to a different branch.",
+                            blocked_action="report_finding",
+                            affected_component=str(args.get("affected_component", "")),
+                            source_finding_type=str(args.get("finding_type", "")),
+                        )
+                        self.state.add_message("tool", {
+                            "name": "report_finding",
+                            "args": args,
+                            "result": {
+                                "ok": False,
+                                "summary": _reason,
+                                "data": {
+                                    "memory_suppressed": True,
+                                    "refuted_pattern": _refuted_match,
+                                },
+                            },
+                        })
+                        self._emit_control_plane("Memory suppressed a previously refuted finding pattern")
+                        continue
 
                 # Phase Q: dispatch-level surface guard. The desktop preamble
                 # in build_agent_system_prompt tells Brain "DO NOT call web
@@ -2084,6 +5671,7 @@ class ScanAgentLoop:
                             self.state.record_branch_attempt(
                                 _bid,
                                 name,
+                                args,
                                 status="blocked",
                                 summary=_block_msg,
                                 blocker="surface guard",
@@ -2091,8 +5679,151 @@ class ScanAgentLoop:
                         self._emit_control_plane(_block_msg)
                         continue
 
+                if name in {"run_skill", "report_finding"}:
+                    _memory_refuted_action = self._matches_refuted_memory_action(name, args)
+                    if _memory_refuted_action is not None:
+                        _memory_block_msg = (
+                            f"MEMORY BLOCKED: repeated refuted "
+                            f"{_memory_refuted_action.get('finding_type', 'finding')} pattern on "
+                            f"{_memory_refuted_action.get('affected_component', 'the same component')}. "
+                            f"Reason: {str(_memory_refuted_action.get('reasoning', '') or 'prior scan refuted it.')[:180]} "
+                            f"Choose a deeper pivot or a materially different control pair."
+                        )
+                        self.state.add_message("tool", {
+                            "name": name,
+                            "args": args,
+                            "result": {
+                                "ok": False,
+                                "summary": _memory_block_msg,
+                                "data": {
+                                    "memory_suppressed": True,
+                                    "refuted_pattern": _memory_refuted_action,
+                                    "blocked_stage": "action",
+                                },
+                            },
+                        })
+                        self.state.record_review_decision(
+                            stage="memory",
+                            verdict="SUPPRESSED",
+                            title=str(_memory_refuted_action.get("title") or _memory_refuted_action.get("finding_type") or name),
+                            reason=str(_memory_refuted_action.get("reasoning", "") or "Repeated refuted pattern."),
+                            blocked_action=name,
+                            affected_component=str(_memory_refuted_action.get("affected_component", "")),
+                            source_finding_type=str(_memory_refuted_action.get("finding_type", "")),
+                        )
+                        for _cid in _action_candidate_ids:
+                            self.state.record_attempt_outcome(
+                                _cid,
+                                name,
+                                args,
+                                status="blocked",
+                                summary=_memory_block_msg,
+                            )
+                        for _bid in _action_branch_ids:
+                            self.state.record_branch_attempt(
+                                _bid,
+                                name,
+                                args,
+                                status="blocked",
+                                summary=_memory_block_msg,
+                                blocker="memory refuted pattern",
+                            )
+                        self._emit_control_plane(_memory_block_msg)
+                        continue
+
+                _memory_success = self._matching_successful_memory_tactic(name, args)
+                if _memory_success is not None and self.state.iteration <= 8:
+                    self.state.add_message("system", {
+                        "hint": (
+                            f"MEMORY TACTIC HINT: prior scan confirmed "
+                            f"{_memory_success.get('finding_type', 'this tactic')} on "
+                            f"{_memory_success.get('affected_component', 'this surface')}. "
+                            f"Revalidate quickly with fresh transcript, then go deeper than before."
+                        ),
+                    })
+
+                if name == "finish_scan":
+                    _recent_finish_rejections = self._recent_finish_rejections(limit=3)
+                    if len(_recent_finish_rejections) >= 2:
+                        _latest_titles = {item.title for item in _recent_finish_rejections[-2:]}
+                        _latest_title = next(iter(_latest_titles)) if _latest_titles else ""
+                        if len(_latest_titles) == 1 and _latest_title in {"needs_chains", "unfinished_branches", "unattempted_candidates"}:
+                            _chain_candidates = self._suggest_chain_candidates(limit=3)
+                            _auto_linked = await self._maybe_auto_link_suggested_chain()
+                            _forced_action = self._forced_replan_action(_latest_title)
+                            _replan_hint = self._judge_replan_hint()
+                            _candidate_text = ""
+                            _auto_link_text = ""
+                            _forced_text = ""
+                            if _auto_linked is not None:
+                                _auto_link_text = (
+                                    f" Auto-linked { _auto_linked['source_id'] } -> { _auto_linked['target_id'] } "
+                                    f"toward {_auto_linked['crown_jewel']}."
+                                )
+                            if _forced_action is not None:
+                                _forced_text = f" Forced next action: {_forced_action[0]} ({_forced_action[2]})."
+                            if _chain_candidates:
+                                _candidate_lines = [
+                                    f"{item['source_id']} -> {item['target_id']} ({item['crown_jewel']})"
+                                    for item in _chain_candidates
+                                ]
+                                _candidate_text = " Suggested chain candidates: " + "; ".join(_candidate_lines) + "."
+                            _replan_msg = (
+                                "JUDGE REPLAN REQUIRED: finish_scan was rejected repeatedly for the same reason. "
+                                f"Last rejection: {_latest_title}.{_auto_link_text}{_forced_text} {_replan_hint}{_candidate_text}"
+                            )
+                            self.state.add_message("tool", {
+                                "name": "finish_scan",
+                                "args": args,
+                                "result": {
+                                    "ok": False,
+                                    "summary": _replan_msg,
+                                    "data": {
+                                        "judge_replan_required": True,
+                                        "last_rejection_title": _latest_title,
+                                        "auto_linked_chain": _auto_linked,
+                                        "chain_candidates": _chain_candidates,
+                                        "forced_action": {
+                                            "tool": _forced_action[0],
+                                            "args": _forced_action[1],
+                                            "reason": _forced_action[2],
+                                        } if _forced_action is not None else None,
+                                    },
+                                },
+                            })
+                            self.state.add_message("system", {
+                                "hint": f"SYSTEM HINT: {_replan_hint}",
+                            })
+                            for _cid in _action_candidate_ids:
+                                self.state.record_attempt_outcome(
+                                    _cid,
+                                    name,
+                                    args,
+                                    status="blocked",
+                                    summary=_replan_msg,
+                                )
+                            for _bid in _action_branch_ids:
+                                self.state.record_branch_attempt(
+                                    _bid,
+                                    name,
+                                    args,
+                                    status="blocked",
+                                    summary=_replan_msg,
+                                    blocker="judge replan required",
+                                )
+                            self._emit_control_plane(_replan_msg)
+                            if _forced_action is not None:
+                                _priority_action_lane = _forced_action
+                                name, args = _forced_action[0], _forced_action[1]
+                            else:
+                                continue
+
                 self._emit_action_progress(name, args, "Executing")
                 result = await self.registry.dispatch(name, args)
+                if name == "run_skill" and isinstance(args, dict) and not result.ok:
+                    _data = result.data if isinstance(result.data, dict) else {}
+                    if _data.get("blocked"):
+                        self.state.record_blocked_skill(str(args.get("skill") or ""))
                 self.state.add_message("tool", {"name": name, "args": args, "result": {
                     "ok": result.ok, "summary": result.summary, "data": result.data,
                 }})
@@ -2108,6 +5839,7 @@ class ScanAgentLoop:
                     self.state.record_branch_attempt(
                         _bid,
                         name,
+                        args,
                         status=self._status_from_tool_result(result),
                         summary=result.summary,
                     )
@@ -2120,6 +5852,7 @@ class ScanAgentLoop:
                         finding_id = str(result.data.get("id") or "")
                     if finding_id:
                         self._spawn_followup_branches_from_finding(finding_id, args)
+                        await self._maybe_auto_link_chain(finding_id)
 
                 # Phase Q10: credit Brain-direct run_skill calls so VC isn't
                 # blind to LLM initiative. Pre-Q10 only the auto-exec ladder
@@ -2136,6 +5869,19 @@ class ScanAgentLoop:
                     if _real_sk:
                         _real_skills_completed.add(_real_sk)
                         _skills_completed.add(_real_sk)
+                        if isinstance(result.data, dict):
+                            await self._promote_direct_run_skill_result(_real_sk, result.data)
+                        _promote_alias = f"promote::{_real_sk}::iter{self.state.iteration}"
+                        if _promote_alias not in _skill_promotion_replays:
+                            _skill_promotion_replays.add(_promote_alias)
+                            _promote_params = dict(args.get("params") or {})
+                            _promote_params["_skill_override"] = _real_sk
+                            _queue_skill(
+                                _real_sk,
+                                self.state.iteration + 1,
+                                _promote_params,
+                                alias=_promote_alias,
+                            )
 
                 # Phase 4: record sandbox invocations for VC scoring.
                 # Every shell_exec / python_exec call — whether ok or not —
@@ -2339,20 +6085,22 @@ class ScanAgentLoop:
                     # Reject premature finish: enforce minimum exploration
                     _min_iters = min(50, self.state.max_iters // 2)
                     if self.state.iteration < _min_iters:
-                        self.state.add_message("tool", {
-                            "name": "finish_scan", "args": {},
-                            "result": {
-                                "ok": False,
-                                "summary": (
-                                    f"finish_scan REJECTED — only {self.state.iteration} "
-                                    f"iterations done, minimum {_min_iters} required. "
-                                    "Keep exploring: try injection_vectors playbook, "
-                                    "test SQLi on discovered endpoints, run nuclei, "
-                                    "or probe authentication endpoints."
-                                ),
-                                "data": {"premature": True},
-                            },
-                        })
+                        self._reject_finish_scan(
+                            title="premature_finish",
+                            reason=(
+                                f"finish_scan was attempted at iter {self.state.iteration} before the minimum "
+                                f"exploration floor {_min_iters}."
+                            ),
+                            action_hint="Keep scanning and exercise at least one concrete high-signal vector before trying to finish again.",
+                            summary=(
+                                f"finish_scan REJECTED — only {self.state.iteration} "
+                                f"iterations done, minimum {_min_iters} required. "
+                                "Keep exploring: try injection_vectors playbook, "
+                                "test SQLi on discovered endpoints, run nuclei, "
+                                "or probe authentication endpoints."
+                            ),
+                            data={"premature": True},
+                        )
                         logger.warning(
                             "iter %d: finish_scan rejected (min=%d)",
                             self.state.iteration, _min_iters,
@@ -2367,7 +6115,8 @@ class ScanAgentLoop:
                         from vxis.agent.tools.finding_tools import _get_findings as _gf2, _get_chains as _gc2
                         _fin_findings = _gf2()
                         _fin_chains = _gc2()
-                        _fin_desired = 1 if len(_fin_findings) < 3 else max(3, len(_fin_findings) // 3)
+                        _fin_chainable = self._chainable_findings(_fin_findings)
+                        _fin_desired = self._desired_chain_count(_fin_findings)
                         # Phase Q11: hard-block finish_scan when nothing has
                         # been reported. Pre-Q11 the chains-deficit branch
                         # below was gated on `findings >= 3`, so 0-finding
@@ -2382,33 +6131,34 @@ class ScanAgentLoop:
                                 _registered = sorted(self.registry.list_tools())
                             except Exception:
                                 pass
-                            self.state.add_message("tool", {
-                                "name": "finish_scan", "args": {},
-                                "result": {
-                                    "ok": False,
-                                    "summary": (
-                                        f"finish_scan REJECTED — 0 findings after "
-                                        f"{self.state.iteration} iterations. "
-                                        "An empty report is not a scan. Pick a "
-                                        "concrete probe NOW:\n"
-                                        "  - run_skill(skill=\"<one of the registered skills>\")\n"
-                                        "  - shell_exec — sqlmap/nuclei/ffuf for web, "
-                                        "otool/codesign/lipo for macOS desktop\n"
-                                        "  - report_finding — if you DO have evidence, report it before finishing\n"
-                                        f"Tools available: {', '.join(_registered[:12])}"
-                                    ),
-                                    "data": {
-                                        "empty_scan": True,
-                                        "iter": self.state.iteration,
-                                    },
+                            self._reject_finish_scan(
+                                title="empty_scan",
+                                reason=(
+                                    f"finish_scan was attempted at iter {self.state.iteration} with zero accepted findings."
+                                ),
+                                action_hint="Run a concrete probe or report the evidence you already have before finishing.",
+                                summary=(
+                                    f"finish_scan REJECTED — 0 findings after "
+                                    f"{self.state.iteration} iterations. "
+                                    "An empty report is not a scan. Pick a "
+                                    "concrete probe NOW:\n"
+                                    "  - run_skill(skill=\"<one of the registered skills>\")\n"
+                                    "  - shell_exec — sqlmap/nuclei/ffuf for web, "
+                                    "otool/codesign/lipo for macOS desktop\n"
+                                    "  - report_finding — if you DO have evidence, report it before finishing\n"
+                                    f"Tools available: {', '.join(_registered[:12])}"
+                                ),
+                                data={
+                                    "empty_scan": True,
+                                    "iter": self.state.iteration,
                                 },
-                            })
+                            )
                             logger.warning(
                                 "iter %d: finish_scan rejected (0 findings)",
                                 self.state.iteration,
                             )
                             continue
-                        if len(_fin_findings) >= 2 and len(_fin_chains) < _fin_desired:
+                        if _fin_desired > 0 and len(_fin_chains) < _fin_desired:
                             # Build concrete chain suggestions from actual IDs.
                             # Group by severity — high/critical first so Brain
                             # is pointed at the most impactful composition.
@@ -2443,62 +6193,92 @@ class ScanAgentLoop:
                                 f"{f['id']} [{f.get('severity','?').upper()}] {f.get('finding_type','')}: {f.get('title','')[:60]}"
                                 for f in _sorted[:10]
                             )
-                            self.state.add_message("tool", {
-                                "name": "finish_scan", "args": {},
-                                "result": {
-                                    "ok": False,
-                                    "summary": (
-                                        f"finish_scan REJECTED — {len(_fin_findings)} findings, "
-                                        f"{len(_fin_chains)} chains (need ≥{_fin_desired}).\n"
-                                        f"DO NOT call finish_scan yet.\n\n"
-                                        f"YOUR FINDINGS:\n  {_findings_block}\n\n"
-                                        f"READY-TO-CALL link_chain SUGGESTIONS:\n  {_sug_block}\n\n"
-                                        "Pick one, customise the rationale/crown_jewel, call link_chain, "
-                                        "then try the next. Each chain you link = one step closer to "
-                                        "passing the gate. Crown jewels: admin takeover, DB dump, RCE, "
-                                        "key theft, full data exfil."
-                                    ),
-                                    "data": {
-                                        "needs_chains": True,
-                                        "chain_deficit": _fin_desired - len(_fin_chains),
-                                        "suggestions": _suggestions,
-                                    },
+                            self._reject_finish_scan(
+                                title="needs_chains",
+                                reason=(
+                                    f"finish_scan was attempted with {len(_fin_findings)} findings but only "
+                                    f"{len(_fin_chains)} chains; target is at least {_fin_desired}."
+                                ),
+                                action_hint="Link and validate at least one more attack chain before finishing.",
+                                summary=(
+                                    f"finish_scan REJECTED — {len(_fin_findings)} findings, "
+                                    f"{len(_fin_chains)} chains (need ≥{_fin_desired}).\n"
+                                    f"DO NOT call finish_scan yet.\n"
+                                    f"CHAINABLE FINDINGS: {len(_fin_chainable)}\n\n"
+                                    f"YOUR FINDINGS:\n  {_findings_block}\n\n"
+                                    f"READY-TO-CALL link_chain SUGGESTIONS:\n  {_sug_block}\n\n"
+                                    "Pick one, customise the rationale/crown_jewel, call link_chain, "
+                                    "then try the next. Each chain you link = one step closer to "
+                                    "passing the gate. Crown jewels: admin takeover, DB dump, RCE, "
+                                    "key theft, full data exfil."
+                                ),
+                                data={
+                                    "needs_chains": True,
+                                    "chain_deficit": _fin_desired - len(_fin_chains),
+                                    "suggestions": _suggestions,
                                 },
-                            })
+                            )
                             logger.warning(
                                 "iter %d: finish_scan rejected (%d chains / %d target, %d findings)",
                                 self.state.iteration, len(_fin_chains),
                                 _fin_desired, len(_fin_findings),
                             )
                             continue
+                        _blocking_branches = self._blocking_finish_branches()
+                        if _blocking_branches and self.state.iteration < self._finish_branch_guard_until(self.state.max_iters):
+                            _branch_block = "\n  ".join(
+                                f"{b.id} p{b.priority} attempts={b.attempts} title={b.title} "
+                                f"objective={b.objective[:70]} next={b.next_step[:70]}"
+                                for b in _blocking_branches[:6]
+                            )
+                            self._reject_finish_scan(
+                                title="unfinished_branches",
+                                reason=(
+                                    f"finish_scan was attempted while {len(_blocking_branches)} high-priority branches remained active."
+                                ),
+                                action_hint="Stay on the strongest live branch until it is proven, exhausted, or blocked.",
+                                summary=(
+                                    "finish_scan REJECTED — high-priority attack branches remain active.\n\n"
+                                    f"UNFINISHED BRANCHES:\n  {_branch_block}\n\n"
+                                    "Strix-style rule: reporting a finding is not the end. Stay on each live branch "
+                                    "until you either expand it into real impact/crown-jewel access, or clearly exhaust/block it."
+                                ),
+                                data={
+                                    "unfinished_branches": [b.to_dict() for b in _blocking_branches[:6]],
+                                },
+                            )
+                            logger.warning(
+                                "iter %d: finish_scan rejected (%d blocking branches)",
+                                self.state.iteration,
+                                len(_blocking_branches),
+                            )
+                            continue
                         if self.state.max_iters >= 30:
-                            _open_candidates = [
-                                c for c in self.state.open_vector_candidates()
-                                if c.priority >= 75 and c.attempts == 0
-                            ]
+                            _open_candidates = self._remaining_high_yield_family_candidates(_fin_findings)
                             if _open_candidates:
                                 _cand_block = "\n  ".join(
                                     f"{c.id} ({c.vector_id}) p{c.priority}: {c.title}"
                                     for c in _open_candidates[:8]
                                 )
-                                self.state.add_message("tool", {
-                                    "name": "finish_scan", "args": {},
-                                    "result": {
-                                        "ok": False,
-                                        "summary": (
-                                            "finish_scan REJECTED — high-priority vector candidates "
-                                            "remain unattempted. Exhaust them first:\n"
-                                            f"  {_cand_block}\n\n"
-                                            "For each candidate: try a concrete tool/payload, then drive it to "
-                                            "found, clean, blocked, or dead before finishing."
-                                        ),
-                                        "data": {
-                                            "unresolved_vector_candidates": [
-                                                c.to_dict() for c in _open_candidates[:8]
-                                            ],
-                                        },
+                                self._reject_finish_scan(
+                                    title="unattempted_candidates",
+                                    reason=(
+                                        f"finish_scan was attempted while {len(_open_candidates)} high-priority vector candidates had never been tried."
+                                    ),
+                                    action_hint="Attempt each high-priority candidate at least once before finishing.",
+                                    summary=(
+                                        "finish_scan REJECTED — high-priority vector candidates "
+                                        "remain unattempted. Exhaust them first:\n"
+                                        f"  {_cand_block}\n\n"
+                                        "For each candidate: try a concrete tool/payload, then drive it to "
+                                        "found, clean, blocked, or dead before finishing."
+                                    ),
+                                    data={
+                                        "unresolved_vector_candidates": [
+                                            c.to_dict() for c in _open_candidates[:8]
+                                        ],
                                     },
-                                })
+                                )
                                 logger.warning(
                                     "iter %d: finish_scan rejected (%d unattempted high-priority candidates)",
                                     self.state.iteration,
@@ -2550,6 +6330,14 @@ class ScanAgentLoop:
                             # multiple times with distinct parameters without
                             # confusing the de-dup set.
                             _real_skill = params.pop("_skill_override", None) or skill_name
+                            _real_skill, params = self._reroute_blocked_skill(_real_skill, params)
+                            if not _real_skill:
+                                logger.info(
+                                    "iter %d: auto skill queue=%s skipped after blocked-skill reroute",
+                                    self.state.iteration,
+                                    skill_name,
+                                )
+                                continue
                             # Track the real skill even when called via alias,
                             # so the sweep block can detect untouched skills.
                             _real_skills_completed.add(_real_skill)
@@ -2583,22 +6371,45 @@ class ScanAgentLoop:
                                         # Auto-report auth finding
                                         severity = "critical" if "sqli" in method else "high"
                                         ftype = "sql_injection" if "sqli" in method else "weak_auth"
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"Authentication bypass via {method}",
-                                            "severity": severity,
-                                            "finding_type": ftype,
-                                            "affected_component": sr.data.get("login_endpoint", self.state.target),
-                                            "description": f"Auth bypass via {method}. Credentials: {creds}",
-                                            "evidence": f"Token: {_auth_token[:60]}...\nUser: {sr.data.get('user_info', {})}",
-                                        })
+                                        login_endpoint = sr.data.get("login_endpoint", self.state.target)
+                                        control_checks = sr.data.get("control_checks", {}) or {}
+                                        poc_blob = (
+                                            sr.data.get("poc_http_exchange")
+                                            or (
+                                                f"Method: {method}\n"
+                                                f"Credentials used: {creds}\n"
+                                                f"Token: {_auth_token[:120]}\n"
+                                                f"User info: {sr.data.get('user_info', {})}\n"
+                                                f"Control checks: {control_checks}"
+                                            )
+                                        )
+                                        await self._dispatch_report_finding_checked(self._build_report_finding_args(
+                                            title=f"Authentication bypass via {method}",
+                                            severity=severity,
+                                            finding_type=ftype,
+                                            affected_component=login_endpoint,
+                                            description=f"Authentication succeeded via {method}.",
+                                            impact="An unauthenticated actor can obtain a valid session or token and pivot into post-authenticated functionality.",
+                                            technical_analysis=(
+                                                f"The attempt_auth skill reported authenticated=True using method={method}. "
+                                                f"Negative control: {control_checks.get('negative_control', {})}. "
+                                                f"Positive control: {control_checks.get('positive_control', {})}. "
+                                                "This indicates the login boundary can be bypassed under the observed conditions."
+                                            ),
+                                            poc_description="Replay the authentication flow with the same bypass technique and confirm that the application returns an authenticated token or session.",
+                                            poc_script_code=poc_blob,
+                                            remediation_steps="Enforce server-side authentication checks, normalize credential validation, and add regression tests for the bypass condition.",
+                                            endpoint=login_endpoint,
+                                            method="POST",
+                                        ))
                                         # Queue post-auth skills
                                         _post_auth_skills = [
                                             ("post_auth_enum", self.state.iteration + 2, {"token": _auth_token}),
                                             ("test_idor", self.state.iteration + 4, {"token": _auth_token}),
                                             ("test_auth_deep", self.state.iteration + 5, {"token": _auth_token}),
                                         ]
-                                        _skill_sequence.extend(_post_auth_skills)
-                                        _all_skill_names.update(s[0] for s in _post_auth_skills)
+                                        for _queued_skill, _queued_iter, _queued_params in _post_auth_skills:
+                                            _queue_skill(_queued_skill, _queued_iter, _queued_params)
                                         self.state.add_message("user", (
                                             f"SKILL CHAIN: Auth bypass confirmed via {method}! "
                                             f"Token acquired. Post-auth skills queued."
@@ -2609,26 +6420,89 @@ class ScanAgentLoop:
                                     for exposed in (sr.data.get("exposed") or [])[:10]:
                                         sev = exposed.get("severity", "medium")
                                         if sev in ("critical", "high"):
-                                            await self.registry.dispatch("report_finding", {
-                                                "title": f"Sensitive file exposed: {exposed['path']}",
-                                                "severity": sev,
-                                                "finding_type": "information_disclosure",
-                                                "affected_component": self.state.target + exposed["path"],
-                                                "description": exposed.get("description", ""),
-                                                "evidence": exposed.get("preview", "")[:500],
-                                            })
+                                            exposed_path = self.state.target + exposed["path"]
+                                            preview = exposed.get("preview", "")[:1000]
+                                            poc_blob = self._build_simple_http_poc(
+                                                url=exposed_path,
+                                                status=exposed.get("status", "?"),
+                                                response_preview=preview,
+                                            )
+                                            self.state.record_retrieval_observation(
+                                                finding_type="information_disclosure",
+                                                component=exposed_path,
+                                                retrieval_kind="sensitive_file",
+                                                summary=f"Sensitive file content retrieved from {exposed['path']}",
+                                                sample=preview,
+                                            )
+                                            await self._dispatch_report_finding_checked(self._build_report_finding_args(
+                                                title=f"Sensitive file exposed: {exposed['path']}",
+                                                severity=sev,
+                                                finding_type="information_disclosure",
+                                                affected_component=exposed_path,
+                                                description=exposed.get("description", "") or f"Sensitive file {exposed['path']} is externally accessible.",
+                                                impact="Sensitive configuration or credential material may be retrievable without authorization, enabling follow-on compromise.",
+                                                technical_analysis=(
+                                                    f"The sensitive files skill marked {exposed['path']} as exposed and returned response content preview, "
+                                                    "which indicates direct unauthenticated access to non-public file content."
+                                                ),
+                                                poc_description="Request the exposed file path directly and verify that the server returns the file contents without an authorization challenge.",
+                                                poc_script_code=poc_blob,
+                                                remediation_steps="Deny public access to sensitive files, remove secrets from web roots, and return 403/404 for internal artifacts.",
+                                                endpoint=exposed_path,
+                                                method="GET",
+                                                extra_evidence=[
+                                                    self._retrieval_evidence_item(
+                                                        title="Retrieved Sensitive File Preview",
+                                                        retrieval_kind="sensitive_file",
+                                                        summary=f"Unauthenticated retrieval of {exposed['path']}",
+                                                        sample=preview,
+                                                    )
+                                                ],
+                                            ))
 
                                 # Auto-report injection findings
                                 if _real_skill == "test_injection" and sr.data:
                                     for finding in (sr.data.get("findings") or []):
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"{finding['type'].upper()} on {sr.data.get('param', '?')}",
-                                            "severity": finding.get("severity", "medium"),
+                                        inj_sev = finding.get("severity", "medium")
+                                        if inj_sev not in ("high", "critical"):
+                                            continue
+                                        inj_url = sr.data.get("url", self.state.target)
+                                        inj_param = sr.data.get("param", finding.get("param", "?"))
+                                        control = finding.get("control", {}) or {}
+                                        payload_text = finding.get("payload", "")
+                                        poc_blob = self._build_reflected_get_poc(
+                                            url=inj_url,
+                                            param=inj_param,
+                                            payload=payload_text,
+                                            control=control,
+                                            response_preview=finding.get("response_preview", "")[:1200],
+                                        )
+                                        args = {
+                                            "title": f"{finding['type'].upper()} on {inj_param}",
+                                            "severity": inj_sev,
                                             "finding_type": finding["type"],
-                                            "affected_component": sr.data.get("url", self.state.target),
-                                            "description": f"Payload: {finding['payload'][:80]}",
+                                            "affected_component": inj_url,
+                                            "description": f"Payload: {payload_text[:80]}",
                                             "evidence": finding.get("response_preview", finding.get("evidence", ""))[:500],
-                                        })
+                                        }
+                                        args.update(self._build_report_finding_args(
+                                            title=args["title"],
+                                            severity=inj_sev,
+                                            finding_type=finding["type"],
+                                            affected_component=inj_url,
+                                            description=f"Injection behavior was observed on parameter {inj_param}.",
+                                            impact="Successful injection may expose backend data, execute attacker-controlled logic, or cross trust boundaries depending on the sink.",
+                                            technical_analysis=(
+                                                f"The injection skill recorded baseline/control data {control} alongside the payload response, "
+                                                "which indicates the parameter reacts differently under attacker-controlled input."
+                                            ),
+                                            poc_description="Replay the payload against the same parameter and compare the baseline response to the injected response or delay/output delta.",
+                                            poc_script_code=poc_blob,
+                                            remediation_steps="Apply sink-specific input handling such as parameterized queries, output encoding, and strict server-side validation.",
+                                            endpoint=inj_url,
+                                            method="GET",
+                                        ))
+                                        await self._dispatch_report_finding_checked(args)
 
                                 # Auto-report enumeration results
                                 if _real_skill == "enumerate_endpoints" and sr.data:
@@ -2638,9 +6512,9 @@ class ScanAgentLoop:
                                         path = ep.get("path", "")
                                         if "?" in path or "search" in path.lower():
                                             full_url = self.state.target.rstrip("/") + path
-                                            _skill_sequence.append(("test_injection", self.state.iteration + 2, {"url": full_url}))
-                                            _skill_sequence.append(("test_xss", self.state.iteration + 3, {"url": full_url}))
-                                            _skill_sequence.append(("test_ssrf", self.state.iteration + 4, {"url": full_url}))
+                                            _queue_skill("test_injection", self.state.iteration + 2, {"url": full_url})
+                                            _queue_skill("test_xss", self.state.iteration + 3, {"url": full_url})
+                                            _queue_skill("test_ssrf", self.state.iteration + 4, {"url": full_url})
                                             break
                                     # Queue test_idor on discovered numeric-id
                                     # patterns so we don't rely on the
@@ -2656,12 +6530,12 @@ class ScanAgentLoop:
                                             pattern = self.state.target.rstrip("/") + base + "/{id}"
                                             if pattern not in _idor_patterns_seen:
                                                 _idor_patterns_seen.add(pattern)
-                                                _skill_sequence.append((
-                                                    f"test_idor_{len(_idor_patterns_seen)}",
+                                                _queue_skill(
+                                                    "test_idor",
                                                     self.state.iteration + 5,
                                                     {"url_pattern": pattern, "_skill_override": "test_idor"},
-                                                ))
-                                                _all_skill_names.add(f"test_idor_{len(_idor_patterns_seen)}")
+                                                    alias=f"test_idor_{len(_idor_patterns_seen)}",
+                                                )
                                                 if len(_idor_patterns_seen) >= 4:
                                                     break
                                     # Also target common API shapes if nothing
@@ -2674,86 +6548,204 @@ class ScanAgentLoop:
                                             "/users/{id}", "/profile/{id}",
                                         ):
                                             pattern = self.state.target.rstrip("/") + _candidate
-                                            _skill_sequence.append((
-                                                f"test_idor_probe_{_candidate.strip('/').replace('/','_')}",
+                                            _queue_skill(
+                                                "test_idor",
                                                 self.state.iteration + 5,
                                                 {"url_pattern": pattern, "_skill_override": "test_idor"},
-                                            ))
-                                            _all_skill_names.add(f"test_idor_probe_{_candidate.strip('/').replace('/','_')}")
+                                                alias=f"test_idor_probe_{_candidate.strip('/').replace('/','_')}",
+                                            )
                                     # Report error endpoints
                                     for ep in (sr.data.get("errors") or [])[:5]:
-                                        await self.registry.dispatch("report_finding", {
+                                        preview = (ep.get("error_preview", "") or "")[:300]
+                                        if not self._error_oracle_preview_is_actionable(preview):
+                                            continue
+                                        await self._dispatch_report_finding_checked({
                                             "title": f"HTTP 500 on {ep['path']}",
                                             "severity": "medium",
                                             "finding_type": "error_oracle",
                                             "affected_component": self.state.target + ep["path"],
-                                            "description": f"Endpoint returns HTTP 500 ({ep.get('size', '?')}B)",
-                                            "evidence": ep.get("error_preview", "")[:300],
+                                            "description": f"Endpoint returns HTTP 500 ({ep.get('size', '?')}B) with actionable backend error details.",
+                                            "evidence": preview,
                                         })
 
                                 # IDOR results
                                 if _real_skill == "test_idor" and sr.data:
                                     if sr.data.get("vulnerable"):
                                         ids = sr.data.get("accessible_ids", [])
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"IDOR on {sr.data.get('url_pattern', '?')}",
-                                            "severity": "high",
-                                            "finding_type": "idor",
-                                            "affected_component": sr.data.get("url_pattern", ""),
-                                            "description": f"{len(ids)} IDs accessible",
-                                            "evidence": f"Accessible IDs: {ids[:10]}\nSamples: {sr.data.get('data_samples', [])[:2]}",
-                                        })
+                                        pattern = sr.data.get("url_pattern", "")
+                                        control_evidence = sr.data.get("control_evidence", {}) or {}
+                                        comparisons = sr.data.get("comparisons", []) or []
+                                        exfil_sample = str(sr.data.get("data_samples", [])[:2])[:1200]
+                                        self.state.record_retrieval_observation(
+                                            finding_type="idor",
+                                            component=pattern,
+                                            retrieval_kind="unauthorized_object_access",
+                                            summary=f"Accessible IDs: {ids[:10]} / auth bypass IDs: {sr.data.get('auth_bypass_ids', [])[:10]}",
+                                            sample=exfil_sample,
+                                        )
+                                        poc_blob = (
+                                            f"Accessible IDs: {ids[:10]}\n"
+                                            f"Auth bypass IDs: {sr.data.get('auth_bypass_ids', [])[:10]}\n"
+                                            f"Control evidence: {control_evidence}\n"
+                                            f"Comparisons: {comparisons[:4]}\n"
+                                            f"Samples: {sr.data.get('data_samples', [])[:2]}"
+                                        )
+                                        await self._dispatch_report_finding_checked(self._build_report_finding_args(
+                                            title=f"IDOR on {pattern}",
+                                            severity="high",
+                                            finding_type="idor",
+                                            affected_component=pattern,
+                                            description=f"{len(ids)} object identifier(s) were accessible outside the expected authorization boundary.",
+                                            impact="Attackers may enumerate and retrieve other users' records or privileged objects without proper authorization.",
+                                            technical_analysis=(
+                                                f"The test_idor skill marked the pattern {pattern} as vulnerable and returned per-object comparisons. "
+                                                f"Positive/negative controls: {control_evidence}. This demonstrates a broken object-level authorization check."
+                                            ),
+                                            poc_description="Repeat the same object access request across multiple IDs and verify that unrelated records are returned successfully.",
+                                            poc_script_code=poc_blob,
+                                            remediation_steps="Enforce server-side ownership and authorization checks on every object reference before returning data.",
+                                            endpoint=pattern,
+                                            method="GET",
+                                            cwe="CWE-639",
+                                            extra_evidence=[
+                                                self._retrieval_evidence_item(
+                                                    title="Unauthorized Object Retrieval",
+                                                    retrieval_kind="unauthorized_object_access",
+                                                    summary=f"Multiple object identifiers returned data across the same pattern {pattern}.",
+                                                    sample=exfil_sample,
+                                                ),
+                                                self._exfil_evidence_item(
+                                                    title="Potential Bulk Data Exfiltration Path",
+                                                    summary="The vulnerable object pattern can be iterated across IDs to extract unrelated records.",
+                                                    sample=str(comparisons[:4])[:1200],
+                                                ),
+                                            ],
+                                        ))
 
                                 # Post-auth enum results
                                 if _real_skill == "post_auth_enum" and sr.data:
                                     user_data = sr.data.get("user_data_exposed", [])
                                     if user_data:
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"Sensitive user data exposed on {len(user_data)} endpoint(s)",
-                                            "severity": "high",
-                                            "finding_type": "broken_access_control",
-                                            "affected_component": self.state.target,
-                                            "description": f"Endpoints exposing user data: {[e['path'] for e in user_data[:5]]}",
-                                            "evidence": str(user_data[:3])[:500],
-                                        })
+                                        paths = [e["path"] for e in user_data[:5]]
+                                        control_evidence = sr.data.get("control_evidence", {}) or {}
+                                        user_data_sample = str(user_data[:3])[:1200]
+                                        self.state.record_retrieval_observation(
+                                            finding_type="broken_access_control",
+                                            component=self.state.target,
+                                            retrieval_kind="post_auth_data_access",
+                                            summary=f"Sensitive user data observed on {len(user_data)} authenticated endpoint(s): {paths}",
+                                            sample=user_data_sample,
+                                        )
+                                        await self._dispatch_report_finding_checked(self._build_report_finding_args(
+                                            title=f"Sensitive user data exposed on {len(user_data)} endpoint(s)",
+                                            severity="high",
+                                            finding_type="broken_access_control",
+                                            affected_component=self.state.target,
+                                            description=f"Authenticated functionality exposed sensitive user data on endpoints including: {paths}",
+                                            impact="Low-privilege or bypassed access can disclose user records and enable lateral movement into other accounts.",
+                                            technical_analysis=(
+                                                "The post_auth_enum skill collected user-data-bearing endpoints after authentication and compared them with unauthenticated access results. "
+                                                f"Control evidence: {control_evidence}."
+                                            ),
+                                            poc_description="Access the listed post-auth endpoints with the acquired session and confirm that user data is returned beyond the minimum necessary scope.",
+                                            poc_script_code=(
+                                                f"Control evidence: {control_evidence}\n"
+                                                f"User data samples: {user_data_sample}"
+                                            ),
+                                            remediation_steps="Apply object- and field-level authorization checks on user data endpoints and minimize exposed record fields.",
+                                            endpoint=self.state.target,
+                                            method="GET",
+                                            extra_evidence=[
+                                                self._retrieval_evidence_item(
+                                                    title="Authenticated Data Retrieval",
+                                                    retrieval_kind="post_auth_data_access",
+                                                    summary=f"Authenticated access exposed user data on {len(user_data)} endpoint(s).",
+                                                    sample=user_data_sample,
+                                                ),
+                                                self._exfil_evidence_item(
+                                                    title="Post-Authentication Exfiltration Surface",
+                                                    summary=f"The acquired session unlocks reusable data-bearing endpoints: {paths}",
+                                                    sample=str(control_evidence)[:1200],
+                                                ),
+                                            ],
+                                        ))
 
                                 # Auto-report: XSS findings
                                 if _real_skill == "test_xss" and sr.data:
                                     for finding in (sr.data.get("findings") or []):
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"XSS ({finding.get('type', 'reflected')}) on {finding.get('param', '?')}",
-                                            "severity": finding.get("severity", "high"),
+                                        xss_sev = finding.get("severity", "high")
+                                        xss_url = sr.data.get("url", self.state.target)
+                                        xss_param = finding.get("param", sr.data.get("param", "?"))
+                                        payload = finding.get("payload", "")[:200]
+                                        response_preview = finding.get("response_preview", finding.get("evidence", ""))[:1200]
+                                        control = finding.get("control", {}) or {}
+                                        xss_poc = self._build_reflected_get_poc(
+                                            url=xss_url,
+                                            param=xss_param,
+                                            payload=payload,
+                                            control=control,
+                                            response_preview=response_preview,
+                                        )
+                                        args = {
+                                            "title": f"XSS ({finding.get('type', 'reflected')}) on {xss_param}",
+                                            "severity": xss_sev,
                                             "finding_type": f"xss_{finding.get('type', 'reflected')}",
-                                            "affected_component": sr.data.get("url", self.state.target),
-                                            "description": f"Payload: {finding.get('payload', '')[:80]}",
-                                            "evidence": finding.get("response_preview", finding.get("evidence", ""))[:500],
-                                        })
+                                            "affected_component": xss_url,
+                                            "description": f"Cross-site scripting payload reflected or executed via parameter {xss_param}.",
+                                            "evidence": response_preview,
+                                        }
+                                        if xss_sev in ("high", "critical"):
+                                            args.update(self._build_report_finding_args(
+                                                title=args["title"],
+                                                severity=xss_sev,
+                                                finding_type=args["finding_type"],
+                                                affected_component=xss_url,
+                                                description=args["description"],
+                                                impact="An attacker may execute script in a victim browser, enabling session theft or authenticated action execution.",
+                                                technical_analysis=(
+                                                    "The XSS skill returned a concrete payload and response evidence indicating that attacker-controlled script content was reflected or executed. "
+                                                    f"Baseline/control data: {control}."
+                                                ),
+                                                poc_description="Submit the supplied payload to the vulnerable parameter and confirm that it is reflected/executed in the response context.",
+                                                poc_script_code=xss_poc,
+                                                remediation_steps="Contextually encode untrusted input, apply output escaping, and deploy CSP as a secondary control.",
+                                                endpoint=xss_url,
+                                                method="GET",
+                                                cwe="CWE-79",
+                                            ))
+                                        await self._dispatch_report_finding_checked(args)
 
-                                # Payload rotation: if injection/xss came up
+                                # Payload rotation: if injection/xss/ssrf came up
                                 # CLEAN at round R<3, re-queue at round R+1
                                 # against the same URL. Round 2 = blind/time
                                 # + filter bypass; round 3 = WAF-evasion
                                 # polyglots. This prevents "one cheap classic
                                 # pass, declare clean" when a WAF is in play.
-                                if _real_skill in ("test_injection", "test_xss") and sr.data:
+                                if _real_skill in ("test_injection", "test_xss", "test_ssrf") and sr.data:
                                     _cur_round = sr.data.get("round", 1)
                                     if not sr.data.get("vulnerable") and _cur_round < 3:
                                         _url = sr.data.get("url")
                                         if _url:
+                                            self._mark_family_probe_retryable(
+                                                _real_skill,
+                                                url=_url,
+                                                round_num=_cur_round,
+                                                tested_params=list(sr.data.get("tested_params") or []),
+                                            )
                                             _next = _cur_round + 1
                                             _alias_r = (
                                                 f"{_real_skill}__round{_next}_iter{self.state.iteration}"
                                             )
-                                            _skill_sequence.append((
-                                                _alias_r,
+                                            _queue_skill(
+                                                _real_skill,
                                                 self.state.iteration + 2,
                                                 {
                                                     "_skill_override": _real_skill,
                                                     "url": _url,
                                                     "round": _next,
                                                 },
-                                            ))
-                                            _all_skill_names.add(_alias_r)
+                                                alias=_alias_r,
+                                            )
                                             logger.info(
                                                 "payload rotation: re-queue %s round=%d on %s",
                                                 _real_skill, _next, _url,
@@ -2762,74 +6754,281 @@ class ScanAgentLoop:
                                 # Auto-report: SSRF findings
                                 if _real_skill == "test_ssrf" and sr.data:
                                     for finding in (sr.data.get("findings") or []):
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"SSRF via {finding.get('type', 'ssrf')} on {finding.get('param', '?')}",
-                                            "severity": finding.get("severity", "high"),
+                                        ssrf_sev = finding.get("severity", "high")
+                                        ssrf_url = sr.data.get("url", self.state.target)
+                                        ssrf_param = finding.get("param", sr.data.get("param", "?"))
+                                        payload = finding.get("payload", "")[:200]
+                                        response_preview = finding.get("response_preview", finding.get("evidence", ""))[:1200]
+                                        control = finding.get("control", {}) or {}
+                                        matched_signal = str(control.get("matched_signal") or finding.get("type", "internal_response"))
+                                        callback_summary = response_preview[:500] or str(finding.get("evidence", ""))[:500]
+                                        self.state.record_callback_observation(
+                                            finding_type="ssrf",
+                                            component=ssrf_url,
+                                            signal=matched_signal,
+                                            payload=payload,
+                                            summary=callback_summary,
+                                        )
+                                        ssrf_poc = self._build_reflected_get_poc(
+                                            url=ssrf_url,
+                                            param=ssrf_param,
+                                            payload=payload,
+                                            control=control,
+                                            response_preview=response_preview,
+                                        )
+                                        args = {
+                                            "title": f"SSRF via {finding.get('type', 'ssrf')} on {ssrf_param}",
+                                            "severity": ssrf_sev,
                                             "finding_type": "ssrf",
-                                            "affected_component": sr.data.get("url", self.state.target),
-                                            "description": f"Payload: {finding.get('payload', '')[:80]}",
-                                            "evidence": finding.get("response_preview", finding.get("evidence", ""))[:500],
-                                        })
+                                            "affected_component": ssrf_url,
+                                            "description": f"Server-side request behavior was influenced via parameter {ssrf_param}.",
+                                            "evidence": response_preview,
+                                        }
+                                        if ssrf_sev in ("high", "critical"):
+                                            args.update(self._build_report_finding_args(
+                                                title=args["title"],
+                                                severity=ssrf_sev,
+                                                finding_type="ssrf",
+                                                affected_component=ssrf_url,
+                                                description=args["description"],
+                                                impact="Attackers may force the server to reach internal services, cloud metadata endpoints, or trust-bound internal resources.",
+                                                technical_analysis=(
+                                                    "The SSRF skill produced a payload and corresponding response preview suggesting server-side fetching or internal reachability. "
+                                                    f"Baseline/control data: {control}."
+                                                ),
+                                                poc_description="Submit the SSRF payload to the target parameter and confirm that the server fetches or leaks data from the supplied internal URL.",
+                                                poc_script_code=ssrf_poc,
+                                                remediation_steps="Restrict outbound requests, enforce URL allowlists, and block internal address spaces from user-controlled fetches.",
+                                                endpoint=ssrf_url,
+                                                method="GET",
+                                                cwe="CWE-918",
+                                                extra_evidence=[
+                                                    self._callback_evidence_item(
+                                                        title="Callback / Internal Reachability",
+                                                        signal=matched_signal,
+                                                        payload=payload,
+                                                        summary=callback_summary,
+                                                    )
+                                                ],
+                                            ))
+                                        await self._dispatch_report_finding_checked(args)
 
                                 # Auto-report: CSRF findings
                                 if _real_skill == "test_csrf" and sr.data:
                                     for finding in (sr.data.get("findings") or [])[:5]:
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"CSRF: no protection on {finding.get('method', '?')} {finding.get('endpoint', '?')}",
-                                            "severity": finding.get("severity", "medium"),
+                                        csrf_component = self.state.target + finding.get("endpoint", "")
+                                        csrf_method = finding.get("method", "POST")
+                                        csrf_evidence = finding.get("evidence", "")[:1200]
+                                        csrf_sev = finding.get("severity", "medium")
+                                        args = {
+                                            "title": f"CSRF: no protection on {csrf_method} {finding.get('endpoint', '?')}",
+                                            "severity": csrf_sev,
                                             "finding_type": "csrf",
-                                            "affected_component": self.state.target + finding.get("endpoint", ""),
-                                            "description": f"No CSRF token on {finding.get('method', '?')} {finding.get('endpoint', '?')}",
-                                            "evidence": finding.get("evidence", "")[:500],
-                                        })
+                                            "affected_component": csrf_component,
+                                            "description": f"No CSRF token on {csrf_method} {finding.get('endpoint', '?')}",
+                                            "evidence": csrf_evidence[:500],
+                                        }
+                                        if csrf_sev in ("high", "critical"):
+                                            args.update(self._build_report_finding_args(
+                                                title=args["title"],
+                                                severity=csrf_sev,
+                                                finding_type="csrf",
+                                                affected_component=csrf_component,
+                                                description=args["description"],
+                                                impact="Victims may be forced to execute authenticated state-changing actions from an attacker-controlled origin.",
+                                                technical_analysis=f"The CSRF skill observed tokenless or invalid-token acceptance: {csrf_evidence}",
+                                                poc_description="Replay the state-changing request with no CSRF token and then with an invalid token; both should be rejected if protection is working.",
+                                                poc_script_code=csrf_evidence,
+                                                remediation_steps="Require unpredictable CSRF tokens on state-changing requests and pair them with SameSite-aware session handling.",
+                                                endpoint=csrf_component,
+                                                method=csrf_method,
+                                                cwe="CWE-352",
+                                            ))
+                                        await self._dispatch_report_finding_checked(args)
+
+                                # Auto-report: deep auth findings
+                                if _real_skill == "test_auth_deep" and sr.data:
+                                    auth_controls = sr.data.get("control_evidence", {}) or {}
+                                    for finding in (sr.data.get("findings") or [])[:5]:
+                                        auth_sev = finding.get("severity", "high")
+                                        auth_type = finding.get("type", "weak_auth")
+                                        poc_blob = (
+                                            f"Payload: {finding.get('payload', '')}\n"
+                                            f"Evidence: {finding.get('evidence', '')}\n"
+                                            f"Control: {finding.get('control', {})}\n\n"
+                                            f"{finding.get('response_preview', '')[:1200]}"
+                                        )
+                                        await self._dispatch_report_finding_checked(self._build_report_finding_args(
+                                            title=f"{auth_type.replace('_', ' ').title()} on authentication surface",
+                                            severity=auth_sev,
+                                            finding_type=auth_type,
+                                            affected_component=self.state.target,
+                                            description=f"Authentication weakness detected: {auth_type}.",
+                                            impact="Attackers may forge tokens, fixate sessions, or poison password reset flows to obtain or retain unauthorized access.",
+                                            technical_analysis=(
+                                                f"The deep-auth skill returned a positive signal for {auth_type}. "
+                                                f"Skill-level control evidence: {auth_controls}. Finding-level control: {finding.get('control', {})}."
+                                            ),
+                                            poc_description="Replay the supplied token/session/reset manipulation and compare the protected endpoint behavior against the normal authenticated baseline.",
+                                            poc_script_code=poc_blob,
+                                            remediation_steps="Enforce strict JWT verification, rotate sessions on privilege changes/login, and pin reset link generation to trusted host configuration.",
+                                            endpoint=self.state.target,
+                                            method="GET",
+                                        ))
+
+                                # Auto-report: business logic findings
+                                if _real_skill == "test_business_logic" and sr.data:
+                                    logic_controls = sr.data.get("control_evidence", {}) or {}
+                                    for finding in (sr.data.get("findings") or [])[:5]:
+                                        logic_sev = finding.get("severity", "high")
+                                        logic_type = finding.get("type", "business_logic")
+                                        poc_blob = (
+                                            f"Payload: {finding.get('payload', '')}\n"
+                                            f"Evidence: {finding.get('evidence', '')}\n"
+                                            f"Control: {finding.get('control', {})}\n\n"
+                                            f"{finding.get('response_preview', '')[:1200]}"
+                                        )
+                                        await self._dispatch_report_finding_checked(self._build_report_finding_args(
+                                            title=f"{logic_type.replace('_', ' ').title()} on business flow",
+                                            severity=logic_sev,
+                                            finding_type=logic_type,
+                                            affected_component=self.state.target,
+                                            description=f"Business workflow accepted an invalid or concurrency-sensitive action: {logic_type}.",
+                                            impact="Attackers may manipulate state transitions, financial values, or concurrency windows to gain unauthorized business advantage.",
+                                            technical_analysis=(
+                                                f"The business-logic skill returned accepted vs rejected control data {logic_controls} "
+                                                f"and recorded a positive case for {logic_type}: {finding.get('control', {})}."
+                                            ),
+                                            poc_description="Replay the supplied workflow mutation and compare it against the rejected or normal business control cases recorded by the skill.",
+                                            poc_script_code=poc_blob,
+                                            remediation_steps="Enforce server-side business invariants, validate state transitions, and serialize concurrency-sensitive mutations.",
+                                            endpoint=self.state.target,
+                                            method="POST",
+                                        ))
 
                                 # Auto-report: Misconfig findings (headers, CORS, debug)
                                 if _real_skill == "test_misconfig" and sr.data:
                                     for finding in (sr.data.get("findings") or [])[:5]:
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"Misconfiguration: {finding.get('type', 'unknown')}",
-                                            "severity": finding.get("severity", "medium"),
+                                        mis_sev = finding.get("severity", "medium")
+                                        mis_type = finding.get("type", "misconfiguration")
+                                        mis_desc = finding.get("description", finding.get("type", ""))[:200]
+                                        mis_evidence = finding.get("evidence", finding.get("payload", ""))[:1200]
+                                        args = {
+                                            "title": f"Misconfiguration: {mis_type}",
+                                            "severity": mis_sev,
                                             "finding_type": "misconfiguration",
                                             "affected_component": self.state.target,
-                                            "description": finding.get("description", finding.get("type", ""))[:200],
-                                            "evidence": finding.get("evidence", finding.get("payload", ""))[:500],
-                                        })
+                                            "description": mis_desc,
+                                            "evidence": mis_evidence[:500],
+                                        }
+                                        if mis_sev in ("high", "critical"):
+                                            args.update(self._build_report_finding_args(
+                                                title=args["title"],
+                                                severity=mis_sev,
+                                                finding_type="misconfiguration",
+                                                affected_component=self.state.target,
+                                                description=mis_desc,
+                                                impact="Application security posture is weakened by an externally observable misconfiguration that may enable follow-on compromise.",
+                                                technical_analysis=f"The misconfiguration skill returned the following evidence: {mis_evidence}",
+                                                poc_description="Request the affected resource or replay the header/origin probe and confirm that the unsafe configuration is returned consistently.",
+                                                poc_script_code=mis_evidence,
+                                                remediation_steps="Harden the affected configuration, remove unnecessary exposure, and add regression checks for the missing control.",
+                                                endpoint=self.state.target,
+                                                method="GET",
+                                            ))
+                                        await self._dispatch_report_finding_checked(args)
 
                                 # Auto-report: API security findings
                                 if _real_skill == "test_api_security" and sr.data:
                                     for finding in (sr.data.get("findings") or [])[:5]:
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"API Security: {finding.get('type', 'unknown')}",
-                                            "severity": finding.get("severity", "medium"),
-                                            "finding_type": finding.get("type", "api_security"),
-                                            "affected_component": self.state.target + finding.get("endpoint", ""),
-                                            "description": finding.get("description", finding.get("payload", ""))[:200],
-                                            "evidence": finding.get("evidence", "")[:500],
-                                        })
+                                        api_sev = finding.get("severity", "medium")
+                                        api_type = finding.get("type", "api_security")
+                                        api_component = self.state.target + finding.get("endpoint", "")
+                                        api_desc = finding.get("description", finding.get("payload", ""))[:200]
+                                        api_evidence = finding.get("evidence", "")[:1400]
+                                        api_payload = finding.get("payload", "")[:300]
+                                        args = {
+                                            "title": f"API Security: {api_type}",
+                                            "severity": api_sev,
+                                            "finding_type": api_type,
+                                            "affected_component": api_component,
+                                            "description": api_desc,
+                                            "evidence": api_evidence[:500],
+                                        }
+                                        if api_sev in ("high", "critical"):
+                                            args.update(self._build_report_finding_args(
+                                                title=args["title"],
+                                                severity=api_sev,
+                                                finding_type=api_type,
+                                                affected_component=api_component,
+                                                description=api_desc,
+                                                impact="Attackers may bypass API authorization or mutate protected fields through unsafe action handling.",
+                                                technical_analysis=f"The API security skill reported payload={api_payload} with evidence={api_evidence}",
+                                                poc_description="Replay the documented API request variant and compare the unauthorized or over-permissive response against the expected access policy.",
+                                                poc_script_code=f"Payload: {api_payload}\n\nEvidence: {api_evidence}",
+                                                remediation_steps="Enforce server-side authorization and field allowlists for every action-based or object-mutating API path.",
+                                                endpoint=api_component,
+                                                method="POST",
+                                            ))
+                                        await self._dispatch_report_finding_checked(args)
 
                                 # Auto-report: Crypto findings
                                 if _real_skill == "test_crypto" and sr.data:
                                     for finding in (sr.data.get("findings") or []):
-                                        await self.registry.dispatch("report_finding", {
+                                        crypto_sev = finding.get("severity", "medium")
+                                        crypto_component = self.state.target + finding.get("path", "")
+                                        crypto_desc = finding.get("description", finding.get("payload", ""))[:200]
+                                        crypto_evidence = finding.get("evidence", "")[:1200]
+                                        args = {
                                             "title": f"Crypto weakness: {finding.get('type', 'unknown')}",
-                                            "severity": finding.get("severity", "medium"),
+                                            "severity": crypto_sev,
                                             "finding_type": "weak_crypto",
-                                            "affected_component": self.state.target + finding.get("path", ""),
-                                            "description": finding.get("description", finding.get("payload", ""))[:200],
-                                            "evidence": finding.get("evidence", "")[:500],
-                                        })
+                                            "affected_component": crypto_component,
+                                            "description": crypto_desc,
+                                            "evidence": crypto_evidence[:500],
+                                        }
+                                        if crypto_sev in ("high", "critical"):
+                                            args.update(self._build_report_finding_args(
+                                                title=args["title"],
+                                                severity=crypto_sev,
+                                                finding_type="weak_crypto",
+                                                affected_component=crypto_component,
+                                                description=crypto_desc,
+                                                impact="Weak cryptographic handling may expose secrets, reduce transport security, or enable credential cracking or token compromise.",
+                                                technical_analysis=f"The crypto skill reported the following concrete indicator: {crypto_evidence}",
+                                                poc_description="Replay the protocol or artifact inspection and confirm that the weak protocol, secret exposure, or weak hash indicator is present.",
+                                                poc_script_code=crypto_evidence,
+                                                remediation_steps="Disable weak protocols, remove hardcoded secrets, and replace legacy hashes with modern password hashing and secret management.",
+                                                endpoint=crypto_component,
+                                                method="GET",
+                                            ))
+                                        await self._dispatch_report_finding_checked(args)
 
                                 # Auto-report: Infra findings (git, env, cloud)
                                 if _real_skill == "test_infra" and sr.data:
                                     for finding in (sr.data.get("findings") or []):
-                                        await self.registry.dispatch("report_finding", {
-                                            "title": f"Infrastructure exposure: {finding.get('type', 'unknown')}",
-                                            "severity": finding.get("severity", "high"),
-                                            "finding_type": "misconfiguration",
-                                            "affected_component": self.state.target + finding.get("path", ""),
-                                            "description": finding.get("description", finding.get("payload", ""))[:200],
-                                            "evidence": finding.get("evidence", "")[:500],
-                                        })
+                                        infra_component = self.state.target + finding.get("path", "")
+                                        infra_desc = finding.get("description", finding.get("payload", ""))[:200]
+                                        infra_evidence = finding.get("evidence", "")[:1200]
+                                        infra_poc = self._build_simple_http_poc(
+                                            url=infra_component,
+                                            status=finding.get("status", "?"),
+                                            response_preview=finding.get("response_preview", infra_evidence)[:1200],
+                                        )
+                                        await self._dispatch_report_finding_checked(self._build_report_finding_args(
+                                            title=f"Infrastructure exposure: {finding.get('type', 'unknown')}",
+                                            severity=finding.get("severity", "high"),
+                                            finding_type="misconfiguration",
+                                            affected_component=infra_component,
+                                            description=infra_desc,
+                                            impact="Attackers may leverage exposed infrastructure artifacts to obtain secrets, internal topology, or privileged administrative access.",
+                                            technical_analysis=f"The infrastructure skill surfaced the following externally reachable artifact or service evidence: {infra_evidence}",
+                                            poc_description="Request the exposed infrastructure path or service directly and verify that the sensitive artifact or administrative surface is reachable.",
+                                            poc_script_code=infra_poc,
+                                            remediation_steps="Remove public exposure of infrastructure artifacts, restrict administrative services, and block direct access to internal metadata or repository content.",
+                                            endpoint=infra_component,
+                                            method="GET",
+                                        ))
 
                                 # ── Desktop skill auto-promotion ────────────
                                 # All 6 macOS desktop skills emit Finding-shaped
@@ -2897,7 +7096,7 @@ class ScanAgentLoop:
                                                 f"path={_loc}"
                                             )
                                         )
-                                        await self.registry.dispatch("report_finding", {
+                                        await self._dispatch_report_finding_checked({
                                             "title": finding.get("title", f"Desktop finding: {finding.get('vector', '?')}"),
                                             "severity": finding.get("severity", "medium"),
                                             "finding_type": finding.get("vector", "desktop_misconfiguration"),
@@ -3225,7 +7424,7 @@ class ScanAgentLoop:
                                                 )
                                                 severity = "critical" if "OR 1=1" in email else "high"
                                                 ftype = "sql_injection" if "OR 1=1" in email else "weak_auth"
-                                                await self.registry.dispatch("report_finding", {
+                                                await self._dispatch_report_finding_checked({
                                                     "title": f"Authentication bypass via {'SQLi' if 'OR 1=1' in email else 'default credentials'} on login form",
                                                     "severity": severity,
                                                     "finding_type": ftype,
@@ -3480,18 +7679,21 @@ class ScanAgentLoop:
                             )
                             if is_injectable:
                                 # Auto-report — don't ask Brain, it won't do it
-                                await self.registry.dispatch("report_finding", {
-                                    "title": f"SQL Injection confirmed by sqlmap on {target_url.split('?')[0]}",
-                                    "severity": "critical",
-                                    "finding_type": "sql_injection",
-                                    "affected_component": target_url,
-                                    "description": (
-                                        f"sqlmap --batch confirmed SQL injection.\n"
-                                        f"Target: {target_url}\n"
-                                        f"Evidence:\n{stdout[:1500]}"
-                                    ),
-                                    "evidence": stdout[:2000],
-                                })
+                                await self._dispatch_report_finding_checked(self._build_report_finding_args(
+                                    title=f"SQL Injection confirmed by sqlmap on {target_url.split('?')[0]}",
+                                    severity="critical",
+                                    finding_type="sql_injection",
+                                    affected_component=target_url,
+                                    description="sqlmap confirmed injectable behavior on the supplied parameterized URL.",
+                                    impact="Attackers may extract or modify backend database data and pivot into account compromise or administrative access.",
+                                    technical_analysis="The auto-sqlmap branch detected canonical sqlmap success markers including injectable parameter / payload output in the tool transcript.",
+                                    poc_description="Run sqlmap against the same target URL and confirm that the tool identifies the parameter as injectable and returns working payload details.",
+                                    poc_script_code=stdout[:4000],
+                                    remediation_steps="Parameterize the backend query, remove raw SQL concatenation, and suppress database error leakage to clients.",
+                                    endpoint=target_url,
+                                    method="GET",
+                                    cwe="CWE-89",
+                                ))
                                 self.state.add_message("user", (
                                     f"AUTO-EXPLOIT: sqlmap confirmed SQL injection on {target_url}!\n"
                                     "Finding auto-reported as CRITICAL sql_injection."
@@ -3599,7 +7801,10 @@ class ScanAgentLoop:
                             _eligible = _all_registered & _DESKTOP_SKILLS
                         else:
                             _eligible = _all_registered - _DESKTOP_SKILLS
-                        _untried = sorted(_eligible - _real_skills_completed)
+                        _untried = sorted(
+                            sk for sk in (_eligible - _real_skills_completed)
+                            if self._recent_blocked_skill_count(sk) < 3
+                        )
                         if _untried:
                             self._last_skill_sweep_iter = self.state.iteration
                             _base = self.state.target.rstrip("/")
@@ -3611,7 +7816,7 @@ class ScanAgentLoop:
                                 "test_injection": {"url": f"{_base}/search?q=test"},
                                 "test_xss": {"url": f"{_base}/search?q=test"},
                                 "test_ssrf": {"url": f"{_base}/redirect?url=http://example.com"},
-                                "test_idor": {"url_pattern": f"{_base}/api/users/{{id}}"},
+                                "test_idor": {"url_pattern": f"{_base}/api/users/{{id}}", "token": _auth_token or "", "max_id": 30 if _auth_token else 20},
                                 "post_auth_enum": {"token": _auth_token or ""},
                                 "test_auth_deep": {"token": _auth_token},
                                 "test_csrf": {"token": _auth_token},
@@ -3623,11 +7828,8 @@ class ScanAgentLoop:
                                 params = dict(_defaults.get(sk, {}))
                                 params["_skill_override"] = sk
                                 _alias = f"{sk}__sweep{self.state.iteration}"
-                                _skill_sequence.append(
-                                    (_alias, self.state.iteration + 1, params)
-                                )
-                                _all_skill_names.add(_alias)
-                                _queued += 1
+                                if _queue_skill(sk, self.state.iteration + 1, params, alias=_alias):
+                                    _queued += 1
                             self.state.add_message("user", (
                                 f"SKILL SWEEP at iter {self.state.iteration}: "
                                 f"{_queued} untried skills queued ({', '.join(_untried[:8])}"
@@ -3708,6 +7910,7 @@ class ScanAgentLoop:
                                     ))
                         except Exception:
                             logger.exception("director action dispatch failed")
+        self._maybe_finalize_budget_exhausted_scan()
         self.state.clear_waiting_reason()
         self._emit_control_plane("Scan loop completed")
         return {
@@ -3733,5 +7936,9 @@ class ScanAgentLoop:
             "attempt_outcomes": self.state.attempt_outcomes_as_dicts(),
             "scan_todos": self.state.scan_todos_as_dicts(),
             "branches": self.state.branches_as_dicts(),
+            "review_queue": self.state.review_queue_as_dicts(),
+            "review_history": self.state.review_history_as_dicts(),
+            "callback_observations": self.state.callback_observations_as_dicts(),
+            "retrieval_observations": self.state.retrieval_observations_as_dicts(),
             "shared_notes": list(self.state.shared_notes),
         }

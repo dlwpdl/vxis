@@ -1,12 +1,12 @@
 # `src/vxis/pipeline/` — Scan Orchestration Entry Point
 
-> The top of the scan stack. CLI instantiates a `ScanPipeline` and calls `run(target)`. The live implementation is `scan_pipeline_v2.py`.
+> The top of the scan stack. CLI instantiates a `ScanPipeline` and calls `run(target)`. The live implementation is `scan_pipeline_v2.py`, whose job is to launch the worker loop and preserve the AI review hierarchy around it.
 
 ## Files
 
 | File | Role | Status |
 |---|---|---|
-| **`scan_pipeline_v2.py`** (~505 lines) | **LIVE** — thin shim. Builds `ScanContext`, resets counters, creates `ScanAgentLoop` + `ToolRegistry` (23 tools), runs the loop, copies findings/chains, generates HTML report (with verification summary + MITRE coverage), computes VXIS score, emits `VXIS_BENCHMARK` line. | Live (CLI imports from here) |
+| **`scan_pipeline_v2.py`** (~505 lines) | **LIVE** — thin shim. Builds `ScanContext`, resets counters, creates `ScanAgentLoop` + `ToolRegistry`, runs the loop, copies findings/chains, extracts final report sections, generates HTML report (with verification summary + MITRE coverage), computes VXIS score, emits `VXIS_BENCHMARK` line. | Live (CLI imports from here) |
 | **`pipeline.py`** (5234 lines) | **DEPRECATED** — legacy 14-phase `ScanPipeline`. Violates Brain-First principle. | Dead code |
 | `context.py` | `ScanContext` dataclass — per-scan state container (target, scan_id, findings, attack_chains, vxis_score, duration, deferred_actions, etc.). | Live |
 | `game_pipeline.py` / `game_context.py` | Game-target pipeline variant (legacy) | Legacy |
@@ -33,18 +33,39 @@ ScanPipeline.run(target, app_context_en="", app_context_ko="", resume_from=None)
      - 1 tool per message (Strix pattern)
      - LLM memory compression at 90K tokens
      - 3-tier smart history
+     - branch persistence / vector exhaustion
+     - PoC-gated auto-promotion
+     - adversarial verification
      - Auto-orchestration safety net
      - Scan dashboard injection every iteration
      - Enterprise egress filter (if VXIS_EGRESS_STRICT=1)
   9. Copy _get_findings() → ctx.findings (with Finding object conversion)
  10. Copy _get_chains() → ctx.attack_chains
- 11. Compute MITRE ATT&CK coverage → ctx
- 12. If ctx.deferred_actions: await _run_deferred_gate(ctx)  # enterprise
- 13. await _generate_report(ctx)  # NCC-style HTML + verification summary + MITRE table
- 14. ctx.vxis_score = _SimpleScore(total=..., grade=...)
- 15. Print: VXIS_BENCHMARK peak_context_bytes=<N> llm_call_count=<N> ...
- 16. Return ctx
+ 11. Extract final `executive_summary/methodology/technical_analysis/recommendations`
+ 12. Compute MITRE ATT&CK coverage → ctx
+ 13. If ctx.deferred_actions: await _run_deferred_gate(ctx)  # enterprise
+ 14. await _generate_report(ctx)  # NCC-style HTML + verification summary + MITRE table
+ 15. ctx.vxis_score = _SimpleScore(total=..., grade=...)
+ 16. Print: VXIS_BENCHMARK peak_context_bytes=<N> llm_call_count=<N> ...
+ 17. Return ctx
 ```
+
+## Architectural role
+
+`ScanPipelineV2` is intentionally thin. It should not become a second strategist.
+
+Its job is:
+
+- launch the worker runtime,
+- preserve the verifier/judge outputs,
+- turn accepted findings into exportable artifacts,
+- enforce top-level scan bookkeeping.
+
+It should not:
+
+- reintroduce phase dispatch,
+- micromanage vector priorities,
+- override loop-level review decisions.
 
 ## What the v2 shim does NOT do (vs legacy v1)
 
@@ -52,6 +73,7 @@ ScanPipeline.run(target, app_context_en="", app_context_ko="", resume_from=None)
 - No profile-hardcoded attempt counts
 - No `_consult_brain_for_phase_vectors` — Brain reads its own context via messages
 - No `_build_batch_brain_decisions` — Brain gets tool catalog, not pre-chosen vectors
+- No human review checkpoint as a mandatory stage — review is handled primarily by AI gates inside the loop
 
 ## Finding dict → Finding object conversion
 

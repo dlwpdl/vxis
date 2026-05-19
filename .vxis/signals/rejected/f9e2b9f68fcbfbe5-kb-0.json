@@ -19,8 +19,8 @@
   "rationale_en": "KB pattern from thehackernews",
   "rationale_ko": "thehackernews에서 도출된 KB 패턴",
   "source_url": "https://thehackernews.com/2026/04/36-malicious-npm-packages-exploited.html",
-  "status": "pending",
+  "status": "rejected",
   "applied_at": "",
-  "rolled_back_at": "",
+  "rolled_back_at": "2026-05-12T08:01:05.538361+00:00",
   "effectiveness_score": 0.0
 }

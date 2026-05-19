@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from copy import deepcopy
 from typing import Any
 
 from vxis.llm.model_registry import get_compression_policy
@@ -23,6 +24,91 @@ logger = logging.getLogger(__name__)
 
 # Rough token estimate: 1 token ≈ 4 chars for English text
 _CHARS_PER_TOKEN = 4
+_MEMORY_COMPRESSION_STATS: dict[str, Any] = {
+    "checks": 0,
+    "triggered": 0,
+    "compressed_runs": 0,
+    "llm_summary_runs": 0,
+    "total_messages_before": 0,
+    "total_messages_after": 0,
+    "total_tokens_before": 0,
+    "total_tokens_after": 0,
+    "total_tokens_saved": 0,
+    "total_messages_saved": 0,
+    "total_chunks": 0,
+    "total_chunks_summarized": 0,
+    "total_chunks_passthrough": 0,
+    "last_iter": 0,
+    "last_threshold": 0,
+    "last_tokens_before": 0,
+    "last_tokens_after": 0,
+    "last_tokens_saved": 0,
+    "last_messages_before": 0,
+    "last_messages_after": 0,
+    "last_messages_saved": 0,
+}
+
+
+def reset_memory_compression_stats() -> None:
+    for key in list(_MEMORY_COMPRESSION_STATS):
+        _MEMORY_COMPRESSION_STATS[key] = 0
+
+
+def get_memory_compression_stats() -> dict[str, Any]:
+    return deepcopy(_MEMORY_COMPRESSION_STATS)
+
+
+def _last_iter(messages: list[dict[str, Any]]) -> int:
+    for message in reversed(messages):
+        try:
+            return int(message.get("iter") or 0)
+        except Exception:
+            continue
+    return 0
+
+
+def _record_compression_check(*, total_tokens: int, threshold: int, messages: list[dict[str, Any]]) -> None:
+    _MEMORY_COMPRESSION_STATS["checks"] += 1
+    _MEMORY_COMPRESSION_STATS["last_iter"] = _last_iter(messages)
+    _MEMORY_COMPRESSION_STATS["last_threshold"] = int(threshold)
+    _MEMORY_COMPRESSION_STATS["last_tokens_before"] = int(total_tokens)
+    _MEMORY_COMPRESSION_STATS["last_tokens_after"] = int(total_tokens)
+    _MEMORY_COMPRESSION_STATS["last_tokens_saved"] = 0
+    _MEMORY_COMPRESSION_STATS["last_messages_before"] = int(len(messages))
+    _MEMORY_COMPRESSION_STATS["last_messages_after"] = int(len(messages))
+    _MEMORY_COMPRESSION_STATS["last_messages_saved"] = 0
+
+
+def _record_compression_result(
+    *,
+    total_tokens_before: int,
+    total_tokens_after: int,
+    messages_before: int,
+    messages_after: int,
+    chunks_total: int,
+    chunks_summarized: int,
+    chunks_passthrough: int,
+) -> None:
+    tokens_saved = max(0, int(total_tokens_before) - int(total_tokens_after))
+    messages_saved = max(0, int(messages_before) - int(messages_after))
+    _MEMORY_COMPRESSION_STATS["triggered"] += 1
+    if tokens_saved > 0 or messages_saved > 0:
+        _MEMORY_COMPRESSION_STATS["compressed_runs"] += 1
+    if chunks_summarized > 0:
+        _MEMORY_COMPRESSION_STATS["llm_summary_runs"] += 1
+    _MEMORY_COMPRESSION_STATS["total_messages_before"] += int(messages_before)
+    _MEMORY_COMPRESSION_STATS["total_messages_after"] += int(messages_after)
+    _MEMORY_COMPRESSION_STATS["total_tokens_before"] += int(total_tokens_before)
+    _MEMORY_COMPRESSION_STATS["total_tokens_after"] += int(total_tokens_after)
+    _MEMORY_COMPRESSION_STATS["total_tokens_saved"] += tokens_saved
+    _MEMORY_COMPRESSION_STATS["total_messages_saved"] += messages_saved
+    _MEMORY_COMPRESSION_STATS["total_chunks"] += int(chunks_total)
+    _MEMORY_COMPRESSION_STATS["total_chunks_summarized"] += int(chunks_summarized)
+    _MEMORY_COMPRESSION_STATS["total_chunks_passthrough"] += int(chunks_passthrough)
+    _MEMORY_COMPRESSION_STATS["last_tokens_after"] = int(total_tokens_after)
+    _MEMORY_COMPRESSION_STATS["last_tokens_saved"] = tokens_saved
+    _MEMORY_COMPRESSION_STATS["last_messages_after"] = int(messages_after)
+    _MEMORY_COMPRESSION_STATS["last_messages_saved"] = messages_saved
 
 def _build_summarize_prompt(max_words: int) -> str:
     return f"""\
@@ -42,6 +128,30 @@ def _resolve_policy(brain: Any) -> Any:
     provider = getattr(brain, "_provider", "") if brain is not None else ""
     model = getattr(brain, "_model", "") if brain is not None else ""
     return get_compression_policy(provider, model)
+
+
+def _is_local_strict(brain: Any) -> bool:
+    provider = str(getattr(brain, "_provider", "") or "").lower()
+    return provider in {"llamacpp", "ollama"}
+
+
+def _effective_policy_for_runtime(policy: Any, brain: Any) -> tuple[int, int, int, int]:
+    """Return runtime-tuned compression knobs.
+
+    Local 8k-ish models need more aggressive history compaction than the
+    generic registry defaults: compress sooner, preserve fewer raw messages,
+    summarize smaller chunks, and emit shorter summaries.
+    """
+    threshold = int(policy.compress_threshold_tokens)
+    preserve_recent = int(policy.preserve_recent_messages)
+    chunk_size = int(policy.chunk_size)
+    summary_words = int(policy.summary_max_words)
+    if _is_local_strict(brain):
+        threshold = min(threshold, 2200)
+        preserve_recent = min(preserve_recent, 3)
+        chunk_size = min(chunk_size, 3)
+        summary_words = min(summary_words, 90)
+    return threshold, preserve_recent, chunk_size, summary_words
 
 
 def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -71,7 +181,9 @@ async def compress_history(
     """
     total_tokens = _estimate_tokens(messages)
     policy = _resolve_policy(brain)
-    if total_tokens < policy.compress_threshold_tokens:
+    threshold, preserve_recent, chunk_size, summary_words = _effective_policy_for_runtime(policy, brain)
+    _record_compression_check(total_tokens=total_tokens, threshold=threshold, messages=messages)
+    if total_tokens < threshold:
         return messages
 
     logger.info(
@@ -79,22 +191,26 @@ async def compress_history(
         getattr(brain, "_provider", "?") if brain is not None else "?",
         getattr(brain, "_model", "?") if brain is not None else "?",
         total_tokens,
-        policy.compress_threshold_tokens,
-        policy.preserve_recent_messages,
-        policy.chunk_size,
+        threshold,
+        preserve_recent,
+        chunk_size,
     )
 
     # Split: old messages to compress, recent to preserve
-    if len(messages) <= policy.preserve_recent_messages:
+    if len(messages) <= preserve_recent:
         return messages
 
-    old = messages[:-policy.preserve_recent_messages]
-    recent = messages[-policy.preserve_recent_messages:]
+    old = messages[:-preserve_recent]
+    recent = messages[-preserve_recent:]
 
     # Chunk old messages and summarize each chunk
     compressed: list[dict[str, Any]] = []
-    for i in range(0, len(old), policy.chunk_size):
-        chunk = old[i:i + policy.chunk_size]
+    chunks_total = 0
+    chunks_summarized = 0
+    chunks_passthrough = 0
+    for i in range(0, len(old), chunk_size):
+        chunk = old[i:i + chunk_size]
+        chunks_total += 1
 
         # Build a text representation of the chunk
         chunk_text_parts: list[str] = []
@@ -113,6 +229,7 @@ async def compress_history(
         # If chunk is tiny, keep as-is
         if len(chunk_text) < 500:
             compressed.extend(chunk)
+            chunks_passthrough += 1
             continue
 
         # Summarize via LLM
@@ -120,7 +237,7 @@ async def compress_history(
             try:
                 summary = await asyncio.to_thread(
                     brain._call_llm_with_fallback,
-                    _build_summarize_prompt(policy.summary_max_words),
+                    _build_summarize_prompt(summary_words),
                     f"Conversation chunk (iterations {chunk[0].get('iter', '?')}-{chunk[-1].get('iter', '?')}):\n\n{chunk_text}",
                 )
                 if summary:
@@ -129,6 +246,7 @@ async def compress_history(
                         "content": f"[COMPRESSED HISTORY iters {chunk[0].get('iter','?')}-{chunk[-1].get('iter','?')}] {summary.strip()[:1000]}",
                         "iter": chunk[-1].get("iter", 0),
                     })
+                    chunks_summarized += 1
                     logger.info(
                         "memory_compressor: compressed %d messages → 1 summary (%d chars)",
                         len(chunk), len(summary),
@@ -139,9 +257,19 @@ async def compress_history(
 
         # Fallback: keep raw but truncated
         compressed.extend(chunk)
+        chunks_passthrough += 1
 
     result = compressed + recent
     new_tokens = _estimate_tokens(result)
+    _record_compression_result(
+        total_tokens_before=total_tokens,
+        total_tokens_after=new_tokens,
+        messages_before=len(messages),
+        messages_after=len(result),
+        chunks_total=chunks_total,
+        chunks_summarized=chunks_summarized,
+        chunks_passthrough=chunks_passthrough,
+    )
     logger.info(
         "memory_compressor: %d → %d messages, %d → %d tokens",
         len(messages), len(result), total_tokens, new_tokens,

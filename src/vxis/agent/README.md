@@ -1,13 +1,13 @@
-# `src/vxis/agent/` — Brain + Single Loop + Tool Registry
+# `src/vxis/agent/` — Brain + Single Loop + AI Review Hierarchy
 
-> The heart of VXIS. This module contains everything that makes VXIS a Brain-First agent: the ReAct loop, the LLM brain with provider fallback, the tool registry, 23 BrainTool implementations, adversarial verifier, memory compression, and auto-orchestration safety net.
+> The heart of VXIS. This module contains the Brain-first worker loop, the AI reviewer layers, the tool registry, the verifier, branch persistence, memory compression, and the auto-orchestration safety net.
 
 ## Key files
 
 | File | Role |
 |---|---|
 | **`brain.py`** (~2186 lines) | `AgentBrain` class. Contains `think()` (legacy) and **`think_in_loop()`** (live). Owns `AGENT_SYSTEM_PROMPT`, `LOOP_PROMPT_ADAPTER`, `_build_smart_history()` (3-tier compaction), the provider fallback chain (`_call_llm_with_fallback`), `_parse_response` JSON parser. `max_steps=300`. |
-| **`scan_loop.py`** (~1127 lines) | `ScanAgentLoop` class. Strix-equivalent single `while` loop. Owns `ScanLoopState` (messages, verdict_counts, belief state). Includes scan dashboard injection, auto-orchestration safety net (login/ffuf/nuclei/sqlmap), egress filter integration, LLM memory compression trigger, and 1-tool-per-message enforcement. |
+| **`scan_loop.py`** | `ScanAgentLoop` class. Strix-equivalent single `while` loop. Owns `ScanLoopState` (messages, verdict_counts, vector_candidates, branches, belief state). Includes scan dashboard injection, branch-discipline, auto-orchestration safety net (login/ffuf/nuclei/sqlmap), egress filter integration, LLM memory compression trigger, and 1-tool-per-message enforcement. |
 | **`tool_registry.py`** | `BrainTool` runtime-checkable Protocol, `ToolResult` dataclass, and `ToolRegistry` async dispatcher. `describe_all()` output is the Brain's tool catalog. |
 | **`memory_compressor.py`** | LLM-based memory compression — Strix pattern. At 90K tokens, older messages are chunked and summarized. 15 most recent messages always preserved verbatim. |
 | **`egress.py`** | Enterprise egress filter. When `VXIS_EGRESS_STRICT=1`, builds an allowlist from the target URL and blocks sandbox outbound to non-target hosts. |
@@ -23,6 +23,19 @@
 
 All three implement `think()` which increments the unified `_BRAIN_DECISION_COUNT` counter. `brain_protocol.py` defines the shared Protocol.
 
+## Runtime roles
+
+Although VXIS currently runs inside one process and one loop, the module already divides responsibilities into runtime roles:
+
+| Role | Main code | Responsibility |
+|---|---|---|
+| Worker | `brain.py` + `scan_loop.py` | Select actions, run tools, persist exploit branches |
+| Verifier | `tools/verifier_tools.py` | Refute weak findings and demand PoC/control evidence |
+| Judge | `scan_loop.py` + `tools/control_tools.py` | Reject premature `finish_scan`, shape final report sections |
+| Human | External | Only for escalated exceptions or risky approvals |
+
+This is deliberate: VXIS aims for unattended execution with AI review, not continuous human steering.
+
 ## The ReAct loop (live happy path)
 
 ```python
@@ -36,11 +49,28 @@ while not completed and iteration < max_iters:  # max_iters=300
     for (tool_name, args) in actions:
         result = await registry.dispatch(tool_name, args)
         state.add_message("tool", {"name": tool_name, "args": args, "result": result})
+        # findings may be auto-promoted and auto-verified here
         if tool_name == "finish_scan" and result.ok:
             completed = True; break
-    # Auto-orchestration safety net fires here (login/ffuf/nuclei/sqlmap)
-    # Egress filter checks here (enterprise mode)
+    # Focus-branch discipline, auto-orchestration safety net, and completion gate fire here
 ```
+
+## Branch persistence
+
+`ScanLoopState` persists more than messages:
+
+- `vector_candidates`: durable attack hypotheses
+- `attempt_outcomes`: concrete tries against those hypotheses
+- `scan_todos`: operator-visible work queue
+- `branches`: active exploit paths, including pivots from findings
+
+This is the real search state. Tool names are just verbs over that state.
+
+The practical effect is:
+
+- the loop can keep digging on one lead instead of forgetting it,
+- off-branch actions can be warned or blocked,
+- `finish_scan` can be rejected while high-value branches remain open.
 
 ## Smart 3-tier history (`_build_smart_history`)
 
@@ -54,6 +84,17 @@ Instead of a flat window of the last N messages, `AgentBrain` builds a compacted
 
 Pinned tools: `report_finding`, `verify_finding`, `fingerprint_target`.
 Pinned keywords: `SCAN DASHBOARD`, `CRITIC REVIEW`, `SYSTEM HINT`, `AUTO-RECON`, `BELIEF STATE`, `STICKY HINT`.
+
+## AI review hierarchy
+
+The module no longer assumes that "finding creation" equals "finding acceptance".
+
+1. Worker loop proposes a result.
+2. Structured PoC contract gates serious findings.
+3. `verify_finding` tries to refute them.
+4. The completion gate blocks termination if the run is still strategically incomplete.
+
+This is the key autonomy mechanism that replaces phase-by-phase human review.
 
 ## Auto-orchestration safety net
 
@@ -109,4 +150,5 @@ reset_brain_decision_count()
 - **Do NOT modify `AGENT_SYSTEM_PROMPT` body** — use `LOOP_PROMPT_ADAPTER` for overrides.
 - **Never pass `LOOP_PROMPT_ADAPTER` through `.format()`** — brace escape bug (see regression test).
 - **1 tool per message** — `actions[:1]` in scan_loop.py. Do not remove this.
+- **Do NOT weaken PoC / verifier / finish gates just to raise finding count**.
 - Counter increments must happen AFTER the `is_done` / `max_steps` early-return (don't count skipped steps).

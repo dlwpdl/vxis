@@ -10,6 +10,19 @@
 | `router.py` | Token-budget-aware provider routing + cost tracking |
 | `model_registry.py` | Registry of known models (context window, cost per 1M tokens, vision support) |
 
+## Context Policy
+
+`model_registry.get_compression_policy(provider, model)` is the canonical
+source for provider-specific context behavior.
+
+- `llamacpp`: small local profile. Uses `VXIS_LLAMACPP_CONTEXT` with an `8192`
+  default, keeps only the most recent full iteration, compresses early, caps
+  output tightly, and ignores `VXIS_LONG_CONTEXT`.
+- `ollama`: medium local profile. Uses `VXIS_OLLAMA_CONTEXT`, keeps two recent
+  full iterations, and compresses earlier than cloud models.
+- Cloud providers: large profile. Keeps more recent full history, delays
+  compression, and may honor `VXIS_LONG_CONTEXT`.
+
 ## Provider fallback chain (built by `AgentBrain._build_standard_chain`)
 
 ```

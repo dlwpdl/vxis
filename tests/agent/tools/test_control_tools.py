@@ -12,7 +12,15 @@ async def test_finish_scan_tool_returns_ok():
     assert tool.name == "finish_scan"
     result = await tool.run()
     assert result.ok is True
-    assert result.data == {"final": True}
+    assert result.data == {
+        "final": True,
+        "final_report": {
+            "executive_summary": "",
+            "methodology": "",
+            "technical_analysis": "",
+            "recommendations": "",
+        },
+    }
     assert "finished" in result.summary.lower()
 
 

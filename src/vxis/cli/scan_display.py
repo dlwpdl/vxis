@@ -62,6 +62,14 @@ class ScanLiveDisplay:
         self.branch_counts: dict[str, int] = {}
         self.todo_items: list[dict] = []
         self.branch_items: list[dict] = []
+        self.review_items: list[dict] = []
+        self.chain_candidates: list[dict] = []
+        self.blocking_branches: list[dict] = []
+        self.campaign_groups: list[dict] = []
+        self.focus_campaign: dict | None = None
+        self.memory_directives: list[str] = []
+        self.focus_branch: dict | None = None
+        self.recent_attempts: list[dict] = []
         self.shared_notes: list[str] = []
         self.telemetry: dict = {}
         self.proxy: dict = {}
@@ -194,6 +202,14 @@ class ScanLiveDisplay:
             self.branch_counts = dict(data.get("branch_counts") or {})
             self.todo_items = list(data.get("todos") or [])
             self.branch_items = list(data.get("branches") or [])
+            self.review_items = list(data.get("reviews") or [])
+            self.chain_candidates = list(data.get("chain_candidates") or [])
+            self.blocking_branches = list(data.get("blocking_branches") or [])
+            self.campaign_groups = list(data.get("campaign_groups") or [])
+            self.focus_campaign = data.get("focus_campaign") or None
+            self.memory_directives = list(data.get("memory_directives") or [])
+            self.focus_branch = data.get("focus_branch") or None
+            self.recent_attempts = list(data.get("recent_attempts") or [])
             self.shared_notes = list(data.get("shared_notes") or [])
             self.telemetry = dict(data.get("telemetry") or {})
             self.proxy = dict(data.get("proxy") or {})
@@ -210,6 +226,10 @@ class ScanLiveDisplay:
                 "origin_type": ftype,
                 "origin_endpoint": endpoint,
                 "origin_vector": vector,
+                "finding_ids": list(data.get("finding_ids") or []),
+                "source_title": str(data.get("source_title") or "")[:60],
+                "rationale": str(data.get("rationale") or "")[:90],
+                "crown_jewel": str(data.get("crown_jewel") or "")[:70],
                 "steps": [],
                 "max_level": 1,
             }
@@ -224,6 +244,8 @@ class ScanLiveDisplay:
                     "endpoint": data.get("endpoint", "?")[-30:],
                     "level": data.get("level", 0),
                     "reasoning": data.get("reasoning", "")[:60],
+                    "title": str(data.get("title") or "")[:60],
+                    "severity": str(data.get("severity") or ""),
                 }
                 self.chains[chain_id]["steps"].append(step)
                 self.chains[chain_id]["max_level"] = max(
@@ -247,6 +269,9 @@ class ScanLiveDisplay:
         table.add_row("Target:", f"[cyan]{self.target}[/cyan]")
         table.add_row("Profile:", f"[{_pstyle}]{self.profile}[/{_pstyle}]")
         table.add_row("Brain:", f"[green]{self.brain}[/green]")
+        runtime = self._runtime_summary()
+        if runtime:
+            table.add_row("LLM:", runtime)
         table.add_row("Ghost:", "[magenta]ON[/magenta]" if self.ghost else "[dim]OFF[/dim]")
         table.add_row("Version:", f"v{self.version}")
         return Panel(table, title="[bold cyan]VXIS Scan[/bold cyan]", border_style="cyan")
@@ -336,6 +361,10 @@ class ScanLiveDisplay:
         """현재 Brain이 무엇을 시도 중인지 + Phase Guide 힌트 표시."""
         content_parts = []
 
+        runtime = self._runtime_summary()
+        if runtime:
+            content_parts.append(f"[bold cyan]LLM Runtime:[/bold cyan] {runtime}")
+
         # Phase Guide 정보 (새로 통합됨)
         if self.current_objective:
             content_parts.append(f"[bold yellow]🎯 목표:[/bold yellow] [italic]{self.current_objective}[/italic]")
@@ -359,6 +388,20 @@ class ScanLiveDisplay:
             border_style="magenta",
         )
 
+    def _runtime_summary(self) -> str:
+        if not self.telemetry:
+            return ""
+        provider = str(self.telemetry.get("provider") or "?").strip()
+        model = str(self.telemetry.get("model") or "?").strip()
+        base_url = str(self.telemetry.get("base_url") or "").strip()
+        profile = str(self.telemetry.get("discipline_profile") or "").strip()
+        runtime = f"[green]{provider}[/green]/[cyan]{model}[/cyan]"
+        if profile:
+            runtime += f" [magenta]{profile}[/magenta]"
+        if base_url:
+            runtime += f" [dim]@ {base_url[:42]}[/dim]"
+        return runtime
+
     def _render_attack_feed(self) -> Panel:
         lines = list(self.attack_feed) if self.attack_feed else ["[dim]waiting for attacks...[/dim]"]
         content = "\n".join(lines)
@@ -377,6 +420,7 @@ class ScanLiveDisplay:
         if self.telemetry:
             provider = self.telemetry.get("provider") or "?"
             model = self.telemetry.get("model") or "?"
+            profile = self.telemetry.get("discipline_profile") or "?"
             total_tokens = int(self.telemetry.get("total_tokens") or 0)
             token_prefix = "~" if self.telemetry.get("tokens_estimated") else ""
             llm_calls = int(self.telemetry.get("llm_calls") or self.telemetry.get("calls") or 0)
@@ -384,8 +428,14 @@ class ScanLiveDisplay:
             cost_usd = float(self.telemetry.get("cost_usd") or 0.0)
             cost_prefix = "est. " if self.telemetry.get("cost_estimated") else ""
             lines.append(f"[bold cyan]LLM:[/bold cyan] {provider}/{model}")
+            lines.append(f"[dim]discipline {profile}[/dim]")
             lines.append(f"[dim]{llm_calls} calls · {brain_decisions} decisions · {token_prefix}{total_tokens:,} tok[/dim]")
             lines.append(f"[dim]Cost {cost_prefix}${cost_usd:.4f}[/dim]")
+            memory_compression = self.telemetry.get("memory_compression") or {}
+            compress_triggered = int(memory_compression.get("triggered") or 0)
+            tokens_saved = int(memory_compression.get("total_tokens_saved") or 0)
+            if compress_triggered > 0 or tokens_saved > 0:
+                lines.append(f"[dim]compress {compress_triggered}x · save ~{tokens_saved:,} tok[/dim]")
 
         if self.proxy:
             backend = self.proxy.get("backend") or "disabled"
@@ -444,35 +494,208 @@ class ScanLiveDisplay:
         )
 
     def _render_chains(self) -> Panel:
-        """공격 체인 진행 상황 — 각 체인의 단계를 트리 형태로."""
-        if not self.chains:
-            return Panel(
-                "[dim]No chains yet — chains build when findings are exploited[/dim]",
-                title=f"[bold]🔗 Attack Chains[/bold] [dim]({self.total_chains})[/dim]",
-                border_style="blue",
-            )
+        """공격 체인 진행 상황 + 활성 브랜치 도시에를 함께 표시."""
+        lines: list[str] = []
 
-        # 최근 2개 체인만 표시
-        recent_chains = list(self.chains.items())[-2:]
-        lines = []
-        for chain_id, chain in recent_chains:
-            origin = chain["origin_type"][:15]
-            ep = chain["origin_endpoint"]
-            max_lvl = chain["max_level"]
-            level_color = {4: "bold red", 3: "red", 2: "yellow", 1: "white"}.get(max_lvl, "dim")
-            lines.append(f"[{level_color}]◉[/{level_color}] [cyan]{origin}[/cyan] [dim]{ep}[/dim] [bold]L{max_lvl}[/bold]")
-            for i, step in enumerate(chain["steps"][:3]):
-                prefix = "└─" if i == len(chain["steps"]) - 1 else "├─"
-                lvl_c = {4: "bold red", 3: "red", 2: "yellow", 1: "white"}.get(step["level"], "dim")
-                lines.append(f"  {prefix} [{lvl_c}]L{step['level']}[/{lvl_c}] [cyan]{step['vector'][:14]}[/cyan] [dim]{step['endpoint']}[/dim]")
-                if step.get("reasoning"):
-                    lines.append(f"      [italic dim]{step['reasoning'][:50]}[/italic dim]")
-            if len(chain["steps"]) > 3:
-                lines.append(f"  [dim]... +{len(chain['steps']) - 3} more steps[/dim]")
-        content = "\n".join(lines) if lines else "[dim]building chains...[/dim]"
+        if self.focus_branch:
+            lines.append("[bold cyan]Focus branch[/bold cyan]")
+            focus = self.focus_branch
+            lines.append(
+                f"{focus.get('id', '?')} [{focus.get('role', '?')}/{focus.get('phase', '?')}] "
+                f"{focus.get('status', '?')}"
+            )
+            objective = str(focus.get("objective") or "")[:84]
+            next_step = str(focus.get("next_step") or "")[:84]
+            crown = str(focus.get("crown_jewel") or "")[:72]
+            blocker = str(focus.get("blocker") or "")[:72]
+            if objective:
+                lines.append(f"[dim]goal:[/dim] {objective}")
+            if next_step:
+                lines.append(f"[dim]next:[/dim] {next_step}")
+            if crown:
+                lines.append(f"[dim]crown:[/dim] {crown}")
+            if blocker:
+                lines.append(f"[dim]block:[/dim] {blocker}")
+
+        if self.branch_items:
+            if lines:
+                lines.append("")
+            lines.append("[bold]Active branch dossiers[/bold]")
+            for branch in self.branch_items[:3]:
+                lines.append(
+                    f"{branch.get('id', '?')} [{branch.get('role', '?')}/{branch.get('phase', '?')}] "
+                    f"{branch.get('status', '?')} a{branch.get('attempts', 0)}"
+                )
+                title = str(branch.get("title") or branch.get("vector_id") or "")[:78]
+                if title:
+                    lines.append(f"[dim]path:[/dim] {title}")
+                objective = str(branch.get("objective") or "")[:78]
+                next_step = str(branch.get("next_step") or "")[:78]
+                if objective:
+                    lines.append(f"[dim]goal:[/dim] {objective}")
+                if next_step:
+                    lines.append(f"[dim]next:[/dim] {next_step}")
+
+        if self.chain_candidates:
+            if lines:
+                lines.append("")
+            lines.append("[bold yellow]Pending chain candidates[/bold yellow]")
+            for cand in self.chain_candidates[:3]:
+                source = str(cand.get("source_type") or cand.get("source_id") or "?")[:20]
+                target = str(cand.get("target_type") or cand.get("target_id") or "?")[:20]
+                lines.append(f"{source} → {target}")
+                rationale = str(cand.get("rationale") or "")[:84]
+                crown = str(cand.get("crown_jewel") or "")[:72]
+                if rationale:
+                    lines.append(f"[dim]why:[/dim] {rationale}")
+                if crown:
+                    lines.append(f"[dim]crown:[/dim] {crown}")
+
+        if self.campaign_groups:
+            if lines:
+                lines.append("")
+            lines.append("[bold cyan]Active campaigns[/bold cyan]")
+            for camp in self.campaign_groups[:3]:
+                family = str(camp.get("family") or "?")
+                crown = str(camp.get("crown_jewel") or "")[:52]
+                roles = "/".join(str(r) for r in (camp.get("roles") or [])[:2]) or "?"
+                phases = "/".join(str(p) for p in (camp.get("phases") or [])[:2]) or "?"
+                lines.append(
+                    f"{family} [{roles}:{phases}] "
+                    f"branches={camp.get('branch_count', 0)} blockers={camp.get('blocking_count', 0)}"
+                )
+                headline = str(camp.get("headline") or "")[:78]
+                next_step = str(camp.get("next_step") or "")[:84]
+                if headline:
+                    lines.append(f"[dim]from:[/dim] {headline}")
+                if crown:
+                    lines.append(f"[dim]crown:[/dim] {crown}")
+                if next_step:
+                    lines.append(f"[dim]next:[/dim] {next_step}")
+
+        if self.focus_campaign:
+            if lines:
+                lines.append("")
+            lines.append("[bold white]Campaign detail[/bold white]")
+            family = str(self.focus_campaign.get("family") or "?")
+            crown = str(self.focus_campaign.get("crown_jewel") or "")[:72]
+            objective = str(self.focus_campaign.get("objective") or "")[:88]
+            next_step = str(self.focus_campaign.get("next_step") or "")[:88]
+            if family:
+                lines.append(f"[dim]family:[/dim] {family}")
+            if crown:
+                lines.append(f"[dim]crown:[/dim] {crown}")
+            if objective:
+                lines.append(f"[dim]goal:[/dim] {objective}")
+            if next_step:
+                lines.append(f"[dim]next:[/dim] {next_step}")
+            findings = list(self.focus_campaign.get("findings") or [])
+            if findings:
+                lines.append("[bold green]findings[/bold green]")
+                for finding in findings[:2]:
+                    lines.append(
+                        f"{finding.get('severity', '?')} {finding.get('finding_type', '?')} "
+                        f"{str(finding.get('title') or '')[:58]}"
+                    )
+            reviews = list(self.focus_campaign.get("reviews") or [])
+            if reviews:
+                lines.append("[bold red]reviews[/bold red]")
+                for review in reviews[:2]:
+                    lines.append(
+                        f"{review.get('stage', '?')} {review.get('status', '?')} "
+                        f"{str(review.get('title') or '')[:52]}"
+                    )
+
+        if self.blocking_branches:
+            if lines:
+                lines.append("")
+            lines.append("[bold red]Finish blockers[/bold red]")
+            for branch in self.blocking_branches[:3]:
+                lines.append(
+                    f"{branch.get('id', '?')} [{branch.get('role', '?')}/{branch.get('phase', '?')}] "
+                    f"p{branch.get('priority', 0)} a{branch.get('attempts', 0)}"
+                )
+                blocker = str(branch.get("blocker") or "")[:72]
+                objective = str(branch.get("objective") or "")[:78]
+                next_step = str(branch.get("next_step") or "")[:78]
+                if blocker:
+                    lines.append(f"[dim]why:[/dim] {blocker}")
+                if objective:
+                    lines.append(f"[dim]goal:[/dim] {objective}")
+                if next_step:
+                    lines.append(f"[dim]next:[/dim] {next_step}")
+
+        if self.memory_directives:
+            if lines:
+                lines.append("")
+            lines.append("[bold magenta]Memory directives[/bold magenta]")
+            for item in self.memory_directives[-3:]:
+                lines.append(f"[dim]- {str(item)[:90]}[/dim]")
+
+        if self.review_items:
+            if lines:
+                lines.append("")
+            lines.append("[bold red]Open AI reviews[/bold red]")
+            for item in self.review_items[:2]:
+                lines.append(
+                    f"{item.get('stage', '?')} {item.get('status', '?')} {str(item.get('title') or '')[:46]}"
+                )
+                reason = str(item.get("reason") or "")[:80]
+                if reason:
+                    lines.append(f"[dim]why:[/dim] {reason}")
+
+        if self.recent_attempts:
+            if lines:
+                lines.append("")
+            lines.append("[bold green]Recent branch activity[/bold green]")
+            for attempt in self.recent_attempts[-3:]:
+                status = str(attempt.get("status") or "?")[:10]
+                tool = str(attempt.get("tool") or "?")[:18]
+                vector = str(attempt.get("vector_id") or "?")[:18]
+                summary = str(attempt.get("summary") or "")[:72]
+                lines.append(f"{status:<10} {vector} via {tool}")
+                if summary:
+                    lines.append(f"[dim]res:[/dim] {summary}")
+
+        if self.chains:
+            if lines:
+                lines.append("")
+            lines.append(f"[bold blue]Linked chains[/bold blue] ({self.total_chains})")
+            recent_chains = list(self.chains.items())[-2:]
+            for chain_id, chain in recent_chains:
+                origin = chain["origin_type"][:15]
+                ep = chain["origin_endpoint"]
+                max_lvl = chain["max_level"]
+                level_color = {4: "bold red", 3: "red", 2: "yellow", 1: "white"}.get(max_lvl, "dim")
+                lines.append(
+                    f"[{level_color}]◉[/{level_color}] {chain_id} [cyan]{origin}[/cyan] [dim]{ep}[/dim] [bold]L{max_lvl}[/bold]"
+                )
+                crown = str(chain.get("crown_jewel") or "")[:76]
+                rationale = str(chain.get("rationale") or "")[:88]
+                if crown:
+                    lines.append(f"  [dim]crown:[/dim] {crown}")
+                if rationale:
+                    lines.append(f"  [dim]why:[/dim] {rationale}")
+                for i, step in enumerate(chain["steps"][:3]):
+                    prefix = "└─" if i == len(chain["steps"]) - 1 else "├─"
+                    lvl_c = {4: "bold red", 3: "red", 2: "yellow", 1: "white"}.get(step["level"], "dim")
+                    title = str(step.get("title") or step.get("reasoning") or "")[:52]
+                    lines.append(
+                        f"  {prefix} [{lvl_c}]L{step['level']}[/{lvl_c}] "
+                        f"[cyan]{step['vector'][:14]}[/cyan] [dim]{step['endpoint']}[/dim]"
+                    )
+                    if title:
+                        lines.append(f"      [italic dim]{title}[/italic dim]")
+                if len(chain["steps"]) > 3:
+                    lines.append(f"  [dim]... +{len(chain['steps']) - 3} more steps[/dim]")
+
+        if not lines:
+            lines = ["[dim]No chain operations yet — branches and links appear here[/dim]"]
+
+        content = "\n".join(lines)
         return Panel(
             content,
-            title=f"[bold]🔗 Attack Chains[/bold] [dim]({self.total_chains})[/dim]",
+            title=f"[bold]🔗 Chain Ops[/bold] [dim](linked: {self.total_chains})[/dim]",
             border_style="blue",
         )
 
@@ -544,11 +767,11 @@ class ScanLiveDisplay:
             Layout(self._render_brain_thinking(), size=9, name="thinking"),
             Layout(self._render_control_plane(), size=12, name="control"),
             Layout(self._render_attack_feed(), name="attacks"),
-            Layout(self._render_chains(), name="chains"),
         )
-        # Right column: Hits + Findings
+        # Right column: hits + chain dossiers + findings
         layout["right"].split(
-            Layout(self._render_hits(), name="hits"),
+            Layout(self._render_hits(), size=8, name="hits"),
+            Layout(self._render_chains(), name="chains"),
             Layout(self._render_findings(), size=11, name="findings"),
         )
         return layout

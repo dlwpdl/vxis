@@ -105,6 +105,7 @@ async def _scan_target(
     ctx = await pipeline.run(
         target=target.entry,
         kind=target.kind,
+        target_hints=dict(target.hints),
     )
 
     findings: list[Finding] = list(ctx.findings) if ctx.findings else []

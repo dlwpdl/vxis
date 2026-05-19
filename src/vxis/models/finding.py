@@ -144,6 +144,19 @@ class Finding(BaseModel):
     # --- Description ---
     title: str = Field(description="Short, human-readable title of the finding")
     description: str = Field(description="Detailed description of the finding")
+    impact: str | None = Field(default=None, description="Validated business/security impact")
+    technical_analysis: str | None = Field(
+        default=None,
+        description="Detailed reasoning, controls, and exploit analysis",
+    )
+    poc_description: str | None = Field(
+        default=None,
+        description="Step-by-step proof-of-concept summary",
+    )
+    poc_script_code: str | None = Field(
+        default=None,
+        description="Actual exploit payload, command transcript, or HTTP exchange",
+    )
 
     # --- Classification ---
     severity: Severity = Field(description="Scanner-assessed severity level")

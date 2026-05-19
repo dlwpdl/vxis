@@ -1,0 +1,34 @@
+{% if report.has_aggregated_findings %}
+<div class="section-label">Section 3</div>
+<h1><span class="en">Target Aggregate Memory</span><span class="ko">타깃 누적 메모리</span></h1>
+
+<p>
+  <span class="en">The table below merges repeated findings from prior scans of the same target into a deduplicated view. This lets the operator see cumulative evidence without manually reconciling multiple runs.</span>
+  <span class="ko">아래 표는 동일 타깃의 이전 스캔 결과를 현재 결과와 합쳐 중복 제거한 누적 뷰입니다. 여러 번의 스캔 결과를 수동으로 합칠 필요 없이 누적 증거를 볼 수 있습니다.</span>
+</p>
+
+<table style="width:100%;border-collapse:collapse;margin:12px 0;font-size:12px;">
+  <thead>
+    <tr style="background:#0b1220;color:#fff;">
+      <th style="padding:6px;text-align:left;">Severity</th>
+      <th style="padding:6px;text-align:left;">Type</th>
+      <th style="padding:6px;text-align:left;">Title</th>
+      <th style="padding:6px;text-align:left;">Component</th>
+      <th style="padding:6px;text-align:right;">Seen</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in report.aggregated_findings[:15] %}
+    <tr>
+      <td style="padding:6px;border-bottom:1px solid #e5e7eb;">
+        <span class="severity-badge severity-badge-{{ item.severity }}">{{ item.severity | upper }}</span>
+      </td>
+      <td style="padding:6px;border-bottom:1px solid #e5e7eb;"><code>{{ item.finding_type }}</code></td>
+      <td style="padding:6px;border-bottom:1px solid #e5e7eb;">{{ item.title }}</td>
+      <td style="padding:6px;border-bottom:1px solid #e5e7eb;">{{ item.affected_component }}</td>
+      <td style="padding:6px;border-bottom:1px solid #e5e7eb;text-align:right;">{{ item.occurrences }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}

@@ -946,19 +946,26 @@
       <span class="toc-dots"></span>
       <span class="toc-entry-page">4</span>
     </div>
+    {% if report.technical_analysis %}
     <div class="toc-entry">
-      <span class="toc-entry-title"><span class="en">3. Findings</span><span class="ko">3. 발견 사항</span></span>
+      <span class="toc-entry-title"><span class="en">3. Technical Analysis</span><span class="ko">3. 기술 분석</span></span>
       <span class="toc-dots"></span>
       <span class="toc-entry-page">5</span>
     </div>
+    {% endif %}
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">4. Findings</span><span class="ko">4. 발견 사항</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">6</span>
+    </div>
     {% set counts = report.severity_counts %}
     {% set severities = ["critical", "high", "medium", "low", "informational"] %}
-    {% set page_offset = namespace(val=5) %}
+    {% set page_offset = namespace(val=6) %}
     {% for severity in severities %}
       {% if counts[severity] > 0 %}
       <div class="toc-entry" style="padding-left:16pt;">
         <span class="toc-entry-title">
-          3.{{ loop.index }}. {{ severity | title }} Findings ({{ counts[severity] }})
+          4.{{ loop.index }}. {{ severity | title }} Findings ({{ counts[severity] }})
         </span>
         <span class="toc-dots"></span>
         <span class="toc-entry-page">{{ page_offset.val }}</span>
@@ -967,12 +974,19 @@
       {% endif %}
     {% endfor %}
     <div class="toc-entry">
-      <span class="toc-entry-title"><span class="en">4. Attack Path Analysis</span><span class="ko">4. 공격 경로 분석</span></span>
+      <span class="toc-entry-title"><span class="en">5. Attack Path Analysis</span><span class="ko">5. 공격 경로 분석</span></span>
       <span class="toc-dots"></span>
       <span class="toc-entry-page">—</span>
     </div>
+    {% if report.recommendations %}
     <div class="toc-entry">
-      <span class="toc-entry-title"><span class="en">5. Attestation</span><span class="ko">5. 확인서</span></span>
+      <span class="toc-entry-title"><span class="en">6. Recommendations</span><span class="ko">6. 권고 사항</span></span>
+      <span class="toc-dots"></span>
+      <span class="toc-entry-page">—</span>
+    </div>
+    {% endif %}
+    <div class="toc-entry">
+      <span class="toc-entry-title"><span class="en">7. Attestation</span><span class="ko">7. 확인서</span></span>
       <span class="toc-dots"></span>
       <span class="toc-entry-page">—</span>
     </div>
@@ -1041,6 +1055,12 @@
 
   <div class="page-break"></div>
 
+  {% include "partials/_aggregate_findings.html" %}
+
+  {% if report.has_aggregated_findings %}
+  <div class="page-break"></div>
+  {% endif %}
+
   {# ============================================================
      SECTION 2: METHODOLOGY
      ============================================================ #}
@@ -1061,12 +1081,21 @@
   </div>
   {% endif %}
 
+  {% if report.technical_analysis %}
+  <div class="page-break"></div>
+
+  <div class="section-label">Section 3</div>
+  <h1><span class="en">Technical Analysis</span><span class="ko">기술 분석</span></h1>
+
+  <p>{{ report.technical_analysis | bilingual | safe }}</p>
+  {% endif %}
+
   <div class="page-break"></div>
 
   {# ============================================================
-     SECTION 3: FINDINGS
+     SECTION 4: FINDINGS
      ============================================================ #}
-  <div class="section-label">Section 3</div>
+  <div class="section-label">Section 4</div>
   <h1><span class="en">Findings</span><span class="ko">발견 사항</span></h1>
 
   {% if report.total_findings == 0 %}
@@ -1094,14 +1123,23 @@
   <div class="page-break"></div>
 
   {# ============================================================
-     SECTION 4: ATTACK PATH ANALYSIS
+     SECTION 5: ATTACK PATH ANALYSIS
      ============================================================ #}
   {% include "partials/_attack_paths.html" %}
 
+  {% if report.recommendations %}
+  <div class="page-break"></div>
+
+  <div class="section-label">Section 6</div>
+  <h1><span class="en">Recommendations</span><span class="ko">권고 사항</span></h1>
+
+  <p>{{ report.recommendations | bilingual | safe }}</p>
+  {% endif %}
+
   {# ============================================================
-     SECTION 5: ATTESTATION
+     SECTION 7: ATTESTATION
      ============================================================ #}
-  <div class="section-label">Section 5</div>
+  <div class="section-label">Section 7</div>
   <h1><span class="en">Attestation</span><span class="ko">확인서</span></h1>
 
   {% include "partials/_attestation.html" %}

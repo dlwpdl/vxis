@@ -36,7 +36,19 @@ async def test_report_finding_stores_and_returns_id():
         finding_type="sql_injection",
         affected_component="/login",
         description="Classic ' OR 1=1-- bypass on the username field",
-        evidence="POST /login user=admin'--",
+        impact="Authentication bypass leads to administrative access.",
+        technical_analysis="Server accepted attacker-controlled quote payload and created an authenticated session.",
+        poc_description="Submit a quote-based payload to the login endpoint and observe a valid session cookie.",
+        poc_script_code=(
+            "POST /login HTTP/1.1\n"
+            "Host: app.local\n"
+            "Content-Type: application/json\n\n"
+            "{\"username\":\"admin'--\",\"password\":\"x\"}\n\n"
+            "HTTP/1.1 200 OK\n"
+            "Set-Cookie: session=abc\n\n"
+            "{\"role\":\"admin\"}"
+        ),
+        remediation_steps="Parameterize the login query and reject malformed authentication input.",
     )
     assert result.ok is True
     assert result.data["id"] == "VXIS-0001"
@@ -51,7 +63,7 @@ async def test_report_finding_auto_increments_id():
     for i in range(3):
         await tool.run(
             title=f"Finding {i}",
-            severity="high",
+            severity="medium",
             finding_type="xss",
             affected_component=f"/path{i}",
             description="test",
@@ -88,6 +100,36 @@ async def test_report_finding_rejects_missing_fields():
     assert "missing" in result.summary.lower()
 
 
+@pytest.mark.asyncio
+async def test_report_finding_rejects_high_without_real_poc():
+    tool = ReportFindingTool()
+    result = await tool.run(
+        title="JWT bypass",
+        severity="high",
+        finding_type="broken_authentication",
+        affected_component="/",
+        description="looks exploitable",
+        impact="Login boundary may be bypassed.",
+    )
+    assert result.ok is False
+    assert result.error == "missing_report_fields"
+
+
+@pytest.mark.asyncio
+async def test_report_finding_allows_medium_with_descriptive_evidence():
+    tool = ReportFindingTool()
+    result = await tool.run(
+        title="Verbose error disclosure",
+        severity="medium",
+        finding_type="info_disclosure",
+        affected_component="/search",
+        description="Verbose stack trace observed",
+        evidence="Stack trace included SQL exception details in browser response.",
+    )
+    assert result.ok is True
+    assert _get_findings()[0]["poc_script_code"] == "Stack trace included SQL exception details in browser response."
+
+
 # ── QueryFindingsTool ────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -108,9 +150,9 @@ async def test_query_findings_empty_store():
 @pytest.mark.asyncio
 async def test_query_findings_filters_by_severity_and_type():
     rep = ReportFindingTool()
-    await rep.run(title="A", severity="critical", finding_type="sqli", affected_component="/a", description="da")
-    await rep.run(title="B", severity="high",     finding_type="xss",  affected_component="/b", description="db")
-    await rep.run(title="C", severity="critical", finding_type="xss",  affected_component="/c", description="dc")
+    await rep.run(title="A", severity="critical", finding_type="sqli", affected_component="/a", description="da", impact="ia", technical_analysis="ta", poc_description="pa", poc_script_code="GET /a\nHTTP/1.1 500", remediation_steps="ra")
+    await rep.run(title="B", severity="high",     finding_type="xss",  affected_component="/b", description="db", impact="ib", technical_analysis="tb", poc_description="pb", poc_script_code="<script>alert(1)</script>", remediation_steps="rb")
+    await rep.run(title="C", severity="critical", finding_type="xss",  affected_component="/c", description="dc", impact="ic", technical_analysis="tc", poc_description="pc", poc_script_code="GET /c\nHTTP/1.1 200", remediation_steps="rc")
 
     q = QueryFindingsTool()
     r1 = await q.run(severity="critical")
@@ -129,7 +171,7 @@ async def test_query_findings_filters_by_severity_and_type():
 @pytest.mark.asyncio
 async def test_query_findings_text_contains_matches_title_or_description():
     rep = ReportFindingTool()
-    await rep.run(title="Login bypass", severity="critical", finding_type="auth", affected_component="/login", description="jwt none alg")
+    await rep.run(title="Login bypass", severity="critical", finding_type="auth", affected_component="/login", description="jwt none alg", impact="ia", technical_analysis="ta", poc_description="pa", poc_script_code="Cookie: JWT=forged", remediation_steps="ra")
     await rep.run(title="Open redirect", severity="low", finding_type="redirect", affected_component="/go", description="phishing vector")
 
     q = QueryFindingsTool()
@@ -169,7 +211,25 @@ async def test_link_chain_happy_path():
     rep = ReportFindingTool()
     await rep.run(title="Info leak", severity="low", finding_type="info_disclosure", affected_component="/debug", description="d")
     await rep.run(title="IDOR", severity="medium", finding_type="idor", affected_component="/api/user", description="d")
-    await rep.run(title="Privesc", severity="high", finding_type="privesc", affected_component="/admin", description="d")
+    await rep.run(
+        title="Privesc",
+        severity="high",
+        finding_type="privesc",
+        affected_component="/admin",
+        description="d",
+        impact="Administrative role escalation succeeds.",
+        technical_analysis="Server honored a low-privilege session during a promotion action.",
+        poc_description="Replay the promotion request with a low-privilege cookie and observe a success response.",
+        poc_script_code=(
+            "POST /admin/promote HTTP/1.1\n"
+            "Host: app.local\n"
+            "Cookie: session=low\n\n"
+            "{\"user\":\"attacker\",\"role\":\"admin\"}\n\n"
+            "HTTP/1.1 200 OK\n\n"
+            "{\"status\":\"promoted\"}"
+        ),
+        remediation_steps="Enforce server-side role checks on promotion endpoints.",
+    )
 
     link = LinkChainTool()
     result = await link.run(
@@ -199,7 +259,7 @@ async def test_link_chain_rejects_unknown_finding_ids():
 @pytest.mark.asyncio
 async def test_link_chain_requires_at_least_two_findings():
     rep = ReportFindingTool()
-    await rep.run(title="Solo", severity="high", finding_type="x", affected_component="/s", description="d")
+    await rep.run(title="Solo", severity="high", finding_type="x", affected_component="/s", description="d", impact="i", technical_analysis="t", poc_description="p", poc_script_code="GET /s\nHTTP/1.1 200", remediation_steps="r")
 
     link = LinkChainTool()
     result = await link.run(finding_ids=["VXIS-0001"], rationale="alone")
@@ -210,8 +270,8 @@ async def test_link_chain_requires_at_least_two_findings():
 @pytest.mark.asyncio
 async def test_link_chain_requires_rationale():
     rep = ReportFindingTool()
-    await rep.run(title="A", severity="high", finding_type="x", affected_component="/a", description="d")
-    await rep.run(title="B", severity="high", finding_type="x", affected_component="/b", description="d")
+    await rep.run(title="A", severity="high", finding_type="x", affected_component="/a", description="d", impact="i", technical_analysis="t", poc_description="p", poc_script_code="GET /a\nHTTP/1.1 200", remediation_steps="r")
+    await rep.run(title="B", severity="high", finding_type="x", affected_component="/b", description="d", impact="i", technical_analysis="t", poc_description="p", poc_script_code="GET /b\nHTTP/1.1 200", remediation_steps="r")
 
     link = LinkChainTool()
     result = await link.run(finding_ids=["VXIS-0001", "VXIS-0002"], rationale="")
@@ -275,7 +335,7 @@ async def test_no_hash_falls_back_to_existing_dedup() -> None:
     base = "/api/Orders"
     r1 = await tool.run(
         title="IDOR",
-        severity="high",
+        severity="medium",
         finding_type="idor",
         affected_component=f"{base}/1",
         description="...",
@@ -283,7 +343,7 @@ async def test_no_hash_falls_back_to_existing_dedup() -> None:
     )
     r2 = await tool.run(
         title="IDOR",
-        severity="high",
+        severity="medium",
         finding_type="idor",
         affected_component=f"{base}/2",
         description="...",

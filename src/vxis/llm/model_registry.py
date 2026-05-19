@@ -42,6 +42,10 @@ class CompressionPolicy:
     preserve_recent_messages: int
     chunk_size: int
     summary_max_words: int = 300
+    recent_full_iterations: int = 3
+    output_token_cap: int = 8_000
+    allow_long_context: bool = False
+    profile: str = "balanced"
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +352,10 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
             preserve_recent_messages=5,
             chunk_size=5,
             summary_max_words=180,
+            recent_full_iterations=1,
+            output_token_cap=max(512, min(2_048, int(context_window * 0.18))),
+            allow_long_context=False,
+            profile="local-small",
         )
 
     if provider == "ollama":
@@ -358,6 +366,10 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
             preserve_recent_messages=8,
             chunk_size=8,
             summary_max_words=220,
+            recent_full_iterations=2,
+            output_token_cap=max(1_024, min(4_096, int(context_window * 0.18))),
+            allow_long_context=False,
+            profile="local-medium",
         )
 
     if provider in {"openai", "anthropic", "gemini", "together", "deepseek"}:
@@ -367,6 +379,11 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
             compress_threshold_tokens=threshold,
             preserve_recent_messages=15,
             chunk_size=10,
+            summary_max_words=300,
+            recent_full_iterations=5,
+            output_token_cap=8_000,
+            allow_long_context=True,
+            profile="cloud-large",
         )
 
     return CompressionPolicy(
@@ -374,6 +391,10 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
         compress_threshold_tokens=max(8_000, int(context_window * 0.75)),
         preserve_recent_messages=12,
         chunk_size=8,
+        recent_full_iterations=3,
+        output_token_cap=4_000,
+        allow_long_context=False,
+        profile="balanced",
     )
 
 

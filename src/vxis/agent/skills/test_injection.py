@@ -40,6 +40,8 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
         {
             "vulnerable": bool,
             "findings": [{"type": "sqli", "payload": "...", "evidence": "...", "severity": "..."}, ...],
+            "baseline": {"status": int, "size": int, "preview": str},
+            "control_evidence": {"baseline": {...}, "interesting_responses": [...]},
             "tested": int,
             "url": str,
             "round": int,
@@ -81,6 +83,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
 
     findings: list[dict] = []
     blind_sizes: dict[str, int] = {}
+    control_evidence: list[dict[str, Any]] = []
     tested = 0
 
     sem = asyncio.Semaphore(10)
@@ -114,6 +117,15 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
                     "param": target_param,
                     "evidence": f"Request took {_elapsed:.2f}s (payload injected SLEEP/WAITFOR)",
                     "response_preview": r.text[:300],
+                    "control": {
+                        "baseline_status": baseline_status,
+                        "baseline_size": baseline_size,
+                        "payload_status": r.status,
+                        "payload_size": size,
+                        "baseline_preview": base_r.text[:180],
+                        "payload_preview": r.text[:180],
+                        "elapsed_seconds": round(_elapsed, 2),
+                    },
                     "severity": "critical",
                 })
                 logger.info("time-based sqli: %s on %s (%.2fs)", p["payload"][:40], target_param, _elapsed)
@@ -122,6 +134,15 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
             # Track blind SQLi size differences
             if p["type"] == "sqli_blind":
                 blind_sizes[p["payload"]] = size
+                control_evidence.append({
+                    "type": p["type"],
+                    "payload": p["payload"],
+                    "status": r.status,
+                    "size": size,
+                    "baseline_status": baseline_status,
+                    "baseline_size": baseline_size,
+                    "response_preview": r.text[:180],
+                })
                 return
 
             # Check for error-based detection
@@ -142,6 +163,15 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
                         "param": target_param,
                         "evidence": f"Status {r.status}, matched '{sig}' in response",
                         "response_preview": r.text[:300],
+                        "control": {
+                            "baseline_status": baseline_status,
+                            "baseline_size": baseline_size,
+                            "payload_status": r.status,
+                            "payload_size": size,
+                            "matched_signal": sig,
+                            "baseline_preview": base_r.text[:180],
+                            "payload_preview": r.text[:180],
+                        },
                         "severity": severity,
                     })
                     logger.info("injection found: %s on %s with %s", p["type"], target_param, p["payload"][:30])
@@ -155,6 +185,14 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
                     "param": target_param,
                     "evidence": f"Payload caused 500 error (baseline was {baseline_status})",
                     "response_preview": r.text[:300],
+                    "control": {
+                        "baseline_status": baseline_status,
+                        "baseline_size": baseline_size,
+                        "payload_status": r.status,
+                        "payload_size": size,
+                        "baseline_preview": base_r.text[:180],
+                        "payload_preview": r.text[:180],
+                    },
                     "severity": "medium",
                 })
 
@@ -166,6 +204,14 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
                     "param": target_param,
                     "evidence": "Payload reflected in response body",
                     "response_preview": r.text[:300],
+                    "control": {
+                        "baseline_status": baseline_status,
+                        "baseline_size": baseline_size,
+                        "payload_status": r.status,
+                        "payload_size": size,
+                        "baseline_preview": base_r.text[:180],
+                        "payload_preview": r.text[:180],
+                    },
                     "severity": "high",
                 })
 
@@ -180,6 +226,12 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
                 "payload": "boolean-based blind",
                 "param": target_param,
                 "evidence": f"Response size delta: {dict(blind_sizes)}",
+                "control": {
+                    "baseline_status": baseline_status,
+                    "baseline_size": baseline_size,
+                    "blind_sizes": dict(blind_sizes),
+                    "baseline_preview": base_r.text[:180],
+                },
                 "severity": "critical",
             })
 
@@ -195,6 +247,19 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
     return {
         "vulnerable": len(unique_findings) > 0,
         "findings": unique_findings,
+        "baseline": {
+            "status": baseline_status,
+            "size": baseline_size,
+            "preview": base_r.text[:240],
+        },
+        "control_evidence": {
+            "baseline": {
+                "status": baseline_status,
+                "size": baseline_size,
+                "preview": base_r.text[:240],
+            },
+            "interesting_responses": control_evidence[:10],
+        },
         "tested": tested,
         "url": url,
         "param": target_param,

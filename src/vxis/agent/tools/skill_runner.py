@@ -233,6 +233,9 @@ class RunSkillTool:
         elif skill_name == "test_injection":
             findings = result.get("findings", [])
             summary_parts.append(f"{'VULNERABLE' if result.get('vulnerable') else 'clean'} — {len(findings)} finding(s)")
+            baseline = result.get("baseline", {})
+            if baseline:
+                summary_parts.append(f"baseline={baseline.get('status', '?')}/{baseline.get('size', '?')}B")
             for f in findings[:3]:
                 summary_parts.append(f"  {f['type']}: {f['payload'][:30]} ({f['severity']})")
 
@@ -240,6 +243,9 @@ class RunSkillTool:
             if result.get("authenticated"):
                 summary_parts.append(f"AUTHENTICATED via {result['method']}! token={result['token'][:30]}...")
                 summary_parts.append(f"user: {result.get('user_info', {})}")
+                controls = result.get("control_checks", {})
+                if controls:
+                    summary_parts.append(f"controls: neg={controls.get('negative_control', {}).get('status', '?')} pos={controls.get('positive_control', {}).get('status', '?')}")
             else:
                 summary_parts.append(f"auth failed ({len(result.get('all_attempts', []))} attempts)")
 
@@ -248,6 +254,11 @@ class RunSkillTool:
             new = result.get("new_endpoints", [])
             exposed = result.get("user_data_exposed", [])
             summary_parts.append(f"{len(acc)} accessible, {len(new)} new (auth-only), {len(exposed)} with user data")
+            controls = result.get("control_evidence", {})
+            if controls:
+                summary_parts.append(
+                    f"controls: auth_only={len(controls.get('auth_only', []))} noauth_same={len(controls.get('same_data_without_auth', []))}"
+                )
 
         elif skill_name == "test_sensitive_files":
             exposed = result.get("exposed", [])
@@ -261,6 +272,11 @@ class RunSkillTool:
                 f"{len(result.get('accessible_ids', []))} accessible, "
                 f"{len(result.get('auth_bypass_ids', []))} without auth"
             )
+            controls = result.get("control_evidence", {})
+            if controls:
+                summary_parts.append(
+                    f"controls: +{len(controls.get('positive_cases', []))}/-{len(controls.get('negative_cases', []))}"
+                )
 
         elif skill_name in ("test_xss", "test_ssrf", "test_auth_deep", "test_csrf",
                              "test_api_security", "test_misconfig", "test_business_logic",
@@ -268,6 +284,14 @@ class RunSkillTool:
             findings = result.get("findings", result.get("exposed", []))
             vuln = result.get("vulnerable", len(findings) > 0)
             summary_parts.append(f"{'VULNERABLE' if vuln else 'clean'} — {len(findings)} finding(s), {result.get('tested', 0)} tested")
+            baseline = result.get("baseline", {})
+            if baseline:
+                summary_parts.append(f"baseline={baseline.get('status', '?')}/{baseline.get('size', '?')}B")
+            controls = result.get("control_evidence", {})
+            if controls:
+                control_count = sum(len(v) for v in controls.values() if isinstance(v, list))
+                if control_count:
+                    summary_parts.append(f"controls={control_count}")
             for f in findings[:3]:
                 ftype = f.get("type", "unknown")
                 fpayload = f.get("payload", f.get("path", ""))[:40]

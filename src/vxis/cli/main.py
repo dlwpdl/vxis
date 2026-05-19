@@ -748,6 +748,45 @@ def scan(
             border_style="yellow",
         ))
 
+    aggregated_findings = list(getattr(ctx, "aggregated_findings", []) or [])
+    prior_scan_count = int((getattr(ctx, "target_memory", {}) or {}).get("prior_scan_count") or 0)
+    new_this_run_count = sum(
+        1
+        for item in aggregated_findings
+        if isinstance(item, dict)
+        and str(item.get("first_seen", "")) == str(item.get("last_seen", ""))
+        and ctx.scan_id in list(item.get("source_scan_ids") or [])
+    )
+    if aggregated_findings and prior_scan_count > 0:
+        agg_table = Table(
+            title=f"[bold]Target Aggregate — {prior_scan_count} prior scan(s) + current[/bold]",
+            show_header=True, header_style="bold",
+            border_style="cyan",
+        )
+        agg_table.add_column("Severity", no_wrap=True, width=10)
+        agg_table.add_column("Type", no_wrap=True, width=20)
+        agg_table.add_column("Title", max_width=48)
+        agg_table.add_column("Component", max_width=34, style="dim")
+        agg_table.add_column("Seen", no_wrap=True, width=6, justify="right")
+
+        for item in aggregated_findings[:12]:
+            sev_val = str(item.get("severity", "medium")).lower()
+            style = severity_styles.get(sev_val, "")
+            agg_table.add_row(
+                f"[{style}]{sev_val.upper()}[/{style}]",
+                str(item.get("finding_type", ""))[:20],
+                str(item.get("title", ""))[:48],
+                str(item.get("affected_component", ""))[:34],
+                str(item.get("occurrences", 1)),
+            )
+        console.print(agg_table)
+        console.print(
+            f"[dim]Aggregated target memory deduped repeated findings across scans. "
+            f"Total unique findings for this target: {len(aggregated_findings)} | "
+            f"Current scan findings: {len(ctx.findings)} | "
+            f"Likely new this run: {max(new_this_run_count, 0)}[/dim]"
+        )
+
     # Score
     vxis_score = getattr(ctx, "vxis_score", None)
     if vxis_score:

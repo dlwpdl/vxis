@@ -77,6 +77,26 @@
     <div class="finding-section-title"><span class="en">Description</span><span class="ko">상세 설명</span></div>
     <div>{{ finding.description | bilingual | safe }}</div>
 
+    {% if finding.impact %}
+    <div class="finding-section-title"><span class="en">Impact</span><span class="ko">영향</span></div>
+    <div>{{ finding.impact | bilingual | safe }}</div>
+    {% endif %}
+
+    {% if finding.technical_analysis %}
+    <div class="finding-section-title"><span class="en">Technical Analysis</span><span class="ko">기술 분석</span></div>
+    <div>{{ finding.technical_analysis | bilingual | safe }}</div>
+    {% endif %}
+
+    {% if finding.poc_description or finding.poc_script_code %}
+    <div class="finding-section-title"><span class="en">Proof of Concept</span><span class="ko">개념 증명</span></div>
+    {% if finding.poc_description %}
+    <div>{{ finding.poc_description | bilingual | safe }}</div>
+    {% endif %}
+    {% if finding.poc_script_code %}
+    <pre class="evidence-content"><code>{{ finding.poc_script_code }}</code></pre>
+    {% endif %}
+    {% endif %}
+
     {# Evidence #}
     {% if finding.evidence %}
     <div class="finding-section-title"><span class="en">Evidence</span><span class="ko">증거</span></div>

@@ -180,3 +180,43 @@ def test_think_in_loop_trims_history_for_small_llamacpp_context(monkeypatch):
     assert "PROMPT-BUDGET COMPACTION" in captured["user"]
     prompt_tokens = (len(captured["system"]) + len(captured["user"])) // 4
     assert prompt_tokens < 8192
+
+
+def test_think_in_loop_uses_compact_prompt_for_small_local_context(monkeypatch):
+    from vxis.agent.brain import AgentBrain
+
+    monkeypatch.setenv("VXIS_LLAMACPP_CONTEXT", "8192")
+
+    brain = AgentBrain(
+        provider="llamacpp",
+        model="huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+    )
+
+    captured: dict[str, str] = {}
+
+    def fake_llm(system: str, user: str, **kwargs) -> str:
+        captured["system"] = system
+        captured["user"] = user
+        return (
+            '```json\n'
+            '{"reasoning":"compact","actions":[{"tool":"finish_scan","args":{},"reasoning":"done","priority":"low"}]}\n'
+            '```'
+        )
+
+    monkeypatch.setattr(brain, "_call_llm_with_fallback", fake_llm)
+
+    messages = [{"role": "system", "content": "Scan started", "iter": 0}]
+    tool_catalog = [
+        {
+            "name": "finish_scan",
+            "description": "Finish the scan after all credible attack families are exhausted and the final report can be generated safely.",
+            "input_schema": {"type": "object"},
+        },
+    ]
+
+    actions = asyncio.run(brain.think_in_loop(messages, tool_catalog))
+
+    assert actions == [("finish_scan", {})]
+    assert "autonomous pentest operator" in captured["system"]
+    assert "OWASP Top 10" not in captured["system"]
+    assert "Bug bounty hunters spend days on one target" not in captured["system"]

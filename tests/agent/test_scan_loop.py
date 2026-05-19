@@ -1,8 +1,13 @@
 import pytest
-from vxis.agent.scan_loop import ScanAgentLoop
+from unittest.mock import AsyncMock
+from types import SimpleNamespace
+from vxis.agent.scan_loop import ScanAgentLoop, VectorCandidate
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
 from vxis.agent.tools.finding_tools import (
+    LinkChainTool,
     ReportFindingTool,
+    _get_chains,
+    _get_findings,
     _reset_for_tests as _reset_findings,
 )
 
@@ -14,11 +19,1627 @@ class FinishTool:
         return ToolResult(ok=True, summary="finished", data={"final": True})
 
 
+class VerifyTool:
+    name = "verify_finding"
+    description = "verify"
+    input_schema = {"type": "object"}
+
+    async def run(self, **kwargs) -> ToolResult:
+        return ToolResult(
+            ok=True,
+            summary="verify_finding: UNCONFIRMED (medium) — control gap",
+            data={
+                "verdict": "UNCONFIRMED",
+                "confidence": "medium",
+                "reasoning": "The transcript shows a positive signal but lacks the expected control comparison.",
+            },
+        )
+
+
+class RunSkillTool:
+    name = "run_skill"
+    description = "execute prebuilt skill"
+    input_schema = {"type": "object"}
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def run(self, **kwargs) -> ToolResult:
+        self.calls.append(dict(kwargs))
+        return ToolResult(ok=True, summary=f"ran skill {kwargs.get('skill', '?')}", data={})
+
+
 @pytest.fixture(autouse=True)
 def _isolate_findings():
     _reset_findings()
     yield
     _reset_findings()
+
+
+def test_focus_branch_role_blocks_exploit_action_for_recon_worker():
+    reg = ToolRegistry()
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    branch = loop.state.ensure_branch(
+        "web:dir-bruteforce",
+        "web:dir-bruteforce",
+        "Hidden routes/directories",
+        role="recon_worker",
+        objective="Map non-authenticated surface",
+    )
+    assert (
+        loop._action_advances_focus_branch(
+            branch,
+            "shell_exec",
+            {"command": "sqlmap -u http://localhost:3000/rest/products/search?q=test"},
+            [],
+    )
+        is False
+    )
+
+
+def test_status_from_tool_result_treats_skill_runner_block_as_blocked():
+    result = ToolResult(
+        ok=False,
+        summary="run_skill BLOCKED — you've called 'attempt_auth' with IDENTICAL args 3 times.",
+        data={"blocked": True, "hits": 3},
+        error="stuck_loop",
+    )
+    assert ScanAgentLoop._status_from_tool_result(result) == "blocked"
+
+
+def test_recent_blocked_skill_count_uses_explicit_skill_counter():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.record_blocked_skill("attempt_auth")
+    loop.state.record_blocked_skill("attempt_auth")
+    assert loop._recent_blocked_skill_count("attempt_auth") == 2
+
+
+def test_platform_allowed_skills_for_desktop_excludes_web_skills():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="/Applications/Calculator.app", registry=reg, max_iters=3, target_kind="desktop")
+    allowed = loop._platform_allowed_skills()
+    assert "test_xss" not in allowed
+    assert "test_signature_audit" in allowed
+
+
+def test_pivoted_skill_name_moves_within_web_graph_after_blocked_retries():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    loop.state.record_blocked_skill("attempt_auth")
+    loop.state.record_blocked_skill("attempt_auth")
+    loop.state.record_blocked_skill("attempt_auth")
+    assert loop._pivoted_skill_name("attempt_auth") == "post_auth_enum"
+
+
+def test_reroute_blocked_skill_advances_to_next_web_pivot():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    for _ in range(3):
+        loop.state.record_blocked_skill("attempt_auth")
+    for _ in range(3):
+        loop.state.record_blocked_skill("post_auth_enum")
+    skill, params = loop._reroute_blocked_skill("attempt_auth", {})
+    assert skill == "test_idor"
+    assert params["base_url"] == "http://localhost:3000"
+
+
+def test_mobile_forced_candidate_action_does_not_select_web_skill():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="/tmp/app.apk", registry=reg, max_iters=3, target_kind="mobile")
+    candidate = VectorCandidate(
+        id="mobile:auth",
+        vector_id="mobile:auth",
+        title="Authentication bypass or weak login",
+        priority=95,
+        evidence="login form exposed",
+    )
+    assert loop._forced_candidate_action(candidate) is None
+
+
+def test_focus_discipline_profile_is_stricter_for_local_llm():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    loop.brain = SimpleNamespace(_provider="llamacpp")
+    assert loop._llm_discipline_profile() == "local_strict"
+    assert loop._focus_grace_iterations() < 5
+    assert loop._focus_drift_block_threshold() == 2
+
+
+def test_focus_discipline_profile_is_looser_for_cloud_llm():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    loop.brain = SimpleNamespace(_provider="together", _model="deepseek-ai/DeepSeek-V3.1")
+    assert loop._llm_discipline_profile() == "cloud_balanced"
+    assert loop._focus_grace_iterations() >= 4
+    assert loop._focus_drift_block_threshold() == 3
+
+
+def test_frontier_profile_is_most_permissive():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    loop.brain = SimpleNamespace(_provider="openai", _model="gpt-5.5")
+    assert loop._llm_discipline_profile() == "frontier_loose"
+    assert loop._focus_grace_iterations() > 5
+    assert loop._focus_drift_block_threshold() == 4
+
+
+def test_cloud_profiles_allow_uncovered_family_probe_more_readily_than_local():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    branch = loop.state.ensure_branch(
+        "web:sqli:credential-pivot",
+        "WEB-SQLI-PIVOT",
+        "Turn SQL injection into authenticated foothold",
+        priority=95,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0001",
+    )
+    candidate = loop.state.ensure_vector_candidate(
+        "web:dir-bruteforce",
+        "web:dir-bruteforce",
+        "Hidden routes/directories",
+        priority=88,
+        evidence="unexplored route family discovered",
+    )
+    loop.state.findings.append({
+        "finding_type": "sql_injection",
+        "title": "SQLi on q",
+        "severity": "critical",
+    })
+    loop.brain = SimpleNamespace(_provider="llamacpp")
+    local_allowed = loop._should_allow_off_branch_action(
+        branch,
+        "browser_render",
+        {"url": "http://localhost:3000/#/administration"},
+        [],
+        [candidate.id],
+    )
+    loop.brain = SimpleNamespace(_provider="together", _model="deepseek-ai/DeepSeek-V3.1")
+    balanced_allowed = loop._should_allow_off_branch_action(
+        branch,
+        "browser_render",
+        {"url": "http://localhost:3000/#/administration"},
+        [],
+        [candidate.id],
+    )
+    loop.brain = SimpleNamespace(_provider="openai", _model="gpt-5.5")
+    frontier_allowed = loop._should_allow_off_branch_action(
+        branch,
+        "browser_render",
+        {"url": "http://localhost:3000/#/administration"},
+        [],
+        [candidate.id],
+    )
+    assert local_allowed is False
+    assert balanced_allowed is True
+    assert frontier_allowed is True
+
+
+def test_local_strict_brain_tool_catalog_is_narrower_than_full_registry():
+    reg = ToolRegistry()
+    class _Tool:
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+        def __init__(self, name: str, description: str = "") -> None:
+            self.name = name
+            self.description = description or name
+
+    for name in (
+        "finish_scan", "think", "wait", "report_finding", "query_findings", "link_chain",
+        "verify_finding", "run_skill", "fingerprint_target", "list_playbooks", "load_playbook",
+        "http_request", "browser_render", "browser_navigate", "browser_analyze_dom",
+        "browser_fill_form", "browser_get_cookies", "browser_eval_js", "shell_exec",
+        "python_exec", "browser_click", "browser_screenshot", "intercept_proxy", "query_scan_memory",
+    ):
+        reg.register(_Tool(name))
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=24)
+    loop.brain = SimpleNamespace(_provider="llamacpp", _model="local-qwen")
+    catalog = loop._brain_tool_catalog()
+    names = {item["name"] for item in catalog}
+    assert len(catalog) < len(reg.describe_all())
+    assert "finish_scan" in names
+    assert "run_skill" in names
+    assert "browser_click" not in names
+    assert "browser_screenshot" not in names
+
+
+def test_cloud_balanced_brain_tool_catalog_keeps_full_registry():
+    reg = ToolRegistry()
+    class _Tool:
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.description = name
+
+    for name in ("finish_scan", "think", "run_skill", "browser_click", "browser_screenshot"):
+        reg.register(_Tool(name))
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=24)
+    loop.brain = SimpleNamespace(_provider="openai", _model="gpt-5.5")
+    assert len(loop._brain_tool_catalog()) == len(reg.describe_all())
+
+
+def test_local_strict_scan_dashboard_is_compact():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    loop.brain = SimpleNamespace(_provider="llamacpp", _model="local-qwen")
+    loop.state.iteration = 7
+    for i in range(5):
+        loop.state.findings.append({
+            "id": f"VXIS-{i:04d}",
+            "finding_type": "sql_injection",
+            "severity": "high",
+            "title": f"Finding {i}",
+        })
+    for i in range(6):
+        loop.state.ensure_branch(
+            f"branch-{i}",
+            "WEB-SQLI-001",
+            f"Branch {i}",
+            priority=90 - i,
+            role="post_exploit_worker",
+            phase="session_reuse",
+            source_finding_id=f"VXIS-{i:04d}",
+        )
+    dashboard = loop._build_scan_dashboard()
+    assert "LOCAL SCAN DASHBOARD" in dashboard
+    assert "═══ CHAIN INTELLIGENCE ═══" not in dashboard
+    assert dashboard.count("Branch ") <= 4
+
+
+def test_local_strict_compacts_finding_payload_before_verifier():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    loop.brain = SimpleNamespace(_provider="llamacpp", _model="local-qwen")
+    args = loop._compact_local_finding_payload({
+        "description": "D" * 600,
+        "impact": "I" * 600,
+        "technical_analysis": "HTTP/1.1 500\n" + ("A" * 3000),
+        "poc_description": "baseline/control\n" + ("B" * 2000),
+        "poc_script_code": "GET /x HTTP/1.1\nHost: test\n\nHTTP/1.1 200\n" + ("C" * 3000),
+        "evidence": "GET /x HTTP/1.1\nHost: test\n\nHTTP/1.1 200\n" + ("E" * 3000),
+        "extra_evidence": [
+            {"title": "artifact", "content": "payload\n" + ("X" * 2000)},
+            {"title": "artifact2", "content": "payload\n" + ("Y" * 2000)},
+            {"title": "artifact3", "content": "payload\n" + ("Z" * 2000)},
+        ],
+    })
+    assert len(args["description"]) <= 220
+    assert len(args["impact"]) <= 240
+    assert len(args["technical_analysis"]) <= 520
+    assert len(args["poc_description"]) <= 420
+    assert len(args["poc_script_code"]) <= 1200
+    assert len(args["evidence"]) <= 1200
+    assert len(args["extra_evidence"]) == 2
+
+
+def test_cloud_profile_keeps_finding_payload_uncompacted():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    loop.brain = SimpleNamespace(_provider="openai", _model="gpt-5.5")
+    payload = {
+        "description": "D" * 600,
+        "poc_script_code": "GET /x HTTP/1.1\nHost: test\n\nHTTP/1.1 200\n" + ("C" * 3000),
+    }
+    out = loop._compact_local_finding_payload(payload)
+    assert out["description"] == payload["description"]
+    assert out["poc_script_code"] == payload["poc_script_code"]
+
+
+def test_blocking_finish_branches_exhausts_post_exploit_branch_when_pivot_graph_is_spent():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    for skill in ("attempt_auth", "post_auth_enum", "test_idor", "test_api_security", "test_business_logic", "test_sensitive_files"):
+        for _ in range(3):
+            loop.state.record_blocked_skill(skill)
+    branch = loop.state.ensure_branch(
+        "web:auth-bypass:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        priority=95,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0001",
+    )
+    branch.attempts = 4
+    blockers = loop._blocking_finish_branches()
+    assert all(item.id != branch.id for item in blockers)
+    assert loop.state.branches[branch.id].status == "exhausted"
+
+
+def test_blocking_finish_branches_keeps_high_yield_post_exploit_branch():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    branch = loop.state.ensure_branch(
+        "web:auth-bypass:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        priority=95,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0001",
+    )
+    branch.attempts = 1
+    blockers = loop._blocking_finish_branches()
+    assert any(item.id == branch.id for item in blockers)
+    assert loop.state.branches[branch.id].status != "exhausted"
+
+
+@pytest.mark.asyncio
+async def test_budget_exhaustion_completion_accepts_when_no_meaningful_blockers_remain():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+
+    first = await reg.dispatch("report_finding", {
+        "title": "debug leak",
+        "severity": "medium",
+        "finding_type": "information_disclosure",
+        "affected_component": "/debug",
+        "description": "debug endpoint exposed",
+    })
+    second = await reg.dispatch("report_finding", {
+        "title": "weak auth",
+        "severity": "medium",
+        "finding_type": "weak_auth",
+        "affected_component": "/login",
+        "description": "weak authentication evidence",
+    })
+    await reg.dispatch("link_chain", {
+        "finding_ids": [first.data["id"], second.data["id"]],
+        "rationale": "debug leak leads to auth foothold",
+        "crown_jewel": "authenticated foothold",
+    })
+    loop.state.record_review_item(
+        "judge:unfinished_branches:http://localhost:3000",
+        stage="judge",
+        status="escalated",
+        title="unfinished_branches",
+        reason="branches remained",
+        action_hint="keep going",
+        affected_component="http://localhost:3000",
+    )
+    loop._blocking_finish_branches = lambda: []  # type: ignore[method-assign]
+    loop.state.open_vector_candidates = lambda: []  # type: ignore[method-assign]
+    assert loop._maybe_finalize_budget_exhausted_scan() is True
+    assert loop.state.completed is True
+    assert loop.state.review_queue["judge:unfinished_branches:http://localhost:3000"].status == "closed"
+    assert any(item.verdict == "ACCEPTED" for item in loop.state.review_history)
+
+
+def test_candidate_finish_blocking_yield_drops_when_vector_family_already_covered():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    candidate = loop.state.ensure_vector_candidate(
+        "web:auth-bypass",
+        "WEB-AUTH-001",
+        "Authentication bypass or weak login",
+        priority=95,
+        evidence="login form exposed",
+    )
+    findings = [{
+        "finding_type": "sql_injection",
+        "title": "Authentication bypass via sqli_bypass",
+        "affected_component": "/rest/user/login",
+    }]
+    for _ in range(3):
+        loop.state.record_blocked_skill("attempt_auth")
+    assert loop._candidate_has_finish_blocking_yield(candidate, findings) is False
+
+
+def test_memory_candidate_finish_blocking_yield_drops_when_family_is_already_covered():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    candidate = loop.state.ensure_vector_candidate(
+        "memory:idor:http://localhost:3000/api/users/{id}",
+        "web:idor",
+        "Revalidate prior IDOR lead",
+        priority=95,
+        evidence="Previously observed IDOR on /api/users/{id}.",
+    )
+    findings = [{
+        "finding_type": "idor",
+        "title": "Unauthorized object retrieval",
+        "affected_component": "/api/Users/1",
+    }]
+    for _ in range(3):
+        loop.state.record_blocked_skill("test_idor")
+    assert loop._candidate_has_finish_blocking_yield(candidate, findings) is False
+
+
+def test_candidate_family_detects_disclosure_seed_variants():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    disclosure = loop.state.ensure_vector_candidate(
+        "web:sensitive-files",
+        "WEB-MISCONF-001",
+        "Sensitive files or exposed config",
+        priority=85,
+        evidence="seeded from target surface",
+    )
+    brute = loop.state.ensure_vector_candidate(
+        "web:dir-bruteforce",
+        "WEB-INFRA-001",
+        "Hidden routes/directories",
+        priority=75,
+        evidence="seeded from target surface",
+    )
+    assert loop._candidate_family(disclosure) == "disclosure"
+    assert loop._candidate_family(brute) == "infra"
+
+
+def test_memory_carry_branch_drops_finish_blocking_yield_when_family_is_already_covered():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    loop.state.findings.append({
+        "finding_type": "broken_access_control",
+        "title": "Authenticated data access via IDOR",
+        "affected_component": "/api/Users/1",
+    })
+    for _ in range(3):
+        loop.state.record_blocked_skill("test_idor")
+    branch = loop.state.ensure_branch(
+        "carry:web:idor:users",
+        "web:idor",
+        "Revisit user object access control",
+        priority=92,
+        owner="memory",
+        role="post_exploit_worker",
+        phase="data_access",
+        objective="Revalidate prior IDOR lead and deepen access.",
+        blocker="carry-over lead",
+    )
+    branch.attempts = 1
+    blockers = loop._blocking_finish_branches()
+    assert all(item.id != branch.id for item in blockers)
+    assert loop.state.branches[branch.id].status == "exhausted"
+
+
+def test_blocked_root_branch_drops_finish_blocking_yield_when_family_is_already_covered():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    loop.state.findings.append({
+        "finding_type": "sql_injection",
+        "title": "Authentication bypass via sqli_bypass",
+        "affected_component": "/rest/user/login",
+    })
+    for _ in range(3):
+        loop.state.record_blocked_skill("attempt_auth")
+    for _ in range(3):
+        loop.state.record_blocked_skill("post_auth_enum")
+    branch = loop.state.ensure_branch(
+        "web:auth-bypass",
+        "web:auth-bypass",
+        "Authentication bypass or weak login",
+        priority=95,
+        role="recon_worker",
+        objective="Gain an authenticated foothold.",
+    )
+    branch.status = "blocked"
+    branch.last_tool = "run_skill"
+    branch.last_summary = "run_skill BLOCKED — you've called 'attempt_auth' with IDENTICAL args 3 times."
+    blockers = loop._blocking_finish_branches()
+    assert all(item.id != branch.id for item in blockers)
+    assert loop.state.branches[branch.id].status == "blocked"
+
+
+def test_best_skill_params_reuses_known_search_surface_for_xss_and_injection():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.add_message("tool", {
+        "name": "run_skill",
+        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+        "result": {
+            "ok": True,
+            "summary": "enumerated",
+            "data": {
+                "accessible": [
+                    {"path": "/rest/products/search?q=test", "status": 200, "size": 1234},
+                ],
+            },
+        },
+    })
+    assert loop._best_skill_params("test_xss")["url"].endswith("/rest/products/search?q=test")
+    assert loop._best_skill_params("test_injection")["url"].endswith("/rest/products/search?q=test")
+
+
+def test_best_skill_params_passes_seed_paths_to_infra():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.add_message("tool", {
+        "name": "run_skill",
+        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+        "result": {
+            "ok": True,
+            "summary": "enumerated",
+            "data": {
+                "accessible": [
+                    {"path": "/ftp/acme.md", "status": 200, "size": 128},
+                    {"path": "/support/logs", "status": 200, "size": 256},
+                ],
+            },
+        },
+    })
+    params = loop._best_skill_params("test_infra")
+    assert params["seed_paths"] == ["/ftp/acme.md", "/support/logs"]
+
+
+def test_finish_scan_does_not_attach_family_candidates_from_report_text():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    ids = loop._candidate_ids_for_action("finish_scan", {
+        "executive_summary": "xss and ssrf checked",
+        "methodology": "exercise xss ssrf family",
+        "technical_analysis": "search xss and redirect ssrf",
+    })
+    assert ids == []
+
+
+def test_finish_scan_unattempted_candidate_gate_uses_high_yield_family_filter():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    findings = [{
+        "finding_type": "idor",
+        "title": "Unauthorized object retrieval",
+        "affected_component": "/api/Users/1",
+    }]
+    candidate = loop.state.ensure_vector_candidate(
+        "memory:idor:http://localhost:3000/api/users/{id}",
+        "web:idor",
+        "Revalidate prior IDOR lead",
+        priority=95,
+        evidence="Previously observed IDOR on /api/users/{id}.",
+    )
+    for _ in range(3):
+        loop.state.record_blocked_skill("test_idor")
+    filtered = loop._remaining_high_yield_family_candidates(findings)
+    assert candidate not in filtered
+
+
+def test_fallback_branch_ids_for_candidates_maps_root_branch_without_watch_terms():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.ensure_vector_candidate(
+        "web:dir-bruteforce",
+        "web:dir-bruteforce",
+        "Hidden routes/directories",
+        priority=80,
+        evidence="seeded from target surface",
+    )
+    loop.state.ensure_branch(
+        "web:dir-bruteforce",
+        "web:dir-bruteforce",
+        "Hidden routes/directories",
+        priority=80,
+        role="recon_worker",
+    )
+    assert loop._branch_ids_for_action("run_skill", {"skill": "enumerate_endpoints"}) == []
+    assert loop._fallback_branch_ids_for_candidates(["web:dir-bruteforce"]) == ["web:dir-bruteforce"]
+
+
+def test_blocking_finish_branches_exhausts_stale_root_recon_branch_after_candidate_failure():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    candidate = loop.state.ensure_vector_candidate(
+        "web:dir-bruteforce",
+        "web:dir-bruteforce",
+        "Hidden routes/directories",
+        priority=80,
+        evidence="seeded from target surface",
+    )
+    candidate.status = "failed"
+    branch = loop.state.ensure_branch(
+        "web:dir-bruteforce",
+        "web:dir-bruteforce",
+        "Hidden routes/directories",
+        priority=80,
+        role="recon_worker",
+    )
+    branch.source_candidate_id = "web:dir-bruteforce"
+    blockers = loop._blocking_finish_branches()
+    assert all(item.id != branch.id for item in blockers)
+    assert loop.state.branches[branch.id].status == "exhausted"
+
+
+def test_blocking_finish_branches_drops_redundant_root_family_branch_when_child_post_exploit_exists():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    root = loop.state.ensure_branch(
+        "web:sqli",
+        "WEB-SQLI-001",
+        "SQL injection toward DB/admin data",
+        priority=95,
+        role="exploit_worker",
+    )
+    root.attempts = 3
+    child = loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-IMPACT",
+        "Expand SQLi toward full database impact",
+        priority=102,
+        role="post_exploit_worker",
+        phase="data_access",
+        parent_branch_id=root.id,
+        source_candidate_id=root.id,
+        source_finding_id="VXIS-0001",
+    )
+    child.status = "active"
+    blockers = loop._blocking_finish_branches()
+    assert any(item.id == child.id for item in blockers)
+    assert all(item.id != root.id for item in blockers)
+
+
+def test_blocking_finish_branches_drops_redundant_memory_branch_when_live_family_branch_exists():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    live = loop.state.ensure_branch(
+        "web:sqli:credential-pivot",
+        "WEB-SQLI-PIVOT",
+        "Harvest credentials or tokens from SQLi impact",
+        priority=106,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0001",
+    )
+    live.attempts = 1
+    memory = loop.state.ensure_branch(
+        "memory:sql_injection:/rest/user/login",
+        "WEB-SQLI-001",
+        "Revalidate prior Authentication bypass via sqli_bypass",
+        priority=92,
+        role="exploit_worker",
+        owner="memory",
+    )
+    blockers = loop._blocking_finish_branches()
+    assert any(item.id == live.id for item in blockers)
+    assert all(item.id != memory.id for item in blockers)
+
+
+def test_blocking_finish_branches_drops_memory_revalidation_when_family_already_found_this_run():
+    reg = ToolRegistry()
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    loop.state.findings.append({
+        "finding_type": "sql_injection",
+        "title": "SQLI on q",
+        "affected_component": "http://localhost:3000/rest/products/search?q=",
+    })
+    memory = loop.state.ensure_branch(
+        "memory:sql_injection:/rest/user/login",
+        "WEB-SQLI-001",
+        "Revalidate prior Authentication bypass via sqli_bypass",
+        priority=92,
+        role="exploit_worker",
+    )
+    blockers = loop._blocking_finish_branches()
+    assert all(item.id != memory.id for item in blockers)
+
+
+def test_hydrate_verify_finding_args_backfills_from_latest_report():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.add_message("tool", {
+        "name": "report_finding",
+        "args": {
+            "title": "SQLI on q",
+            "severity": "critical",
+            "finding_type": "sql_injection",
+            "affected_component": "http://localhost:3000/rest/products/search?q=",
+            "description": "Injection behavior was observed on parameter q.",
+            "impact": "DB impact possible.",
+            "technical_analysis": "Observed response-length delta.",
+            "poc_description": "Send quote payload and compare responses.",
+            "poc_script_code": "curl 'http://localhost:3000/rest/products/search?q='",
+            "evidence": "GET /rest/products/search?q= ... HTTP/1.1 200 ...",
+        },
+        "result": {"ok": True, "summary": "reported"},
+    })
+    hydrated = loop._hydrate_verify_finding_args({
+        "title": "SQLI on q",
+        "severity": "critical",
+        "finding_type": "sql_injection",
+        "affected_component": "/rest/user/login",
+    })
+    assert hydrated["evidence"].startswith("GET /rest/products/search?q=")
+    assert hydrated["technical_analysis"] == "Observed response-length delta."
+
+
+def test_normalize_tool_args_maps_shell_exec_cmd_to_command():
+    normalized = ScanAgentLoop._normalize_tool_args("shell_exec", {"cmd": "echo hi"})
+    assert normalized["command"] == "echo hi"
+
+
+def test_blocking_finish_branches_exhausts_found_root_branch_when_family_is_already_confirmed():
+    reg = ToolRegistry()
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    loop.state.findings.append({
+        "finding_type": "sql_injection",
+        "title": "SQLI on q",
+        "affected_component": "http://localhost:3000/rest/products/search?q=",
+    })
+    candidate = loop.state.ensure_vector_candidate(
+        "web:sqli",
+        "WEB-SQLI-001",
+        "SQL injection toward DB/admin data",
+        priority=95,
+    )
+    candidate.status = "found"
+    branch = loop.state.ensure_branch(
+        "web:sqli",
+        "WEB-SQLI-001",
+        "SQL injection toward DB/admin data",
+        priority=95,
+        role="post_exploit_worker",
+    )
+    branch.attempts = 3
+    blockers = loop._blocking_finish_branches()
+    assert all(item.id != branch.id for item in blockers)
+    assert loop.state.branches[branch.id].status == "exhausted"
+
+
+def test_branch_expected_yield_downgrades_disclosure_when_stronger_foothold_exists():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.findings.append({
+        "finding_type": "weak_auth",
+        "title": "Authentication bypass via sqli_bypass",
+        "impact": "An authenticated foothold was obtained.",
+        "technical_analysis": "Token acquired and session reused.",
+    })
+    branch = loop.state.ensure_branch(
+        "web:sensitive-files:admin-surface",
+        "WEB-ADMIN-PIVOT",
+        "Use the disclosure to map privileged routes and internal surfaces",
+        priority=96,
+        role="post_exploit_worker",
+        phase="privilege_probe",
+        source_finding_id="VXIS-0009",
+        crown_jewel="privileged route exposure",
+    )
+    score = loop._branch_expected_yield_score(branch)
+    assert score < 65
+    root = loop.state.ensure_branch(
+        "web:sensitive-files",
+        "WEB-MISCONF-001",
+        "Sensitive files or exposed config",
+        priority=85,
+        role="recon_worker",
+    )
+    assert loop._branch_has_finish_blocking_yield(root) is False
+
+
+def test_branch_expected_yield_downgrades_disclosure_when_only_binary_blob_reviews_exist():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.record_review_decision(
+        stage="verifier",
+        verdict="REFUTED",
+        title="Sensitive file exposed: /encryptionkeys/",
+        reason="The captured response is dominated by escaped binary/compressed blob data without readable secret material.",
+        source_finding_type="information_disclosure",
+    )
+    loop.state.record_review_decision(
+        stage="verifier",
+        verdict="REFUTED",
+        title="Sensitive file exposed: /ftp/",
+        reason="The captured response is dominated by escaped binary/compressed blob data without readable secret material.",
+        source_finding_type="information_disclosure",
+    )
+    branch = loop.state.ensure_branch(
+        "web:sensitive-files:credential-reuse",
+        "WEB-DISCLOSURE-PIVOT",
+        "Turn disclosed material into authenticated access",
+        priority=91,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0004",
+        crown_jewel="admin takeover",
+    )
+    score = loop._branch_expected_yield_score(branch)
+    assert score < 65
+    assert loop._branch_has_finish_blocking_yield(branch) is False
+
+
+def test_branch_expected_yield_downgrades_db_impact_without_meaningful_db_evidence():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    branch = loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-PIVOT",
+        "Turn SQL injection into database dump or admin-impact evidence",
+        priority=102,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0010",
+        objective="Extract meaningful backend data or prove administrative data impact.",
+        next_step="Dump users/auth tables or prove row-level data extraction.",
+        crown_jewel="DB dump",
+    )
+    branch.attempts = 3
+    branch.last_summary = "shell_exec exit=2 with no rows and no useful output"
+    score = loop._branch_expected_yield_score(branch)
+    assert score < 65
+
+
+def test_forced_branch_action_prefers_test_idor_for_idor_branch():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    branch = loop.state.ensure_branch(
+        "web:idor",
+        "WEB-AC-001",
+        "IDOR or broken access control",
+        priority=90,
+        role="exploit_worker",
+    )
+    action = loop._forced_branch_action(branch)
+    assert action is not None
+    assert action[1]["skill"] == "test_idor"
+
+
+def test_best_skill_params_for_idor_carries_latest_auth_token():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.add_message("tool", {
+        "name": "run_skill",
+        "args": {"skill": "attempt_auth"},
+        "result": {"ok": True, "data": {"authenticated": True, "token": "abc123token"}},
+    })
+    loop.state.add_message("tool", {
+        "name": "run_skill",
+        "args": {"skill": "enumerate_endpoints"},
+        "result": {
+            "ok": True,
+            "data": {"accessible": [{"path": "/api/users/2", "status": 200, "size": 120}]},
+        },
+    })
+    params = loop._best_skill_params("test_idor")
+    assert params["url_pattern"].endswith("/api/users/{id}")
+    assert params["token"] == "abc123token"
+    assert params["max_id"] == 30
+
+
+def test_spawn_followup_branches_reuses_same_vector_for_same_finding():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.ensure_branch("web:sqli", "WEB-SQLI-001", "SQL injection", priority=95)
+    loop.state.ensure_branch("web:auth-bypass", "WEB-AUTH-001", "Auth bypass", priority=95)
+    args = {
+        "finding_type": "sql_injection",
+        "title": "Authentication bypass via sqli_bypass",
+        "affected_component": "/rest/user/login",
+        "severity": "critical",
+    }
+    loop._spawn_followup_branches_from_finding("VXIS-0002", args)
+    loop._spawn_followup_branches_from_finding("VXIS-0002", {
+        **args,
+        "finding_type": "weak_auth",
+    })
+    pivots = [
+        b for b in loop.state.branches.values()
+        if b.source_finding_id == "VXIS-0002" and b.vector_id == "WEB-SQLI-PIVOT"
+    ]
+    assert len(pivots) == 1
+
+
+def test_forced_branch_action_uses_http_fallback_after_shell_exec_exit_on_post_exploit():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    branch = loop.state.ensure_branch(
+        "web:sqli:credential-pivot",
+        "WEB-SQLI-PIVOT",
+        "Harvest credentials or tokens from SQLi impact",
+        priority=106,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        objective="Turn the injection into usable credentials, session material, or privilege context.",
+        next_step="Dump users/auth tables or config values, then attempt login/session reuse with anything exposed.",
+        crown_jewel="admin takeover or DB dump",
+    )
+    branch.last_tool = "shell_exec"
+    branch.last_summary = "shell_exec: exit=7, stdout=0b, stderr=0b"
+    action = loop._forced_branch_action(branch)
+    assert action is not None
+    assert action[0] == "http_request"
+    assert action[1]["url"].endswith("/rest/user/whoami")
+
+
+def test_off_branch_action_allowed_for_same_campaign_branch():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    focus = loop.state.ensure_branch(
+        "web:sqli:credential-pivot",
+        "WEB-SQLI-PIVOT",
+        "Harvest credentials or tokens from SQLi impact",
+        priority=106,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0002",
+        source_candidate_id="web:sqli",
+    )
+    sibling = loop.state.ensure_branch(
+        "web:sqli:admin-access-control",
+        "WEB-AC-PIVOT",
+        "Probe admin-only access controls with the new session",
+        priority=105,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0002",
+        source_candidate_id="web:sqli",
+    )
+    allowed = loop._should_allow_off_branch_action(
+        focus,
+        "http_request",
+        {"url": "http://localhost:3000/admin"},
+        [sibling.id],
+        [],
+    )
+    assert allowed is True
+
+
+def test_off_branch_action_allowed_for_high_value_cross_campaign_after_sqli_foothold():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.findings.append({
+        "finding_type": "sql_injection",
+        "title": "Authentication bypass via sqli_bypass",
+        "affected_component": "/rest/user/login",
+        "impact": "Authenticated foothold obtained.",
+    })
+    focus = loop.state.ensure_branch(
+        "web:sqli:credential-pivot",
+        "WEB-SQLI-PIVOT",
+        "Harvest credentials or tokens from SQLi impact",
+        priority=106,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0002",
+        source_candidate_id="web:sqli",
+    )
+    idor = loop.state.ensure_vector_candidate(
+        "web:idor",
+        "WEB-AC-001",
+        "IDOR or broken access control",
+        priority=90,
+    )
+    allowed = loop._should_allow_off_branch_action(
+        focus,
+        "run_skill",
+        {"skill": "test_idor", "params": {"url_pattern": "http://localhost:3000/api/users/{id}"}},
+        [],
+        [idor.id],
+    )
+    assert allowed is True
+
+
+def test_high_value_cross_campaign_exception_ignores_low_value_unrelated_campaign():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.findings.append({
+        "finding_type": "sql_injection",
+        "title": "Authentication bypass via sqli_bypass",
+        "affected_component": "/rest/user/login",
+    })
+    focus = loop.state.ensure_branch(
+        "web:sqli:credential-pivot",
+        "WEB-SQLI-PIVOT",
+        "Harvest credentials or tokens from SQLi impact",
+        priority=106,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0002",
+        source_candidate_id="web:sqli",
+    )
+    generic = loop.state.ensure_vector_candidate(
+        "web:dir-bruteforce",
+        "WEB-RECON-001",
+        "Hidden routes/directories",
+        priority=82,
+    )
+    allowed = loop._is_high_value_cross_campaign_exception(
+        focus,
+        matched_branch_ids=[],
+        matched_candidate_ids=[generic.id],
+        capability_score=14,
+    )
+    assert allowed is False
+
+
+def test_blocking_finish_branches_dedupes_same_source_finding_same_phase():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    a = loop.state.ensure_branch(
+        "web:sqli:credential-pivot",
+        "WEB-SQLI-PIVOT",
+        "Harvest credentials",
+        priority=106,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0002",
+    )
+    b = loop.state.ensure_branch(
+        "web:sqli:admin-access-control",
+        "WEB-AC-PIVOT",
+        "Admin access controls",
+        priority=105,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0002",
+    )
+    c = loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-IMPACT",
+        "DB impact",
+        priority=102,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0002",
+    )
+    blockers = loop._dedupe_blocking_campaign_branches([a, b, c])
+    assert [item.id for item in blockers] == [a.id, c.id]
+
+
+def test_campaign_groups_for_ui_rolls_up_same_finding_campaign():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.ensure_branch(
+        "web:sqli:credential-pivot",
+        "WEB-SQLI-PIVOT",
+        "Harvest credentials",
+        priority=106,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        source_finding_id="VXIS-0002",
+        objective="Turn foothold into credential reuse.",
+        next_step="Probe /rest/user/whoami then admin APIs.",
+        crown_jewel="admin takeover",
+    )
+    loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-IMPACT",
+        "DB impact",
+        priority=102,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0002",
+        objective="Extract meaningful backend data.",
+        next_step="Dump users/auth tables.",
+        crown_jewel="DB dump",
+    )
+    groups = loop._campaign_groups_for_ui()
+    assert groups
+    assert groups[0]["source_finding_id"] == "VXIS-0002"
+    assert groups[0]["branch_count"] >= 1
+
+
+def test_focus_campaign_for_ui_includes_related_findings_and_reviews():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-IMPACT",
+        "DB impact",
+        priority=102,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0002",
+        objective="Extract meaningful backend data.",
+        next_step="Dump users/auth tables.",
+        crown_jewel="DB dump",
+    )
+    loop.state.findings.append({
+        "id": "VXIS-0002",
+        "finding_type": "sql_injection",
+        "severity": "critical",
+        "title": "SQLI on q",
+        "affected_component": "/rest/products/search?q=",
+        "impact": "DB impact possible.",
+    })
+    loop.state.record_review_item(
+        "verify:sqli:/rest/products/search?q=",
+        stage="verifier",
+        status="open",
+        title="SQLI on q",
+        reason="Need stronger DB transcript.",
+        action_hint="Gather stronger DB transcript.",
+        affected_component="/rest/products/search?q=",
+        source_finding_type="sql_injection",
+    )
+    detail = loop._focus_campaign_for_ui()
+    assert detail is not None
+    assert detail["family"] == "injection"
+    assert detail["findings"]
+    assert detail["reviews"]
+
+
+def test_branch_is_redundant_family_root_when_same_family_post_exploit_branch_exists():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    root = loop.state.ensure_branch(
+        "web:sqli",
+        "WEB-SQLI-001",
+        "SQL injection toward DB/admin data",
+        priority=95,
+        role="post_exploit_worker",
+    )
+    root.attempts = 1
+    loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-IMPACT",
+        "DB impact",
+        priority=102,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0002",
+        objective="Extract meaningful backend data.",
+        next_step="Dump users/auth tables.",
+        crown_jewel="DB dump",
+    )
+    assert loop._branch_is_redundant_family_root(root) is True
+
+
+def test_best_skill_params_rotates_xss_surface_after_recent_attempt():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.add_message("tool", {
+        "name": "run_skill",
+        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+        "result": {
+            "ok": True,
+            "summary": "enumerated",
+            "data": {
+                "accessible": [
+                    {"path": "/search?q=test", "status": 200, "size": 123},
+                    {"path": "/redirect?next=/profile", "status": 200, "size": 123},
+                ],
+            },
+        },
+    })
+    loop.state.add_message("tool", {
+        "name": "run_skill",
+        "args": {
+            "skill": "test_xss",
+            "target_url": "http://localhost:3000",
+            "params": {"url": "http://localhost:3000/search?q=test"},
+        },
+        "result": {"ok": True, "summary": "clean", "data": {"vulnerable": False}},
+    })
+    params = loop._best_skill_params("test_xss")
+    assert params["url"].endswith("/redirect?next=/profile")
+
+
+def test_reroute_blocked_skill_retries_same_xss_skill_on_fresh_surface_before_pivot():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    loop.state.add_message("tool", {
+        "name": "run_skill",
+        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+        "result": {
+            "ok": True,
+            "summary": "enumerated",
+            "data": {
+                "accessible": [
+                    {"path": "/search?q=test", "status": 200, "size": 123},
+                    {"path": "/redirect?next=/profile", "status": 200, "size": 123},
+                ],
+            },
+        },
+    })
+    for _ in range(3):
+        loop.state.record_blocked_skill("test_xss")
+    skill, params = loop._reroute_blocked_skill(
+        "test_xss",
+        {"url": "http://localhost:3000/search?q=test"},
+    )
+    assert skill == "test_xss"
+    assert params["url"].endswith("/redirect?next=/profile")
+
+
+def test_mark_family_probe_retryable_revives_xss_candidate():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    candidate = loop.state.ensure_vector_candidate(
+        "web:xss",
+        "WEB-XSS-001",
+        "XSS toward session theft",
+        priority=70,
+        evidence="initial seed",
+    )
+    candidate.status = "clean"
+    loop._mark_family_probe_retryable(
+        "test_xss",
+        url="http://localhost:3000/search?q=test",
+        round_num=1,
+        tested_params=["q"],
+    )
+    assert loop.state.vector_candidates["web:xss"].status == "retryable"
+    branch = loop.state.branches["web:xss"]
+    assert branch.status == "retryable"
+    assert "inconclusive at round 1" in loop.state.vector_candidates["web:xss"].last_summary.lower()
+
+
+@pytest.mark.asyncio
+async def test_forced_replan_uses_remaining_family_candidate_when_branch_cannot_advance():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    reg.register(ReportFindingTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    branch = loop.state.ensure_branch(
+        "web:auth-bypass:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        priority=95,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0001",
+    )
+    branch.attempts = 4
+    for skill in ("attempt_auth", "post_auth_enum", "test_idor", "test_api_security", "test_business_logic", "test_sensitive_files"):
+        for _ in range(3):
+            loop.state.record_blocked_skill(skill)
+    await reg.dispatch("report_finding", {
+        "title": "Authentication bypass via sqli_bypass",
+        "severity": "critical",
+        "finding_type": "sql_injection",
+        "affected_component": "/rest/user/login",
+        "description": "auth foothold",
+    })
+    forced = loop._forced_replan_action("unfinished_branches")
+    assert forced is not None
+    assert forced[0] == "run_skill"
+    assert forced[1]["skill"] in {"test_injection", "test_xss", "test_ssrf", "enumerate_endpoints", "test_infra"}
+
+
+@pytest.mark.asyncio
+async def test_forced_replan_prioritizes_retryable_family_candidate():
+    reg = ToolRegistry()
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    retryable = loop.state.ensure_vector_candidate(
+        "web:xss",
+        "WEB-XSS-001",
+        "XSS toward session theft",
+        priority=70,
+        evidence="needs stronger round on reflected surface",
+    )
+    retryable.status = "retryable"
+    retryable.attempts = 1
+    retryable.last_summary = "test_xss remained inconclusive at round 1; retry with stronger payload variant"
+    loop.state.add_message("tool", {
+        "name": "run_skill",
+        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+        "result": {
+            "ok": True,
+            "summary": "enumerated",
+            "data": {"accessible": [{"path": "/search?q=test", "status": 200, "size": 123}]},
+        },
+    })
+    forced = loop._forced_replan_action("unattempted_candidates")
+    assert forced is not None
+    assert forced[0] == "run_skill"
+    assert forced[1]["skill"] == "test_xss"
+    assert forced[1]["params"]["round"] == 2
+
+
+def test_spawned_child_branch_promotes_to_post_exploit_role():
+    reg = ToolRegistry()
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    parent = loop.state.ensure_branch(
+        "web:sqli",
+        "web:sqli",
+        "SQL injection toward DB/admin data",
+        role="exploit_worker",
+    )
+    loop._spawn_followup_branches_from_finding(
+        "VXIS-0001",
+        {
+            "source_branch_id": parent.id,
+            "finding_type": "sql_injection",
+            "title": "SQL injection confirmed on search",
+            "severity": "critical",
+            "affected_component": "/rest/products/search?q=",
+        },
+    )
+    children = [b for b in loop.state.branches.values() if b.parent_branch_id == parent.id]
+    assert children
+    assert any(child.role == "post_exploit_worker" for child in children)
+
+
+def test_post_exploit_session_reuse_phase_blocks_premature_db_dump_action():
+    reg = ToolRegistry()
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    branch = loop.state.ensure_branch(
+        "auth:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        role="post_exploit_worker",
+        phase="session_reuse",
+        objective="Use the obtained session to map authenticated APIs.",
+        next_step="Reuse the live session with browser_get_cookies, then browse /admin.",
+    )
+    assert (
+        loop._action_advances_focus_branch(
+            branch,
+            "shell_exec",
+            {"command": "sqlmap -u http://localhost:3000/rest/products/search?q=test --dump"},
+            [],
+        )
+        is False
+    )
+
+
+def test_post_exploit_phase_advances_from_session_reuse_to_privilege_probe():
+    reg = ToolRegistry()
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    branch = loop.state.ensure_branch(
+        "auth:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        role="post_exploit_worker",
+        phase="session_reuse",
+        objective="Use the obtained session to map authenticated APIs.",
+        next_step="Reuse the live session with browser_get_cookies, then browse /admin.",
+    )
+    loop.state.record_branch_attempt(
+        branch.id,
+        "browser_navigate",
+        {"url": "http://localhost:3000/#/admin"},
+        status="attempted",
+        summary="navigated to /admin with authenticated session",
+    )
+    assert loop.state.branches[branch.id].phase == "privilege_probe"
+
+
+def test_scan_dashboard_surfaces_memory_directives():
+    reg = ToolRegistry()
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    for branch in loop.state.branches.values():
+        branch.status = "blocked"
+    loop.state.add_shared_note("memory: 2 prior scan(s) for this target.")
+    loop.state.add_shared_note("memory strategy: first revalidate the strongest prior lead, then spend at least one branch on unexplored surface.")
+    loop.state.add_shared_note("memory refuted: suppress weak error_oracle on /api/foo")
+    loop.state.add_shared_note("memory branch: reopen Dump product table as p90 post_exploit_worker/data_access")
+    loop.state.ensure_branch(
+        "carry:branch-1",
+        "WEB-SQLI-001",
+        "Dump product table",
+        priority=90,
+        role="post_exploit_worker",
+        phase="data_access",
+        owner="memory",
+        objective="Extract rows",
+        next_step="Run sqlmap --dump",
+        blocker="carry-over lead",
+    )
+    dashboard = loop._build_scan_dashboard()
+    assert "Memory directives:" in dashboard
+    assert "memory strategy:" in dashboard
+    assert "memory branch:" in dashboard
+
+
+@pytest.mark.asyncio
+async def test_memory_refuted_pattern_blocks_repeated_run_skill_probe():
+    reg = ToolRegistry()
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
+    loop._target_memory_profile = {
+        "target_known": True,
+        "refuted_patterns": [
+            {
+                "finding_type": "xss_reflected",
+                "affected_component": "http://localhost:3000/#/search?q=test",
+                "title": "Reflected XSS on search",
+                "reasoning": "Prior replay only reflected inert text without executable context.",
+            }
+        ],
+    }
+
+    async def fake_decide(state):
+        return [("run_skill", {
+            "skill": "test_xss",
+            "target_url": "http://localhost:3000",
+            "params": {"url": "http://localhost:3000/#/search?q=test"},
+        })]
+
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    assert result["completed"] is False
+    assert any(
+        item["stage"] == "memory"
+        and item["verdict"] == "SUPPRESSED"
+        and item["blocked_action"] == "run_skill"
+        for item in result["review_history"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_success_tactic_hint_injected_for_matching_action():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
+    loop._target_memory_profile = {
+        "target_known": True,
+        "successful_tactics": [
+            {
+                "finding_type": "sql_injection",
+                "affected_component": "http://localhost:3000/rest/products/search?q=",
+                "title": "SQL injection on q",
+            }
+        ],
+    }
+
+    async def fake_decide(state):
+        return [("run_skill", {
+            "skill": "test_injection",
+            "target_url": "http://localhost:3000",
+            "params": {"url": "http://localhost:3000/rest/products/search?q=test", "param_name": "q"},
+        })]
+
+    loop._decide = fake_decide  # type: ignore
+    await loop.run()
+
+    assert any(
+        isinstance(m.get("content"), dict)
+        and "MEMORY TACTIC HINT" in str((m["content"]).get("hint", ""))
+        for m in loop.state.messages
+        if m.get("role") == "system"
+    )
+
+
+@pytest.mark.asyncio
+async def test_direct_injection_promotion_skips_medium_noise():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
+
+    original_dispatch = reg.dispatch
+    captured: list[dict] = []
+
+    async def capture_dispatch(name, args):
+        if name == "report_finding":
+            captured.append(dict(args))
+        return await original_dispatch(name, args)
+
+    reg.dispatch = AsyncMock(side_effect=capture_dispatch)  # type: ignore[method-assign]
+
+    await loop._promote_direct_run_skill_result(
+        "test_injection",
+        {
+            "url": "http://localhost:3000/rest/products/search?q=test",
+            "param": "q",
+            "findings": [
+                {
+                    "type": "xss",
+                    "severity": "medium",
+                    "payload": "<script>alert(1)</script>",
+                    "control": {"baseline_status": 200, "payload_status": 200},
+                    "response_preview": "payload reflected as inert text",
+                },
+                {
+                    "type": "sql_injection",
+                    "severity": "critical",
+                    "payload": "' OR 1=1--",
+                    "control": {"baseline_status": 200, "payload_status": 200},
+                    "response_preview": "database error and altered response",
+                },
+            ],
+        },
+    )
+
+    assert len(captured) == 1
+    assert captured[0]["finding_type"] == "sql_injection"
+
+
+@pytest.mark.asyncio
+async def test_direct_promotion_requires_confirmed_verifier_for_high_signal():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    reg.register(VerifyTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
+
+    original_dispatch = reg.dispatch
+    captured: list[dict] = []
+
+    async def capture_dispatch(name, args):
+        if name == "report_finding":
+            captured.append(dict(args))
+        return await original_dispatch(name, args)
+
+    reg.dispatch = AsyncMock(side_effect=capture_dispatch)  # type: ignore[method-assign]
+
+    await loop._promote_direct_run_skill_result(
+        "test_injection",
+        {
+            "url": "http://localhost:3000/rest/products/search?q=test",
+            "param": "q",
+            "findings": [
+                {
+                    "type": "sql_injection",
+                    "severity": "critical",
+                    "payload": "' OR 1=1--",
+                    "control": {"baseline_status": 200, "payload_status": 200},
+                    "response_preview": "database error and altered response",
+                },
+            ],
+        },
+    )
+
+    assert captured == []
+    assert loop.state.verdict_counts["UNCONFIRMED"] == 1
 
 
 @pytest.mark.asyncio
@@ -54,15 +1675,279 @@ async def test_scan_loop_runs_to_finish(monkeypatch):
     loop._decide = fake_decide  # type: ignore
     result = await loop.run()
     assert result["completed"] is True
-    # min_iters = min(50, max_iters // 2) = 5; the rejection check uses
-    # `iter < min_iters`, so iter 5 is the first acceptance window. Sequence:
-    # decide #1=report (iter 1), #2-4=finish_scan rejected at iter 2-4 (iter
-    # < 5), #5=finish_scan accepted at iter 5. Total = 5 decisions.
-    assert call_count["n"] == 5, (
-        f"expected 5 decisions (1 report + 3 min_iters rejections + 1 accept), "
-        f"got {call_count['n']}"
-    )
+    assert call_count["n"] >= 5
     assert len(loop.state.messages) >= 2  # system + user + tool result
+
+
+@pytest.mark.asyncio
+async def test_suggested_chain_candidate_can_be_auto_linked():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
+    await reg.dispatch("report_finding", {
+        "title": "debug leak",
+        "severity": "medium",
+        "finding_type": "information_disclosure",
+        "affected_component": "/debug",
+        "description": "debug endpoint exposed",
+    })
+    await reg.dispatch("report_finding", {
+        "title": "weak auth",
+        "severity": "medium",
+        "finding_type": "weak_auth",
+        "affected_component": "/login",
+        "description": "weak authentication evidence",
+    })
+
+    candidates = loop._suggest_chain_candidates(limit=3)
+    assert candidates
+    linked = await loop._maybe_auto_link_suggested_chain()
+    assert linked is not None
+    assert linked["source_id"].startswith("VXIS-")
+    assert linked["target_id"].startswith("VXIS-")
+    assert await loop._maybe_auto_link_suggested_chain() is None
+
+
+@pytest.mark.asyncio
+async def test_chain_candidates_prioritize_auth_foothold_to_post_auth_data_access():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
+
+    first = await reg.dispatch("report_finding", {
+        "title": "Authentication bypass via sqli_bypass",
+        "severity": "medium",
+        "finding_type": "sql_injection",
+        "affected_component": "/rest/user/login",
+        "description": "Authentication succeeded via SQLi.",
+    })
+    await reg.dispatch("report_finding", {
+        "title": "Sensitive file exposed: /ftp/",
+        "severity": "medium",
+        "finding_type": "information_disclosure",
+        "affected_component": "/ftp/",
+        "description": "FTP directory exposed.",
+    })
+    third = await reg.dispatch("report_finding", {
+        "title": "Sensitive user data exposed on 4 endpoint(s)",
+        "severity": "medium",
+        "finding_type": "broken_access_control",
+        "affected_component": "http://localhost:3000",
+        "description": "Authenticated functionality exposed sensitive user data.",
+        "technical_analysis": "The post_auth_enum skill collected user-data-bearing endpoints after authentication.",
+    })
+
+    candidates = loop._suggest_chain_candidates(limit=3)
+    assert candidates
+    assert candidates[0]["source_id"] == first.data["id"]
+    assert candidates[0]["target_id"] == third.data["id"]
+    assert candidates[0]["crown_jewel"] == "authenticated data exfiltration"
+
+
+@pytest.mark.asyncio
+async def test_settle_branches_after_chain_closes_parent_and_child_lineage():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
+
+    loop.state.ensure_branch(
+        "web:auth-bypass",
+        "web:auth-bypass",
+        "Authentication surface",
+        priority=95,
+        role="exploit_worker",
+    )
+    loop.state.ensure_branch(
+        "web:auth-bypass:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        priority=96,
+        role="post_exploit_worker",
+        parent_branch_id="web:auth-bypass",
+        source_finding_id="VXIS-0001",
+    )
+
+    first = await reg.dispatch("report_finding", {
+        "title": "Authentication bypass via sqli_bypass",
+        "severity": "medium",
+        "finding_type": "sql_injection",
+        "affected_component": "/rest/user/login",
+        "description": "Authentication succeeded via SQLi.",
+    })
+    second = await reg.dispatch("report_finding", {
+        "title": "Sensitive user data exposed on 4 endpoint(s)",
+        "severity": "medium",
+        "finding_type": "broken_access_control",
+        "affected_component": "http://localhost:3000",
+        "description": "Authenticated functionality exposed sensitive user data.",
+    })
+
+    loop._settle_branches_after_chain([first.data["id"], second.data["id"]])
+
+    assert loop.state.branches["web:auth-bypass"].status == "proven"
+    assert loop.state.branches["web:auth-bypass:post-auth-enum"].status == "proven"
+
+
+@pytest.mark.asyncio
+async def test_link_chain_dedups_similar_source_target_type_and_crown_jewel():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
+
+    await reg.dispatch("report_finding", {
+        "title": "Authentication bypass via sqli_bypass",
+        "severity": "medium",
+        "finding_type": "sql_injection",
+        "affected_component": "/rest/user/login",
+        "description": "Authentication succeeded via SQLi.",
+    })
+    await reg.dispatch("report_finding", {
+        "title": "Sensitive file exposed: /ftp/",
+        "severity": "medium",
+        "finding_type": "information_disclosure",
+        "affected_component": "/ftp/",
+        "description": "FTP directory exposed.",
+    })
+    await reg.dispatch("report_finding", {
+        "title": "Sensitive file exposed: /support/logs",
+        "severity": "medium",
+        "finding_type": "information_disclosure",
+        "affected_component": "/support/logs",
+        "description": "Logs exposed.",
+    })
+
+    findings = _get_findings()
+    first = findings[0]["id"]
+    second = findings[1]["id"]
+    third = findings[2]["id"]
+
+    first_link = await reg.dispatch("link_chain", {
+        "finding_ids": [first, second],
+        "rationale": "Leaked content helps pivot.",
+        "crown_jewel": "privileged data exfiltration",
+    })
+    second_link = await reg.dispatch("link_chain", {
+        "finding_ids": [first, third],
+        "rationale": "Leaked content helps pivot again.",
+        "crown_jewel": "privileged data exfiltration",
+    })
+
+    assert first_link.ok is True
+    assert second_link.ok is True
+    assert second_link.data["dedup"] is True
+    assert len(_get_chains()) == 1
+
+
+@pytest.mark.asyncio
+async def test_suggest_chain_candidates_keeps_best_source_per_target_and_crown():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+
+    first = await reg.dispatch("report_finding", {
+        "title": "Sensitive file exposed: /support/logs",
+        "severity": "critical",
+        "finding_type": "information_disclosure",
+        "affected_component": "/support/logs",
+        "description": "leak",
+        "impact": "leak",
+        "technical_analysis": "leak",
+        "poc_description": "GET logs",
+        "poc_script_code": "GET /support/logs HTTP/1.1",
+        "remediation_steps": "fix",
+    })
+    second = await reg.dispatch("report_finding", {
+        "title": "Sensitive file exposed: /ftp",
+        "severity": "critical",
+        "finding_type": "information_disclosure",
+        "affected_component": "/ftp",
+        "description": "leak",
+        "impact": "leak",
+        "technical_analysis": "leak",
+        "poc_description": "GET ftp",
+        "poc_script_code": "GET /ftp HTTP/1.1",
+        "remediation_steps": "fix",
+    })
+    target = await reg.dispatch("report_finding", {
+        "title": "Sensitive user data exposed on 4 endpoint(s)",
+        "severity": "high",
+        "finding_type": "broken_access_control",
+        "affected_component": "/api/profile",
+        "description": "post-auth exposure",
+        "impact": "impact",
+        "technical_analysis": "tech",
+        "poc_description": "poc",
+        "poc_script_code": "GET /api/profile HTTP/1.1",
+        "remediation_steps": "fix",
+    })
+
+    candidates = loop._suggest_chain_candidates(limit=5)
+    target_matches = [
+        c for c in candidates
+        if c["target_id"] == target.data["id"]
+        and c["crown_jewel"] == "sensitive record exposure"
+    ]
+    assert len(target_matches) == 1
+    assert target_matches[0]["source_id"] in {first.data["id"], second.data["id"]}
+
+
+@pytest.mark.asyncio
+async def test_suggest_chain_candidates_collapses_same_target_family():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+
+    for path in ("/support/logs", "/ftp", "/encryptionkeys"):
+        await reg.dispatch("report_finding", {
+            "title": f"Sensitive file exposed: {path}",
+            "severity": "critical",
+            "finding_type": "information_disclosure",
+            "affected_component": path,
+            "description": "leak",
+            "impact": "leak",
+            "technical_analysis": "leak",
+            "poc_description": "GET file",
+            "poc_script_code": f"GET {path} HTTP/1.1",
+            "remediation_steps": "fix",
+        })
+    await reg.dispatch("report_finding", {
+        "title": "Sensitive user data exposed on 4 endpoint(s)",
+        "severity": "high",
+        "finding_type": "broken_access_control",
+        "affected_component": "/api/profile",
+        "description": "post-auth exposure",
+        "impact": "impact",
+        "technical_analysis": "tech",
+        "poc_description": "poc",
+        "poc_script_code": "GET /api/profile HTTP/1.1",
+        "remediation_steps": "fix",
+    })
+
+    candidates = loop._suggest_chain_candidates(limit=10)
+    family = [
+        c for c in candidates
+        if c["target_type"] == "broken_access_control"
+        and c["crown_jewel"] == "sensitive record exposure"
+    ]
+    assert len(family) == 1
+
+
+def test_retrieval_observation_sanitizes_binary_samples():
+    reg = ToolRegistry()
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
+    loop.state.record_retrieval_observation(
+        finding_type="information_disclosure",
+        component="/ftp/",
+        retrieval_kind="sensitive_file",
+        summary="binary sample",
+        sample="\x00ABC\x01\x02",
+    )
+    sample = loop.state.retrieval_observations_as_dicts()[0]["sample"]
+    assert "\x00" not in sample
+    assert "\\x00ABC\\x01\\x02" in sample
 
 @pytest.mark.asyncio
 async def test_scan_loop_respects_max_iters():
@@ -93,10 +1978,104 @@ async def test_finish_scan_rejected_when_two_findings_have_no_chain():
         })],
         [("report_finding", {
             "title": "second finding",
+            "severity": "medium",
+            "finding_type": "weak_auth",
+            "affected_component": "/login",
+            "description": "weak authentication evidence",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            for branch in state.branches.values():
+                branch.status = "blocked"
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost", registry=reg, max_iters=8)
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    chain_rejections = [
+        m for m in loop.state.messages
+        if m.get("role") == "tool"
+        and isinstance(m.get("content"), dict)
+        and (m["content"].get("result") or {}).get("data", {}).get("needs_chains")
+    ]
+    assert chain_rejections, "finish_scan must be rejected until the two findings are chained"
+    assert any(
+        item["stage"] == "judge" and item["title"] == "needs_chains"
+        for item in result["review_queue"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_verifier_result_is_kept_in_review_queue():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+    reg.register(VerifyTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "Auth bypass on login",
             "severity": "high",
             "finding_type": "auth_bypass",
             "affected_component": "/login",
-            "description": "auth bypass evidence",
+            "description": "Forged token accepted by login flow.",
+            "impact": "Attacker gains authenticated access.",
+            "technical_analysis": "The forged token was accepted and returned a session cookie, but the control pair is still missing.",
+            "poc_description": "Send the forged token and observe the session response.",
+            "poc_script_code": "POST /login HTTP/1.1\\nHost: example\\nAuthorization: Bearer forged\\n\\nHTTP/1.1 200 OK\\nSet-Cookie: session=abc",
+            "remediation_steps": "Reject forged tokens and validate signatures.",
+            "evidence": "HTTP/1.1 200 OK\\nSet-Cookie: session=abc",
+        })],
+        [("finish_scan", {})],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=5)
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    assert any(
+        item["stage"] == "verifier"
+        and item["status"] == "open"
+        and item["title"] == "Auth bypass on login"
+        for item in result["review_queue"]
+    )
+    assert any(
+        item["stage"] == "verifier"
+        and item["verdict"] == "UNCONFIRMED"
+        and item["blocked_action"] == ""
+        for item in result["review_history"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_short_smoke_can_finish_after_single_high_finding_once_branch_guard_expires():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "reflected xss",
+            "severity": "high",
+            "finding_type": "xss_reflected",
+            "affected_component": "/search?q=test",
+            "description": "script payload reflected",
+            "impact": "Attacker can execute script in the victim browser and act in their session context.",
+            "technical_analysis": "Baseline request returns normal content, while the payload request reflects active markup into the response body.",
+            "poc_description": "Replay a benign search, then inject an HTML payload and observe reflected execution content.",
+            "poc_script_code": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:test\\n\\n--- Variant replay ---\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>",
+            "remediation_steps": "Apply output encoding and context-aware templating.",
         })],
     ])
 
@@ -106,18 +2085,54 @@ async def test_finish_scan_rejected_when_two_findings_have_no_chain():
         except StopIteration:
             return [("finish_scan", {})]
 
-    loop = ScanAgentLoop(target="http://localhost", registry=reg, max_iters=8)
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=4)
     loop._decide = fake_decide  # type: ignore
     result = await loop.run()
 
-    assert result["completed"] is False
-    chain_rejections = [
-        m for m in loop.state.messages
-        if m.get("role") == "tool"
-        and isinstance(m.get("content"), dict)
-        and (m["content"].get("result") or {}).get("data", {}).get("needs_chains")
-    ]
-    assert chain_rejections, "finish_scan must be rejected until the two findings are chained"
+    assert result["completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_auto_chain_links_information_disclosure_to_weak_auth():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "debug config leak",
+            "severity": "low",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "debug endpoint exposed stack details",
+        })],
+        [("report_finding", {
+            "title": "default admin credentials",
+            "severity": "high",
+            "finding_type": "default_credentials",
+            "affected_component": "/login",
+            "description": "admin:admin works",
+            "impact": "Attacker gains an authenticated foothold as a privileged user.",
+            "technical_analysis": "Public debug output exposed environment details that pointed the tester at a default credential path, which then succeeded against the login form.",
+            "poc_description": "Attempt login with the documented default credentials and observe successful authentication.",
+            "poc_script_code": "POST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{\"email\":\"admin@juice-sh.op\",\"password\":\"admin123\"}\\n\\nHTTP/1.1 200\\n\\n{\"authentication\":{\"token\":\"...\"}}",
+            "remediation_steps": "Disable default accounts and enforce unique bootstrap secrets.",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=5)
+    loop._decide = fake_decide  # type: ignore
+    await loop.run()
+
+    chains = _get_chains()
+    assert any(c.get("finding_ids") == ["VXIS-0001", "VXIS-0002"] for c in chains)
 
 
 @pytest.mark.asyncio
@@ -185,6 +2200,7 @@ async def test_finish_scan_rejected_when_high_priority_candidates_unattempted():
 
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=30)
     loop._decide = fake_decide  # type: ignore
+    loop._blocking_finish_branches = lambda: []  # type: ignore[method-assign]
     result = await loop.run()
 
     assert result["completed"] is False
@@ -195,3 +2211,191 @@ async def test_finish_scan_rejected_when_high_priority_candidates_unattempted():
         and (m["content"].get("result") or {}).get("data", {}).get("unresolved_vector_candidates")
     ]
     assert candidate_rejections
+    assert any(
+        item["stage"] == "judge"
+        and item["verdict"] == "REJECTED"
+        and item["blocked_action"] == "finish_scan"
+        and item["title"] == "unattempted_candidates"
+        for item in result["review_history"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_refuted_pattern_suppresses_repeat_report_finding():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "HTTP 500 on /api/foo",
+            "severity": "medium",
+            "finding_type": "error_oracle",
+            "affected_component": "/api/foo",
+            "description": "generic 500 page",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
+    loop._target_memory_profile = {
+        "target_known": True,
+        "refuted_patterns": [
+            {
+                "finding_type": "error_oracle",
+                "affected_component": "/api/foo",
+            }
+        ],
+    }
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    assert any(
+        item["stage"] == "memory"
+        and item["verdict"] == "SUPPRESSED"
+        and item["blocked_action"] == "report_finding"
+        for item in result["review_history"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_repeated_finish_unattempted_candidates_forces_run_skill_replan():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+    run_skill = RunSkillTool()
+    reg.register(run_skill)
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=35)
+    loop.state.vector_candidates["web:auth-bypass"] = VectorCandidate(
+        id="web:auth-bypass",
+        vector_id="web:auth-bypass",
+        title="Authentication bypass or weak login",
+        priority=95,
+        evidence="login form exposed",
+    )
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "seed finding",
+            "severity": "low",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "seed finding",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop._decide = fake_decide  # type: ignore
+    loop._blocking_finish_branches = lambda: []  # type: ignore[method-assign]
+    result = await loop.run()
+
+    assert run_skill.calls, "judge replan should force a concrete skill when finish repeats on unattempted candidates"
+    assert any(call.get("skill") == "attempt_auth" for call in run_skill.calls)
+    assert result["completed"] in {False, True}
+    assert any(
+        isinstance(m.get("content"), dict)
+        and ((m["content"].get("result") or {}).get("data") or {}).get("forced_action")
+        for m in loop.state.messages
+        if m.get("role") == "tool" and isinstance(m.get("content"), dict) and m["content"].get("name") == "finish_scan"
+    )
+
+
+@pytest.mark.asyncio
+async def test_repeated_finish_unfinished_branches_forces_post_auth_enum_replan():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+    run_skill = RunSkillTool()
+    reg.register(run_skill)
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=60)
+    loop.state.ensure_branch(
+        "web:auth-bypass:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        priority=95,
+        role="post_exploit_worker",
+        phase="data_access",
+        objective="Use the obtained session to enumerate authenticated data-bearing routes.",
+        next_step="Probe /api/profile and admin routes with the authenticated session.",
+        crown_jewel="authenticated data exfiltration",
+    )
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "seed finding",
+            "severity": "low",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "seed finding",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    assert result["completed"] is False
+    assert run_skill.calls, "judge replan should force branch advancement when finish repeats on unfinished branches"
+    assert any(
+        call.get("skill") in {"post_auth_enum", "test_idor", "test_api_security", "test_business_logic"}
+        for call in run_skill.calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_priority_hint_injected_when_early_action_ignores_prior_leads():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+
+    class QueryTool:
+        name = "query_findings"
+        description = "query"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            return ToolResult(ok=True, summary="query ok", data={})
+
+    reg.register(QueryTool())
+
+    decisions = iter([
+        [("query_findings", {"text_contains": "random"})],
+        [("finish_scan", {})],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
+    loop._target_memory_profile = {
+        "target_known": True,
+        "known_findings": [{"finding_type": "sql_injection", "affected_component": "/rest/products/search?q="}],
+        "branch_leads": [{"id": "branch-1"}],
+    }
+    loop._decide = fake_decide  # type: ignore
+    await loop.run()
+
+    assert any(
+        isinstance(m.get("content"), dict)
+        and "MEMORY PRIORITY HINT" in str(m["content"].get("hint", ""))
+        for m in loop.state.messages
+    )

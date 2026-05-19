@@ -20,13 +20,14 @@ Phase 3 Architecture:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import re as _re
 import threading
-import urllib.request
 import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
@@ -500,6 +501,39 @@ def build_agent_system_prompt(kind: TargetKind = TargetKind.WEB) -> str:
     return _PROMPT_UNSUPPORTED_SURFACE_PREAMBLE + _PROMPT_SHARED_MINDSET
 
 
+def build_compact_agent_system_prompt(kind: TargetKind = TargetKind.WEB) -> str:
+    """Return a compact prompt variant for small local context windows."""
+    if kind == TargetKind.WEB:
+        return """\
+Authorized black-box web pentest. Act like an operator, not a scanner.
+Primary families: auth bypass, injection, IDOR/access control, sensitive files,
+misconfiguration, XSS, SSRF. Build chains toward admin access, data access, or
+full compromise. Prefer concrete validation, control comparisons, and exploit
+transcripts over speculative reporting.
+
+## Available tools
+
+{available_tools}
+"""
+    if kind == TargetKind.DESKTOP:
+        return """\
+Authorized desktop app pentest. The target is a local app path, not a web URL.
+Use desktop-only skills. Prioritize secrets, local privilege abuse, deep links,
+IPC, signature/entitlement issues, and sensitive local data exposure.
+
+## Available tools
+
+{available_tools}
+"""
+    return """\
+Surface not yet supported. Escalate clearly and stop safely.
+
+## Available tools
+
+{available_tools}
+"""
+
+
 # Backwards-compatible module-level constant — resolves to the web prompt so
 # that existing imports (`from vxis.agent.brain import AGENT_SYSTEM_PROMPT`)
 # and tests continue to work unchanged.
@@ -552,6 +586,12 @@ If you're unsure what to do next, ALWAYS call think first. Never guess.
 - python_exec for multi-line code. shell_exec for single commands. Never heredocs.
 - shell_exec runs inside Docker sandbox (sqlmap, nuclei, ffuf, nmap available).
 - Report findings via report_finding when you discover something real.
+- NEVER call report_finding on a thin signal alone. First gather a real PoC:
+  baseline/control comparison, concrete request/response transcript, and the
+  exact payload or action that changed behavior.
+- If you suspect a vulnerability but cannot show the exploit transcript yet,
+  do NOT report it. Keep testing until you can populate technical_analysis,
+  poc_description, and poc_script_code with real evidence from this target.
 - Do not call finish_scan until you've tested: injection, auth bypass, IDOR,
   sensitive files, misconfigurations. Check the dashboard for what's missing.
 - PERSISTENCE: Real vulnerabilities take time. 100+ iterations expected.
@@ -559,7 +599,7 @@ If you're unsure what to do next, ALWAYS call think first. Never guess.
 
 ## FINDING REPORT FORMAT
 
-{"tool":"report_finding","args":{"title":"<short>","severity":"<critical|high|medium|low|informational>","finding_type":"<snake_case>","affected_component":"<url_or_param>","description":"<what/how/impact>","evidence":"<raw output>"},"reasoning":"<why this is real>","priority":"high"}
+{"tool":"report_finding","args":{"title":"<short>","severity":"<critical|high|medium|low|informational>","finding_type":"<snake_case>","affected_component":"<url_or_param>","description":"<plain-language issue summary>","impact":"<validated business/security impact>","technical_analysis":"<why this is real, including control checks>","poc_description":"<step-by-step reproduction>","poc_script_code":"<actual exploit payload / HTTP exchange / command transcript>","remediation_steps":"<specific fix guidance>","endpoint":"<path_or_url>","method":"<GET|POST|...>"},"reasoning":"<why this is real>","priority":"high"}
 
 finding_type examples: sql_injection, xss_reflected, xss_stored, idor,
 rce, ssrf, xxe, information_disclosure, auth_bypass, broken_access_control,
@@ -577,6 +617,20 @@ Never finish_scan before 3 confirmed findings unless you've tried 50+
 diverse approaches. Running many iterations is NORMAL and CORRECT.
 
 [ORIGINAL PROMPT BELOW — strategic context, but this adapter wins]
+"""
+
+COMPACT_LOOP_PROMPT_ADAPTER = r"""\
+You are VXIS, an autonomous pentest operator.
+
+Output exactly one JSON object:
+{"reasoning":"<goal + why>","actions":[{"tool":"<exact tool>","args":{...},"reasoning":"<why>","priority":"high|medium|low"}]}
+
+Rules:
+- Exactly ONE action per turn.
+- Use think first when uncertain.
+- Prefer evidence-building actions once a high-value lead exists.
+- Never report a finding without baseline/control, payload/action, and observed result.
+- Finish only after a crown jewel is reached or credible families are exhausted.
 """
 
 # ── Tool descriptions for the agent ─────────────────────────────
@@ -668,9 +722,6 @@ TOOL_DESCRIPTIONS = {
     "bandit": "Python 보안 정적 분석. args: source_path(str)",
     "checkov": "IaC 보안 점검 (Terraform, K8s, Docker). args: source_path(str)",
     "trivy": "의존성 취약점 + 시크릿 + IaC 스캔. args: source_path(str)",
-    # Cloud
-    "prowler": "AWS/Azure/GCP 보안 감사. args: provider(str)",
-    "s3scanner": "S3 버킷 권한 스캔. args: domain(str)",
     # Cloud
     "prowler": "AWS/Azure/GCP 보안 감사. args: provider(str)",
     "s3scanner": "S3 버킷 권한 스캔. args: domain(str)",
@@ -768,6 +819,39 @@ class AgentBrain:
         self._consecutive_no_findings = 0  # 연속 발견 없는 스텝 수
         # LLM Fallback 체인 (정책 거부 대응)
         self._fallback_providers = self._build_fallback_chain()
+        self._log_llm_runtime_config()
+
+    def _log_llm_runtime_config(self) -> None:
+        """Record the effective LLM runtime without exposing credentials."""
+        from vxis.llm.model_registry import get_compression_policy
+
+        base_url = "-"
+        if self._provider == "llamacpp":
+            base_url = os.environ.get("VXIS_LLAMACPP_BASE_URL", "").rstrip("/") or "-"
+        elif self._provider == "ollama":
+            base_url = os.environ.get("VXIS_OLLAMA_BASE_URL", "").rstrip("/") or "-"
+
+        try:
+            policy = get_compression_policy(self._provider, self._model)
+        except Exception as exc:
+            logger.info(
+                "llm runtime selected: provider=%s model=%s base_url=%s policy=unavailable error=%s",
+                self._provider,
+                self._model,
+                base_url,
+                exc,
+            )
+            return
+
+        logger.info(
+            "llm runtime selected: provider=%s model=%s base_url=%s context=%d output_cap=%d profile=%s",
+            self._provider,
+            self._model,
+            base_url,
+            policy.context_window,
+            policy.output_token_cap,
+            policy.profile,
+        )
 
     def _build_fallback_chain(self) -> list[dict[str, str]]:
         """LLM Fallback 체인을 구성한다.
@@ -952,6 +1036,7 @@ class AgentBrain:
     def _build_smart_history(
         messages: list[dict[str, Any]],
         long_context: bool = False,
+        recent_full_iterations: int = 3,
     ) -> list[str]:
         """Build a 3-tier compacted history for think_in_loop.
 
@@ -983,7 +1068,8 @@ class AgentBrain:
             if m.get("iter"):
                 current_iter = int(m["iter"])
                 break
-        recent_cutoff = max(0, current_iter - 3)  # last 3 iterations = full
+        recent_full_iterations = max(1, int(recent_full_iterations or 3))
+        recent_cutoff = max(0, current_iter - recent_full_iterations)
 
         # Classify messages into tiers
         pinned_keywords = {
@@ -1082,7 +1168,21 @@ class AgentBrain:
         text = str(text or "")
         if not text:
             return 0
-        return max(1, len(text) // 4)
+        encoded_len = len(text.encode("utf-8", errors="ignore"))
+        return max(1, len(text) // 4, encoded_len // 3)
+
+    def _is_small_local_context(self) -> bool:
+        from vxis.llm.model_registry import get_compression_policy
+
+        policy = get_compression_policy(self._provider, self._model)
+        return self._provider in {"llamacpp", "ollama"} and int(policy.context_window or 0) <= 8_192
+
+    @staticmethod
+    def _compact_tool_description(description: str, limit: int = 72) -> str:
+        text = " ".join(str(description or "").split())
+        if len(text) <= limit:
+            return text
+        return text[: max(24, limit - 3)].rstrip() + "..."
 
     def _fit_history_lines_to_budget(
         self,
@@ -1110,6 +1210,7 @@ class AgentBrain:
 
         reserve_output = min(
             get_max_output_tokens(self._model, default=4000),
+            int(policy.output_token_cap or 8000),
             max(512, int(context_window * 0.20)),
         )
         static_tokens = (
@@ -1119,6 +1220,16 @@ class AgentBrain:
         )
         safety_margin = max(192, int(context_window * 0.12))
         budget = max(240, context_window - reserve_output - static_tokens - safety_margin)
+        if self._is_small_local_context():
+            reserve_output = max(reserve_output, int(context_window * 0.22))
+            safety_margin = max(safety_margin, int(context_window * 0.24))
+            budget = max(
+                160,
+                min(
+                    budget,
+                    int(context_window * 0.18),
+                ),
+            )
 
         total = sum(self._estimate_prompt_tokens(line) for line in history_lines)
         if total <= budget:
@@ -1174,15 +1285,26 @@ class AgentBrain:
             self._step_count += 1
         _increment_brain_decision_count()
 
-        tools_text = "\n".join(
-            f"  - {t['name']}: {t.get('description', '')}"
-            for t in tool_catalog
-        )
+        small_local_context = self._is_small_local_context()
+        if small_local_context:
+            tools_text = "\n".join(f"  - {t['name']}" for t in tool_catalog)
+        else:
+            tools_text = "\n".join(
+                f"  - {t['name']}: "
+                f"{self._compact_tool_description(t.get('description', ''), 160)}"
+                for t in tool_catalog
+            )
 
-        body_prompt = build_agent_system_prompt(self._target_kind).format(
+        body_builder = (
+            build_compact_agent_system_prompt
+            if small_local_context
+            else build_agent_system_prompt
+        )
+        body_prompt = body_builder(self._target_kind).format(
             available_tools=tools_text
         )
-        system_prompt = LOOP_PROMPT_ADAPTER + "\n" + body_prompt
+        adapter_prompt = COMPACT_LOOP_PROMPT_ADAPTER if small_local_context else LOOP_PROMPT_ADAPTER
+        system_prompt = adapter_prompt + "\n" + body_prompt
 
         # Phase D: smart history compaction.
         # Instead of a flat window of the last N messages, build a 3-tier
@@ -1199,17 +1321,32 @@ class AgentBrain:
         # This gives Brain the equivalent of 200+ messages of context
         # within a 50-message token budget.
         import os as _os
-        _long_ctx = _os.environ.get("VXIS_LONG_CONTEXT") == "1"
-        history_lines: list[str] = self._build_smart_history(messages, long_context=_long_ctx)
-        history_header = "## Conversation history (most recent last)\n"
-        task_prompt = (
-            "\n\n## Your task\n"
-            + "Based on the history above, decide the next tool call(s). "
-            + "Output EXACTLY this JSON shape (inside a ```json fence):\n"
-            + '{"reasoning": "<why>", "actions": [{"tool": "<exact name from catalog>", "args": {...}, "reasoning": "<why>", "priority": "high|medium|low"}]}\n'
-            + "To end the scan, emit a single action with tool='finish_scan'.\n"
-            + "REMEMBER: only emit tool names that appear in '## Available Tools' above."
+        from vxis.llm.model_registry import get_compression_policy
+
+        policy = get_compression_policy(self._provider, self._model)
+        _long_ctx = _os.environ.get("VXIS_LONG_CONTEXT") == "1" and policy.allow_long_context
+        history_lines: list[str] = self._build_smart_history(
+            messages,
+            long_context=_long_ctx,
+            recent_full_iterations=policy.recent_full_iterations,
         )
+        history_header = "## Conversation history (most recent last)\n"
+        if small_local_context:
+            task_prompt = (
+                "\n\n## Task\n"
+                + "Use the history above to choose the next single tool call.\n"
+                + 'Emit exactly: {"reasoning":"<why>","actions":[{"tool":"<catalog tool>","args":{...},"reasoning":"<why>","priority":"high|medium|low"}]}\n'
+                + "Use finish_scan only when the mission is truly complete."
+            )
+        else:
+            task_prompt = (
+                "\n\n## Your task\n"
+                + "Based on the history above, decide the next tool call(s). "
+                + "Output EXACTLY this JSON shape (inside a ```json fence):\n"
+                + '{"reasoning": "<why>", "actions": [{"tool": "<exact name from catalog>", "args": {...}, "reasoning": "<why>", "priority": "high|medium|low"}]}\n'
+                + "To end the scan, emit a single action with tool='finish_scan'.\n"
+                + "REMEMBER: only emit tool names that appear in '## Available Tools' above."
+            )
         history_lines = self._fit_history_lines_to_budget(
             history_lines,
             system_prompt=system_prompt,
@@ -1538,14 +1675,7 @@ class AgentBrain:
             return
 
         try:
-            from vxis.knowledge.store import ExecutionRecord, KnowledgeStore
-
-            # 현재 관찰에서 tech_stack 가져오기
-            tech_stack = (
-                self.steps[-1].observation_summary
-                if self.steps
-                else ""
-            )
+            from vxis.knowledge.store import ExecutionRecord
 
             findings_count = result.get("findings_count", 0)
             effectiveness = min(1.0, findings_count * 0.3) if findings_count > 0 else 0.0
@@ -1803,12 +1933,19 @@ class AgentBrain:
 
         # gpt-5.x / o1 / o3 reasoning models reject `max_tokens`.
         from vxis.llm.model_registry import (
-            is_reasoning_model, get_max_output_tokens, supports_vision,
+            get_compression_policy,
+            get_max_output_tokens,
+            is_reasoning_model,
+            supports_vision,
         )
         token_param = "max_tokens"
         if provider == "openai" and is_reasoning_model(model):
             token_param = "max_completion_tokens"
-        output_tokens = min(get_max_output_tokens(model, default=4000), 8000)
+        policy = get_compression_policy(provider, model)
+        output_tokens = min(
+            get_max_output_tokens(model, default=4000),
+            int(policy.output_token_cap or 8000),
+        )
 
         # Build message content — multimodal if vision model + image provided
         user_content: Any = user
@@ -1884,7 +2021,12 @@ class AgentBrain:
         model = model or "gemini-2.5-pro"
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
-        from vxis.llm.model_registry import get_max_output_tokens, supports_vision
+        from vxis.llm.model_registry import (
+            get_compression_policy,
+            get_max_output_tokens,
+            supports_vision,
+        )
+        policy = get_compression_policy("gemini", model)
 
         parts: list[dict[str, Any]] = [{"text": user}]
         if image_path and supports_vision(model):
@@ -1907,7 +2049,10 @@ class AgentBrain:
             "system_instruction": {"parts": [{"text": system}]},
             "contents": [{"parts": parts}],
             "generationConfig": {
-                "maxOutputTokens": min(get_max_output_tokens(model, default=4000), 8000),
+                "maxOutputTokens": min(
+                    get_max_output_tokens(model, default=4000),
+                    int(policy.output_token_cap or 8000),
+                ),
             },
         }).encode("utf-8")
 
@@ -1940,9 +2085,11 @@ class AgentBrain:
             return None
 
         model = model or "deepseek-chat"
+        from vxis.llm.model_registry import get_compression_policy
+        policy = get_compression_policy("deepseek", model)
         payload = json.dumps({
             "model": model,
-            "max_tokens": 2000,
+            "max_tokens": min(2_000, int(policy.output_token_cap or 8_000)),
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -2317,7 +2464,12 @@ class AgentBrain:
     ) -> str | None:
         """Anthropic-specific call (vision-capable when image_path given)."""
         model = model or self._model or "claude-sonnet-4-6"
-        from vxis.llm.model_registry import get_max_output_tokens, supports_vision
+        from vxis.llm.model_registry import (
+            get_compression_policy,
+            get_max_output_tokens,
+            supports_vision,
+        )
+        policy = get_compression_policy("anthropic", model)
 
         user_content: Any = user
         if image_path and supports_vision(model):
@@ -2343,7 +2495,10 @@ class AgentBrain:
 
         payload = json.dumps({
             "model": model,
-            "max_tokens": min(get_max_output_tokens(model, default=4000), 8000),
+            "max_tokens": min(
+                get_max_output_tokens(model, default=4000),
+                int(policy.output_token_cap or 8000),
+            ),
             "system": system,
             "messages": [{"role": "user", "content": user_content}],
         }).encode("utf-8")

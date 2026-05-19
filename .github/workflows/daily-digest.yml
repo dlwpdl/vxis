@@ -47,16 +47,8 @@ jobs:
                   except Exception:
                       pass
 
-          # Count pending PRs
-          pending_dir = Path(".vxis/signals/pending")
-          pending = []
-          if pending_dir.exists():
-              for f in pending_dir.glob("*.json"):
-                  try:
-                      data = json.loads(f.read_text())
-                      pending.append(data)
-                  except Exception:
-                      pass
+          from vxis.growth.apply import count_reviewable_pending_proposals
+          pending_reviewable = count_reviewable_pending_proposals()
 
           # Count rolled back
           rejected_dir = Path(".vxis/signals/rejected")
@@ -89,7 +81,7 @@ jobs:
                   payload = s.get("change_data", {}).get("payload", "")[:40]
                   lines.append(f"    {s.get('change_type','?')}: {payload}")
 
-          lines.append(f"Pending review: {len(pending)}")
+          lines.append(f"Pending review: {pending_reviewable}")
           if rolled_back:
               lines.append(f"Rolled back (24h): {len(rolled_back)}")
           lines.append(f"Inbox backlog: {inbox_count} files")

@@ -37,17 +37,39 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
     """Deep authentication testing: JWT confusion, session fixation, reset poisoning.
 
     Returns:
-        {"vulnerable": bool, "findings": [...], "tested": int}
+        {
+            "vulnerable": bool,
+            "findings": [...],
+            "control_evidence": {"baseline": {...}, "interesting_responses": [...]},
+            "tested": int,
+        }
     """
     from vxis.interaction.hands import SessionManager
 
     target = target_url.rstrip("/")
     findings: list[dict[str, Any]] = []
+    control_evidence: list[dict[str, Any]] = []
     tested = 0
     sem = asyncio.Semaphore(15)
 
     _mgr = SessionManager()
     _session = await _mgr.get_session(target)
+    baseline_user_me: dict[str, Any] = {}
+
+    if token:
+        try:
+            base_me = await _session.request(
+                "GET",
+                f"{target}/api/users/me",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            baseline_user_me = {
+                "status": base_me.status,
+                "size": base_me.body_length,
+                "preview": base_me.text[:240],
+            }
+        except Exception:
+            baseline_user_me = {}
 
     # --- JWT alg:none attack ---
     if token and "." in token:
@@ -79,8 +101,22 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                                 "payload": f"alg={alg_header['alg']}",
                                 "evidence": f"Server accepted alg:none token (status {r.status})",
                                 "response_preview": r.text[:300],
+                                "control": {
+                                    "baseline_user_me": baseline_user_me,
+                                    "forged_status": r.status,
+                                    "forged_size": r.body_length,
+                                    "forged_preview": r.text[:180],
+                                    "header": alg_header,
+                                },
                                 "severity": "critical",
                             })
+                        control_evidence.append({
+                            "type": "jwt_alg_none",
+                            "payload": f"alg={alg_header['alg']}",
+                            "status": r.status,
+                            "size": r.body_length,
+                            "preview": r.text[:180],
+                        })
                     except Exception:
                         pass
 
@@ -104,8 +140,22 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                                 "payload": "RS256->HS256",
                                 "evidence": "Server accepted algorithm-confused token",
                                 "response_preview": r.text[:300],
+                                "control": {
+                                    "baseline_user_me": baseline_user_me,
+                                    "forged_status": r.status,
+                                    "forged_size": r.body_length,
+                                    "forged_preview": r.text[:180],
+                                    "original_alg": decoded_header.get("alg", ""),
+                                },
                                 "severity": "critical",
                             })
+                        control_evidence.append({
+                            "type": "jwt_alg_confusion",
+                            "payload": "RS256->HS256",
+                            "status": r.status,
+                            "size": r.body_length,
+                            "preview": r.text[:180],
+                        })
                     except Exception:
                         pass
 
@@ -122,8 +172,22 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                     "type": "session_fixation",
                     "payload": "session=attacker_fixed_session",
                     "evidence": "Server accepted attacker-supplied session ID",
+                    "response_preview": r.text[:300],
+                    "control": {
+                        "request_cookie": "session=attacker_fixed_session",
+                        "set_cookie": set_cookie[:240],
+                        "status": r.status,
+                        "preview": r.text[:180],
+                    },
                     "severity": "high",
                 })
+            control_evidence.append({
+                "type": "session_fixation",
+                "payload": "session=attacker_fixed_session",
+                "status": r.status,
+                "set_cookie": set_cookie[:180],
+                "preview": r.text[:180],
+            })
         except Exception:
             pass
 
@@ -147,11 +211,33 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                             "payload": f"Host: evil.com on {path}",
                             "evidence": f"Reset endpoint responded to poisoned host (status {r.status})",
                             "response_preview": r.text[:300],
+                            "control": {
+                                "poisoned_host": "evil.com",
+                                "status": r.status,
+                                "size": r.body_length,
+                                "preview": r.text[:180],
+                                "path": path,
+                            },
                             "severity": "high",
                         })
+                    control_evidence.append({
+                        "type": "password_reset_poisoning",
+                        "payload": f"Host: evil.com on {path}",
+                        "status": r.status,
+                        "size": r.body_length,
+                        "preview": r.text[:180],
+                    })
             except Exception:
                 pass
 
     await asyncio.gather(*[test_reset(p) for p in RESET_PATHS])
 
-    return {"vulnerable": len(findings) > 0, "findings": findings, "tested": tested}
+    return {
+        "vulnerable": len(findings) > 0,
+        "findings": findings,
+        "control_evidence": {
+            "baseline_user_me": baseline_user_me,
+            "interesting_responses": control_evidence[:12],
+        },
+        "tested": tested,
+    }

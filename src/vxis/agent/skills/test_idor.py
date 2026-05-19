@@ -23,6 +23,8 @@ async def execute(url_pattern: str, token: str | None = None, **kwargs: Any) -> 
             "accessible_ids": [int, ...],
             "auth_bypass_ids": [int, ...],  # accessible without token
             "data_samples": [{"id": int, "preview": str}, ...],
+            "comparisons": [{"id": int, "status_auth": int, "status_noauth": int, ...}, ...],
+            "control_evidence": {"positive_cases": [...], "negative_cases": [...]},
             "total_tested": int,
         }
     """
@@ -32,6 +34,7 @@ async def execute(url_pattern: str, token: str | None = None, **kwargs: Any) -> 
     accessible_ids: list[int] = []
     auth_bypass_ids: list[int] = []
     data_samples: list[dict] = []
+    comparisons: list[dict[str, Any]] = []
     max_id = int(kwargs.get("max_id", 20))
 
     headers_auth: dict[str, str] = {}
@@ -51,9 +54,13 @@ async def execute(url_pattern: str, token: str | None = None, **kwargs: Any) -> 
         async with sem:
             url = url_pattern.replace("{id}", str(uid))
             try:
+                entry: dict[str, Any] = {"id": uid, "url": url}
                 # With auth
                 if headers_auth:
                     r_auth = await _session.request("GET", url, headers=headers_auth)
+                    entry["status_auth"] = r_auth.status
+                    entry["size_auth"] = r_auth.body_length
+                    entry["preview_auth"] = r_auth.text[:240]
                     if r_auth.status == 200:
                         accessible_ids.append(uid)
                         if uid <= 5:
@@ -63,8 +70,12 @@ async def execute(url_pattern: str, token: str | None = None, **kwargs: Any) -> 
 
                 # Without auth
                 r_noauth = await _session.request("GET", url)
+                entry["status_noauth"] = r_noauth.status
+                entry["size_noauth"] = r_noauth.body_length
+                entry["preview_noauth"] = r_noauth.text[:240]
                 if r_noauth.status == 200 and r_noauth.body_length > 50:
                     auth_bypass_ids.append(uid)
+                comparisons.append(entry)
             except Exception:
                 pass
 
@@ -72,8 +83,17 @@ async def execute(url_pattern: str, token: str | None = None, **kwargs: Any) -> 
 
     accessible_ids.sort()
     auth_bypass_ids.sort()
+    comparisons.sort(key=lambda item: item.get("id", 0))
 
     vulnerable = len(accessible_ids) > 1 or len(auth_bypass_ids) > 0
+    positive_cases = [
+        c for c in comparisons
+        if c.get("status_auth") == 200 or c.get("status_noauth") == 200
+    ][:5]
+    negative_cases = [
+        c for c in comparisons
+        if c.get("status_noauth") in (401, 403, 404) or c.get("status_auth") in (401, 403, 404)
+    ][:5]
 
     logger.info("test_idor: %d accessible, %d without auth, vulnerable=%s",
                 len(accessible_ids), len(auth_bypass_ids), vulnerable)
@@ -83,6 +103,11 @@ async def execute(url_pattern: str, token: str | None = None, **kwargs: Any) -> 
         "accessible_ids": accessible_ids,
         "auth_bypass_ids": auth_bypass_ids,
         "data_samples": data_samples,
+        "comparisons": comparisons[:10],
+        "control_evidence": {
+            "positive_cases": positive_cases,
+            "negative_cases": negative_cases,
+        },
         "total_tested": max_id,
         "url_pattern": url_pattern,
     }

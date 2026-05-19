@@ -1,13 +1,14 @@
-# VXIS Architecture — Brain-First Single-Loop
+# VXIS Architecture — Brain-First Single-Loop with AI Review Hierarchy
 
-> How VXIS reasons, decides, and acts. Read this after `README.md`. Updated 2026-04-10.
+> How VXIS reasons, decides, verifies, and escalates. Read this after `README.md`. Updated 2026-05-04.
 
 ## The one-line design statement
 
-**A single persistent ReAct loop, driven by an LLM Brain, owns the entire scan — from recon to exploitation to reporting — via 23 dynamic tools, a Docker sandbox, adversarial verification, and Strix-pattern history management.**
+**A single persistent ReAct loop owns scanning and exploitation, while layered AI reviewers gate findings and scan completion before anything lands in the final report.**
 
 Extended beyond Strix with:
 - Adversarial verifier (stronger model refutes findings before confirmation)
+- Selective escalation: cheap worker, stronger verifier, final judge/report gate
 - MITRE ATT&CK mapping (16 techniques, auto-inferred)
 - 3-tier smart history + LLM memory compression at 90K tokens
 - Auto-orchestration safety net (auto-login, auto-ffuf, auto-nuclei, auto-sqlmap)
@@ -21,6 +22,36 @@ Extended beyond Strix with:
 The preceding VXIS architecture (14-Phase `ScanPipeline` in `pipeline.py`, 5234 lines) treated the Brain as a **bag of LLM helpers** — each phase dispatched hardcoded scanner logic and only called the Brain to interpret individual probe results. `brain_decision_count = 0` across a full benchmark scan, despite `llm_call_count = 10+` — proof that the "Brain-First" principle was violated at the code level.
 
 Phase A rebuilt VXIS so the Brain **owns the top of the stack**. Every tool call flows through `AgentBrain.think_in_loop()`, which is a true ReAct decision. Current state: `brain_decisions=50, llm_calls=55` on Juice Shop.
+
+## Operating model: autonomous by default
+
+VXIS is optimized for the workflow:
+
+1. Launch a scan.
+2. Leave it running unattended.
+3. Return to a completed run with verified findings, chains, and a rendered report.
+
+That means the architecture favors `AI-in-the-loop` over `human-in-the-loop`.
+Humans should only see:
+
+- dangerous real-world mutation approvals,
+- ambiguous verdict queues,
+- final delivery spot-checks.
+
+Everything else should be handled by the runtime itself.
+
+## Runtime roles
+
+VXIS is still implemented as a single loop, but architecturally it already behaves like a role-separated system:
+
+| Role | Current implementation | Responsibility |
+|---|---|---|
+| **Worker** | `AgentBrain` + `ScanAgentLoop` | Recon, probing, exploitation attempts, branch persistence |
+| **Verifier** | `verify_finding` + PoC/control gates | Refute weak findings, block non-PoC high/criticals |
+| **Judge** | `finish_scan` gate + final report extraction | Decide whether evidence is sufficient to end the run |
+| **Human** | Optional exception handler | Review only escalated ambiguity or risky actions |
+
+The design target is **fully autonomous with selective escalation**, not phase-by-phase human steering.
 
 ## Vector exhaustion and crown-jewel semantics
 
@@ -67,6 +98,7 @@ Next structural step: expand candidate generation from seeded web/desktop hypoth
 │  • Reset per-scan counters (finding store, brain decision)   │
 │  • Run ScanAgentLoop                                         │
 │  • Copy findings/chains → ctx                                │
+│  • Extract final report sections from accepted finish_scan    │
 │  • Deferred approval gate (enterprise)                       │
 │  • Generate HTML report (NCC style + verification + MITRE)   │
 │  • Compute VXIS score                                        │
@@ -74,7 +106,7 @@ Next structural step: expand candidate generation from seeded web/desktop hypoth
                           ↓
 ┌──────────────────────────────────────────────────────────────┐
 │                   ScanAgentLoop                              │
-│          src/vxis/agent/scan_loop.py  (~1127 lines)          │
+│          src/vxis/agent/scan_loop.py                         │
 │                                                              │
 │  while not completed and iteration < max_iters (300):        │
 │      compress_history(messages, brain)  # at 90K tokens      │
@@ -82,6 +114,9 @@ Next structural step: expand candidate generation from seeded web/desktop hypoth
 │      actions = brain.think_in_loop(messages + dashboard)     │
 │      actions = actions[:1]  # Strix: 1 tool per message      │
 │      result = registry.dispatch(name, args)                  │
+│      enforce focus branch / vector discipline                │
+│      auto-promote PoC-backed findings                        │
+│      auto-verify high-value findings                         │
 │      auto-orchestration safety net (login/ffuf/nuclei/sqlmap)│
 │      if finish_scan: break                                   │
 │                                                              │
@@ -161,6 +196,29 @@ This lets scans run 300+ iterations without losing critical context.
 
 This replaces the naive flat window that caused Brain amnesia at high iteration counts.
 
+## AI review hierarchy
+
+VXIS does not treat review as a manual phase. It treats review as a chain of increasingly strict machine gates:
+
+1. **Worker loop**
+   - Generates hypotheses
+   - Executes tools
+   - Keeps branches alive until proven, exhausted, or blocked
+
+2. **Structured PoC gate**
+   - `report_finding` requires stronger fields for serious findings:
+     `impact`, `technical_analysis`, `poc_description`, `poc_script_code`, `remediation_steps`
+   - High/critical findings without real exploit transcript or observed result are blocked before report rendering
+
+3. **Adversarial verifier**
+   - `verify_finding` attempts to refute the claim
+   - Control-pair evidence is required for auth / IDOR / injection-style findings
+
+4. **Judge / completion gate**
+   - `finish_scan` is rejected if high-value branches remain open, chain expectations are unmet, or the run looks incomplete
+
+This is the main autonomy pattern: **cheap worker, stricter verifier, strictest completion gate, optional human only on exceptions**.
+
 ## Adversarial verifier — Phase C
 
 `verify_finding` tool (`src/vxis/agent/tools/verifier_tools.py`): when Brain reports a finding via `report_finding`, the scan loop auto-intercepts and calls `verify_finding` with a stronger model that attempts to refute the claim. Verdicts:
@@ -170,6 +228,19 @@ This replaces the naive flat window that caused Brain amnesia at high iteration 
 - **REFUTED** — false positive, excluded from report
 
 Verdict counts tracked in `ScanLoopState.verdict_counts`. Report includes a Verification Summary section.
+
+## Branch-first execution
+
+The primary unit of work is no longer "phase" or "tool". It is the **branch**:
+
+- `vector_candidates` represent durable attack hypotheses
+- `branches` represent active exploit paths derived from those hypotheses or findings
+- off-branch actions are warned, then blocked
+- `finish_scan` is blocked while important branches remain alive
+
+This is how VXIS approximates multi-agent persistence without requiring separate processes for every idea. The current architecture is a **logical multi-agent system inside one scan loop**.
+
+Future evolution can split top branches into real parallel workers, but the required ownership model already exists in `ScanLoopState`.
 
 ## MITRE ATT&CK mapping
 
@@ -191,6 +262,19 @@ The scan loop includes safety-net triggers that fire if Brain hasn't executed ce
 | auto-sqlmap | iter 18+ | Test endpoints that returned 500 errors |
 
 These compensate for weaker models that may not autonomously reach for the right scanner at the right time.
+
+## Current limits
+
+The architecture is strongest today on `web/API` targets.
+
+- `web/API`: most mature, with branch persistence, verifier gates, report shaping, and direct PoC rendering
+- `desktop`: partial parity via dedicated desktop skills and verifier rubric
+- `mobile / infra / k8s / hardware`: architecturally possible, but still missing launcher/runtime maturity
+
+The long-term model is not "one universal sandbox". It is:
+
+- platform-specific execution adapters (`docker`, VM, emulator, cluster, local binary runtime)
+- one shared pentest core (`ScanAgentLoop`, verifier, reporting, chain analysis)
 
 ## Three Brain backends (only AgentBrain is live)
 

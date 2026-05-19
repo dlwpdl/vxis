@@ -25,7 +25,11 @@ def test_finding_tools_emit_live_hit_and_chain_events() -> None:
             finding_type="sql_injection",
             affected_component="/login",
             description="Classic auth bypass",
-            evidence="POST /login username=admin' --",
+            impact="Authentication bypass to privileged session.",
+            technical_analysis="The login accepted a boolean-auth bypass payload and returned an authenticated response.",
+            poc_description="Submit a crafted username payload to bypass authentication.",
+            poc_script_code="POST /login HTTP/1.1\\n\\nusername=admin' --&password=x\\nHTTP/1.1 302 Found\\nLocation: /admin",
+            remediation_steps="Parameterize the login query and add strict authentication controls.",
         )
         second = await report.run(
             title="Weak auth on admin",
@@ -33,7 +37,11 @@ def test_finding_tools_emit_live_hit_and_chain_events() -> None:
             finding_type="weak_auth",
             affected_component="/admin",
             description="Default credentials accepted",
-            evidence="admin:admin",
+            impact="Administrative access with default credentials.",
+            technical_analysis="The admin endpoint accepted the documented default credential pair and granted access.",
+            poc_description="Authenticate to the admin panel with default credentials.",
+            poc_script_code="POST /admin/login HTTP/1.1\\n\\nusername=admin&password=admin\\nHTTP/1.1 200 OK",
+            remediation_steps="Disable default credentials and enforce rotation on first use.",
         )
         await chain.run(
             finding_ids=[first.data["id"], second.data["id"]],

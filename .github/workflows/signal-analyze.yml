@@ -57,7 +57,12 @@ jobs:
           from vxis.growth.ingest import INBOX_DIR
           from vxis.growth.schemas import RawSignal, SignalSource
           from vxis.growth.analyze import analyze_batch
-          from vxis.growth.apply import generate_proposals, apply_proposals
+          from vxis.growth.apply import (
+              apply_proposals,
+              count_reviewable_pending_proposals,
+              generate_proposals,
+              prune_pending_proposals,
+          )
 
           import shutil
 
@@ -104,6 +109,9 @@ jobs:
 
           # Apply (dry-run stores in pending/)
           result = apply_proposals(all_proposals)
+          hygiene = prune_pending_proposals(config)
+          result["pending_review"] = count_reviewable_pending_proposals(config)
+          result["pending_hygiene"] = hygiene
           print(f"Applied: {result}")
 
           with open("_analyze_result.json", "w") as f:
@@ -162,26 +170,19 @@ jobs:
           import json, subprocess
           from pathlib import Path
 
-          pending_dir = Path(".vxis/signals/pending")
-          if not pending_dir.exists():
-              exit(0)
-
-          pending_files = sorted(pending_dir.glob("*.json"))
-          if not pending_files:
+          from vxis.growth.apply import list_reviewable_pending_proposals
+          reviewable = list_reviewable_pending_proposals()
+          if not reviewable:
               exit(0)
 
           # Only create PR for skill_payload_add proposals
           skill_proposals = []
-          for f in pending_files:
-              try:
-                  d = json.loads(f.read_text())
-                  if d.get("change_type") == "skill_payload_add":
-                      skill_proposals.append(d)
-              except Exception:
-                  pass
+          for d in reviewable:
+              if d.get("change_type") == "skill_payload_add":
+                  skill_proposals.append(d)
 
           if not skill_proposals:
-              print(f"No skill proposals in {len(pending_files)} pending — skip PR")
+              print(f"No skill proposals in {len(reviewable)} reviewable pending — skip PR")
               exit(0)
 
           # Apply the pending proposals to a branch

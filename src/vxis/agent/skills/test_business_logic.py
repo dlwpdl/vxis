@@ -14,12 +14,19 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
     """Test business logic vulnerabilities.
 
     Returns:
-        {"vulnerable": bool, "findings": [...], "tested": int}
+        {
+            "vulnerable": bool,
+            "findings": [...],
+            "control_evidence": {"accepted": [...], "rejected": [...]},
+            "tested": int,
+        }
     """
     from vxis.interaction.hands import SessionManager
 
     target = target_url.rstrip("/")
     findings: list[dict[str, Any]] = []
+    accepted_controls: list[dict[str, Any]] = []
+    rejected_controls: list[dict[str, Any]] = []
     tested = 0
     sem = asyncio.Semaphore(15)
 
@@ -54,9 +61,30 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                             "payload": f"{t['method']} {t['path']} body={t['body']}",
                             "evidence": f"{t['desc']}: accepted (status {r.status})",
                             "response_preview": r.text[:300],
+                            "control": {
+                                "status": r.status,
+                                "size": r.body_length,
+                                "preview": r.text[:180],
+                                "test": t,
+                            },
                             "severity": t["severity"],
                         })
                         logger.info("Business logic: %s", t["desc"])
+                        accepted_controls.append({
+                            "desc": t["desc"],
+                            "path": t["path"],
+                            "status": r.status,
+                            "size": r.body_length,
+                            "preview": r.text[:180],
+                        })
+                    else:
+                        rejected_controls.append({
+                            "desc": t["desc"],
+                            "path": t["path"],
+                            "status": r.status,
+                            "size": r.body_length,
+                            "preview": r.text[:180],
+                        })
             except Exception:
                 pass
 
@@ -80,9 +108,31 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                     "type": "race_condition",
                     "payload": "5 concurrent coupon applies",
                     "evidence": f"{len(successes)} of 5 succeeded (possible double-spend)",
+                    "response_preview": str([getattr(r, "status", "?") for r in successes])[:300],
+                    "control": {
+                        "success_count": len(successes),
+                        "attempt_count": 5,
+                        "statuses": [getattr(r, "status", "?") for r in results if not isinstance(r, Exception)],
+                    },
                     "severity": "high",
+                })
+            else:
+                rejected_controls.append({
+                    "desc": "concurrent coupon apply",
+                    "path": "/api/coupon/apply",
+                    "status": "no_race",
+                    "size": 0,
+                    "preview": str([getattr(r, "status", "?") for r in results if not isinstance(r, Exception)])[:180],
                 })
         except Exception:
             pass
 
-    return {"vulnerable": len(findings) > 0, "findings": findings, "tested": tested}
+    return {
+        "vulnerable": len(findings) > 0,
+        "findings": findings,
+        "control_evidence": {
+            "accepted": accepted_controls[:8],
+            "rejected": rejected_controls[:8],
+        },
+        "tested": tested,
+    }

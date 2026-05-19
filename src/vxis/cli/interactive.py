@@ -16,6 +16,169 @@ from InquirerPy.separator import Separator
 
 console = Console()
 
+_DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+_DEFAULT_OLLAMA_MODEL = "qwen2.5-coder:14b"
+_DEFAULT_LLAMACPP_BASE_URL = "http://localhost:8080"
+_DEFAULT_LLAMACPP_CONTEXT = 8192
+_DEFAULT_LLAMACPP_MODEL = (
+    "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m"
+)
+_LOCAL_LLM_PROVIDERS = {"ollama", "llamacpp"}
+_CLOUD_PROVIDER_KEYS = {
+    "together": "TOGETHER_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "gemini": "GOOGLE_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
+
+
+def _configure_llm_environment(
+    provider: str,
+    model: str,
+    base_url: str | None = None,
+) -> str:
+    """Set process env so AgentBrain uses the selected TUI backend."""
+    import os
+
+    provider = "gemini" if provider == "google" else provider.lower()
+    os.environ["UPSTREAM_LLM_PROVIDER"] = provider
+    os.environ["UPSTREAM_LLM_MODEL"] = model
+
+    if provider == "ollama":
+        resolved = (base_url or os.environ.get("VXIS_OLLAMA_BASE_URL") or _DEFAULT_OLLAMA_BASE_URL).rstrip("/")
+        os.environ["VXIS_OLLAMA_BASE_URL"] = resolved
+        os.environ["VXIS_OLLAMA_UNCENSORED_MODEL"] = model
+        return resolved
+
+    if provider == "llamacpp":
+        resolved = (
+            base_url
+            or os.environ.get("VXIS_LLAMACPP_BASE_URL")
+            or _DEFAULT_LLAMACPP_BASE_URL
+        ).rstrip("/")
+        os.environ["VXIS_LLAMACPP_BASE_URL"] = resolved
+        os.environ["VXIS_LLAMACPP_MODEL"] = model
+        return resolved
+
+    return ""
+
+
+def _cloud_provider_key_env(provider: str) -> str:
+    """Return the required API-key env var for a cloud provider."""
+    return _CLOUD_PROVIDER_KEYS.get("gemini" if provider == "google" else provider, "TOGETHER_API_KEY")
+
+
+def _has_cloud_provider_key(provider: str) -> bool:
+    """True when the selected cloud provider has credentials in env."""
+    import os
+
+    key_env = _cloud_provider_key_env(provider)
+    if provider == "openai" and os.environ.get("LLM_API_KEY"):
+        return True
+    return bool(os.environ.get(key_env))
+
+
+def _fetch_llamacpp_models(base_url: str, timeout: float = 2.5) -> list[str]:
+    """Fetch model ids from llama.cpp's OpenAI-compatible /v1/models endpoint."""
+    import json
+    import urllib.request
+
+    req = urllib.request.Request(f"{base_url.rstrip('/')}/v1/models", method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8")
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+
+    data = payload.get("data", [])
+    if not isinstance(data, list):
+        return []
+
+    model_ids: list[str] = []
+    for item in data:
+        if isinstance(item, dict) and item.get("id"):
+            model_ids.append(str(item["id"]))
+    return model_ids
+
+
+def _fetch_json_url(url: str, timeout: float = 1.0) -> dict | None:
+    """Best-effort JSON fetch for local runtime auto-detection."""
+    import json
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if not 200 <= getattr(resp, "status", 200) < 500:
+                return None
+            body = resp.read().decode("utf-8", errors="replace")
+        payload = json.loads(body)
+        return payload if isinstance(payload, dict) else None
+    except Exception:
+        return None
+
+
+def _fetch_llamacpp_health(base_url: str, timeout: float = 1.0) -> dict:
+    """Return llama.cpp/proxy health metadata when available."""
+    return _fetch_json_url(f"{base_url.rstrip('/')}/health", timeout=timeout) or {}
+
+
+def _default_llamacpp_context(health: dict | None = None) -> int:
+    """Resolve the llama.cpp context prompt default without dropping below 8192."""
+    import os
+
+    env_value = os.environ.get("VXIS_LLAMACPP_CONTEXT", "").strip()
+    if env_value.isdigit():
+        return max(512, int(env_value))
+
+    health_value = (health or {}).get("ctx_size")
+    if isinstance(health_value, int):
+        return max(512, health_value)
+    if isinstance(health_value, str) and health_value.strip().isdigit():
+        return max(512, int(health_value.strip()))
+
+    return _DEFAULT_LLAMACPP_CONTEXT
+
+
+def _default_llamacpp_base_url() -> str:
+    """Prefer the local compact proxy when it is running, otherwise llama-server."""
+    import os
+
+    env_value = os.environ.get("VXIS_LLAMACPP_BASE_URL", "").strip()
+    if env_value:
+        return env_value.rstrip("/")
+
+    compact_proxy = "http://127.0.0.1:8090"
+    if _fetch_json_url(f"{compact_proxy}/v1/models", timeout=0.4) is not None:
+        return compact_proxy
+
+    return _DEFAULT_LLAMACPP_BASE_URL
+
+
+def _check_local_llm_ready(provider: str, base_url: str, timeout: float = 2.5) -> tuple[bool, str]:
+    """Verify the selected local runtime is reachable before starting a scan."""
+    import urllib.request
+
+    provider = provider.lower()
+    if provider == "ollama":
+        url = f"{base_url.rstrip('/')}/api/tags"
+    elif provider == "llamacpp":
+        url = f"{base_url.rstrip('/')}/v1/models"
+    else:
+        return False, f"unsupported local provider: {provider}"
+
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = getattr(resp, "status", 200)
+            if 200 <= status < 500:
+                return True, f"{provider} reachable at {base_url.rstrip('/')}"
+            return False, f"{provider} returned HTTP {status}"
+    except Exception as exc:
+        return False, f"{provider} unreachable at {base_url.rstrip('/')}: {exc}"
+
 # ── 스캔 카테고리 정의 ──────────────────────────────────────────
 
 SCAN_CATEGORIES = {
@@ -389,7 +552,7 @@ def _code_scan_wizard(cat: dict) -> dict | None:
             if result.returncode != 0:
                 console.print(f"[red]Clone 실패:[/red] {result.stderr[:200]}")
                 return None
-            console.print(f"[green]Clone 완료[/green]")
+            console.print("[green]Clone 완료[/green]")
         except Exception as exc:
             console.print(f"[red]Clone 실패:[/red] {exc}")
             return None
@@ -492,7 +655,7 @@ def _show_plugin_summary(
         plugin_lines.append(line)
 
     table.add_row(
-        f"\U0001f50c 플러그인:",
+        "\U0001f50c 플러그인:",
         f"[dim]{len(plugins)}개 선택[/dim]",
     )
 
@@ -1750,9 +1913,199 @@ def _client_menu() -> None:
             client_show(client_id=client_id.strip())
 
 
+def _select_local_llm() -> tuple[str, str, str] | None:
+    """Prompt for a local LLM runtime and return (provider, model, base_url)."""
+    import os
+
+    runtime = inquirer.select(
+        message="로컬 AI 런타임을 선택하세요",
+        choices=[
+            {"name": "Ollama — http://localhost:11434", "value": "ollama"},
+            {"name": "llama.cpp server — OpenAI-compatible /v1", "value": "llamacpp"},
+            {"name": "취소", "value": "cancel"},
+        ],
+        pointer="\u276f",
+        qmark="\U0001f9e0",
+        amark="\u2705",
+    ).execute()
+
+    if runtime in (None, "cancel"):
+        return None
+
+    def _prompt_context_window(
+        *,
+        message: str,
+        env_key: str,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int | None:
+        raw = inquirer.text(
+            message=message,
+            default=os.environ.get(env_key, str(default)),
+            qmark="\U0001f9e0",
+            amark="\u2705",
+            validate=lambda value: (
+                value.strip().isdigit()
+                and minimum <= int(value.strip()) <= maximum
+            ),
+            invalid_message=f"{minimum}~{maximum} 사이의 정수를 입력하세요",
+        ).execute()
+        if not raw:
+            return None
+        value = int(raw.strip())
+        os.environ[env_key] = str(value)
+        return value
+
+    if runtime == "ollama":
+        base_url = inquirer.text(
+            message="Ollama base URL",
+            default=os.environ.get("VXIS_OLLAMA_BASE_URL", _DEFAULT_OLLAMA_BASE_URL),
+            qmark="\U0001f9e0",
+            amark="\u2705",
+        ).execute()
+        if not base_url:
+            return None
+
+        if _prompt_context_window(
+            message="Ollama context window",
+            env_key="VXIS_OLLAMA_CONTEXT",
+            default=32768,
+            minimum=2048,
+            maximum=262144,
+        ) is None:
+            return None
+
+        model = inquirer.select(
+            message="Ollama 모델을 선택하세요",
+            choices=[
+                {"name": "Qwen 2.5 Coder 14B (권장 기본값)", "value": _DEFAULT_OLLAMA_MODEL},
+                {"name": "WhiteRabbitNeo 13B (무검열 연구)", "value": "whiterabbitneo:13b"},
+                {"name": "Dolphin Mixtral 8x7B (범용)", "value": "dolphin-mixtral:8x7b"},
+                {"name": "Custom Ollama model id", "value": "__custom__"},
+            ],
+            pointer="\u276f",
+            qmark="\U0001f9e0",
+            amark="\u2705",
+        ).execute()
+
+        if model == "__custom__":
+            custom_model = inquirer.text(
+                message="Ollama model id를 입력하세요",
+                default=os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", _DEFAULT_OLLAMA_MODEL),
+                qmark="\U0001f9e0",
+                amark="\u2705",
+            ).execute()
+            if not custom_model:
+                console.print("[red]model id가 필요합니다.[/red]")
+                return None
+            model = custom_model.strip()
+
+        return ("ollama", model, base_url.strip().rstrip("/"))
+
+    base_url = inquirer.text(
+        message="llama.cpp server base URL",
+        default=_default_llamacpp_base_url(),
+        qmark="\U0001f9e0",
+        amark="\u2705",
+    ).execute()
+    if not base_url:
+        return None
+    base_url = base_url.strip().rstrip("/")
+    health = _fetch_llamacpp_health(base_url)
+    context_default = _default_llamacpp_context(health)
+
+    if _prompt_context_window(
+        message="llama.cpp context window (-c/--ctx-size와 맞추세요)",
+        env_key="VXIS_LLAMACPP_CONTEXT",
+        default=context_default,
+        minimum=512,
+        maximum=131072,
+    ) is None:
+        return None
+
+    detected_models: list[str] = []
+    try:
+        detected_models = _fetch_llamacpp_models(base_url)
+    except Exception:
+        detected_models = []
+
+    choices = []
+    if detected_models:
+        choices.append(Separator(f"── detected from {base_url}/v1/models ──"))
+        choices.extend({"name": model_id, "value": model_id} for model_id in detected_models)
+    else:
+        console.print(
+            f"[yellow]llama.cpp 서버 모델 목록을 읽지 못했습니다:[/yellow] {base_url}/v1/models"
+        )
+
+    choices.extend([
+        Separator("── fallback/default ──"),
+        {
+            "name": f"Huihui Qwen3.6 35B A3B Q4_K_M ({_DEFAULT_LLAMACPP_MODEL})",
+            "value": _DEFAULT_LLAMACPP_MODEL,
+        },
+        {"name": "Custom llama.cpp model id", "value": "__custom__"},
+    ])
+
+    model = inquirer.select(
+        message="llama.cpp 모델을 선택하세요",
+        choices=choices,
+        pointer="\u276f",
+        qmark="\U0001f9e0",
+        amark="\u2705",
+    ).execute()
+
+    if model == "__custom__":
+        custom_model = inquirer.text(
+            message="llama.cpp 서버의 model id를 입력하세요",
+            default=os.environ.get("VXIS_LLAMACPP_MODEL", _DEFAULT_LLAMACPP_MODEL),
+            qmark="\U0001f9e0",
+            amark="\u2705",
+        ).execute()
+        if not custom_model:
+            console.print("[red]model id가 필요합니다.[/red]")
+            return None
+        model = custom_model.strip()
+
+    if not model:
+        return None
+    return ("llamacpp", model, base_url)
+
+
+def _run_brain_first_scan_from_tui(
+    target: str,
+    profile: str,
+    *,
+    allow_inject: bool = False,
+) -> None:
+    """Delegate TUI AI mode to the same Brain-first pipeline as `vxis scan`."""
+    import typer
+
+    from vxis.cli.main import scan as run_scan
+
+    try:
+        run_scan(
+            target=target,
+            manifest=None,
+            profile=profile,
+            ghost=False,
+            output=None,
+            no_report=False,
+            resume=None,
+            interactive=False,
+            verbose=False,
+            allow_inject=allow_inject,
+            plugins=None,
+            kind="web",
+        )
+    except typer.Exit as exc:
+        if exc.exit_code not in (0, None):
+            console.print(f"[red]Brain-first scan exited with code {exc.exit_code}[/red]")
+
+
 def _execute_agent_scan(params: dict) -> None:
     """AI 자율 에이전트 모드 실행."""
-    import asyncio
     import os
 
     target = params["target"]
@@ -1774,15 +2127,10 @@ def _execute_agent_scan(params: dict) -> None:
         return
 
     if source_class == "local":
-        llm_choices = [
-            Separator("── Ollama ──"),
-            {"name": "Qwen 2.5 Coder 14B (권장 기본값)", "value": ("ollama", "qwen2.5-coder:14b")},
-            {"name": "WhiteRabbitNeo 13B (무검열 연구)", "value": ("ollama", "whiterabbitneo:13b")},
-            {"name": "Dolphin Mixtral 8x7B (범용)", "value": ("ollama", "dolphin-mixtral:8x7b")},
-            Separator("── llama.cpp 서버 ──"),
-            {"name": "Huihui Qwen3.6 35B A3B Q4_K_M (llama.cpp)", "value": ("llamacpp", "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m")},
-            {"name": "Custom llama.cpp model id", "value": ("llamacpp", "__custom__")},
-        ]
+        local_selection = _select_local_llm()
+        if local_selection is None:
+            return
+        provider, model, base_url = local_selection
     else:
         llm_choices = [
             Separator("── Together.ai (통합 게이트웨이) ──"),
@@ -1801,54 +2149,38 @@ def _execute_agent_scan(params: dict) -> None:
             {"name": "\U0001f535 GPT-4o Mini (OpenAI, 저렴)", "value": ("openai", "gpt-4o-mini")},
         ]
 
-    llm_selection = inquirer.select(
-        message="AI 에이전트의 두뇌를 선택하세요",
-        choices=llm_choices,
-        pointer="\u276f",
-        qmark="\U0001f9e0",
-        amark="\u2705",
-        instruction="(↑↓ 방향키)",
-    ).execute()
-
-    if llm_selection is None:
-        return
-
-    provider, model = llm_selection
-    if provider == "llamacpp" and model == "__custom__":
-        custom_model = inquirer.text(
-            message="llama.cpp 서버의 model id를 입력하세요",
-            default=os.environ.get(
-                "VXIS_LLAMACPP_MODEL",
-                "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
-            ),
+        llm_selection = inquirer.select(
+            message="AI 에이전트의 두뇌를 선택하세요",
+            choices=llm_choices,
+            pointer="\u276f",
             qmark="\U0001f9e0",
             amark="\u2705",
+            instruction="(↑↓ 방향키)",
         ).execute()
-        if not custom_model:
-            console.print("[red]model id가 필요합니다.[/red]")
+
+        if llm_selection is None:
             return
-        model = custom_model.strip()
 
-    os.environ["UPSTREAM_LLM_PROVIDER"] = provider
-    os.environ["UPSTREAM_LLM_MODEL"] = model
+        provider, model = llm_selection
+        base_url = ""
 
-    if provider == "ollama":
-        os.environ["VXIS_OLLAMA_BASE_URL"] = os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434")
-        os.environ["VXIS_OLLAMA_UNCENSORED_MODEL"] = model
-    elif provider == "llamacpp":
-        os.environ["VXIS_LLAMACPP_BASE_URL"] = os.environ.get("VXIS_LLAMACPP_BASE_URL", "http://localhost:8080")
-        os.environ["VXIS_LLAMACPP_MODEL"] = model
+    resolved_base_url = _configure_llm_environment(provider, model, base_url)
+
+    if provider in _LOCAL_LLM_PROVIDERS:
+        ready, message = _check_local_llm_ready(provider, resolved_base_url)
+        if not ready:
+            console.print(f"[red]{message}[/red]")
+            if provider == "llamacpp":
+                console.print(
+                    "[dim]먼저 llama-server를 실행하세요. 예: "
+                    "llama-server -m /path/to/model.gguf --host 127.0.0.1 --port 8080[/dim]"
+                )
+            return
+        console.print(f"[green]{message}[/green]")
 
     # Check API key
-    from tools.upstream_watch.llm import is_available as llm_is_available
-    if provider not in {"ollama", "llamacpp"} and not llm_is_available():
-        key_env = {
-            "together": "TOGETHER_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "gemini": "GOOGLE_API_KEY",
-            "openai": "OPENAI_API_KEY",
-        }.get(provider, "TOGETHER_API_KEY")
-
+    if provider not in _LOCAL_LLM_PROVIDERS and not _has_cloud_provider_key(provider):
+        key_env = _cloud_provider_key_env(provider)
         api_key = inquirer.secret(
             message=f"{key_env}를 입력하세요",
             qmark="\U0001f511",
@@ -1911,217 +2243,11 @@ def _execute_agent_scan(params: dict) -> None:
     ))
     console.print()
 
-    from vxis.agent.runner import AgentRunner, SCAN_TYPE_MISSIONS
-
-    # Show agent lineup for selected scan type
-    scan_type_key = params.get("scan_type", "external")
-    if scan_type_key == "ai_auto":
-        scan_type_key = "external"  # default mission type
-
-    mission_def = SCAN_TYPE_MISSIONS.get(scan_type_key, SCAN_TYPE_MISSIONS["external"])
-    agent_list = mission_def.get("agents", [])
-
-    if agent_list:
-        agent_table = Table(title=f"\U0001f46a 투입 에이전트 ({len(agent_list)}개)", border_style="cyan", expand=True)
-        agent_table.add_column("#", style="dim", width=4)
-        agent_table.add_column("에이전트", style="bold cyan", min_width=20)
-
-        for i, aid in enumerate(agent_list, 1):
-            agent_table.add_row(str(i), aid)
-        console.print(agent_table)
-    else:
-        console.print("[dim]Director가 타겟 분석 후 자동으로 에이전트를 선택합니다.[/dim]")
-    console.print()
-
-    try:
-        from rich.live import Live
-        from rich.layout import Layout
-        from rich.spinner import Spinner
-        import time
-
-        # State for live display
-        agent_state = {
-            "phase": "초기화",
-            "step": 0,
-            "max_steps": 15,
-            "current_team": "",
-            "current_tools": [],
-            "findings": [],
-            "completed_teams": [],
-            "running_tools": [],
-            "log": [],
-        }
-
-        def _render_agent_display() -> Panel:
-            """Render the live agent status display."""
-            lines = []
-
-            # Header
-            elapsed = time.time() - agent_state.get("start_time", time.time())
-            lines.append(
-                f"\U0001f9e0 [bold cyan]VXIS AI Agent[/bold cyan]  |  "
-                f"Step {agent_state['step']}/{agent_state['max_steps']}  |  "
-                f"\U0001f50d {len(agent_state['findings'])}건 발견  |  "
-                f"\u23f1 {elapsed:.0f}초"
-            )
-            lines.append("")
-
-            # Current phase
-            phase = agent_state["phase"]
-            phase_icons = {
-                "초기화": "\u2699\ufe0f",
-                "정찰": "\U0001f50d",
-                "취약점 분석": "\U0001f6e1\ufe0f",
-                "공격 시도": "\u2694\ufe0f",
-                "검증": "\u2705",
-                "완료": "\U0001f3c1",
-                "AI 판단 중": "\U0001f9e0",
-            }
-            icon = phase_icons.get(phase, "\u25b6\ufe0f")
-            lines.append(f"  {icon} [bold]현재 단계:[/bold] [yellow]{phase}[/yellow]")
-
-            # Current team & tools
-            if agent_state["current_team"]:
-                lines.append(f"  \U0001f46a [bold]활성 팀:[/bold] [cyan]{agent_state['current_team']}[/cyan]")
-
-            if agent_state["running_tools"]:
-                tool_str = "  ".join(f"\u25b6 {t}" for t in agent_state["running_tools"])
-                lines.append(f"  \U0001f527 [bold]실행 중:[/bold] {tool_str}")
-
-            lines.append("")
-
-            # Team status grid
-            team_statuses = []
-            for team_id, team in AGENT_TEAMS.items():
-                if team_id in [t.get("id") for t in agent_state.get("completed_teams", [])]:
-                    team_statuses.append(f"[green]\u2713 {team['name']}[/green]")
-                elif team_id == agent_state.get("current_team_id"):
-                    team_statuses.append(f"[cyan]\u25b6 {team['name']}[/cyan]")
-                else:
-                    team_statuses.append(f"[dim]\u25cb {team['name']}[/dim]")
-
-            # Show 3 per line
-            for i in range(0, len(team_statuses), 3):
-                chunk = team_statuses[i:i+3]
-                lines.append("  " + "  ".join(chunk))
-
-            lines.append("")
-
-            # Findings feed
-            if agent_state["findings"]:
-                lines.append("  [bold]\U0001f4cb 발견 사항:[/bold]")
-                severity_colors = {
-                    "critical": "bold red", "high": "red",
-                    "medium": "yellow", "low": "blue", "informational": "dim",
-                }
-                for f in agent_state["findings"][-8:]:
-                    sev = f.get("severity", "?")
-                    color = severity_colors.get(sev, "")
-                    lines.append(f"    [{color}][{sev:13s}][/{color}] {f.get('title', '')[:60]}")
-
-            lines.append("")
-
-            # AI reasoning log
-            if agent_state["log"]:
-                lines.append("  [bold]\U0001f9e0 AI 판단 로그:[/bold]")
-                for entry in agent_state["log"][-5:]:
-                    lines.append(f"    [dim]{entry[:80]}[/dim]")
-
-            return Panel(
-                "\n".join(lines),
-                title=f"\U0001f9e0 VXIS AI Agent — {target}",
-                border_style="cyan",
-            )
-
-        agent_state["start_time"] = time.time()
-
-        # Monkey-patch the executor to emit updates
-        def _on_agent_status(phase, details):
-            agent_state["phase"] = phase
-            if "agent" in details:
-                agent_state["current_team"] = details["agent"]
-            if phase == "에이전트 실행":
-                agent_state["running_tools"].append(details.get("agent", ""))
-            elif phase == "에이전트 완료":
-                tool = details.get("agent", "")
-                if tool in agent_state["running_tools"]:
-                    agent_state["running_tools"].remove(tool)
-                agent_state["completed_teams"].append({"id": tool})
-            agent_state["log"].append(f"{phase}: {details}")
-
-        runner = AgentRunner(on_status=_on_agent_status)
-
-        # Run with live display
-        async def _run_with_live():
-            return await runner.run(
-                target=target,
-                scan_type=scan_type_key,
-                profile=profile,
-            )
-
-        with Live(_render_agent_display(), console=console, refresh_per_second=2) as live:
-            async def _run_and_update():
-                task = asyncio.create_task(_run_with_live())
-                while not task.done():
-                    live.update(_render_agent_display())
-                    await asyncio.sleep(0.5)
-                live.update(_render_agent_display())
-                return await task
-
-            result = asyncio.run(_run_and_update())
-
-        # Final results
-        console.print(f"\n[bold green]\u2705 AI 에이전트 스캔 완료[/bold green]")
-        console.print(
-            f"  단계: {result.steps_taken}  |  "
-            f"발견: {len(result.findings)}건  |  "
-            f"에이전트: {len(result.agents_completed)}개  |  "
-            f"체인: {len(result.attack_chains)}개  |  "
-            f"시간: {result.duration_seconds:.0f}초  |  "
-            f"모델: {model_short}"
-        )
-
-        # Severity summary
-        counts = result.severity_counts
-        sev_parts = []
-        for sev, color in [("critical", "bold red"), ("high", "red"), ("medium", "yellow"), ("low", "blue")]:
-            if counts.get(sev, 0) > 0:
-                sev_parts.append(f"[{color}]{sev}: {counts[sev]}[/{color}]")
-        if sev_parts:
-            console.print("  " + " | ".join(sev_parts))
-
-        # Attack chains
-        if result.attack_chains:
-            console.print(f"\n  [bold]\u26d3 공격 체인 {len(result.attack_chains)}개 발견:[/bold]")
-            for chain in result.attack_chains:
-                console.print(f"    [red]{chain.get('title', '')}[/red] ({chain.get('steps', 0)}단계)")
-
-        # Findings detail
-        if result.findings:
-            console.print(f"\n  [bold]\U0001f4cb 발견 사항:[/bold]")
-            severity_colors = {
-                "critical": "bold red", "high": "red",
-                "medium": "yellow", "low": "blue", "informational": "dim",
-            }
-            for f in result.findings[:20]:
-                sev = getattr(f, "severity", None)
-                sev_str = sev.value if hasattr(sev, "value") else str(sev or "?")
-                color = severity_colors.get(sev_str.lower(), "")
-                title = getattr(f, "title", str(f))
-                console.print(f"    [{color}][{sev_str}][/{color}] {title}")
-            if len(result.findings) > 20:
-                console.print(f"    [dim]... +{len(result.findings) - 20}건 더[/dim]")
-
-        # Execution log summary
-        if result.execution_log:
-            console.print(f"\n  [dim]실행 로그 ({len(result.execution_log)}줄):[/dim]")
-            for entry in result.execution_log[-5:]:
-                console.print(f"    [dim]{entry}[/dim]")
-
-    except Exception as exc:
-        console.print(f"\n[bold red]에이전트 스캔 실패:[/bold red] {exc}")
-        import traceback
-        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+    _run_brain_first_scan_from_tui(
+        target=target,
+        profile=profile,
+        allow_inject=False,
+    )
 
 
 def _client_add_wizard() -> None:

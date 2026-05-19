@@ -76,7 +76,10 @@ class ReportData:
     logo_path: str | None = None
     executive_summary: str = ""
     methodology: str = field(default=_DEFAULT_METHODOLOGY)
+    technical_analysis: str = ""
+    recommendations: str = ""
     attack_chains: list[list[str]] | None = None  # finding_id 체인 리스트
+    aggregated_findings: list[dict] = field(default_factory=list)
     screenshots: dict[str, str] = field(default_factory=dict)  # label → file path/URL
     # Phase C belief state (optional — populated by ScanPipelineV2)
     verdict_counts: dict[str, int] = field(default_factory=dict)
@@ -120,6 +123,10 @@ class ReportData:
     def has_attack_chains(self) -> bool:
         """공격 체인이 존재하는지."""
         return bool(self.attack_chains)
+
+    @property
+    def has_aggregated_findings(self) -> bool:
+        return bool(self.aggregated_findings)
 
     @property
     def severity_counts(self) -> dict[str, int]:

@@ -35,6 +35,7 @@ Phase A adaptations (documented):
 from __future__ import annotations
 
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -53,11 +54,112 @@ from vxis.agent.tools.finding_tools import _get_chains as _get_chain_dicts
 from vxis.agent.tools.finding_tools import _get_findings as _get_finding_dicts
 from vxis.agent.tools.finding_tools import _reset_for_tests as _reset_finding_store
 from vxis.agent.tools.finding_tools import set_event_callback as _set_finding_event_callback
-from vxis.agent.tools.memory_tools import record_scan_result as _record_scan_memory
+from vxis.agent.tools.memory_tools import (
+    load_target_memory_profile as _load_target_memory_profile,
+    record_scan_result as _record_scan_memory,
+)
 from vxis.interaction.surface import TargetKind
 from vxis.pipeline.context import ScanContext
+from vxis.pipeline.launcher import prepare_target_runtime
 
 logger = logging.getLogger(__name__)
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("invalid %s=%r; using %d", name, raw, default)
+        return default
+    return max(minimum, value)
+
+
+def _resolve_scan_loop_budget() -> tuple[int, int, int]:
+    """Return (soft_max, hard_max, extension_chunk) for the Brain loop."""
+    provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "").strip().lower()
+    is_local = provider in {"llamacpp", "ollama"}
+
+    # 50 was a Phase-A safety cap. Local models need room to pursue live leads;
+    # cloud runs keep a lower default to limit accidental spend.
+    default_soft = 300 if is_local else 120
+    default_hard = 1000 if is_local else 300
+    soft_max = _env_int("VXIS_SCAN_MAX_ITERS", default_soft, minimum=10)
+    hard_max = _env_int("VXIS_SCAN_HARD_MAX_ITERS", default_hard, minimum=soft_max)
+    extension_chunk = _env_int("VXIS_SCAN_EXTEND_ITERS", 50, minimum=10)
+    return soft_max, max(soft_max, hard_max), extension_chunk
+
+
+def _extract_final_report_sections(messages: list[dict[str, Any]]) -> dict[str, str]:
+    """Extract the last successful finish_scan payload from loop messages."""
+    for msg in reversed(messages):
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content")
+        if not isinstance(content, dict):
+            continue
+        if content.get("name") != "finish_scan":
+            continue
+        result = content.get("result") or {}
+        if not isinstance(result, dict) or not result.get("ok"):
+            continue
+        data = result.get("data") or {}
+        if not isinstance(data, dict):
+            continue
+        final_report = data.get("final_report") or {}
+        if not isinstance(final_report, dict):
+            continue
+        return {
+            "executive_summary": str(final_report.get("executive_summary", "")).strip(),
+            "methodology": str(final_report.get("methodology", "")).strip(),
+            "technical_analysis": str(final_report.get("technical_analysis", "")).strip(),
+            "recommendations": str(final_report.get("recommendations", "")).strip(),
+        }
+    return {}
+
+
+def _memory_finding_to_vector_seed(finding_type: str, title: str, component: str) -> tuple[str, str, int] | None:
+    ft = str(finding_type or "").lower()
+    if ft in {"auth_bypass", "weak_auth", "default_credentials"}:
+        return ("WEB-AUTH-001", title or "Authentication bypass or weak login", 90)
+    if ft in {"sql_injection", "sqli", "sqli_time", "sqli_blind"}:
+        return ("WEB-SQLI-001", title or "SQL injection toward DB/admin data", 92)
+    if ft in {"idor", "broken_access_control"}:
+        return ("WEB-AC-001", title or "IDOR or broken access control", 88)
+    if ft in {"information_disclosure", "misconfiguration"}:
+        return ("WEB-MISCONF-001", title or "Sensitive files or exposed config", 78)
+    if ft.startswith("xss") or ft == "xss":
+        return ("WEB-XSS-001", title or "XSS toward session theft", 72)
+    if ft == "ssrf":
+        return ("WEB-SSRF-001", title or "SSRF/internal reachability", 70)
+    if ft == "csrf":
+        return ("WEB-CSRF-001", title or "CSRF on state-changing flow", 65)
+    if not ft:
+        return None
+    return (f"MEM-{ft.upper()[:12]}", title or component or ft, 60)
+
+
+def _memory_branch_priority(lead: dict[str, Any]) -> int:
+    role = str(lead.get("role", "")).lower()
+    phase = str(lead.get("phase", "")).lower()
+    status = str(lead.get("status", "")).lower()
+    priority = 78
+    if role == "post_exploit_worker":
+        priority += 10
+    if phase in {"privilege_probe", "data_access", "chain_closure"}:
+        priority += 6
+    if status in {"active", "retryable", "open"}:
+        priority += 4
+    return min(priority, 95)
+
+
+def _normalize_carryover_title(title: str) -> str:
+    value = str(title or "").strip().lower()
+    while value.startswith("carryover:"):
+        value = value[len("carryover:"):].strip()
+    return value
 
 
 def _build_finding_from_dict(
@@ -79,6 +181,7 @@ def _build_finding_from_dict(
     identically to the pre-phase-G build.
     """
     from vxis.evidence.schema import Severity
+    from vxis.agent.tools.finding_tools import _canonical_finding_type
     from vxis.models.finding import CVSSVector, Evidence, Finding
 
     sev_map = {
@@ -93,23 +196,47 @@ def _build_finding_from_dict(
 
     title = str(d.get("title", "Untitled finding"))
     desc_body = str(d.get("description", ""))
-    remediation_body = str(d.get("remediation", ""))
+    impact_body = str(d.get("impact", ""))
+    technical_body = str(d.get("technical_analysis", ""))
+    poc_description = str(d.get("poc_description", ""))
+    poc_script_code = str(d.get("poc_script_code", ""))
+    remediation_body = str(d.get("remediation_steps") or d.get("remediation", ""))
 
     bilingual_title = f"{title}|||{title}"
     bilingual_desc = f"{desc_body}|||{desc_body}"
+    bilingual_impact = f"{impact_body}|||{impact_body}" if impact_body else None
+    bilingual_technical = f"{technical_body}|||{technical_body}" if technical_body else None
+    bilingual_poc = f"{poc_description}|||{poc_description}" if poc_description else None
     bilingual_remediation = (
         f"{remediation_body}|||{remediation_body}" if remediation_body else "TBD|||TBD"
     )
 
-    evidence_text = str(d.get("evidence", "")) or "No evidence captured."
+    evidence_text = poc_script_code or str(d.get("evidence", "")) or "No evidence captured."
     evidence_list = [
         Evidence(
-            evidence_type="log",
-            title="Brain-reported evidence",
+            evidence_type="exploit" if poc_script_code else "log",
+            title="Proof of Concept" if poc_script_code else "Supporting evidence",
             content=evidence_text,
             surface=kind,
         )
     ]
+    for item in d.get("extra_evidence") or []:
+        if not isinstance(item, dict):
+            continue
+        evidence_type = str(item.get("evidence_type", "")).strip()
+        title_text = str(item.get("title", "")).strip()
+        content_text = str(item.get("content", "")).strip()
+        if not evidence_type or not title_text or not content_text:
+            continue
+        evidence_list.append(
+            Evidence(
+                evidence_type=evidence_type,
+                title=title_text,
+                content=content_text,
+                content_type=str(item.get("content_type", "text/plain")).strip() or "text/plain",
+                surface=kind,
+            )
+        )
 
     cvss_score_by_sev = {
         Severity.CRITICAL: 9.5,
@@ -132,8 +259,12 @@ def _build_finding_from_dict(
         target=target,
         title=bilingual_title,
         description=bilingual_desc,
+        impact=bilingual_impact,
+        technical_analysis=bilingual_technical,
+        poc_description=bilingual_poc,
+        poc_script_code=poc_script_code or None,
         severity=severity,
-        finding_type=str(d.get("finding_type", "generic")),
+        finding_type=_canonical_finding_type(str(d.get("finding_type", "generic"))),
         source_plugin="scan_agent_loop",
         affected_component=str(d.get("affected_component", "")),
         cvss=cvss,
@@ -475,29 +606,51 @@ class ScanPipeline:
         app_context_ko: str = "",
         resume_from: str | None = None,  # Phase A: ignored, kept for signature compat
         kind: TargetKind = TargetKind.WEB,
+        target_hints: dict[str, str] | None = None,
     ) -> ScanContext:
         """Run a Strix-parity single-loop scan against the target."""
         started = time.monotonic()
 
-        # 1. Build context
+        # 1. Prepare target runtime through the platform launcher layer.
+        self._emit("phase_start", {"phase": "runtime_prepare", "kind": kind.value, "target": target})
+        runtime = await prepare_target_runtime(target, kind, hints=target_hints)
+        self._emit(
+            "phase_end",
+            {
+                "phase": "runtime_prepare",
+                "kind": kind.value,
+                "target": runtime.resolved_target,
+                "launcher": runtime.launcher_name,
+                "runtime_mode": runtime.runtime_mode,
+            },
+        )
+
+        # 2. Build context
         ctx = ScanContext(
-            target=target,
+            target=runtime.resolved_target,
             kind=kind,
             app_context_en=app_context_en,
             app_context_ko=app_context_ko,
             scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",
         )
+        ctx.runtime_profile = {  # type: ignore[attr-defined]
+            "launcher_name": runtime.launcher_name,
+            "runtime_mode": runtime.runtime_mode,
+            "metadata": dict(runtime.metadata),
+        }
+        ctx.launcher_notes = list(runtime.shared_notes)  # type: ignore[attr-defined]
+        ctx.target_hints = dict(target_hints or {})  # type: ignore[attr-defined]
 
         # Ghost activation — preserve behavior from legacy pipeline
         try:
             from vxis.ghost.trigger import parse_ghost_trigger
 
-            _activated, target = parse_ghost_trigger(target, self.config)
+            _activated, target = parse_ghost_trigger(runtime.resolved_target, self.config)
             ctx.target = target
         except Exception:
             pass  # Ghost optional; missing = no-op
 
-        # 2. Reset per-scan state (findings + brain counters + playbook dedup)
+        # 3. Reset per-scan state (findings + brain counters + playbook dedup)
         _reset_finding_store()
         _set_finding_event_callback(self._emit)
         reset_brain_decision_count()
@@ -509,7 +662,7 @@ class ScanPipeline:
         except Exception:
             pass
 
-        # 3. Propagate surface kind into Brain so it selects the right system prompt.
+        # 4. Propagate surface kind into Brain so it selects the right system prompt.
         # Brain is constructed before run() — we patch _target_kind here because
         # kind is only known at scan time, not at construction time.
         # Brain이 올바른 시스템 프롬프트를 선택할 수 있도록 서피스 종류를 주입합니다.
@@ -517,22 +670,146 @@ class ScanPipeline:
         if hasattr(self.brain, "_target_kind"):
             self.brain._target_kind = kind
 
-        # 4. Build the tool registry
+        # 5. Build the tool registry
         registry = build_default_registry(brain=self.brain)
 
-        # 5. Emit a synthetic phase_start so the CLI Rich Live display has content
+        # 6. Emit a synthetic phase_start so the CLI Rich Live display has content
         self._emit("phase_start", {"phase": "scan_loop", "name": "ScanAgentLoop"})
 
-        # 6. Create + run the ScanAgentLoop
-        max_iters = 50  # Phase A cap; Phase B will tune
+        # 7. Create + run the ScanAgentLoop
+        max_iters, hard_max_iters, extend_iters = _resolve_scan_loop_budget()
+        logger.info(
+            "scan loop budget: soft=%d hard=%d extend=%d",
+            max_iters,
+            hard_max_iters,
+            extend_iters,
+        )
         loop = ScanAgentLoop(
-            target=target,
+            target=ctx.target,
             registry=registry,
             max_iters=max_iters,
+            hard_max_iters=hard_max_iters,
+            adaptive_budget=True,
+            extend_iters=extend_iters,
             brain=self.brain,
             target_kind=kind,
             event_callback=self._emit,
         )
+        for note in runtime.shared_notes[:3]:
+            loop.state.add_shared_note(note)
+
+        # Cross-scan target memory: turn prior scans into concrete strategy
+        # pressure, not just passive notes.
+        try:
+            target_memory = _load_target_memory_profile(ctx.target)
+            ctx.target_memory = target_memory  # type: ignore[attr-defined]
+            if target_memory.get("target_known"):
+                loop._target_memory_profile = target_memory  # type: ignore[attr-defined]
+                loop.state.add_shared_note(
+                    f"memory: {target_memory['prior_scan_count']} prior scan(s) for this target."
+                )
+                loop.state.add_shared_note(
+                    "memory strategy: first revalidate the strongest prior lead, then spend at least one branch on unexplored surface."
+                )
+                for prior in (target_memory.get("known_findings") or [])[:4]:
+                    ft = str(prior.get("finding_type", ""))
+                    component = str(prior.get("affected_component", ""))
+                    title = str(prior.get("title", "") or ft or component)
+                    seed = _memory_finding_to_vector_seed(ft, title, component)
+                    if seed is None:
+                        continue
+                    vector_id, seed_title, priority = seed
+                    branch_id = f"memory:{ft}:{component or seed_title}".lower().replace(" ", "_")[:120]
+                    evidence = (
+                        f"Previously observed finding on this target: {ft} at {component or ctx.target}. "
+                        "Revalidate quickly, then deepen or pivot beyond the previously known scope."
+                    )
+                    loop.state.ensure_vector_candidate(
+                        branch_id,
+                        vector_id,
+                        f"Revalidate prior {seed_title}",
+                        priority=priority,
+                        evidence=evidence,
+                    )
+                for tactic in (target_memory.get("successful_tactics") or [])[:3]:
+                    loop.state.add_shared_note(
+                        "memory tactic: "
+                        + str(tactic.get("finding_type", ""))
+                        + " -> "
+                        + str(tactic.get("reasoning", "") or tactic.get("title", ""))[:120]
+                    )
+                for refuted in (target_memory.get("refuted_patterns") or [])[:3]:
+                    loop.state.add_shared_note(
+                        "memory refuted: suppress weak "
+                        + str(refuted.get("finding_type", ""))
+                        + " on "
+                        + str(refuted.get("affected_component", ""))[:80]
+                    )
+                for lead in (target_memory.get("branch_leads") or [])[:3]:
+                    lead_priority = _memory_branch_priority(lead)
+                    loop.state.ensure_branch(
+                        f"carry:{lead.get('id', 'branch')}",
+                        str(lead.get("vector_id", "MEM-CARRY")),
+                        str(lead.get("title", "Carry-over branch")),
+                        priority=lead_priority,
+                        role=str(lead.get("role", "post_exploit_worker")),
+                        phase=str(lead.get("phase", "")),
+                        owner="memory",
+                        objective=str(lead.get("objective", "")),
+                        next_step=str(lead.get("next_step", "")),
+                        blocker="carry-over lead",
+                        evidence="carry-over memory lead from previous scan; resume, verify current validity, then push deeper.",
+                        watch_terms=[str(lead.get("title", "")), str(lead.get("vector_id", ""))],
+                    )
+                    loop.state.add_shared_note(
+                        f"memory branch: reopen {lead.get('title', 'branch')} as p{lead_priority} {lead.get('role', 'worker')}/{lead.get('phase', '?')}"
+                    )
+        except Exception:
+            logger.exception("Failed to seed scan loop from target memory profile")
+
+        # Local retrospective feedback loop: seed the next run with the most
+        # recent runtime weaknesses for this target. This is separate from the
+        # GitHub Actions growth loop and is meant for unattended local scans.
+        try:
+            from vxis.growth.scan_retrospective import load_latest_target_retrospective
+
+            prior_retro = load_latest_target_retrospective(ctx.target)
+            if prior_retro:
+                for hint in (prior_retro.get("improvement_hints") or [])[:3]:
+                    reason = str(hint.get("reason", "")).strip()
+                    if reason:
+                        loop.state.add_shared_note(f"retrospective: {reason}")
+                seen_carry_titles: set[tuple[str, str]] = set()
+                for item in (prior_retro.get("review_queue") or [])[:3]:
+                    status = str(item.get("status", "open")).lower()
+                    if status not in {"open", "escalated"}:
+                        continue
+                    raw_reason = str(item.get("reason", "") or "")
+                    if "MagicMock" in raw_reason:
+                        continue
+                    raw_title = str(item.get("title", "") or "")
+                    normalized_title = _normalize_carryover_title(raw_title)
+                    if raw_title.lower().startswith("carryover:"):
+                        continue
+                    dedup_key = (
+                        normalized_title,
+                        str(item.get("affected_component", "")).strip().lower(),
+                    )
+                    if dedup_key in seen_carry_titles:
+                        continue
+                    seen_carry_titles.add(dedup_key)
+                    loop.state.record_review_item(
+                        f"carry:{item.get('id', 'retro')}",
+                        stage="retrospective",
+                        status="open",
+                        title=f"carryover:{normalized_title or 'review item'}",
+                        reason=raw_reason or "Carried from previous scan retrospective.",
+                        action_hint=str(item.get("action_hint", "")) or "Resolve this review gap early in the new run.",
+                        affected_component=str(item.get("affected_component", "")),
+                        source_finding_type=str(item.get("source_finding_type", "")),
+                    )
+        except Exception:
+            logger.exception("Failed to seed scan loop from prior retrospective")
 
         loop_result: dict[str, Any] = {}
         try:
@@ -584,9 +861,17 @@ class ScanPipeline:
         ctx.branches = loop_result.get("branches", []) or []  # type: ignore[attr-defined]
         ctx.shared_notes = loop_result.get("shared_notes", []) or []  # type: ignore[attr-defined]
         ctx.llm_usage = get_llm_usage_stats()  # type: ignore[attr-defined]
+        ctx.runtime_profile = {  # type: ignore[attr-defined]
+            "launcher_name": runtime.launcher_name,
+            "runtime_mode": runtime.runtime_mode,
+            "metadata": dict(runtime.metadata),
+        }
         # Phase 4: surface sandbox invocations so _compute_vxis_score can
         # credit VC for shell_exec / python_exec usage (sandbox primacy).
         ctx.sandbox_invocations = loop_result.get("sandbox_invocations", []) or []  # type: ignore[attr-defined]
+        ctx.final_report_sections = _extract_final_report_sections(  # type: ignore[attr-defined]
+            list(getattr(loop.state, "messages", []))
+        )
         if verdict_counts:
             print(
                 "VXIS_BELIEF verdicts={} confirmed={} refuted={}".format(
@@ -741,9 +1026,38 @@ class ScanPipeline:
                 target=ctx.target,
                 findings=finding_dicts_raw,
                 fingerprint=extracted_fingerprint,
+                scan_id=ctx.scan_id,
+                confirmed_findings=getattr(ctx, "confirmed_findings", []) or [],
+                refuted_findings=getattr(ctx, "refuted_findings", []) or [],
+                review_history=loop_result.get("review_history", []) or [],
+                branches=loop_result.get("branches", []) or [],
             )
+            refreshed_memory = _load_target_memory_profile(ctx.target)
+            ctx.target_memory = refreshed_memory  # type: ignore[attr-defined]
+            ctx.aggregated_findings = list(refreshed_memory.get("aggregated_findings") or [])  # type: ignore[attr-defined]
         except Exception:
             logger.exception("Failed to record scan memory")
+
+        # Local self-improvement loop: capture a per-scan retrospective with
+        # review queue, open branches, verdict pressure, and suggested code
+        # areas. This is runtime-local and intentionally separate from the
+        # GitHub Actions growth loop.
+        try:
+            from vxis.growth.scan_retrospective import record_scan_retrospective
+
+            retrospective_path = record_scan_retrospective(
+                scan_id=ctx.scan_id,
+                target=ctx.target,
+                findings=_get_finding_dicts(),
+                loop_result=loop_result,
+                messages=list(getattr(loop.state, "messages", [])),
+                attack_chains=list(getattr(ctx, "attack_chains", []) or []),
+                llm_usage=dict(getattr(ctx, "llm_usage", {}) or {}),
+                control_plane=dict(getattr(loop, "_latest_control_plane", {}) or {}),
+            )
+            ctx.scan_retrospective_path = str(retrospective_path)  # type: ignore[attr-defined]
+        except Exception:
+            logger.exception("Failed to record scan retrospective")
 
         _set_finding_event_callback(None)
         return ctx
@@ -762,7 +1076,7 @@ class ScanPipeline:
     async def _generate_report(self, ctx: ScanContext) -> None:
         """Render the HTML report via ReportGenerator. Honor --output flag."""
         try:
-            from vxis.report.generator import ReportData, ReportGenerator
+            from vxis.report.generator import _DEFAULT_METHODOLOGY, ReportData, ReportGenerator
         except Exception as e:
             logger.warning("Report modules unavailable: %s", e)
             return
@@ -812,10 +1126,25 @@ class ScanPipeline:
             company_name="VXIS Security",
             author="VXIS Autonomous Brain",
             executive_summary=(
-                f"Phase A scan completed: {len(ctx.findings)} finding(s)"
-                f"|||Phase A 스캔 완료: {len(ctx.findings)}건 발견"
+                (
+                    (getattr(ctx, "final_report_sections", {}) or {}).get("executive_summary")
+                    or f"Phase A scan completed: {len(ctx.findings)} finding(s)|||Phase A 스캔 완료: {len(ctx.findings)}건 발견"
+                )
+            ),
+            methodology=(
+                (getattr(ctx, "final_report_sections", {}) or {}).get("methodology")
+                or _DEFAULT_METHODOLOGY
+            ),
+            technical_analysis=(
+                (getattr(ctx, "final_report_sections", {}) or {}).get("technical_analysis")
+                or ""
+            ),
+            recommendations=(
+                (getattr(ctx, "final_report_sections", {}) or {}).get("recommendations")
+                or ""
             ),
             attack_chains=chain_id_lists,
+            aggregated_findings=list(getattr(ctx, "aggregated_findings", []) or []),
             verdict_counts=getattr(ctx, "verdict_counts", {}) or {},
             confirmed_findings=getattr(ctx, "confirmed_findings", []) or [],
             refuted_findings=getattr(ctx, "refuted_findings", []) or [],

@@ -25,6 +25,21 @@ _event_callback: Callable[[str, dict[str, Any]], None] | None = None
 _VALID_SEVERITIES = ("critical", "high", "medium", "low", "informational")
 
 
+def _canonical_finding_type(value: str) -> str:
+    ft = str(value or "").lower().strip()
+    if not ft:
+        return ft
+    if ft.startswith("xss_") or ft == "xss":
+        return "xss"
+    if ft.startswith("sqli") or ft in {"sql_injection", "sqli_blind", "sqli_time"}:
+        return "sql_injection"
+    if ft.startswith("ssrf"):
+        return "ssrf"
+    if ft in {"jwt_alg_none", "jwt_alg_confusion", "session_fixation", "password_reset_poisoning", "default_credentials", "weak_auth"}:
+        return "weak_auth"
+    return ft
+
+
 def _reset_for_tests() -> None:
     """Reset module-level state. Called from test fixtures, NOT from production."""
     global _findings, _chains, _event_callback
@@ -75,6 +90,89 @@ def _finding_by_id(finding_id: str) -> dict[str, Any] | None:
     return None
 
 
+def _chain_signature(finding_ids: list[str], crown_jewel: str) -> tuple[str, str, str]:
+    source_type = ""
+    target_type = ""
+    if finding_ids:
+        source = _finding_by_id(str(finding_ids[0])) or {}
+        target = _finding_by_id(str(finding_ids[-1])) or {}
+        source_type = _canonical_finding_type(str(source.get("finding_type", "")))
+        target_type = _canonical_finding_type(str(target.get("finding_type", "")))
+    return (
+        source_type,
+        target_type,
+        str(crown_jewel or "").strip().lower(),
+    )
+
+
+def _coalesce_report_fields(kwargs: dict[str, Any]) -> dict[str, str]:
+    """Normalize legacy VXIS fields into a Strix-style report contract."""
+    description = str(kwargs.get("description", "")).strip()
+    remediation_steps = str(
+        kwargs.get("remediation_steps")
+        or kwargs.get("remediation")
+        or ""
+    ).strip()
+    technical_analysis = str(
+        kwargs.get("technical_analysis")
+        or description
+        or ""
+    ).strip()
+    poc_description = str(
+        kwargs.get("poc_description")
+        or kwargs.get("evidence")
+        or ""
+    ).strip()
+    poc_script_code = str(
+        kwargs.get("poc_script_code")
+        or kwargs.get("evidence")
+        or ""
+    ).strip()
+    impact = str(
+        kwargs.get("impact")
+        or description
+        or ""
+    ).strip()
+    method = str(kwargs.get("method", "")).strip()
+    endpoint = str(
+        kwargs.get("endpoint")
+        or kwargs.get("affected_component")
+        or ""
+    ).strip()
+    return {
+        "description": description,
+        "impact": impact,
+        "technical_analysis": technical_analysis,
+        "poc_description": poc_description,
+        "poc_script_code": poc_script_code,
+        "remediation_steps": remediation_steps,
+        "method": method,
+        "endpoint": endpoint,
+    }
+
+
+def _normalize_extra_evidence(value: Any) -> list[dict[str, str]]:
+    """Coerce arbitrary extra evidence blobs into a safe structured list."""
+    if not isinstance(value, list):
+        return []
+    normalized: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        evidence_type = str(item.get("evidence_type", "")).strip().lower()
+        title = str(item.get("title", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if not evidence_type or not title or not content:
+            continue
+        normalized.append({
+            "evidence_type": evidence_type[:64],
+            "title": title[:160],
+            "content": content[:4000],
+            "content_type": str(item.get("content_type", "text/plain")).strip()[:120] or "text/plain",
+        })
+    return normalized
+
+
 class ReportFindingTool:
     name = "report_finding"
     description = (
@@ -90,9 +188,20 @@ class ReportFindingTool:
             "finding_type": {"type": "string", "description": "snake_case vuln type e.g. 'sql_injection', 'xss_reflected'"},
             "affected_component": {"type": "string"},
             "description": {"type": "string"},
-            "evidence": {"type": "string", "description": "Raw evidence: HTTP req/resp, payload, log excerpt"},
-            "remediation": {"type": "string"},
+            "impact": {"type": "string", "description": "Concrete business/security impact validated for this finding"},
+            "technical_analysis": {"type": "string", "description": "Why this issue is real, including control checks and reasoning"},
+            "poc_description": {"type": "string", "description": "Step-by-step reproduction summary for the validated exploit"},
+            "poc_script_code": {"type": "string", "description": "Actual exploit payload / HTTP exchange / command transcript"},
+            "evidence": {"type": "string", "description": "Legacy alias for PoC transcript; prefer poc_script_code"},
+            "remediation": {"type": "string", "description": "Legacy alias for remediation_steps"},
+            "remediation_steps": {"type": "string", "description": "Specific remediation guidance"},
+            "endpoint": {"type": "string"},
+            "method": {"type": "string"},
             "cwe": {"type": "string", "description": "e.g. 'CWE-89'"},
+            "extra_evidence": {
+                "type": "array",
+                "description": "Additional evidence artifacts such as callback hits, retrieval previews, or exfil traces",
+            },
         },
         "required": ["title", "severity", "finding_type", "affected_component", "description"],
     }
@@ -113,6 +222,48 @@ class ReportFindingTool:
                 ok=False,
                 summary=f"report_finding: missing required fields: {missing}",
                 error="missing_fields",
+            )
+
+        normalized = _coalesce_report_fields(kwargs)
+        if severity in ("high", "critical"):
+            missing_report_parts = [
+                field_name
+                for field_name in (
+                    "impact",
+                    "technical_analysis",
+                    "poc_description",
+                    "poc_script_code",
+                    "remediation_steps",
+                )
+                if not normalized[field_name]
+            ]
+            if missing_report_parts:
+                pretty = ", ".join(missing_report_parts)
+                return ToolResult(
+                    ok=False,
+                    summary=(
+                        "report_finding: HIGH/CRITICAL findings must include Strix-style "
+                        f"report fields before they can be recorded. Missing: {pretty}."
+                    ),
+                    error="missing_report_fields",
+                    data={"missing_fields": missing_report_parts},
+                )
+
+        if severity in ("medium", "low", "informational") and not normalized["poc_script_code"]:
+            normalized["poc_script_code"] = str(kwargs.get("evidence", "")).strip()
+        if severity in ("medium", "low", "informational") and not normalized["poc_description"]:
+            normalized["poc_description"] = str(kwargs.get("evidence", "")).strip()
+        if severity in ("medium", "low", "informational") and not normalized["remediation_steps"]:
+            normalized["remediation_steps"] = str(kwargs.get("remediation", "")).strip()
+
+        if severity in ("high", "critical") and not normalized["poc_script_code"]:
+            return ToolResult(
+                ok=False,
+                summary=(
+                    "report_finding: HIGH/CRITICAL findings require actual exploit "
+                    "payload/transcript in poc_script_code."
+                ),
+                error="missing_poc_script",
             )
 
         # Phase B: simple dedup — if a finding with the same (finding_type,
@@ -162,17 +313,55 @@ class ReportFindingTool:
             path = re.sub(r"/\d+(/|$)", "/", path).rstrip("/")
             return path
 
-        new_type = _normalize(kwargs["finding_type"])
+        new_type = _normalize(_canonical_finding_type(kwargs["finding_type"]))
         new_component = _normalize(kwargs["affected_component"])
         new_base = _base_path(kwargs["affected_component"])
+        normalized_extra_evidence = _normalize_extra_evidence(kwargs.get("extra_evidence"))
 
         for existing in _findings:
-            ex_type = _normalize(existing["finding_type"])
+            ex_type = _normalize(_canonical_finding_type(existing["finding_type"]))
             ex_component = _normalize(existing["affected_component"])
             ex_base = _base_path(existing["affected_component"])
 
             # Exact match OR same base path + same finding type
             if ex_type == new_type and (ex_component == new_component or ex_base == new_base):
+                variants = existing.setdefault("variant_titles", [])
+                title = str(kwargs.get("title", "")).strip()
+                if title and title not in variants:
+                    variants.append(title)
+                variant_types = existing.setdefault("variant_finding_types", [])
+                raw_type = str(kwargs.get("finding_type", "")).strip()
+                if raw_type and raw_type not in variant_types:
+                    variant_types.append(raw_type)
+                new_poc = str(normalized["poc_script_code"]).strip()
+                old_poc = str(existing.get("poc_script_code", "")).strip()
+                if new_poc and new_poc not in old_poc:
+                    existing["poc_script_code"] = (
+                        old_poc + ("\n\n--- Variant replay ---\n" if old_poc else "") + new_poc
+                    )
+                    existing["evidence"] = existing["poc_script_code"]
+                new_analysis = str(normalized["technical_analysis"]).strip()
+                old_analysis = str(existing.get("technical_analysis", "")).strip()
+                if new_analysis and new_analysis not in old_analysis:
+                    existing["technical_analysis"] = (
+                        old_analysis + ("\n\nVariant note: " if old_analysis else "") + new_analysis
+                    )
+                if normalized_extra_evidence:
+                    existing_extra = existing.setdefault("extra_evidence", [])
+                    existing_keys = {
+                        (
+                            str(ev.get("evidence_type", "")),
+                            str(ev.get("title", "")),
+                            str(ev.get("content", "")),
+                        )
+                        for ev in existing_extra
+                        if isinstance(ev, dict)
+                    }
+                    for ev in normalized_extra_evidence:
+                        key = (ev["evidence_type"], ev["title"], ev["content"])
+                        if key not in existing_keys:
+                            existing_extra.append(ev)
+                            existing_keys.add(key)
                 # If base-path match, append this variant to affected_endpoints
                 if ex_component != new_component:
                     endpoints = existing.get("affected_endpoints", [existing["affected_component"]])
@@ -210,10 +399,18 @@ class ReportFindingTool:
             "severity": severity,
             "finding_type": str(kwargs["finding_type"]),
             "affected_component": str(kwargs["affected_component"]),
-            "description": str(kwargs["description"]),
-            "evidence": str(kwargs.get("evidence", "")),
-            "remediation": str(kwargs.get("remediation", "")),
+            "description": normalized["description"],
+            "impact": normalized["impact"],
+            "technical_analysis": normalized["technical_analysis"],
+            "poc_description": normalized["poc_description"],
+            "poc_script_code": normalized["poc_script_code"],
+            "evidence": normalized["poc_script_code"],
+            "remediation": normalized["remediation_steps"],
+            "remediation_steps": normalized["remediation_steps"],
+            "endpoint": normalized["endpoint"],
+            "method": normalized["method"],
             "cwe": str(kwargs.get("cwe", "")),
+            "extra_evidence": normalized_extra_evidence,
         }
         _findings.append(finding)
         logger.info("[Finding] %s [%s] %s — %s", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80])
@@ -342,6 +539,22 @@ class LinkChainTool:
                 error="unknown_finding_ids",
             )
 
+        new_signature = _chain_signature(list(finding_ids), str(crown_jewel))
+        for existing in _chains:
+            existing_ids = list(existing.get("finding_ids") or [])
+            if tuple(existing_ids) == tuple(finding_ids):
+                return ToolResult(
+                    ok=True,
+                    data={"id": existing.get("id", ""), "length": len(existing_ids), "total_chains": len(_chains), "dedup": True},
+                    summary=f"link_chain: duplicate chain ignored ({existing.get('id', '')})",
+                )
+            if _chain_signature(existing_ids, str(existing.get("crown_jewel", ""))) == new_signature:
+                return ToolResult(
+                    ok=True,
+                    data={"id": existing.get("id", ""), "length": len(existing_ids), "total_chains": len(_chains), "dedup": True},
+                    summary=f"link_chain: similar chain ignored ({existing.get('id', '')})",
+                )
+
         chain_id = f"CHAIN-{len(_chains) + 1:03d}"
         chain = {
             "id": chain_id,
@@ -360,6 +573,11 @@ class LinkChainTool:
                 "finding_type": str(first.get("finding_type", "chain")),
                 "endpoint": str(first.get("affected_component", "")),
                 "vector_id": str(first.get("finding_type", "chain")),
+                "finding_ids": list(finding_ids),
+                "source_id": str(finding_ids[0]) if finding_ids else "",
+                "target_id": str(finding_ids[-1]) if finding_ids else "",
+                "source_title": str(first.get("title", "")),
+                "rationale": str(rationale),
                 "crown_jewel": str(crown_jewel),
             },
         )
@@ -374,6 +592,8 @@ class LinkChainTool:
                     "endpoint": str(finding.get("affected_component", "")),
                     "level": _severity_to_level(str(finding.get("severity", "low"))),
                     "reasoning": str(finding.get("title", rationale))[:60],
+                    "title": str(finding.get("title", "")),
+                    "severity": str(finding.get("severity", "low")),
                 },
             )
 

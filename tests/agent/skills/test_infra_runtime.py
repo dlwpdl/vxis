@@ -35,7 +35,12 @@ def test_test_infra_uses_short_timeouts_for_cloud_and_firebase(monkeypatch) -> N
 
     monkeypatch.setattr("vxis.interaction.hands.SessionManager", _FakeManager)
 
-    asyncio.run(test_infra.execute("https://example.com"))
+    asyncio.run(
+        test_infra.execute(
+            "https://example.com",
+            allow_direct_cloud_metadata_probe=True,
+        )
+    )
 
     cloud_calls = [
         kwargs

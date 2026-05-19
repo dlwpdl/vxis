@@ -18,6 +18,8 @@ from vxis.growth.schemas import NewsIntelligence, Proposal
 PROPOSALS_DIR = Path(".vxis/signals/proposals")
 APPLIED_DIR = Path(".vxis/signals/applied")
 PENDING_DIR = Path(".vxis/signals/pending")
+REJECTED_DIR = Path(".vxis/signals/rejected")
+TEST_PENDING_DIR = Path(".vxis/signals/test-pending")
 
 
 def generate_proposals(intel: NewsIntelligence) -> list[Proposal]:
@@ -258,6 +260,77 @@ def save_proposal(proposal: Proposal, directory: Path) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def _load_pending_proposal_records() -> list[tuple[Path, dict]]:
+    records: list[tuple[Path, dict]] = []
+    if not PENDING_DIR.exists():
+        return records
+    for path in sorted(PENDING_DIR.glob("*.json")):
+        try:
+            records.append((path, json.loads(path.read_text(encoding="utf-8"))))
+        except Exception:
+            continue
+    return records
+
+
+def _proposal_is_test_artifact(proposal: Proposal | dict) -> bool:
+    source_signal_id = str(
+        proposal.source_signal_id if isinstance(proposal, Proposal) else proposal.get("source_signal_id", "")
+    ).strip().lower()
+    proposal_id = str(
+        proposal.proposal_id if isinstance(proposal, Proposal) else proposal.get("proposal_id", "")
+    ).strip().lower()
+    return source_signal_id.startswith("test-") or proposal_id.startswith("test-")
+
+
+def _proposal_meets_pending_threshold(proposal: Proposal | dict, config: dict | None = None) -> bool:
+    cfg = config or load_bootstrap_config()
+    confidence = float(
+        proposal.confidence if isinstance(proposal, Proposal) else proposal.get("confidence", 0.0)
+    )
+    return confidence >= float(cfg["apply"].get("pr_review_threshold", 0.7))
+
+
+def list_reviewable_pending_proposals(config: dict | None = None) -> list[dict]:
+    cfg = config or load_bootstrap_config()
+    reviewable: list[dict] = []
+    for _path, data in _load_pending_proposal_records():
+        if _proposal_is_test_artifact(data):
+            continue
+        if not _proposal_meets_pending_threshold(data, cfg):
+            continue
+        reviewable.append(data)
+    return reviewable
+
+
+def count_reviewable_pending_proposals(config: dict | None = None) -> int:
+    return len(list_reviewable_pending_proposals(config))
+
+
+def prune_pending_proposals(config: dict | None = None) -> dict[str, int]:
+    cfg = config or load_bootstrap_config()
+    moved_test = 0
+    moved_rejected = 0
+    TEST_PENDING_DIR.mkdir(parents=True, exist_ok=True)
+    REJECTED_DIR.mkdir(parents=True, exist_ok=True)
+    for path, data in _load_pending_proposal_records():
+        if _proposal_is_test_artifact(data):
+            path.replace(TEST_PENDING_DIR / path.name)
+            moved_test += 1
+            continue
+        if not _proposal_meets_pending_threshold(data, cfg):
+            data["status"] = "rejected"
+            data["rolled_back_at"] = datetime.now(timezone.utc).isoformat()
+            target = REJECTED_DIR / path.name
+            target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            path.unlink(missing_ok=True)
+            moved_rejected += 1
+    return {
+        "moved_test_artifacts": moved_test,
+        "moved_rejected": moved_rejected,
+        "pending_reviewable": count_reviewable_pending_proposals(cfg),
+    }
 
 
 def apply_proposals(proposals: list[Proposal]) -> dict:

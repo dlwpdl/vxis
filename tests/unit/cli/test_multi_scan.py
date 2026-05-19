@@ -159,6 +159,32 @@ class TestDispatchOrder:
         assert pipeline.run.call_count == 1
         call_args = pipeline.run.call_args
         assert call_args.kwargs.get("target") == "http://a" or call_args.args[0] == "http://a"
+        assert call_args.kwargs.get("target_hints") == {}
+
+    def test_manifest_target_hints_are_forwarded_to_pipeline(self) -> None:
+        pipeline = _fake_pipeline()
+        manifest = _make_manifest(targets=[
+            ManifestTarget(
+                name="api",
+                kind=TargetKind.WEB,
+                entry="http://localhost:3000",
+                hints={"compose_file": "infra/benchmarks/juice-shop.yml", "service": "juice-shop"},
+            ),
+        ])
+
+        with (
+            patch(_PIPELINE_PATH, return_value=pipeline),
+            patch(_BRAIN_PATH, return_value=MagicMock()),
+            patch(_PHASE_G_PATH, new_callable=AsyncMock, return_value=[]),
+            patch(_REPORT_PATH),
+        ):
+            asyncio.run(_async_multi_scan(manifest))
+
+        call_args = pipeline.run.call_args
+        assert call_args.kwargs["target_hints"] == {
+            "compose_file": "infra/benchmarks/juice-shop.yml",
+            "service": "juice-shop",
+        }
 
 
 # ---------------------------------------------------------------------------

@@ -31,6 +31,24 @@ vxis scan <target> [OPTIONS]
 | `preflight.py` | Pre-flight checks (reachable target, required tools, disk space) |
 | `installer.py` | Optional scanner tool installer (apt/pip/go install automation) |
 
+## Local llama.cpp Brain
+
+The no-args TUI path supports scan start -> AI autonomous scan -> `Local Runtime` -> `llama.cpp server`.
+It sets `UPSTREAM_LLM_PROVIDER=llamacpp`, `UPSTREAM_LLM_MODEL`, and
+`VXIS_LLAMACPP_BASE_URL`, asks for the runtime context window
+(`VXIS_LLAMACPP_CONTEXT`), then verifies `GET /v1/models` before delegating to
+the same Brain-first pipeline used by `vxis scan`. Local runtimes use a tighter
+history-compression profile than cloud models. The TUI prefers a running
+compact proxy at `http://127.0.0.1:8090`, otherwise it falls back to
+`http://localhost:8080`. The llama.cpp context default is `8192`; keep it
+matched to `llama-server -c/--ctx-size`.
+
+Start llama.cpp separately first:
+
+```bash
+llama-server -m /path/to/model.gguf -c 8192 --host 127.0.0.1 --port 8080
+```
+
 ## Phase A change — single-line import swap
 
 `cli/main.py:437` switched from `vxis.pipeline.pipeline` to `vxis.pipeline.scan_pipeline_v2`. Everything else (constructor call at :590, run() call at :602, event callback plumbing, injection gate wiring) is untouched — `ScanPipelineV2` preserves the legacy signature exactly.
