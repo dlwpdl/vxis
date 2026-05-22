@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -20,7 +21,13 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
-from rich.text import Text
+
+from vxis.cli.main_helpers import (
+    _convert_finding_records,
+    _get_config,
+    _load_scan_instructions,
+    _print_banner,
+)
 
 app = typer.Typer(
     name="vxis",
@@ -46,31 +53,6 @@ app.add_typer(client_app, name="client")
 db_app = typer.Typer(help="Database migration helpers (Alembic)", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 
-# ---------------------------------------------------------------------------
-# ASCII banner
-# ---------------------------------------------------------------------------
-
-_BANNER = r"""
-__     __ __  __ ___  ____
-\ \   / / \ \/ /|_ _|/ ___|
- \ \ / /   \  /  | | \___ \
-  \ V /    /  \ _| |_ ___) |
-   \_/    /_/\_\_____|____/
-"""
-
-
-def _print_banner() -> None:
-    """Render the VXIS ASCII banner using Rich."""
-    console.print(
-        Panel(
-            Text(_BANNER.strip(), style="bold cyan", justify="center"),
-            subtitle="[dim]AI-powered security automation platform[/dim]",
-            border_style="cyan",
-            padding=(0, 2),
-        )
-    )
-
-
 @app.callback()
 def _app_callback(ctx: typer.Context) -> None:
     """인자 없이 vxis 실행 시 인터랙티브 모드 진입."""
@@ -93,199 +75,9 @@ def _app_callback(ctx: typer.Context) -> None:
 @app.command()
 def help() -> None:
     """VXIS 전체 사용법 가이드 — 스캔, 리포트, 타겟, 파이프라인, 벤치마크."""
-    _print_banner()
+    from vxis.cli.help_text import render_help
 
-    from vxis.registry import (
-        VERSION, WEB_PHASES, EXTERNAL_PHASES, FUTURE_PHASES,
-        BENCHMARK_TARGETS, STAGE_NAMES,
-    )
-    from rich.markdown import Markdown
-    from rich.table import Table
-
-    console.print(f"  [bold]v{VERSION}[/bold]\n")
-
-    guide = """## 스캔
-
-```bash
-# 벤치마크 스캔 (스코어링 + HTML 리포트 자동 생성)
-python tools/growth_loop_runner.py --targets mutillidae --iterations 1
-
-# 여러 타겟
-python tools/growth_loop_runner.py --targets dvwa,juice-shop,webgoat --iterations 1
-
-# 시간 제한 (KST 06시까지 반복)
-python tools/growth_loop_runner.py --targets dvwa --until 06:00
-
-# CLI 직접 스캔 (Brain-First 파이프라인)
-vxis scan http://localhost:8081                    # LLM API Brain 자율 실행
-vxis scan http://localhost:8081 --interactive      # Claude Code가 Brain (MCP)
-vxis scan http://localhost:8081 -g                 # Ghost 익명화 켜기
-vxis scan http://localhost:8081 --resume <ckpt>    # 체크포인트 재개
-```
-
-## 리포트
-
-```bash
-vxis report <SCAN_ID> -o reports/output.html
-vxis export <SCAN_ID> --format docx                # DOCX/JSON/CSV/Attestation
-```
-
-## Self-Growth Intelligence (`vxis news`)
-
-```bash
-vxis news pending              # 검토 대기 중인 자가성장 제안
-vxis news show <PROPOSAL_ID>   # 제안 상세 보기
-vxis news approve <PROPOSAL_ID># 수동 승인 → 자동 적용
-vxis news reject <PROPOSAL_ID> # 거부
-vxis news rollback <PROPOSAL_ID>
-vxis news digest --days 7      # 주간 요약
-vxis news stats                # 부트스트랩 모드 + 누적 통계
-```
-
-## MCP 서버 (외부 Brain 연동)
-
-```bash
-# Claude Code에 VXIS를 도구로 등록
-claude mcp add vxis python -m vxis.mcp_server
-
-# 41개 primitive 툴 노출: sense_*/pattern_*/kb_*/session_*/
-#   ghost_*/chain_*/output_*/phase_*/scope_*
-```
-
-## 기타 명령어
-
-```bash
-vxis plugins          # 플러그인 목록
-vxis setup            # 도구 설치 현황
-vxis diff <ID1> <ID2> # 두 스캔 비교
-vxis trend '*'        # 전체 타겟 점수 추이
-vxis dashboard        # 웹 대시보드
-vxis kb               # 취약점 지식베이스
-vxis schedule         # 지속 모니터링 스케줄
-vxis client           # 클라이언트 관리
-vxis integrations     # Slack/Discord/Jira/Linear/GitHub
-vxis version          # 버전 정보
-```
-"""
-    console.print(Markdown(guide))
-
-    # ── Pipeline Phases (registry에서 동적 생성) ──
-    console.print("\n[bold]Pipeline Phases[/bold]\n")
-    phase_table = Table(show_header=True, header_style="bold cyan")
-    phase_table.add_column("Phase", width=8)
-    phase_table.add_column("Name", width=45)
-    phase_table.add_column("Stage", width=20)
-
-    prev_stage = ""
-    for p in WEB_PHASES:
-        stage_label = STAGE_NAMES.get(p.stage, p.stage)
-        if p.stage != prev_stage:
-            phase_table.add_row("", "", "", style="dim")
-            prev_stage = p.stage
-        phase_table.add_row(f"P{p.id}", p.name, stage_label)
-
-    phase_table.add_row("", "", "", style="dim")
-    for p in EXTERNAL_PHASES:
-        phase_table.add_row(f"P{p.id}", f"{p.name} [dim](GHA)[/dim]", "External", style="dim")
-    for p in FUTURE_PHASES:
-        phase_table.add_row(f"P{p.id}", f"{p.name} [dim](planned)[/dim]", "Future", style="dim")
-
-    console.print(phase_table)
-
-    # ── Benchmark Targets (registry에서 동적 생성) ──
-    console.print("\n[bold]Benchmark Targets[/bold]\n")
-    target_table = Table(show_header=True, header_style="bold cyan")
-    target_table.add_column("Name", width=12)
-    target_table.add_column("Port", width=10)
-    target_table.add_column("Category", width=10)
-    target_table.add_column("Description", width=30)
-    target_table.add_column("Docker", width=30)
-
-    for t in BENCHMARK_TARGETS:
-        port = t.port.split(":")[0]
-        docker_cmd = f"docker run -d -p {t.port} {t.image}" if t.image else f"docker compose ({t.compose})"
-        target_table.add_row(t.name, port, t.category, t.description, docker_cmd)
-
-    console.print(target_table)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _get_config():
-    """Load and return the default VXISConfig.
-
-    Importing here avoids circular imports and keeps startup fast when the
-    caller only needs --help output.
-    """
-    from vxis.config.schema import VXISConfig
-
-    return VXISConfig()
-
-
-def _convert_finding_records(records) -> list:
-    """Convert a list of FindingRecord ORM rows to Pydantic Finding models.
-
-    Mirrors the conversion logic used in the dashboard module so that CLI
-    report generation produces identical Finding objects.
-    """
-    from vxis.models.finding import (
-        CVSSVector,
-        Evidence,
-        Finding,
-        FindingStatus,
-        MitreAttack,
-        Reference,
-        Severity,
-    )
-
-    findings: list[Finding] = []
-    for rec in records:
-        cvss = None
-        if rec.cvss_score is not None and rec.cvss_vector:
-            cvss = CVSSVector(vector_string=rec.cvss_vector, base_score=rec.cvss_score)
-
-        mitre = None
-        if rec.mitre_attack:
-            mitre = MitreAttack(**rec.mitre_attack)
-
-        evidence = [Evidence(**e) for e in (rec.evidence or [])]
-        references = [Reference(**r) for r in (rec.references or [])]
-
-        findings.append(
-            Finding(
-                id=str(rec.id),
-                scan_id=str(rec.scan_id),
-                title=rec.title,
-                description=rec.description,
-                severity=Severity(rec.severity),
-                status=FindingStatus(rec.status),
-                target=rec.target,
-                affected_component=rec.affected_component or "",
-                port=rec.port,
-                protocol=rec.protocol,
-                finding_type=rec.finding_type,
-                cvss=cvss,
-                cve_ids=rec.cve_ids or [],
-                cwe_ids=rec.cwe_ids or [],
-                mitre_attack=mitre,
-                source_plugin=rec.source_plugin,
-                source_plugins=rec.source_plugins or [],
-                confidence=rec.confidence,
-                evidence=evidence,
-                remediation=rec.remediation,
-                references=references,
-                analyst_severity=Severity(rec.analyst_severity)
-                if rec.analyst_severity
-                else None,
-                analyst_notes=rec.analyst_notes,
-                discovered_at=rec.discovered_at,
-                updated_at=rec.updated_at,
-            )
-        )
-    return findings
+    render_help(console, _print_banner)
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +99,11 @@ def scan(
         "--profile",
         "-p",
         help="Scan profile: stealth | standard | aggressive",
+    ),
+    client: Optional[str] = typer.Option(
+        None,
+        "--client",
+        help="Client ID slug to associate with this scan.",
     ),
     ghost: bool = typer.Option(
         False,
@@ -359,6 +156,16 @@ def scan(
         help="Target surface: web | desktop | mobile | game (phase-A: web only; "
              "desktop/mobile/game land in phase-B+).",
     ),
+    instruction: Optional[str] = typer.Option(
+        None,
+        "--instruction",
+        help="Operator instructions for credentials, focus areas, exclusions, or testing approach.",
+    ),
+    instruction_file: Optional[Path] = typer.Option(
+        None,
+        "--instruction-file",
+        help="Path to a Markdown/text file with detailed scan instructions.",
+    ),
 ) -> None:
     """Run a Brain-First security scan against the target.
 
@@ -378,7 +185,6 @@ def scan(
             raise typer.Exit(code=2)
 
         import yaml  # type: ignore[import-untyped]
-        from pydantic import ValidationError as _ValErr
         from vxis.cli.manifest import ScanManifest
         from vxis.cli.multi_scan import multi_scan
 
@@ -408,7 +214,23 @@ def scan(
             "[bold red]Error:[/bold red] Provide a TARGET URL or use --manifest for multi-target scans."
         )
         raise typer.Exit(code=2)
+
+    try:
+        scan_instructions = _load_scan_instructions(instruction, instruction_file)
+    except Exception as exc:
+        err_console.print(f"[bold red]Invalid scan instructions:[/bold red] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    if scan_instructions:
+        os.environ["VXIS_SCAN_INSTRUCTIONS"] = scan_instructions
+    else:
+        os.environ.pop("VXIS_SCAN_INSTRUCTIONS", None)
+
     selected_plugins = [p.strip() for p in plugins.split(",") if p.strip()] if plugins else None
+    if client:
+        os.environ["VXIS_CLIENT_ID"] = client
+    else:
+        os.environ.pop("VXIS_CLIENT_ID", None)
     # Logging policy: TUI(non-interactive)는 로그를 파일로 보냄 → Live 간섭 0
     # interactive 모드는 stdin/stdout이 JSON 프로토콜이라 stderr로 보내야 함
     log_level = logging.DEBUG if verbose else logging.INFO
@@ -484,6 +306,8 @@ def scan(
         pf_table.add_row("Proxy Pool:", _p_status)
     if selected_plugins:
         pf_table.add_row("Plugins:", ", ".join(selected_plugins))
+    if client:
+        pf_table.add_row("Client:", client)
     if log_path is not None:
         pf_table.add_row("Logs:", f"[dim]{log_path}[/dim] (tail -f to follow)")
 
@@ -713,7 +537,6 @@ def scan(
     # --- Final Results (Live display 종료 후) ---
     console.print()  # spacing after live display
 
-    severity_order = ["critical", "high", "medium", "low", "informational"]
     severity_styles = {
         "critical": "bold red", "high": "red", "medium": "yellow",
         "low": "blue", "informational": "dim",
@@ -800,7 +623,7 @@ def scan(
     # Summary line
     phase_failed = sum(1 for p in display.phases if p["status"] == "failed")
     summary_parts = [
-        f"[bold green]Scan completed[/bold green]",
+        "[bold green]Scan completed[/bold green]",
         f"[cyan]{ctx.duration_seconds:.1f}s[/cyan]",
         f"[bold]{len(ctx.findings)}[/bold] finding(s)",
         f"{len([p for p in display.phases if p['status'] == 'done'])}/{len(display.phases)} phases",
@@ -1704,7 +1527,6 @@ def client_scan(
     ),
 ) -> None:
     """Scan all of a client's authorised domains and generate branded reports."""
-    from vxis.config.client_manager import ClientManager
     from vxis.core.orchestrator import ScanOrchestrator
     from vxis.core.scope import ScopeViolationError
     from vxis.report.branding_engine import BrandingEngine
@@ -2402,7 +2224,6 @@ def news_approve(
     """
     from pathlib import Path as _P
     import json as _json
-    import shutil
     from datetime import datetime, timezone
 
     pending_path = _P(".vxis/signals/pending") / f"{proposal_id}.json"

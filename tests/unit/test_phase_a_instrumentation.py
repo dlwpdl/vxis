@@ -9,9 +9,6 @@ Tests for:
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 
 # ── Fix #1: peak_context_bytes ────────────────────────────────────

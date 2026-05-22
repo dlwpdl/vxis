@@ -149,6 +149,26 @@ class VXISConfig(BaseSettings):
     github_token: SecretStr | None = None
 
     # ------------------------------------------------------------------
+    # Hybrid LLM roles
+    # ------------------------------------------------------------------
+    director_llm: str = Field(
+        default="",
+        description="Frontier director model in provider/model format. Env: VXIS_DIRECTOR_LLM.",
+    )
+    worker_llm: str = Field(
+        default="",
+        description="Local-first worker model in provider/model format. Env: VXIS_WORKER_LLM.",
+    )
+    verifier_llm: str = Field(
+        default="",
+        description="Strong verifier model in provider/model format. Env: VXIS_VERIFIER_LLM.",
+    )
+    summarizer_llm: str = Field(
+        default="",
+        description="Cheap/local summarizer model in provider/model format. Env: VXIS_SUMMARIZER_LLM.",
+    )
+
+    # ------------------------------------------------------------------
     # Ghost Mode — 익명화 프록시 풀
     # ------------------------------------------------------------------
     proxy_pool: list[str] = Field(

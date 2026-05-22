@@ -70,6 +70,7 @@ class ScanLiveDisplay:
         self.memory_directives: list[str] = []
         self.focus_branch: dict | None = None
         self.recent_attempts: list[dict] = []
+        self.agent_items: list[dict] = []
         self.shared_notes: list[str] = []
         self.telemetry: dict = {}
         self.proxy: dict = {}
@@ -210,6 +211,7 @@ class ScanLiveDisplay:
             self.memory_directives = list(data.get("memory_directives") or [])
             self.focus_branch = data.get("focus_branch") or None
             self.recent_attempts = list(data.get("recent_attempts") or [])
+            self.agent_items = list(data.get("agents") or [])
             self.shared_notes = list(data.get("shared_notes") or [])
             self.telemetry = dict(data.get("telemetry") or {})
             self.proxy = dict(data.get("proxy") or {})
@@ -410,6 +412,122 @@ class ScanLiveDisplay:
             title=f"[bold]Live Attacks[/bold] [dim](total: {self.total_attacks})[/dim]",
             border_style="yellow",
         )
+
+    def _render_agent_monitor(self) -> Panel:
+        """Crew monitor: active delegated agents, evidence, and next action."""
+        if not self.agent_items:
+            return Panel(
+                "[dim]no delegated agents yet[/dim]\n[dim]agent_graph workers appear here[/dim]",
+                title="[bold]Agents[/bold] [dim](0)[/dim]",
+                border_style="bright_black",
+            )
+
+        agents = sorted(
+            self.agent_items,
+            key=lambda item: (
+                str(item.get("status") or "") not in {"running", "waiting"},
+                str(item.get("created_at") or ""),
+                str(item.get("id") or ""),
+            ),
+        )
+        active = sum(1 for item in agents if str(item.get("status") or "") in {"running", "waiting"})
+        selected = self._selected_agent(agents)
+        lines: list[str] = []
+        for agent in agents[:5]:
+            agent_id = str(agent.get("id") or "?")
+            status = str(agent.get("status") or "?")
+            role = str(agent.get("role") or "worker")
+            runs = int(agent.get("execution_count") or 0)
+            skills = ",".join(str(skill) for skill in list(agent.get("skills") or [])[:2])
+            marker = ">" if selected and agent_id == str(selected.get("id") or "") else " "
+            style = {
+                "running": "yellow",
+                "waiting": "cyan",
+                "finished": "green",
+                "blocked": "red",
+            }.get(status, "white")
+            skill_text = f" [{skills}]" if skills else ""
+            lines.append(f"{marker} [{style}]{agent_id}[/{style}] {status:<8} {role} r{runs}{skill_text}")
+
+        if selected:
+            lines.append("")
+            lines.extend(self._agent_detail_lines(selected))
+
+        return Panel(
+            "\n".join(lines),
+            title=f"[bold]Agents[/bold] [dim]({active} active/{len(agents)} total)[/dim]",
+            border_style="magenta",
+        )
+
+    def _selected_agent(self, agents: list[dict]) -> dict | None:
+        for agent in agents:
+            if str(agent.get("status") or "") in {"running", "waiting"}:
+                return agent
+        return agents[0] if agents else None
+
+    def _agent_detail_lines(self, agent: dict) -> list[str]:
+        lines: list[str] = []
+        task = self._short(agent.get("task"), 82)
+        result = self._short(agent.get("result"), 82)
+        if task:
+            lines.append(f"[bold]task[/bold] {task}")
+        latest = self._latest_agent_execution(agent)
+        if latest:
+            verdict = "ok" if latest.get("ok") else "fail"
+            tool = self._short(latest.get("tool") or "child", 18)
+            summary = self._short(latest.get("summary"), 86)
+            lines.append(f"[bold]last[/bold] {tool} {verdict}: {summary}")
+        if result:
+            lines.append(f"[bold]result[/bold] {result}")
+        next_step = self._agent_next_action_hint(agent)
+        if next_step:
+            lines.append(f"[bold cyan]next[/bold cyan] {next_step}")
+        messages = list(agent.get("messages") or [])
+        if messages:
+            lines.append("[bold]msgs[/bold]")
+            for msg in messages[-2:]:
+                sender = self._short(msg.get("sender"), 14)
+                body = self._short(msg.get("body"), 78)
+                lines.append(f"[dim]{sender}:[/dim] {body}")
+        skill_context = str(agent.get("skill_context") or "")
+        action_line = next(
+            (line.strip() for line in skill_context.splitlines() if line.strip().startswith("action:")),
+            "",
+        )
+        if action_line:
+            lines.append(f"[dim]{self._short(action_line, 92)}[/dim]")
+        return lines
+
+    def _agent_next_action_hint(self, agent: dict) -> str:
+        status = str(agent.get("status") or "")
+        agent_id = str(agent.get("id") or "?")
+        latest = self._latest_agent_execution(agent)
+        result = str(agent.get("result") or "")
+        if status in {"running", "waiting"}:
+            if latest and latest.get("ok"):
+                return f'finish {agent_id} with concrete result, or send narrower instruction'
+            return f"run {agent_id} or send narrower instruction"
+        lowered = result.lower()
+        positive = any(token in lowered for token in ("confirmed", "vulnerable", "token", "admin", "sqli", "idor"))
+        clean = any(token in lowered for token in ("clean", "not vulnerable", "no issue", "blocked"))
+        if positive and not clean:
+            return "crown-chain: create/run post_exploit_worker; verify impact before finish"
+        return "use result to update branch/report, or mark exhausted"
+
+    @staticmethod
+    def _latest_agent_execution(agent: dict) -> dict | None:
+        executions = agent.get("executions")
+        if not isinstance(executions, list) or not executions:
+            return None
+        latest = executions[-1]
+        return latest if isinstance(latest, dict) else None
+
+    @staticmethod
+    def _short(value: object, limit: int) -> str:
+        text = " ".join(str(value or "").split())
+        if len(text) <= limit:
+            return text
+        return text[: max(0, limit - 3)].rstrip() + "..."
 
     def _render_control_plane(self) -> Panel:
         lines: list[str] = []
@@ -764,8 +882,9 @@ class ScanLiveDisplay:
         )
         # Center column: Brain thinking + Attack feed + Chains
         layout["center"].split(
-            Layout(self._render_brain_thinking(), size=9, name="thinking"),
-            Layout(self._render_control_plane(), size=12, name="control"),
+            Layout(self._render_brain_thinking(), size=8, name="thinking"),
+            Layout(self._render_agent_monitor(), size=15, name="agents"),
+            Layout(self._render_control_plane(), size=11, name="control"),
             Layout(self._render_attack_feed(), name="attacks"),
         )
         # Right column: hits + chain dossiers + findings

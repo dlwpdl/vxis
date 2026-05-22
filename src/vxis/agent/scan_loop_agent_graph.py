@@ -1,0 +1,442 @@
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from vxis.agent.agent_graph_runtime import (
+    agent_graph_agents_from_messages,
+    agent_graph_branch_id,
+    agent_graph_branch_priority,
+    agent_graph_crown_chain_next,
+    agent_graph_crown_jewel_for_result,
+    agent_graph_director_brief,
+    agent_graph_director_next_step,
+    agent_graph_result_needs_crown_chain,
+    agent_graph_terminal_branch_status,
+)
+from vxis.agent.scan_loop_state import _TERMINAL_BRANCH_STATUSES, BranchState
+from vxis.agent.tool_registry import ToolResult
+
+
+class ScanLoopAgentGraphMixin:
+    def _agent_graph_agents_from_messages(self) -> list[dict[str, Any]]:
+        return agent_graph_agents_from_messages(self.state.messages)
+
+    def _agent_graph_director_brief(
+        self,
+        agents: list[dict[str, Any]],
+        *,
+        local_strict: bool,
+    ) -> list[str]:
+        return agent_graph_director_brief(agents, local_strict=local_strict)
+
+    def _agent_graph_director_next_step(self, agent: dict[str, Any]) -> str:
+        return agent_graph_director_next_step(agent)
+
+    def _agent_graph_crown_chain_next(self, agent: dict[str, Any]) -> str:
+        return agent_graph_crown_chain_next(agent)
+
+    def _ensure_agent_graph_crown_followup_branch(
+        self,
+        agent: dict[str, Any],
+        *,
+        parent_branch_id: str,
+        directive: str,
+    ) -> BranchState | None:
+        agent_id = str(agent.get("id") or "").strip()
+        result = str(agent.get("result") or "").strip()
+        role = str(agent.get("role") or "").strip()
+        if not agent_id or not parent_branch_id or role == "post_exploit_worker":
+            return None
+        if not result or not self._agent_graph_result_needs_crown_chain(result):
+            return None
+
+        kind = self._target_kind_name()
+        vector_id = "DESK-CROWN-PIVOT" if kind == "desktop" else "WEB-CROWN-PIVOT"
+        crown_jewel = self._agent_graph_crown_jewel_for_result(result)
+        branch_id = f"{parent_branch_id}:crown-chain"
+        task = str(agent.get("task") or "delegated worker result").strip()
+        title = f"Crown-chain follow-up for {agent_id}"
+        objective = (
+            f"Turn delegated result into crown-jewel impact: {task}. "
+            f"Worker result: {result[:220]}"
+        )
+        next_step = (
+            "Create or run a post_exploit_worker. Test session reuse, privilege boundaries, "
+            "data access, and chain closure before allowing finish_scan."
+        )
+        branch = self.state.ensure_branch(
+            branch_id,
+            vector_id,
+            title,
+            priority=96,
+            role="post_exploit_worker",
+            phase="session_reuse",
+            owner="root",
+            parent_branch_id=parent_branch_id,
+            source_candidate_id=parent_branch_id,
+            objective=objective,
+            next_step=next_step,
+            crown_jewel=crown_jewel,
+            evidence=f"{agent_id}: {result[:240]}",
+            watch_terms=[
+                agent_id,
+                "post_exploit_worker",
+                "post_auth_enum",
+                "session",
+                "token",
+                "admin",
+                "data",
+                "link_chain",
+            ],
+        )
+        if branch.status not in _TERMINAL_BRANCH_STATUSES:
+            branch.status = "active"
+        branch.last_tool = "agent_graph"
+        branch.last_summary = directive[:240]
+        branch.last_report = result[:160]
+        branch.last_iter = self.state.iteration
+        todo = self.state.ensure_scan_todo(
+            branch.id,
+            branch.title,
+            priority=branch.priority,
+            source_candidate_id=branch.source_candidate_id or branch.id,
+        )
+        todo.status = "in_progress" if branch.status == "active" else todo.status
+        todo.detail = branch.last_report[:120]
+        todo.last_iter = self.state.iteration
+        return branch
+
+    @staticmethod
+    def _agent_graph_crown_jewel_for_result(result: str) -> str:
+        return agent_graph_crown_jewel_for_result(result)
+
+    @staticmethod
+    def _agent_graph_result_needs_crown_chain(result: str) -> bool:
+        return agent_graph_result_needs_crown_chain(result)
+
+    @staticmethod
+    def _agent_graph_branch_id(agent_id: str) -> str:
+        return agent_graph_branch_id(agent_id)
+
+    @staticmethod
+    def _agent_graph_branch_priority(agent: dict[str, Any]) -> int:
+        return agent_graph_branch_priority(agent)
+
+    @staticmethod
+    def _agent_graph_terminal_branch_status(agent: dict[str, Any]) -> str:
+        return agent_graph_terminal_branch_status(agent)
+
+    def _sync_agent_graph_result_to_branches(
+        self,
+        *,
+        name: str,
+        args: dict[str, Any] | Any,
+        result: ToolResult,
+    ) -> None:
+        """Mirror agent_graph state into durable BranchState records.
+
+        The tool keeps the protocol state; the loop needs a branch projection so
+        focus discipline, dashboard goals, and finish gates can reason about
+        delegated work.
+        """
+        if name != "agent_graph" or not isinstance(args, dict) or not isinstance(result.data, dict):
+            return
+
+        agents: list[dict[str, Any]] = []
+        single = result.data.get("agent")
+        if isinstance(single, dict):
+            agents.append(single)
+        for key in ("agents", "active_agents"):
+            collection = result.data.get(key)
+            if isinstance(collection, list):
+                agents.extend(item for item in collection if isinstance(item, dict))
+
+        seen: set[str] = set()
+        for agent in agents:
+            agent_id = str(agent.get("id") or "").strip()
+            branch_id = self._agent_graph_branch_id(agent_id)
+            if not branch_id or branch_id in seen:
+                continue
+            seen.add(branch_id)
+            role = str(agent.get("role") or "recon_worker").strip() or "recon_worker"
+            task = str(agent.get("task") or "").strip()
+            result_text = str(agent.get("result") or "").strip()
+            parent_agent_id = str(agent.get("parent_id") or "").strip()
+            parent_branch_id = self._agent_graph_branch_id(parent_agent_id)
+            if parent_branch_id and parent_branch_id not in self.state.branches:
+                parent_branch_id = ""
+            skills = [
+                str(skill).strip()
+                for skill in list(agent.get("skills") or [])
+                if str(skill).strip()
+            ] if isinstance(agent.get("skills"), list) else []
+            executions = agent.get("executions")
+            successful_executions = [
+                item
+                for item in executions
+                if isinstance(item, dict) and item.get("ok")
+            ] if isinstance(executions, list) else []
+            latest_success = successful_executions[-1] if successful_executions else {}
+            latest_success_summary = str(latest_success.get("summary") or "").strip()
+            latest_success_tool = str(latest_success.get("tool") or "child").strip()
+            task_terms = [
+                token
+                for token in re.findall(r"[a-z0-9_./:-]{4,}", task.lower())
+                if token not in {"with", "then", "this", "that", "into", "from"}
+            ]
+            next_step = (
+                "Finish this delegated agent with agent_graph(action='finish', agent_id=..., result=...) "
+                "after concrete evidence is gathered."
+            )
+            if skills:
+                next_step = f"Use skill/tool path: {', '.join(skills[:4])}; then finish this delegated agent with a concrete result."
+            if latest_success:
+                evidence_hint = f"{latest_success_tool}: {latest_success_summary}" if latest_success_summary else latest_success_tool
+                next_step = (
+                    "Successful child execution is available. Finish this delegated agent with "
+                    f"agent_graph(action='finish', agent_id='{agent_id}', result='<concrete evidence and impact>') "
+                    f"unless the evidence is inconclusive. Evidence: {evidence_hint[:120]}"
+                )
+            branch = self.state.ensure_branch(
+                branch_id,
+                f"agent_graph:{role}",
+                f"{role}: {task or agent_id}"[:120],
+                priority=self._agent_graph_branch_priority(agent),
+                role=role,
+                phase="delegated_task",
+                owner="agent_graph",
+                parent_branch_id=parent_branch_id,
+                objective=task,
+                next_step=next_step,
+                blocker=result_text if str(agent.get("status") or "").lower() == "blocked" else "",
+                crown_jewel="delegated proof result",
+                evidence=result_text or latest_success_summary or f"agent_graph {agent_id}",
+                watch_terms=[agent_id, role, task, *task_terms, *skills],
+            )
+            branch.status = self._agent_graph_terminal_branch_status(agent)
+            branch.last_tool = "agent_graph"
+            branch.last_summary = result.summary[:240]
+            branch.last_report = (result_text or result.summary)[:160]
+            branch.last_iter = self.state.iteration
+            if result.error in {
+                "run_limit_reached",
+                "executor_unavailable",
+                "no_child_action",
+                "child_tool_unavailable",
+                "child_tool_not_allowed",
+            }:
+                branch.blocker = result.summary[:180]
+            if result.error == "unsupported_execution_evidence":
+                branch.blocker = result.summary[:180]
+                branch.next_step = (
+                    "Run child evidence that matches the positive claim with "
+                    f"agent_graph(action='run', agent_id='{agent_id}'), or finish this agent as blocked/clean. "
+                    "The previous successful execution did not support the claimed vulnerability family."
+                )
+            if branch.status == "blocked" and result_text:
+                branch.blocker = result_text[:180]
+            elif branch.status in _TERMINAL_BRANCH_STATUSES:
+                branch.blocker = ""
+
+            todo = self.state.ensure_scan_todo(
+                branch.id,
+                branch.title,
+                priority=branch.priority,
+                source_candidate_id=branch.source_candidate_id or branch.id,
+            )
+            todo.status = {
+                "proven": "done",
+                "exhausted": "done",
+                "blocked": "blocked",
+                "active": "in_progress",
+            }.get(branch.status, "pending")
+            todo.detail = branch.last_report[:120]
+            todo.last_iter = self.state.iteration
+            self.state.add_shared_note(f"agent_graph {agent_id}: {branch.status} {task[:80]}")
+            crown_next = self._agent_graph_crown_chain_next(agent)
+            if crown_next:
+                self.state.add_shared_note(f"chain directive {agent_id}: {crown_next}")
+                followup = self._ensure_agent_graph_crown_followup_branch(
+                    agent,
+                    parent_branch_id=branch.id,
+                    directive=crown_next,
+                )
+                if followup is not None:
+                    self.state.add_shared_note(
+                        f"chain follow-up {agent_id}: {followup.id} -> {followup.crown_jewel}"
+                    )
+
+    async def _run_agent_graph_child_turn(self, agent: dict[str, Any], instruction: str) -> ToolResult:
+        agent_id = str(agent.get("id") or "").strip()
+        branch = self.state.branches.get(self._agent_graph_branch_id(agent_id))
+        action = (
+            self._forced_branch_action(branch)
+            if branch is not None and branch.owner != "agent_graph"
+            else None
+        )
+        if action is None:
+            action = self._agent_graph_action_from_node(agent, instruction)
+        if action is None:
+            return ToolResult(
+                ok=False,
+                data={"agent_id": agent_id, "instruction": instruction},
+                summary="agent_graph child turn: no executable step found for delegated task",
+                error="no_child_action",
+            )
+
+        tool_name, tool_args = action
+        allowed_child_tools = {"run_skill", "http_request", "browser_navigate", "browser_analyze_dom"}
+        if tool_name not in allowed_child_tools:
+            return ToolResult(
+                ok=False,
+                data={"agent_id": agent_id, "tool": tool_name, "args": tool_args},
+                summary=f"agent_graph child turn: tool {tool_name} is not allowed for bounded child execution",
+                error="child_tool_not_allowed",
+            )
+        if not self.registry.has_tool(tool_name):
+            return ToolResult(
+                ok=False,
+                data={"agent_id": agent_id, "tool": tool_name, "args": tool_args},
+                summary=f"agent_graph child turn: tool {tool_name} is not registered",
+                error="child_tool_unavailable",
+            )
+
+        result = await self.registry.dispatch(tool_name, tool_args)
+        return ToolResult(
+            ok=result.ok,
+            data={
+                "agent_id": agent_id,
+                "tool": tool_name,
+                "args": tool_args,
+                "result": {
+                    "ok": result.ok,
+                    "summary": result.summary,
+                    "data": result.data,
+                    "error": result.error,
+                },
+            },
+            summary=f"{tool_name}: {result.summary}",
+            error=result.error,
+        )
+
+    def _agent_graph_action_from_node(
+        self,
+        agent: dict[str, Any],
+        instruction: str,
+    ) -> tuple[str, dict[str, Any]] | None:
+        if "run_skill" in self.registry.list_tools():
+            blob = " ".join(
+                str(value or "")
+                for value in (
+                    agent.get("role"),
+                    agent.get("task"),
+                    agent.get("result"),
+                    " ".join(str(skill) for skill in list(agent.get("skills") or [])),
+                    instruction,
+                )
+            ).lower()
+            for raw_skill in list(agent.get("skills") or []):
+                skill = self._pivoted_skill_name(str(raw_skill))
+                if skill:
+                    return (
+                        "run_skill",
+                        {
+                            "skill": skill,
+                            "target_url": str(self.state.target),
+                            "params": self._best_skill_params(skill, hint_blob=blob),
+                        },
+                    )
+            inferred = (
+                ("test_idor", ("idor", "access_control", "broken access", "object")),
+                ("test_injection", ("sqli", "sql", "injection", "nosql", "ssti")),
+                ("test_xss", ("xss", "script")),
+                ("test_ssrf", ("ssrf", "callback", "metadata")),
+                ("attempt_auth", ("auth", "login", "credential", "session")),
+                ("test_sensitive_files", ("secret", "config", "file", "disclosure", "git")),
+                ("enumerate_endpoints", ("route", "endpoint", "surface", "map")),
+            )
+            for skill_name, tokens in inferred:
+                if not any(token in blob for token in tokens):
+                    continue
+                skill = self._pivoted_skill_name(skill_name)
+                if not skill:
+                    continue
+                return (
+                    "run_skill",
+                    {
+                        "skill": skill,
+                        "target_url": str(self.state.target),
+                        "params": self._best_skill_params(skill, hint_blob=blob),
+                    },
+                )
+
+        if "http_request" in self.registry.list_tools():
+            return ("http_request", {"method": "GET", "url": str(self.state.target)})
+        return None
+
+    async def _credit_agent_graph_child_execution(
+        self,
+        result: ToolResult,
+        *,
+        skills_completed: set[str],
+        real_skills_completed: set[str],
+    ) -> bool:
+        child = self._extract_agent_graph_child_execution(result)
+        if child is None:
+            return False
+        child_tool, child_args, child_result = child
+        for candidate_id in self._candidate_ids_for_action(child_tool, child_args):
+            self.state.record_attempt_outcome(
+                candidate_id,
+                child_tool,
+                child_args,
+                status=self._status_from_tool_result(child_result),
+                summary=child_result.summary,
+            )
+        for branch_id in self._branch_ids_for_action(child_tool, child_args):
+            self.state.record_branch_attempt(
+                branch_id,
+                child_tool,
+                child_args,
+                status=self._status_from_tool_result(child_result),
+                summary=child_result.summary,
+            )
+
+        if child_tool == "run_skill" and isinstance(child_args, dict):
+            skill = str(child_args.get("skill") or "").strip()
+            if skill and not child_result.ok:
+                data = child_result.data if isinstance(child_result.data, dict) else {}
+                if data.get("blocked"):
+                    self.state.record_blocked_skill(skill)
+            if skill and child_result.ok:
+                real_skills_completed.add(skill)
+                skills_completed.add(skill)
+                if isinstance(child_result.data, dict) and child_result.data:
+                    await self._promote_direct_run_skill_result(skill, child_result.data)
+        return True
+
+    @staticmethod
+    def _extract_agent_graph_child_execution(
+        result: ToolResult,
+    ) -> tuple[str, dict[str, Any], ToolResult] | None:
+        if not isinstance(result.data, dict):
+            return None
+        execution = result.data.get("execution")
+        if not isinstance(execution, dict):
+            return None
+        data = execution.get("data") if isinstance(execution.get("data"), dict) else {}
+        tool_name = str(execution.get("tool") or data.get("tool") or "").strip()
+        if not tool_name:
+            return None
+        args_raw = execution.get("args") if isinstance(execution.get("args"), dict) else data.get("args")
+        child_args = dict(args_raw) if isinstance(args_raw, dict) else {}
+        raw_result = data.get("result") if isinstance(data.get("result"), dict) else {}
+        child_result = ToolResult(
+            ok=bool(raw_result.get("ok", execution.get("ok", result.ok))),
+            data=dict(raw_result.get("data")) if isinstance(raw_result.get("data"), dict) else {},
+            summary=str(raw_result.get("summary") or execution.get("summary") or result.summary),
+            error=raw_result.get("error") or execution.get("error") or result.error,
+        )
+        return tool_name, child_args, child_result
+

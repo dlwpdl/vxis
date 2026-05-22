@@ -156,6 +156,57 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                     "summary": "authenticated session established",
                 },
             ],
+            "agents": [
+                {
+                    "id": "agent-0001",
+                    "role": "exploit_worker",
+                    "task": "Validate SQL injection on /api/search and collect control evidence",
+                    "status": "waiting",
+                    "skills": ["test_injection"],
+                    "result": "",
+                    "message_count": 2,
+                    "execution_count": 1,
+                    "messages": [
+                        {
+                            "id": "msg-0001",
+                            "sender": "root",
+                            "recipient": "agent-0001",
+                            "body": "Validate SQL injection with baseline/control/payload comparison",
+                        },
+                        {
+                            "id": "msg-0002",
+                            "sender": "agent-0001",
+                            "recipient": "root",
+                            "body": "status delta observed on /api/search",
+                        },
+                    ],
+                    "executions": [
+                        {
+                            "id": "exec-0001",
+                            "tool": "run_skill",
+                            "args": {"skill": "test_injection"},
+                            "ok": True,
+                            "summary": "status delta observed on /api/search",
+                            "data": {},
+                            "error": None,
+                        },
+                    ],
+                    "skill_context": (
+                        "### test_injection\n"
+                        "action: run_skill(skill=\"test_injection\", target_url=<target>, params={...})"
+                    ),
+                },
+                {
+                    "id": "agent-0002",
+                    "role": "review_worker",
+                    "task": "Review clean route map",
+                    "status": "finished",
+                    "skills": ["enumerate_endpoints"],
+                    "result": "No admin route before auth.",
+                    "message_count": 1,
+                    "execution_count": 0,
+                },
+            ],
             "telemetry": {
                 "provider": "openai",
                 "model": "gpt-5.4-mini",
@@ -258,6 +309,16 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     brain_text = str(brain_panel.renderable)
     assert "LLM Runtime:" in brain_text
     assert "gpt-5.4-mini" in brain_text
+
+    agent_panel = display._render_agent_monitor()
+    agent_text = str(agent_panel.renderable)
+    assert "Agents" in str(agent_panel.title)
+    assert "agent-0001" in agent_text
+    assert "waiting" in agent_text
+    assert "test_injection" in agent_text
+    assert "finish agent-0001" in agent_text
+    assert "status delta observed" in agent_text
+    assert 'action: run_skill(skill="test_injection"' in agent_text
 
     chain_panel = display._render_chains()
     chain_text = str(chain_panel.renderable)

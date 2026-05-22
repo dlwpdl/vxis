@@ -1,8 +1,8 @@
-"""Python execution tool — Strix python equivalent inside the vxis-sandbox Docker container.
+"""Python execution tool — Strix python equivalent inside the VXIS sandbox.
 
 Accepts raw Python source code, writes it to a temp file in the shared /workspace
-volume (mounted at SANDBOX_WORKSPACE_HOST on the host), then runs:
-    docker exec vxis-sandbox python3 /workspace/_python_exec_<uuid>.py
+volume for this scan, then runs:
+    docker exec <scan-container> python3 /workspace/_python_exec_<uuid>.py
 
 Use for:
 - Multi-line scripts with nested quotes that are painful as shell -c one-liners
@@ -15,7 +15,6 @@ shell_tools._ensure_sandbox_running(). No separate container is started here.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import uuid
@@ -24,10 +23,13 @@ from typing import Any
 
 from vxis.agent.tool_registry import ToolResult
 from vxis.agent.tools.shell_tools import (
-    SANDBOX_CONTAINER,
-    SANDBOX_WORKSPACE_HOST,
-    SANDBOX_WORKSPACE_MOUNT,
     _ensure_sandbox_running,
+    _ensure_tmux_session,
+    cleanup_sandbox_runtime,
+    run_sandbox_shell_command,
+    resolve_sandbox_runtime,
+    sanitize_session_name,
+    send_tmux_payload_and_wait,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,6 +51,14 @@ class PythonExecTool:
         "type": "object",
         "properties": {
             "code": {"type": "string", "description": "Python 3 source code to execute"},
+            "session": {
+                "type": "string",
+                "description": (
+                    "Optional persistent Python REPL session name. Reusing the "
+                    "same session preserves imports, variables, functions, and "
+                    "client objects within this scan."
+                ),
+            },
             "timeout": {
                 "type": "number",
                 "minimum": 1,
@@ -58,6 +68,14 @@ class PythonExecTool:
         },
         "required": ["code"],
     }
+
+    def __init__(
+        self,
+        sandbox_key: str | None = None,
+        workspace_host: str | None = None,
+    ) -> None:
+        self._sandbox_key = sandbox_key
+        self._workspace_host = workspace_host
 
     async def run(self, **kwargs: Any) -> ToolResult:
         code = kwargs.get("code", "")
@@ -70,16 +88,75 @@ class PythonExecTool:
             timeout = DEFAULT_TIMEOUT
         timeout = max(1.0, min(MAX_TIMEOUT, timeout))
 
-        ok, msg = await _ensure_sandbox_running()
+        runtime = resolve_sandbox_runtime(self._sandbox_key, self._workspace_host)
+        ok, msg = await _ensure_sandbox_running(
+            sandbox_key=self._sandbox_key,
+            workspace_host=self._workspace_host,
+        )
         if not ok:
             return ToolResult(ok=False, summary=f"python_exec: {msg}", error="sandbox_unavailable")
 
+        session = str(kwargs.get("session", "") or "").strip()
+        if session:
+            try:
+                exit_code, stdout, timed_out = await _run_python_session_code(
+                    runtime,
+                    session,
+                    code,
+                    timeout,
+                )
+            except Exception as e:
+                return ToolResult(
+                    ok=False,
+                    summary=f"python_exec session failed: {type(e).__name__}: {e}",
+                    error=str(e),
+                )
+            if exit_code == -1 and not timed_out:
+                return ToolResult(
+                    ok=False,
+                    data={
+                        "session": session,
+                        "container": runtime.container,
+                        "workspace": runtime.workspace_host,
+                        "stdout": stdout[:5000],
+                    },
+                    summary=f"python_exec session: {stdout[:500]}",
+                    error="session_unavailable",
+                )
+            if timed_out:
+                return ToolResult(
+                    ok=False,
+                    data={
+                        "timeout": timeout,
+                        "session": session,
+                        "container": runtime.container,
+                        "workspace": runtime.workspace_host,
+                        "stdout": stdout[:5000],
+                    },
+                    summary=f"python_exec session timed out after {timeout}s",
+                    error="timeout",
+                )
+            return ToolResult(
+                ok=(exit_code == 0),
+                data={
+                    "exit_code": exit_code,
+                    "stdout": stdout[:5000],
+                    "stderr": "",
+                    "session": session,
+                    "container": runtime.container,
+                    "workspace": runtime.workspace_host,
+                    "stdout_truncated": len(stdout) > 5000,
+                    "stderr_truncated": False,
+                },
+                summary=f"python_exec[{session}]: exit={exit_code}, stdout={len(stdout)}b",
+            )
+
         script_id = uuid.uuid4().hex[:12]
-        host_script_path = Path(SANDBOX_WORKSPACE_HOST) / f"_python_exec_{script_id}.py"
-        container_script_path = f"{SANDBOX_WORKSPACE_MOUNT}/_python_exec_{script_id}.py"
+        host_script_path = Path(runtime.workspace_host) / f"_python_exec_{script_id}.py"
+        container_script_path = f"{runtime.workspace_mount}/_python_exec_{script_id}.py"
 
         try:
-            os.makedirs(SANDBOX_WORKSPACE_HOST, exist_ok=True)
+            os.makedirs(runtime.workspace_host, exist_ok=True)
             host_script_path.write_text(code, encoding="utf-8")
         except OSError as e:
             return ToolResult(
@@ -89,19 +166,23 @@ class PythonExecTool:
             )
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "docker", "exec", SANDBOX_CONTAINER, "python3", container_script_path,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            command_result = await run_sandbox_shell_command(
+                runtime,
+                f"python3 {container_script_path}",
+                timeout,
             )
-            try:
-                stdout_b, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+            if command_result.get("timeout"):
                 return ToolResult(
                     ok=False,
-                    data={"timeout": timeout, "script_id": script_id},
+                    data={
+                        "timeout": timeout,
+                        "script_id": script_id,
+                        "container": runtime.container,
+                        "workspace": runtime.workspace_host,
+                        "transport": command_result.get("transport", ""),
+                        "stdout": str(command_result.get("stdout", ""))[:5000],
+                        "stderr": str(command_result.get("stderr", ""))[:2000],
+                    },
                     summary=f"python_exec timed out after {timeout}s",
                     error="timeout",
                 )
@@ -117,9 +198,9 @@ class PythonExecTool:
             except OSError:
                 pass
 
-        exit_code = proc.returncode or 0
-        stdout = stdout_b.decode("utf-8", "replace")
-        stderr = stderr_b.decode("utf-8", "replace")
+        exit_code = int(command_result.get("exit_code", 0))
+        stdout = str(command_result.get("stdout", ""))
+        stderr = str(command_result.get("stderr", ""))
 
         return ToolResult(
             ok=(exit_code == 0),
@@ -128,8 +209,50 @@ class PythonExecTool:
                 "stdout": stdout[:5000],
                 "stderr": stderr[:2000],
                 "script_id": script_id,
+                "container": runtime.container,
+                "workspace": runtime.workspace_host,
+                "transport": command_result.get("transport", ""),
                 "stdout_truncated": len(stdout) > 5000,
                 "stderr_truncated": len(stderr) > 2000,
             },
             summary=f"python_exec: exit={exit_code}, stdout={len(stdout)}b, stderr={len(stderr)}b",
         )
+
+    async def cleanup(self) -> None:
+        await cleanup_sandbox_runtime(self._sandbox_key)
+
+
+async def _run_python_session_code(
+    runtime: Any,
+    session: str,
+    code: str,
+    timeout: float,
+) -> tuple[int, str, bool]:
+    session_name = sanitize_session_name("py", session)
+    ok, msg = await _ensure_tmux_session(runtime, session_name, command="python3 -q -i")
+    if not ok:
+        return -1, msg, False
+
+    marker_id = uuid.uuid4().hex
+    start_marker = f"__VXIS_PY_START_{marker_id}__"
+    end_marker = f"__VXIS_PY_DONE_{marker_id}__"
+    driver = (
+        "import traceback as __vxis_tb\n"
+        f"print({start_marker!r})\n"
+        "try:\n"
+        f"    exec({code!r}, globals())\n"
+        "    __vxis_rc = 0\n"
+        "except BaseException:\n"
+        "    __vxis_tb.print_exc()\n"
+        "    __vxis_rc = 1\n"
+        f"print({end_marker!r} + ':' + str(__vxis_rc))\n"
+    )
+    payload = f"exec({driver!r}, globals())"
+    return await send_tmux_payload_and_wait(
+        runtime,
+        session_name,
+        payload,
+        start_marker,
+        end_marker,
+        timeout,
+    )

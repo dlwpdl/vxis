@@ -5,8 +5,6 @@ Also tests the NORMALIZERS registry dict."""
 
 from __future__ import annotations
 
-import pytest
-
 from vxis.core.normalizer import FindingFactory, NORMALIZERS
 from vxis.models.finding import Severity
 

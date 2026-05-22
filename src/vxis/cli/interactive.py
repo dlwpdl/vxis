@@ -48,6 +48,12 @@ def _configure_llm_environment(
         resolved = (base_url or os.environ.get("VXIS_OLLAMA_BASE_URL") or _DEFAULT_OLLAMA_BASE_URL).rstrip("/")
         os.environ["VXIS_OLLAMA_BASE_URL"] = resolved
         os.environ["VXIS_OLLAMA_UNCENSORED_MODEL"] = model
+        os.environ["VXIS_WORKER_LLM_PROVIDER"] = provider
+        os.environ["VXIS_WORKER_LLM_MODEL"] = model
+        os.environ["VXIS_WORKER_LLM_BASE_URL"] = resolved
+        os.environ["VXIS_SUMMARIZER_LLM_PROVIDER"] = provider
+        os.environ["VXIS_SUMMARIZER_LLM_MODEL"] = model
+        os.environ["VXIS_SUMMARIZER_LLM_BASE_URL"] = resolved
         return resolved
 
     if provider == "llamacpp":
@@ -58,8 +64,18 @@ def _configure_llm_environment(
         ).rstrip("/")
         os.environ["VXIS_LLAMACPP_BASE_URL"] = resolved
         os.environ["VXIS_LLAMACPP_MODEL"] = model
+        os.environ["VXIS_WORKER_LLM_PROVIDER"] = provider
+        os.environ["VXIS_WORKER_LLM_MODEL"] = model
+        os.environ["VXIS_WORKER_LLM_BASE_URL"] = resolved
+        os.environ["VXIS_SUMMARIZER_LLM_PROVIDER"] = provider
+        os.environ["VXIS_SUMMARIZER_LLM_MODEL"] = model
+        os.environ["VXIS_SUMMARIZER_LLM_BASE_URL"] = resolved
         return resolved
 
+    os.environ["VXIS_DIRECTOR_LLM_PROVIDER"] = provider
+    os.environ["VXIS_DIRECTOR_LLM_MODEL"] = model
+    os.environ["VXIS_VERIFIER_LLM_PROVIDER"] = provider
+    os.environ["VXIS_VERIFIER_LLM_MODEL"] = model
     return ""
 
 

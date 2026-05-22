@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     wget \
     jq \
+    tmux \
     unzip \
     ca-certificates \
     python3 \
@@ -57,6 +58,8 @@ RUN mkdir -p /usr/share/wordlists && \
 
 # Create the shared workspace directory (will be bind-mounted at runtime)
 RUN mkdir -p /workspace
+COPY vxis_tool_server.py /usr/local/bin/vxis-tool-server
+RUN chmod +x /usr/local/bin/vxis-tool-server
 WORKDIR /workspace
 
 # Keep the container running indefinitely

@@ -3,8 +3,6 @@ from_semgrep, from_bandit, from_checkov, from_kube_bench, from_poutine."""
 
 from __future__ import annotations
 
-import pytest
-
 from vxis.core.normalizer import FindingFactory
 from vxis.models.finding import Severity
 

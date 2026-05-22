@@ -27,6 +27,7 @@ from vxis.agent.tools.fingerprint_tools import FingerprintTargetTool
 from vxis.agent.tools.memory_tools import QueryScanMemoryTool
 from vxis.agent.tools.verifier_tools import VerifyFindingTool
 from vxis.agent.tools.skill_runner import RunSkillTool
+from vxis.agent.tools.agent_graph_tools import AgentGraphTool
 from vxis.agent.tools.browser_tools import (
     BrowserNavigateTool,
     BrowserAnalyzeDomTool,
@@ -54,11 +55,15 @@ __all__ = [
     "FingerprintTargetTool",
     "QueryScanMemoryTool",
     "VerifyFindingTool",
+    "AgentGraphTool",
     "build_default_registry",
 ]
 
 
-def build_default_registry(brain: object | None = None) -> ToolRegistry:
+def build_default_registry(
+    brain: object | None = None,
+    sandbox_key: str | None = None,
+) -> ToolRegistry:
     """Build a ToolRegistry with the default tool set registered.
 
     Phase B: playbook + fingerprint + memory tools let Brain auto-detect
@@ -76,8 +81,8 @@ def build_default_registry(brain: object | None = None) -> ToolRegistry:
     reg.register(HttpRequestTool())
     reg.register(BrowserRenderTool())
     reg.register(InterceptProxyTool())
-    reg.register(ShellExecTool())
-    reg.register(PythonExecTool())
+    reg.register(ShellExecTool(sandbox_key=sandbox_key))
+    reg.register(PythonExecTool(sandbox_key=sandbox_key))
     reg.register(ReportFindingTool())
     reg.register(QueryFindingsTool())
     reg.register(LinkChainTool())
@@ -97,4 +102,5 @@ def build_default_registry(brain: object | None = None) -> ToolRegistry:
     reg.register(BrowserEvalJsTool())
     reg.register(BrowserGetCookiesTool())
     reg.register(RunSkillTool())
+    reg.register(AgentGraphTool())
     return reg

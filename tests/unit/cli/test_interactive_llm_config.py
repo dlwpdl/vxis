@@ -28,6 +28,12 @@ def test_configure_llamacpp_environment(monkeypatch) -> None:
         "UPSTREAM_LLM_MODEL",
         "VXIS_LLAMACPP_BASE_URL",
         "VXIS_LLAMACPP_MODEL",
+        "VXIS_WORKER_LLM_PROVIDER",
+        "VXIS_WORKER_LLM_MODEL",
+        "VXIS_WORKER_LLM_BASE_URL",
+        "VXIS_SUMMARIZER_LLM_PROVIDER",
+        "VXIS_SUMMARIZER_LLM_MODEL",
+        "VXIS_SUMMARIZER_LLM_BASE_URL",
     ]
     for key in keys:
         monkeypatch.delenv(key, raising=False)
@@ -44,6 +50,39 @@ def test_configure_llamacpp_environment(monkeypatch) -> None:
         assert os.environ["UPSTREAM_LLM_MODEL"] == "local-model"
         assert os.environ["VXIS_LLAMACPP_BASE_URL"] == "http://127.0.0.1:8080"
         assert os.environ["VXIS_LLAMACPP_MODEL"] == "local-model"
+        assert os.environ["VXIS_WORKER_LLM_PROVIDER"] == "llamacpp"
+        assert os.environ["VXIS_WORKER_LLM_MODEL"] == "local-model"
+        assert os.environ["VXIS_WORKER_LLM_BASE_URL"] == "http://127.0.0.1:8080"
+        assert os.environ["VXIS_SUMMARIZER_LLM_PROVIDER"] == "llamacpp"
+        assert os.environ["VXIS_SUMMARIZER_LLM_MODEL"] == "local-model"
+        assert os.environ["VXIS_SUMMARIZER_LLM_BASE_URL"] == "http://127.0.0.1:8080"
+    finally:
+        for key in keys:
+            os.environ.pop(key, None)
+
+
+def test_configure_cloud_environment_sets_director_and_verifier(monkeypatch) -> None:
+    keys = [
+        "UPSTREAM_LLM_PROVIDER",
+        "UPSTREAM_LLM_MODEL",
+        "VXIS_DIRECTOR_LLM_PROVIDER",
+        "VXIS_DIRECTOR_LLM_MODEL",
+        "VXIS_VERIFIER_LLM_PROVIDER",
+        "VXIS_VERIFIER_LLM_MODEL",
+    ]
+    for key in keys:
+        monkeypatch.delenv(key, raising=False)
+
+    try:
+        base_url = interactive._configure_llm_environment("openai", "gpt-5.4")
+
+        assert base_url == ""
+        assert os.environ["UPSTREAM_LLM_PROVIDER"] == "openai"
+        assert os.environ["UPSTREAM_LLM_MODEL"] == "gpt-5.4"
+        assert os.environ["VXIS_DIRECTOR_LLM_PROVIDER"] == "openai"
+        assert os.environ["VXIS_DIRECTOR_LLM_MODEL"] == "gpt-5.4"
+        assert os.environ["VXIS_VERIFIER_LLM_PROVIDER"] == "openai"
+        assert os.environ["VXIS_VERIFIER_LLM_MODEL"] == "gpt-5.4"
     finally:
         for key in keys:
             os.environ.pop(key, None)

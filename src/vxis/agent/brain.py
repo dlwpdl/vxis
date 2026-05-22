@@ -21,6 +21,7 @@ Phase 3 Architecture:
 from __future__ import annotations
 
 import asyncio
+import ast
 import json
 import logging
 import os
@@ -28,11 +29,40 @@ import re as _re
 import threading
 import urllib.error
 import urllib.request
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from vxis.agent.context_budget import (
+    estimate_context_tokens,
+    fit_lines_to_token_budget,
+    resolve_context_budget,
+)
+from vxis.agent.brain_metrics import (
+    _increment_brain_decision_count,
+    _increment_llm_call_count,
+    _record_llm_usage,
+    get_brain_decision_count,
+    get_llm_call_count,
+    get_llm_usage_stats,
+    reset_brain_decision_count,
+    reset_llm_call_count,
+    reset_llm_usage_stats,
+)
+from vxis.agent.brain_prompts import (
+    AGENT_SYSTEM_PROMPT,
+    AGENT_TEAMS,
+    COMPACT_LOOP_PROMPT_ADAPTER,
+    LOOP_PROMPT_ADAPTER,
+    TOOL_DESCRIPTIONS,
+    AgentAction,
+    AgentObservation,
+    AgentStep,
+    _parse_llm_json,
+    build_agent_system_prompt,
+    build_compact_agent_system_prompt,
+)
+from vxis.agent.director_protocol import render_director_protocol_memory
 from vxis.interaction.surface import TargetKind
+from vxis.llm.hybrid_config import ModelRole, normalize_provider, resolve_hybrid_model_config
 
 if TYPE_CHECKING:
     from vxis.agent.memory import AgentMemory
@@ -43,703 +73,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-# ── Benchmark instrumentation: authoritative LLM invocation counter ──
-# Incremented once per `_call_llm_direct` entry (the single choke point for
-# all provider paths in AgentBrain). Used by Task 1 baseline + Task 14
-# post-migration comparison. Does NOT affect dispatch — claude-first routing
-# stays untouched.
-_LLM_CALL_COUNT: int = 0
-_LLM_CALL_COUNT_LOCK = threading.Lock()
-
-
-def get_llm_call_count() -> int:
-    """Return total number of LLM provider invocations since process start."""
-    return _LLM_CALL_COUNT
-
-
-def reset_llm_call_count() -> None:
-    """Reset counter to zero (test hook)."""
-    global _LLM_CALL_COUNT
-    with _LLM_CALL_COUNT_LOCK:
-        _LLM_CALL_COUNT = 0
-
-
-def _increment_llm_call_count() -> None:
-    global _LLM_CALL_COUNT
-    with _LLM_CALL_COUNT_LOCK:
-        _LLM_CALL_COUNT += 1
-
-
-# ── Live LLM usage telemetry ───────────────────────────────────
-# TUI/operator visibility needs more than call counts: it should expose
-# provider/model plus token/cost usage while the scan is still running.
-# Costs are estimates unless the upstream provider returns exact usage.
-_LLM_USAGE_LOCK = threading.Lock()
-_LLM_USAGE_STATS: dict[str, Any] = {
-    "provider": "",
-    "model": "",
-    "calls": 0,
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "total_tokens": 0,
-    "cost_usd": 0.0,
-    "tokens_estimated": False,
-    "cost_estimated": False,
-}
-
-
-def get_llm_usage_stats() -> dict[str, Any]:
-    """Return cumulative LLM usage telemetry for the current process."""
-    with _LLM_USAGE_LOCK:
-        return dict(_LLM_USAGE_STATS)
-
-
-def reset_llm_usage_stats() -> None:
-    """Reset live LLM usage telemetry (test + per-scan hook)."""
-    with _LLM_USAGE_LOCK:
-        _LLM_USAGE_STATS.update({
-            "provider": "",
-            "model": "",
-            "calls": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "cost_usd": 0.0,
-            "tokens_estimated": False,
-            "cost_estimated": False,
-        })
-
-
-def _estimate_token_count(value: Any) -> int:
-    """Cheap text-length proxy when providers do not return token usage."""
-    if value is None:
-        return 0
-    if isinstance(value, (dict, list, tuple)):
-        try:
-            text = json.dumps(value, ensure_ascii=False, default=str)
-        except Exception:
-            text = str(value)
-    else:
-        text = str(value)
-    if not text:
-        return 0
-    return max(1, len(text) // 4)
-
-
-def _estimate_usage_cost(provider: str, total_tokens: int) -> tuple[float, bool]:
-    """Return an estimated cost using coarse provider-level defaults.
-
-    We intentionally label these as estimates in the UI; exact per-model
-    billing is not yet wired into the scan runtime.
-    """
-    if total_tokens <= 0:
-        return 0.0, False
-    if provider in {"ollama", "llamacpp", "claude-cli", "gemini-cli", "codex-cli"}:
-        return 0.0, False
-    per_million = {
-        "openai": 0.15,
-        "together": 0.50,
-        "anthropic": 3.00,
-        "gemini": 0.0,
-    }.get(provider)
-    if per_million is None:
-        return 0.0, False
-    return round(per_million * total_tokens / 1_000_000, 4), True
-
-
-def _record_llm_usage(
-    provider: str,
-    model: str,
-    system_prompt: Any,
-    user_prompt: Any,
-    response_text: Any,
-    usage: dict[str, Any] | None = None,
-) -> None:
-    """Accumulate live usage telemetry from a single LLM call."""
-    usage = usage or {}
-    input_tokens = int(
-        usage.get("prompt_tokens")
-        or usage.get("input_tokens")
-        or usage.get("promptTokenCount")
-        or 0
-    )
-    output_tokens = int(
-        usage.get("completion_tokens")
-        or usage.get("output_tokens")
-        or usage.get("candidatesTokenCount")
-        or usage.get("outputTokenCount")
-        or 0
-    )
-    tokens_estimated = False
-    if input_tokens <= 0:
-        input_tokens = _estimate_token_count(system_prompt) + _estimate_token_count(user_prompt)
-        tokens_estimated = True
-    if output_tokens <= 0:
-        output_tokens = _estimate_token_count(response_text)
-        tokens_estimated = True
-    total_tokens = input_tokens + output_tokens
-    cost_usd, cost_estimated = _estimate_usage_cost(provider, total_tokens)
-
-    with _LLM_USAGE_LOCK:
-        _LLM_USAGE_STATS["provider"] = provider
-        _LLM_USAGE_STATS["model"] = model
-        _LLM_USAGE_STATS["calls"] = int(_LLM_USAGE_STATS.get("calls", 0)) + 1
-        _LLM_USAGE_STATS["input_tokens"] = int(_LLM_USAGE_STATS.get("input_tokens", 0)) + input_tokens
-        _LLM_USAGE_STATS["output_tokens"] = int(_LLM_USAGE_STATS.get("output_tokens", 0)) + output_tokens
-        _LLM_USAGE_STATS["total_tokens"] = int(_LLM_USAGE_STATS.get("total_tokens", 0)) + total_tokens
-        _LLM_USAGE_STATS["cost_usd"] = round(float(_LLM_USAGE_STATS.get("cost_usd", 0.0)) + cost_usd, 4)
-        _LLM_USAGE_STATS["tokens_estimated"] = bool(_LLM_USAGE_STATS.get("tokens_estimated", False) or tokens_estimated)
-        _LLM_USAGE_STATS["cost_estimated"] = bool(_LLM_USAGE_STATS.get("cost_estimated", False) or cost_estimated)
-
-
-# ── Benchmark instrumentation: unified brain decision counter ──
-# Incremented once per `think()` entry (after early-return checks) across ALL
-# Brain backends (AgentBrain API path + InteractiveBrain + FileBasedBrain).
-# Apples-to-apples metric for Task 14 comparison independent of backend.
-# Process-global, not per-scan.
-_BRAIN_DECISION_COUNT: int = 0
-_BRAIN_DECISION_LOCK = threading.Lock()
-
-
-def get_brain_decision_count() -> int:
-    """Return total number of Brain think() decisions since process start."""
-    return _BRAIN_DECISION_COUNT
-
-
-def reset_brain_decision_count() -> None:
-    """Reset counter to zero (test hook)."""
-    global _BRAIN_DECISION_COUNT
-    with _BRAIN_DECISION_LOCK:
-        _BRAIN_DECISION_COUNT = 0
-
-
-def _increment_brain_decision_count() -> None:
-    global _BRAIN_DECISION_COUNT
-    with _BRAIN_DECISION_LOCK:
-        _BRAIN_DECISION_COUNT += 1
-
-
-def _parse_llm_json(response: str) -> Any:
-    """LLM 응답에서 JSON을 안정적으로 파싱 (dict or list).
-
-    claude -p 출력의 ANSI 코드, control chars, trailing comma,
-    마크다운 블록 등을 제거하고 파싱한다.
-    """
-    clean = response.strip()
-    clean = _re.sub(r'\x1b\[[0-9;]*[mGKHFJA-Za-z]', '', clean)
-    clean = _re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', clean)
-    if '```' in clean:
-        _cb = _re.search(r'```(?:json)?\s*\n?([\s\S]*?)\n?```', clean)
-        if _cb:
-            clean = _cb.group(1).strip()
-    # dict or list 추출
-    _md = _re.search(r'\{[\s\S]*\}', clean)
-    _ml = _re.search(r'\[[\s\S]*\]', clean)
-    if _md and _ml:
-        # 먼저 나타나는 것 사용
-        clean = _md.group(0) if _md.start() < _ml.start() else _ml.group(0)
-    elif _md:
-        clean = _md.group(0)
-    elif _ml:
-        clean = _ml.group(0)
-    clean = _re.sub(r',(\s*[}\]])', r'\1', clean)
-    # Invalid \escape 제거 (유효: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX)
-    # \\ 쌍을 먼저 원자적으로 처리해야 \\w 같은 유효 시퀀스가 망가지지 않음
-    clean = _re.sub(
-        r'\\\\|\\(?!["\\/bfnrtu])',
-        lambda m: m.group(0) if len(m.group(0)) == 2 else '\\\\',
-        clean,
-    )
-    # raw_decode로 첫 번째 완전한 JSON만 파싱 ("Extra data" 방지)
-    try:
-        obj, _ = json.JSONDecoder().raw_decode(clean)
-        return obj
-    except json.JSONDecodeError:
-        # raw 개행이 문자열 안에 있는 경우 이스케이프 후 재시도
-        clean_safe = _re.sub(
-            r'"((?:[^"\\]|\\.)*)"',
-            lambda m: '"' + m.group(1).replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t') + '"',
-            clean,
-        )
-        obj, _ = json.JSONDecoder().raw_decode(clean_safe)
-        return obj
-
-
-# ── Data structures ─────────────────────────────────────────────
-
-@dataclass
-class AgentObservation:
-    """Current state visible to the agent."""
-
-    target: str
-    tech_stack: list[str] = field(default_factory=list)
-    open_ports: list[dict[str, Any]] = field(default_factory=list)
-    findings: list[dict[str, Any]] = field(default_factory=list)
-    executed_tools: list[dict[str, str]] = field(default_factory=list)
-    subdomains: list[str] = field(default_factory=list)
-    live_urls: list[str] = field(default_factory=list)
-
-
-@dataclass
-class AgentAction:
-    """An action decided by the agent."""
-
-    tool: str  # tool name or special command
-    args: dict[str, Any] = field(default_factory=dict)
-    reasoning: str = ""  # why this action
-    priority: str = "medium"  # high, medium, low
-
-
-@dataclass
-class AgentStep:
-    """Record of one think→act cycle."""
-
-    step_number: int
-    observation_summary: str
-    actions: list[AgentAction]
-    results: list[dict[str, Any]] = field(default_factory=list)
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-
-# ── System prompt ───────────────────────────────────────────────
-
-# Shared preamble — surface-agnostic mindset blocks injected into every prompt.
-_PROMPT_SHARED_MINDSET = """\
-## Anti-Confirmation Bias (arXiv 2603.18740)
-
-Code that looks normal may hide vulnerabilities. Probe even when the first
-test passes. Supply chain attacks hide in legitimate-looking packages
-(base64 payloads, typosquats). Question your own initial read before
-skipping a vector.
-
-## Dual-Use principle — 모든 위협은 공격 도구이기도 하다
-
-Every defensive finding is also an attack vector. Flip every sentence you'd
-write in a defense report into "what can I do with this?":
-- 의존성 노출 → 해당 CVE 타격 / dependency confusion
-- WAF 탐지 → WAF 우회 기법
-- SSO/OAuth → redirect_uri·state·token 탈취
-- 에러 메시지 → 버전 핑거프린트 → CVE
-- 내부 IP (SSRF 응답) → 내부 포트 스캔 / 메타데이터 엔드포인트
-- DNS 레코드 → 서브도메인 테이크오버
-
-## Critical intelligence (2026-03 CISA KEV — prioritize when detected)
-
-- CVE-2026-33017 Langflow code injection (AI/LLM workflows)
-- CVE-2026-33634 Trivy supply chain (CI/CD)
-- CVE-2025-53521 F5 BIG-IP APM RCE
-- CVE-2025-54068 Laravel Livewire RCE
-- CVE-2025-32432 Craft CMS code injection
-
-## Mission completion (outcome-based)
-
-Mission ends when ONE is true:
-1. **Crown jewel reached** — admin takeover, RCE, full DB read, privesc, or
-   equivalent compromise. Evidence attached, chain documented end-to-end.
-2. **All credible surfaces exhausted** — every surface evidence pointed to
-   probed with ≥2 distinct techniques, every chain driven to success or
-   documented dead-end, no unexplored leads remain.
-
-"Tried a few skills" is not completion. Persistence baseline: 100+
-iterations; bug bounty hunters spend days per target. If stuck, pivot —
-do NOT finish_scan early. 끝까지 소진 — admin 권한까지 간다.
-
-## Available tools
-
-{available_tools}
-
-## Output
-
-Reasoning in Korean (한국어). Single valid JSON object, nothing outside it:
-
-{{"reasoning": "증거 / 가설 / 이 action 을 고른 이유",
-  "chains_in_progress": ["발견A → 발견B → ???", "..."],
-  "actions": [{{"tool": "<name>", "args": {{...}},
-               "reasoning": "hypothesis 와 연관",
-               "priority": "high|medium|low"}}]}}
-
-Rules:
-- ENTIRE response = one valid JSON object. No prose before `{{` or after `}}`.
-  No markdown code fences.
-- ONE action per response. Observe result before deciding next.
-- finish_scan follows the Mission completion criteria above — outcome-based,
-  not count-based. Crown jewel OR demonstrably exhausted surfaces.
-- If you cannot comply, output {{"reasoning": "error", "actions": []}} — still valid JSON.
-"""
-
-# Web-surface preamble — injected when target.kind == web.
-_PROMPT_WEB_PREAMBLE = """\
-You are VXIS, a senior offensive security engineer conducting an authorized
-black-box pentest. You are NOT a vulnerability scanner that enumerates surface
-issues — you are an operator who chains evidence into kill chains reaching
-crown jewels: credential theft, RCE, unauthorized data access, privilege
-escalation, full compromise. Every finding is a stepping stone.
-
-## Coverage universe (act on evidence, not checklists)
-
-The testable surface spans OWASP Top 10 — A01 Broken Access Control, A02
-Cryptographic Failures, A03 Injection, A04 Insecure Design, A05 Security
-Misconfiguration, A06 Vulnerable Components, A07 Authentication Failures,
-A08 Integrity Failures, A09 Logging Failures, A10 SSRF — plus subdomain
-takeover, S3 misconfig, cache poisoning, WebSocket attacks, open redirect,
-parameter pollution, timing side channels, email header injection.
-
-This is the universe, NOT a traversal order. Attack wherever the evidence
-points. Brain picks next move; the universe is the search space.
-
-## Available modules (use what evidence suggests)
-
-- Controller (auto-routes Hands/Eyes/X-Ray per intent)
-- Hands (HTTP sessions, crawl, chain, form discovery)
-- Eyes (SPA DOM, JS eval, screenshot)
-- X-Ray (passive traffic, token/secret detection)
-- Knowledge Store (compiled patterns from prior scans)
-- Finding Model (CVSS, CWE, MITRE ATT&CK, Evidence)
-- ReportGenerator (NCC-style bilingual HTML)
-
-## Kill chain mindset
-
-Every finding asks: "how does this extend the chain?" A missing header only
-matters if it feeds a bigger exploit. Authentication is the biggest
-multiplier — when a login surface exists, exhaust it (creds, SQLi/NoSQLi in
-credentials, JWT weakness, response differential, reset poisoning) before
-deep post-auth enumeration. Leaked tokens, stack traces, version strings,
-timing differences are evidence — follow the breadcrumbs. Live subdomains
-are gold; enumerate DNS + cert transparency, pivot and deep-probe.
-"""
-
-# Desktop-surface preamble — injected when target.kind == desktop.
-# TARGET IS A DESKTOP APP BUNDLE / BINARY PATH ON DISK, NOT A URL.
-# Web skills (enumerate_endpoints, test_injection, etc.) will fail — do not call them.
-_PROMPT_DESKTOP_PREAMBLE = """\
-You are VXIS, a senior offensive security engineer conducting an authorized
-desktop-application pentest. TARGET IS A DESKTOP APP at the path given in
-target_url — NOT a web URL.
-|||
-당신은 VXIS 선임 공격 보안 엔지니어로서 승인된 데스크톱 애플리케이션 침투 테스트를
-수행합니다. 타겟은 target_url 에 지정된 경로의 데스크톱 앱입니다 — 웹 URL이 아닙니다.
-
-## Available desktop skills (use these — web skills will error out)
-|||
-## 사용 가능한 데스크톱 스킬 (이 스킬들을 사용하세요 — 웹 스킬은 오류 발생)
-
-- **test_local_storage_secrets** — Walk the .app bundle or directory tree and
-  match every text file against hardcoded-secret regex patterns: AWS keys,
-  GitHub tokens, JWT, private keys, generic `api_key=`/`password=` pairs.
-  Call this FIRST. Args: `target_url` (path to .app or directory).
-  |||
-  .app 번들 또는 디렉토리 전체를 순회하며 모든 텍스트 파일을 하드코딩된 시크릿
-  패턴과 매칭합니다: AWS 키, GitHub 토큰, JWT, 개인키, `api_key=`/`password=`
-  형태의 일반 패턴. 반드시 첫 번째로 호출하세요. Args: `target_url` (.app 또는 디렉토리 경로)
-
-## DO NOT call web skills
-|||
-## 웹 스킬 호출 금지
-
-The following skills target HTTP endpoints and WILL fail against a desktop app.
-Do not call: `enumerate_endpoints`, `test_injection`, `attempt_auth`,
-`post_auth_enum`, `test_sensitive_files`, `test_idor`, `test_xss`,
-`test_auth_deep`, `test_csrf`, `test_ssrf`, `test_api_security`,
-`test_misconfig`, `test_business_logic`, `test_crypto`, `test_infra`.
-|||
-아래 스킬들은 HTTP 엔드포인트를 타겟으로 하며 데스크톱 앱에 사용 시 반드시 실패합니다.
-절대 호출 금지: `enumerate_endpoints`, `test_injection`, `attempt_auth`,
-`post_auth_enum`, `test_sensitive_files`, `test_idor`, `test_xss`,
-`test_auth_deep`, `test_csrf`, `test_ssrf`, `test_api_security`,
-`test_misconfig`, `test_business_logic`, `test_crypto`, `test_infra`
-
-## Kill chain mindset (desktop)
-|||
-## 킬 체인 사고방식 (데스크톱)
-
-Crown jewels for a desktop app: hardcoded cloud credentials (→ AWS account
-takeover), private keys (→ service impersonation), database passwords (→ data
-exfil). Recon (already run by the pipeline) provides binary metadata —
-use those findings as evidence for your next move.
-|||
-데스크톱 앱의 핵심 목표: 하드코딩된 클라우드 자격증명(→ AWS 계정 탈취), 개인키
-(→ 서비스 사칭), 데이터베이스 비밀번호(→ 데이터 유출). 파이프라인이 이미 실행한
-Recon의 바이너리 메타데이터를 다음 행동의 증거로 활용하세요.
-"""
-
-# Mobile/game stub — surfaces not yet fully implemented.
-_PROMPT_UNSUPPORTED_SURFACE_PREAMBLE = """\
-You are VXIS. Surface not yet supported — escalate to user.
-|||
-당신은 VXIS입니다. 해당 서피스는 아직 지원되지 않습니다 — 사용자에게 에스컬레이션하세요.
-
-Call finish_scan immediately with reasoning explaining the surface type is not
-yet implemented and the user should configure a supported surface (web or desktop).
-|||
-즉시 finish_scan을 호출하고, 해당 서피스 타입이 아직 구현되지 않았으며 지원되는
-서피스(web 또는 desktop)를 설정해야 한다는 내용을 reasoning에 명시하세요.
-"""
-
-
-def build_agent_system_prompt(kind: TargetKind = TargetKind.WEB) -> str:
-    """Return the AGENT_SYSTEM_PROMPT for the given surface kind.
-
-    Surface branching:
-    - TargetKind.WEB     → full web pentest prompt (OWASP, kill chain, HTTP skills)
-    - TargetKind.DESKTOP → desktop-only prompt (bundle scan, no web skills)
-    - other kinds        → bilingual stub directing Brain to escalate to user
-
-    The returned string still contains the `{available_tools}` placeholder —
-    callers must `.format(available_tools=...)` before sending to the LLM.
-
-    서피스 분기:
-    - TargetKind.WEB     → 웹 침투 테스트 전체 프롬프트 (OWASP, 킬 체인, HTTP 스킬)
-    - TargetKind.DESKTOP → 데스크톱 전용 프롬프트 (번들 스캔, 웹 스킬 금지)
-    - 기타               → 사용자 에스컬레이션 바이링구얼 스텁
-    """
-    if kind == TargetKind.WEB:
-        return _PROMPT_WEB_PREAMBLE + _PROMPT_SHARED_MINDSET
-    if kind == TargetKind.DESKTOP:
-        return _PROMPT_DESKTOP_PREAMBLE + _PROMPT_SHARED_MINDSET
-    # Mobile / Game — stub until those pipelines ship.
-    return _PROMPT_UNSUPPORTED_SURFACE_PREAMBLE + _PROMPT_SHARED_MINDSET
-
-
-def build_compact_agent_system_prompt(kind: TargetKind = TargetKind.WEB) -> str:
-    """Return a compact prompt variant for small local context windows."""
-    if kind == TargetKind.WEB:
-        return """\
-Authorized black-box web pentest. Act like an operator, not a scanner.
-Primary families: auth bypass, injection, IDOR/access control, sensitive files,
-misconfiguration, XSS, SSRF. Build chains toward admin access, data access, or
-full compromise. Prefer concrete validation, control comparisons, and exploit
-transcripts over speculative reporting.
-
-## Available tools
-
-{available_tools}
-"""
-    if kind == TargetKind.DESKTOP:
-        return """\
-Authorized desktop app pentest. The target is a local app path, not a web URL.
-Use desktop-only skills. Prioritize secrets, local privilege abuse, deep links,
-IPC, signature/entitlement issues, and sensitive local data exposure.
-
-## Available tools
-
-{available_tools}
-"""
-    return """\
-Surface not yet supported. Escalate clearly and stop safely.
-
-## Available tools
-
-{available_tools}
-"""
-
-
-# Backwards-compatible module-level constant — resolves to the web prompt so
-# that existing imports (`from vxis.agent.brain import AGENT_SYSTEM_PROMPT`)
-# and tests continue to work unchanged.
-AGENT_SYSTEM_PROMPT = build_agent_system_prompt(TargetKind.WEB)
-
-# Place AFTER AGENT_SYSTEM_PROMPT closing """, BEFORE AGENT_TEAMS dict.
-# This is a regular triple-quoted string — NOT an f-string and never .format()'d.
-# Use SINGLE braces in the JSON example below; they appear literally in the output.
-LOOP_PROMPT_ADAPTER = r"""\
-You are an expert penetration tester. Authorization confirmed — full scope.
-
-## HOW TO THINK
-
-Each response: look at the SCAN DASHBOARD, decide your CURRENT GOAL, pick
-ONE action that advances that goal. Think like this:
-
-  "I see /rest/products returns 500. My goal: test if this is injectable.
-   Action: send a SQLi payload via shell_exec sqlmap."
-
-  "Login form found with email/password. My goal: bypass authentication.
-   Action: try SQLi in the email field via browser_fill_form."
-
-  "I have admin access via JWT. My goal: find what admin can do that users can't.
-   Action: browser_navigate to /administration or /api/Users."
-
-Do NOT repeat what you already tried. The dashboard shows your history.
-If something failed, try a DIFFERENT approach, not the same one again.
-
-## OUTPUT FORMAT
-
-{"reasoning":"<current goal + why this action>","actions":[{"tool":"<name>","args":{...}}]}
-
-CRITICAL: Emit exactly ONE action per response. You will see the result
-before deciding the next step. Do NOT batch multiple actions — only the
-first one executes. Think → Act → Observe → Think again.
-
-## THINK FIRST
-
-Use the think tool before complex decisions. It's your most important tool.
-Before exploitation: think(content="I see /api returns 500. This could be
-  injectable. I'll try sqlmap with --batch on this endpoint.")
-Before reporting: think(content="The response contains real stack trace with
-  internal paths. This is a confirmed information disclosure, not a false positive.")
-
-If you're unsure what to do next, ALWAYS call think first. Never guess.
-
-## RULES
-
-- ONE action per message. See result → think → next action.
-- python_exec for multi-line code. shell_exec for single commands. Never heredocs.
-- shell_exec runs inside Docker sandbox (sqlmap, nuclei, ffuf, nmap available).
-- Report findings via report_finding when you discover something real.
-- NEVER call report_finding on a thin signal alone. First gather a real PoC:
-  baseline/control comparison, concrete request/response transcript, and the
-  exact payload or action that changed behavior.
-- If you suspect a vulnerability but cannot show the exploit transcript yet,
-  do NOT report it. Keep testing until you can populate technical_analysis,
-  poc_description, and poc_script_code with real evidence from this target.
-- Do not call finish_scan until you've tested: injection, auth bypass, IDOR,
-  sensitive files, misconfigurations. Check the dashboard for what's missing.
-- PERSISTENCE: Real vulnerabilities take time. 100+ iterations expected.
-  If one approach fails, try 10 more. Bug bounty hunters spend days on one target.
-
-## FINDING REPORT FORMAT
-
-{"tool":"report_finding","args":{"title":"<short>","severity":"<critical|high|medium|low|informational>","finding_type":"<snake_case>","affected_component":"<url_or_param>","description":"<plain-language issue summary>","impact":"<validated business/security impact>","technical_analysis":"<why this is real, including control checks>","poc_description":"<step-by-step reproduction>","poc_script_code":"<actual exploit payload / HTTP exchange / command transcript>","remediation_steps":"<specific fix guidance>","endpoint":"<path_or_url>","method":"<GET|POST|...>"},"reasoning":"<why this is real>","priority":"high"}
-
-finding_type examples: sql_injection, xss_reflected, xss_stored, idor,
-rce, ssrf, xxe, information_disclosure, auth_bypass, broken_access_control,
-csrf, security_misconfiguration, sensitive_data_exposure, command_injection.
-
-After 2+ related findings, call link_chain to assert the attack chain.
-
-## WHEN STUCK (3+ useless actions)
-
-1. think: "What assumption is wrong? What have I not tried?"
-2. load a playbook you haven't used yet
-3. Pivot to a completely different attack vector
-
-Never finish_scan before 3 confirmed findings unless you've tried 50+
-diverse approaches. Running many iterations is NORMAL and CORRECT.
-
-[ORIGINAL PROMPT BELOW — strategic context, but this adapter wins]
-"""
-
-COMPACT_LOOP_PROMPT_ADAPTER = r"""\
-You are VXIS, an autonomous pentest operator.
-
-Output exactly one JSON object:
-{"reasoning":"<goal + why>","actions":[{"tool":"<exact tool>","args":{...},"reasoning":"<why>","priority":"high|medium|low"}]}
-
-Rules:
-- Exactly ONE action per turn.
-- Use think first when uncertain.
-- Prefer evidence-building actions once a high-value lead exists.
-- Never report a finding without baseline/control, payload/action, and observed result.
-- Finish only after a crown jewel is reached or credible families are exhausted.
-"""
-
-# ── Tool descriptions for the agent ─────────────────────────────
-
-# ── Sub-agent team definitions ──────────────────────────────────
-
-AGENT_TEAMS = {
-    "recon": {
-        "name": "정찰팀 (Recon)",
-        "desc": "공격 표면 수집 — 서브도메인, 포트, 기술 스택, 인증서",
-        "tools": ["subfinder", "httpx", "nmap", "crtsh", "shodan"],
-    },
-    "vuln": {
-        "name": "취약점 분석팀 (Vulnerability)",
-        "desc": "알려진 취약점 + 설정 오류 탐지",
-        "tools": ["nuclei", "wafw00f"],
-    },
-    "crypto": {
-        "name": "암호화 분석팀 (Crypto/TLS)",
-        "desc": "TLS/SSL 설정, 인증서, 암호화 취약점",
-        "tools": ["testssl", "sslyze"],
-    },
-    "email": {
-        "name": "이메일 보안팀 (Email Security)",
-        "desc": "SPF, DMARC, DKIM, 스푸핑 방지",
-        "tools": ["checkdmarc", "dnstwist", "swaks"],
-    },
-    "secrets": {
-        "name": "시크릿 탐지팀 (Secret Detection)",
-        "desc": "노출된 자격증명, API 키, 토큰 탐색",
-        "tools": ["trufflehog", "gitleaks"],
-    },
-    "webapp": {
-        "name": "웹 앱 공격팀 (Web App Exploitation)",
-        "desc": "SQL 인젝션, XSS, 디렉토리 탐색, 인증 우회",
-        "tools": ["sqlmap", "ffuf"],
-    },
-    "code": {
-        "name": "코드 분석팀 (Code Analysis)",
-        "desc": "소스코드 정적 분석 + 의존성 취약점",
-        "tools": ["semgrep", "bandit", "checkov", "trivy", "gitleaks"],
-    },
-    "cloud": {
-        "name": "클라우드 보안팀 (Cloud Security)",
-        "desc": "AWS/Azure/GCP 설정 감사 + 컨테이너",
-        "tools": ["prowler", "s3scanner", "trivy-k8s", "kube-bench"],
-    },
-    "infra": {
-        "name": "인프라/AD팀 (Infrastructure/AD)",
-        "desc": "내부 네트워크, Active Directory, 권한 상승",
-        "tools": ["bloodhound", "certipy", "netexec", "linpeas"],
-    },
-    "interact": {
-        "name": "직접 상호작용팀 (CPR Interaction)",
-        "desc": "타겟 앱과 직접 상호작용 — 로그인, 폼, API, 퍼징, 익스플로잇 체인",
-        "tools": [
-            "interact_explore", "interact_login", "interact_api",
-            "interact_crawl", "interact_fuzz", "interact_chain",
-            "interact_js", "interact_screenshot",
-        ],
-    },
-}
-
-TOOL_DESCRIPTIONS = {
-    # Recon
-    "nmap": "포트 스캔 + 서비스 탐지. args: ports(str), scripts(str), udp(bool)",
-    "httpx": "HTTP 프로빙 + 기술 스택 탐지 + 보안 헤더. args: targets(list[str])",
-    "subfinder": "서브도메인 열거 (패시브). args: domain(str)",
-    "crtsh": "인증서 투명성 로그에서 서브도메인 조회. args: domain(str)",
-    "shodan": "인터넷 노출 서비스 조회 (유료 API). args: target(str)",
-    # Vulnerability
-    "nuclei": "템플릿 기반 취약점 스캐너 (CVE, 설정오류, 노출). args: severity(str), tags(str)",
-    "wafw00f": "WAF 탐지 — 방화벽 존재 시 전략 조정 필요. args: urls(list[str])",
-    # Crypto
-    "testssl": "TLS 프로토콜/취약점/헤더/인증서 전체 검사. args: host(str)",
-    "sslyze": "SSL 심층 분석 (Heartbleed, ROBOT, CCS injection 등). args: host(str)",
-    # Email
-    "checkdmarc": "SPF/DMARC/DKIM 이메일 인증 검사. args: domain(str)",
-    "dnstwist": "유사 도메인 탐지 + MX 체크 + WHOIS. args: domain(str)",
-    "swaks": "SMTP 오픈 릴레이 / 이메일 스푸핑 테스트. args: target(str)",
-    # Secrets
-    "trufflehog": "GitHub org 전체 시크릿 스캔. args: github_org(str)",
-    "gitleaks": "Git 커밋 히스토리 시크릿 탐지. args: source_path(str)",
-    # Web App Exploitation
-    "ffuf": "디렉토리/파일/파라미터 brute-force. args: url(str), wordlist(str)",
-    "sqlmap": "SQL 인젝션 자동 탐지 + 익스플로잇. args: url(str)",
-    # Code
-    "semgrep": "SAST 정적 코드 분석 (OWASP Top 10). args: source_path(str)",
-    "bandit": "Python 보안 정적 분석. args: source_path(str)",
-    "checkov": "IaC 보안 점검 (Terraform, K8s, Docker). args: source_path(str)",
-    "trivy": "의존성 취약점 + 시크릿 + IaC 스캔. args: source_path(str)",
-    # Cloud
-    "prowler": "AWS/Azure/GCP 보안 감사. args: provider(str)",
-    "s3scanner": "S3 버킷 권한 스캔. args: domain(str)",
-    # ── CPR (Cognitive Pentesting Runtime) — 직접 앱 상호작용 ──
-    "interact_explore": "타겟 웹앱 탐색 — 폼, 링크, 기술 스택 자동 수집. args: url(str)",
-    "interact_login": "로그인 시도 (CSRF 자동 처리). args: url(str), data(dict)",
-    "interact_api": "API 직접 호출. args: method(str), url(str), data(dict), json(dict)",
-    "interact_crawl": "딥 크롤링 — 엔드포인트 수집. args: url(str), depth(int)",
-    "interact_fuzz": "파라미터 퍼징 (X-Ray 트래픽 분석 포함). args: url(str), params(dict)",
-    "interact_chain": "멀티스텝 익스플로잇 체인. args: steps(list[dict])",
-    "interact_js": "JS/DOM 분석 (Playwright 사용). args: url(str)",
-    "interact_screenshot": "페이지 스크린샷 캡처. args: url(str)",
-    # Special
-    "DONE": "테스트 완료 — 충분한 커버리지를 달성했을 때 사용",
-}
-
-
-# ── Brain class ─────────────────────────────────────────────────
+__all__ = [
+    "AGENT_SYSTEM_PROMPT",
+    "AGENT_TEAMS",
+    "AgentAction",
+    "AgentBrain",
+    "AgentObservation",
+    "AgentStep",
+    "COMPACT_LOOP_PROMPT_ADAPTER",
+    "LOOP_PROMPT_ADAPTER",
+    "TOOL_DESCRIPTIONS",
+    "build_agent_system_prompt",
+    "build_compact_agent_system_prompt",
+    "get_brain_decision_count",
+    "get_llm_call_count",
+    "get_llm_usage_stats",
+    "reset_brain_decision_count",
+    "reset_llm_call_count",
+    "reset_llm_usage_stats",
+]
 
 class AgentBrain:
     """AI decision engine for autonomous pentesting.
@@ -798,10 +150,20 @@ class AgentBrain:
         self.steps: list[AgentStep] = []
         self.is_done = False
         self._state_lock = threading.Lock()
-        self._provider = (provider or os.environ.get("UPSTREAM_LLM_PROVIDER", "together")).lower()
-        if self._provider == "google":
-            self._provider = "gemini"
-        self._model = model or os.environ.get("UPSTREAM_LLM_MODEL", "")
+        base_provider = provider or os.environ.get("UPSTREAM_LLM_PROVIDER", "")
+        base_model = model or os.environ.get("UPSTREAM_LLM_MODEL", "")
+        self._hybrid_model_config = resolve_hybrid_model_config(
+            base_provider=base_provider,
+            base_model=base_model,
+            env=os.environ,
+        )
+        director_endpoint = self._hybrid_model_config.director
+        if provider is not None or model is not None:
+            self._provider = normalize_provider(provider or director_endpoint.provider or "together")
+            self._model = model or base_model or director_endpoint.model
+        else:
+            self._provider = director_endpoint.provider or "together"
+            self._model = director_endpoint.model or base_model
         self._step_count = 0
         self._memory = memory
         # "standard" | "uncensored"
@@ -851,6 +213,14 @@ class AgentBrain:
             policy.context_window,
             policy.output_token_cap,
             policy.profile,
+        )
+        config = self._hybrid_model_config
+        logger.info(
+            "hybrid llm roles: director=%s worker=%s verifier=%s summarizer=%s",
+            config.director.ref,
+            config.worker.ref,
+            config.verifier.ref,
+            config.summarizer.ref,
         )
 
     def _build_fallback_chain(self) -> list[dict[str, str]]:
@@ -1165,11 +535,7 @@ class AgentBrain:
 
     @staticmethod
     def _estimate_prompt_tokens(text: str) -> int:
-        text = str(text or "")
-        if not text:
-            return 0
-        encoded_len = len(text.encode("utf-8", errors="ignore"))
-        return max(1, len(text) // 4, encoded_len // 3)
+        return estimate_context_tokens(text)
 
     def _is_small_local_context(self) -> bool:
         from vxis.llm.model_registry import get_compression_policy
@@ -1204,7 +570,13 @@ class AgentBrain:
         from vxis.llm.model_registry import get_compression_policy, get_max_output_tokens
 
         policy = get_compression_policy(self._provider, self._model)
-        context_window = int(policy.context_window or 0)
+        role_budget = resolve_context_budget(
+            "director",
+            provider=self._provider,
+            model=self._model,
+            context_window=int(policy.context_window or 0),
+        )
+        context_window = int(role_budget.context_window or 0)
         if context_window <= 0:
             return history_lines
 
@@ -1231,34 +603,14 @@ class AgentBrain:
                 ),
             )
 
+        budget = min(budget, int(role_budget.history_tokens))
         total = sum(self._estimate_prompt_tokens(line) for line in history_lines)
         if total <= budget:
             return history_lines
 
-        kept_rev: list[str] = []
-        used = 0
-        for line in reversed(history_lines):
-            tokens = self._estimate_prompt_tokens(line)
-            if not kept_rev and tokens > budget:
-                chars = max(200, budget * 4)
-                line = line[:chars]
-                tokens = self._estimate_prompt_tokens(line)
-            if kept_rev and used + tokens > budget:
-                break
-            kept_rev.append(line)
-            used += tokens
-
-        kept = list(reversed(kept_rev))
+        kept = fit_lines_to_token_budget(history_lines, budget, prefer_recent=True)
         omitted = len(history_lines) - len(kept)
-        if omitted > 0:
-            kept.insert(
-                0,
-                (
-                    "[system] PROMPT-BUDGET COMPACTION: "
-                    f"{omitted} older history line(s) omitted for "
-                    f"{self._provider}/{self._model} ({context_window} ctx)"
-                ),
-            )
+        if omitted >= 0:
             logger.info(
                 "think_in_loop prompt trim: provider=%s model=%s context=%d budget=%d history=%d→%d lines",
                 self._provider,
@@ -1324,7 +676,45 @@ class AgentBrain:
         from vxis.llm.model_registry import get_compression_policy
 
         policy = get_compression_policy(self._provider, self._model)
+        role_budget = resolve_context_budget(
+            "director",
+            provider=self._provider,
+            model=self._model,
+            context_window=int(policy.context_window or 0),
+        )
         _long_ctx = _os.environ.get("VXIS_LONG_CONTEXT") == "1" and policy.allow_long_context
+        custom_instruction = _os.environ.get("VXIS_SCAN_INSTRUCTIONS", "").strip()
+        instruction_cap = 900 if small_local_context else min(3_000, role_budget.max_message_chars)
+        protocol_memory = render_director_protocol_memory(
+            local_strict=small_local_context,
+            target_kind=self._target_kind,
+        )
+        instruction_block = "\n\n## Director protocol\n" + protocol_memory + "\n"
+        if custom_instruction:
+            instruction_block += (
+                "\n\n## Operator instructions\n"
+                + custom_instruction[:instruction_cap]
+                + "\n"
+            )
+        try:
+            from vxis.agent.skill_context import render_skill_context
+
+            recent_context = "\n".join(
+                str(message.get("content", ""))[:600]
+                for message in messages[-8:]
+                if isinstance(message, dict)
+            )
+            skill_context = render_skill_context(
+                task=recent_context,
+                role="director",
+                target_kind=getattr(self._target_kind, "value", self._target_kind),
+                limit=4 if small_local_context else 5,
+                max_chars=role_budget.max_skill_chars,
+            )
+        except Exception:
+            skill_context = ""
+        if skill_context:
+            instruction_block += "\n\n## Specialist skill context\n" + skill_context + "\n"
         history_lines: list[str] = self._build_smart_history(
             messages,
             long_context=_long_ctx,
@@ -1333,16 +723,19 @@ class AgentBrain:
         history_header = "## Conversation history (most recent last)\n"
         if small_local_context:
             task_prompt = (
-                "\n\n## Task\n"
-                + "Use the history above to choose the next single tool call.\n"
+                instruction_block
+                + "\n\n## Task\n"
+                + "Pick the next tool call from the history.\n"
+                + "Keep reasoning terse: goal, evidence, blocker, next proof.\n"
                 + 'Emit exactly: {"reasoning":"<why>","actions":[{"tool":"<catalog tool>","args":{...},"reasoning":"<why>","priority":"high|medium|low"}]}\n'
                 + "Use finish_scan only when the mission is truly complete."
             )
         else:
             task_prompt = (
-                "\n\n## Your task\n"
-                + "Based on the history above, decide the next tool call(s). "
-                + "Output EXACTLY this JSON shape (inside a ```json fence):\n"
+                instruction_block
+                + "\n\n## Your task\n"
+                + "Choose next tool call(s). Be terse: goal, evidence, blocker, next proof. "
+                + "Output ONLY this JSON shape in a ```json fence:\n"
                 + '{"reasoning": "<why>", "actions": [{"tool": "<exact name from catalog>", "args": {...}, "reasoning": "<why>", "priority": "high|medium|low"}]}\n'
                 + "To end the scan, emit a single action with tool='finish_scan'.\n"
                 + "REMEMBER: only emit tool names that appear in '## Available Tools' above."
@@ -1372,7 +765,12 @@ class AgentBrain:
             logger.warning("think_in_loop: all LLM calls failed at step %d", self._step_count)
             return []
 
-        actions = self._parse_response(response)
+        valid_tools = {
+            str(t.get("name", "")).strip()
+            for t in tool_catalog
+            if isinstance(t, dict) and str(t.get("name", "")).strip()
+        }
+        actions = self._parse_response(response, valid_tools=valid_tools)
         return [(a.tool, a.args) for a in actions]
 
     def record_result(self, action: AgentAction, result: dict[str, Any]) -> None:
@@ -1712,6 +1110,79 @@ class AgentBrain:
                     system_prompt, user_prompt, max_retries, image_path,
                 ),
             )
+
+    def _call_llm_for_role(
+        self,
+        role: str | ModelRole,
+        system_prompt: str,
+        user_prompt: str,
+        max_retries: int = 2,
+        image_path: str = "",
+        skip_refusal_handling: bool = False,
+    ) -> str | None:
+        """Call the endpoint assigned to a hybrid model role.
+
+        The director path still owns the fallback chain. Non-director roles try
+        their configured endpoint first, then fall back to the director chain if
+        that endpoint fails or refuses.
+        """
+        import time as _time
+
+        try:
+            endpoint = self._hybrid_model_config.for_role(role)
+        except Exception:
+            return self._call_llm_with_fallback(
+                system_prompt,
+                user_prompt,
+                max_retries=max_retries,
+                image_path=image_path,
+                skip_refusal_handling=skip_refusal_handling,
+            )
+
+        if endpoint.provider == self._provider and endpoint.model == self._model:
+            return self._call_llm_with_fallback(
+                system_prompt,
+                user_prompt,
+                max_retries=max_retries,
+                image_path=image_path,
+                skip_refusal_handling=skip_refusal_handling,
+            )
+
+        response = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._call_llm_direct(
+                    system_prompt,
+                    user_prompt,
+                    provider=endpoint.provider,
+                    model=endpoint.model,
+                    image_path=image_path,
+                )
+                if response:
+                    break
+            except Exception as exc:
+                if attempt < max_retries:
+                    _time.sleep(2 ** attempt)
+                else:
+                    logger.debug("role LLM %s failed: %s", endpoint.ref, exc)
+
+        if response and (skip_refusal_handling or not self._is_refusal(response)):
+            return response
+
+        if endpoint.role == ModelRole.DIRECTOR:
+            return None
+
+        logger.info(
+            "role LLM %s unavailable/refused; falling back to director chain",
+            endpoint.ref,
+        )
+        return self._call_llm_with_fallback(
+            system_prompt,
+            user_prompt,
+            max_retries=max_retries,
+            image_path=image_path,
+            skip_refusal_handling=skip_refusal_handling,
+        )
 
     def _call_llm_with_fallback(
         self, system_prompt: str, user_prompt: str,
@@ -2239,7 +1710,11 @@ class AgentBrain:
 
         return "\n".join(sections)
 
-    def _parse_response(self, text: str) -> list[AgentAction]:
+    def _parse_response(
+        self,
+        text: str,
+        valid_tools: set[str] | None = None,
+    ) -> list[AgentAction]:
         """Parse LLM response into AgentAction list.
 
         Phase B hardening: accepts several LLM output shapes that broke the
@@ -2280,7 +1755,10 @@ class AgentBrain:
                 # containing unescaped quotes, the whole JSON breaks but we
                 # can still recover individual tool invocations by matching
                 # their structure loosely.
-                recovered = self._recover_actions_from_broken_json(text)
+                recovered = self._recover_actions_from_broken_json(
+                    text,
+                    valid_tools=valid_tools,
+                )
                 if recovered:
                     logger.warning(
                         "Recovered %d action(s) from malformed JSON via regex fallback",
@@ -2293,23 +1771,45 @@ class AgentBrain:
                 )
                 return []
 
+        if isinstance(data, list):
+            data = {"actions": data}
         if not isinstance(data, dict):
             logger.warning("Agent response parsed but not a dict: %r", type(data))
             return []
 
         actions = []
-        for item in data.get("actions", []):
+        raw_actions = data.get("actions", [])
+        if isinstance(raw_actions, dict):
+            raw_actions = [raw_actions]
+        if not isinstance(raw_actions, list):
+            logger.warning("Agent response actions is not a list: %r", type(raw_actions))
+            return []
+        for item in raw_actions:
+            if not isinstance(item, dict):
+                logger.warning("Skipping non-object action item: %r", item)
+                continue
+            tool = str(item.get("tool", "")).strip()
+            if valid_tools is not None and tool not in valid_tools:
+                logger.warning("Skipping hallucinated tool from Brain: %s", tool)
+                continue
+            args = item.get("args") or {}
+            if not isinstance(args, dict):
+                logger.warning("Coercing non-object args for tool %s to empty dict", tool)
+                args = {}
             actions.append(AgentAction(
-                tool=item.get("tool", ""),
-                args=item.get("args", {}),
-                reasoning=item.get("reasoning", ""),
-                priority=item.get("priority", "medium"),
+                tool=tool,
+                args=args,
+                reasoning=str(item.get("reasoning", "")),
+                priority=str(item.get("priority", "medium") or "medium"),
             ))
 
         return actions
 
     @staticmethod
-    def _recover_actions_from_broken_json(text: str) -> list[AgentAction]:
+    def _recover_actions_from_broken_json(
+        text: str,
+        valid_tools: set[str] | None = None,
+    ) -> list[AgentAction]:
         """Last-ditch action extractor for malformed LLM JSON.
 
         Matches the "tool":"NAME" pattern and tries to extract a reasonable
@@ -2319,36 +1819,29 @@ class AgentBrain:
         Typical failure mode this recovers from: shell_exec action with a
         heredoc python script where the LLM forgot to escape inner quotes.
         """
-        import re as _re
-
-        known_tools = {
+        known_tools = valid_tools or {
             "finish_scan", "think", "wait",
             "http_request", "browser_render", "intercept_proxy",
             "shell_exec", "python_exec",
             "report_finding", "query_findings", "link_chain",
             "list_playbooks", "load_playbook",
+            "fingerprint_target", "query_scan_memory", "verify_finding",
+            "browser_navigate", "browser_analyze_dom", "browser_click",
+            "browser_fill_form", "browser_screenshot", "browser_eval_js",
+            "browser_get_cookies", "run_skill", "agent_graph",
         }
 
         recovered: list[AgentAction] = []
-        # Find every occurrence of "tool":"<name>"
-        for match in _re.finditer(r'"tool"\s*:\s*"([a-z_]+)"', text):
+        # Find every occurrence of "tool":"<name>" or 'tool':'<name>'.
+        for match in _re.finditer(r"""["']tool["']\s*:\s*["']([A-Za-z0-9_.:-]+)["']""", text):
             tool = match.group(1)
             if tool not in known_tools:
                 continue
-            # The args for simple tools — best-effort extraction from the
-            # area after the tool match up to the next closing brace or
-            # "reasoning" sibling field.
-            tail = text[match.end():match.end() + 800]
+            next_tool = _re.search(r"""["']tool["']\s*:\s*["'][A-Za-z0-9_.:-]+["']""", text[match.end():])
+            end = match.end() + next_tool.start() if next_tool else match.end() + 4000
+            tail = text[match.end():end]
 
-            args: dict[str, Any] = {}
-            # Try to pull simple key:value pairs for common args
-            for arg_match in _re.finditer(
-                r'"(url|base_url|path|method|command|code|name|title|severity|finding_type|affected_component|description|evidence|action|seconds|thought|rationale)"\s*:\s*"([^"]{0,2000})"',
-                tail,
-            ):
-                k, v = arg_match.group(1), arg_match.group(2)
-                if k not in args:
-                    args[k] = v
+            args = AgentBrain._recover_args_from_action_tail(tail)
 
             recovered.append(AgentAction(
                 tool=tool,
@@ -2368,6 +1861,104 @@ class AgentBrain:
             seen.add(key)
             out.append(a)
         return out
+
+    @staticmethod
+    def _recover_args_from_action_tail(tail: str) -> dict[str, Any]:
+        args_match = _re.search(r"""["']args["']\s*:""", tail)
+        if args_match:
+            idx = args_match.end()
+            while idx < len(tail) and tail[idx].isspace():
+                idx += 1
+            if idx < len(tail) and tail[idx] == "{":
+                raw_args = AgentBrain._extract_balanced_object(tail, idx)
+                if raw_args:
+                    parsed = AgentBrain._parse_loose_args_object(raw_args)
+                    if isinstance(parsed, dict):
+                        return parsed
+
+        return AgentBrain._recover_simple_args(tail)
+
+    @staticmethod
+    def _extract_balanced_object(text: str, start_idx: int) -> str | None:
+        """Extract a brace-balanced object, tolerating normal quoted strings."""
+        depth = 0
+        quote: str | None = None
+        escaped = False
+        for idx in range(start_idx, len(text)):
+            ch = text[idx]
+            if quote:
+                if escaped:
+                    escaped = False
+                elif ch == "\\":
+                    escaped = True
+                elif ch == quote:
+                    quote = None
+                continue
+            if ch in {"'", '"'}:
+                quote = ch
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start_idx:idx + 1]
+        return None
+
+    @staticmethod
+    def _parse_loose_args_object(raw: str) -> dict[str, Any] | None:
+        cleaned = _re.sub(r",(\s*[}\]])", r"\1", raw.strip())
+        try:
+            parsed = json.loads(cleaned)
+            return parsed if isinstance(parsed, dict) else None
+        except json.JSONDecodeError:
+            pass
+        try:
+            parsed = ast.literal_eval(cleaned)
+            return parsed if isinstance(parsed, dict) else None
+        except (SyntaxError, ValueError):
+            return None
+
+    @staticmethod
+    def _recover_simple_args(text: str) -> dict[str, Any]:
+        args: dict[str, Any] = {}
+        # Common scalar args emitted by local models when the surrounding JSON
+        # is broken. Nested objects are handled by _parse_loose_args_object.
+        keys = (
+            "url", "base_url", "path", "method", "command", "code", "name",
+            "skill", "target_url", "title", "severity", "finding_type",
+            "affected_component", "description", "impact",
+            "technical_analysis", "poc_description", "poc_script_code",
+            "evidence", "action", "seconds", "thought", "rationale",
+            "selector", "form_selector", "expression",
+        )
+        key_pattern = "|".join(_re.escape(k) for k in keys)
+        pattern = rf"""["']({key_pattern})["']\s*:\s*(?:"([^"]{{0,4000}})"|'([^']{{0,4000}})'|([^,}}\]\n]{{1,300}}))"""
+        for arg_match in _re.finditer(pattern, text):
+            key = arg_match.group(1)
+            value = arg_match.group(2) or arg_match.group(3) or arg_match.group(4) or ""
+            value = value.strip()
+            if key not in args:
+                args[key] = AgentBrain._coerce_recovered_scalar(value)
+        return args
+
+    @staticmethod
+    def _coerce_recovered_scalar(value: str) -> Any:
+        lowered = value.lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+        if lowered == "null":
+            return None
+        try:
+            if _re.fullmatch(r"-?\d+", value):
+                return int(value)
+            if _re.fullmatch(r"-?\d+\.\d+", value):
+                return float(value)
+        except ValueError:
+            pass
+        return value
 
     @staticmethod
     def _call_claude_subprocess(system_prompt: str, user_prompt: str) -> str | None:

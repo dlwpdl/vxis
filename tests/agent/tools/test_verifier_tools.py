@@ -25,6 +25,22 @@ class _WeirdBrain:
         return {"not": "text"}
 
 
+class _RoleBrain:
+    _provider = "openai"
+    _model = "gpt-5.4-mini"
+
+    def __init__(self) -> None:
+        self.roles: list[str] = []
+
+    def _call_llm_for_role(self, role: str, system: str, user: str) -> str:
+        self.roles.append(role)
+        return (
+            "VERDICT: CONFIRMED\n"
+            "CONFIDENCE: high\n"
+            "REASONING: Verifier role was used."
+        )
+
+
 @pytest.mark.asyncio
 async def test_verify_finding_refutes_incomplete_high_severity_report() -> None:
     tool = VerifyFindingTool(brain=_FakeBrain())
@@ -98,6 +114,40 @@ async def test_verify_finding_calls_llm_when_poc_and_control_exist() -> None:
     assert result.ok is True
     assert result.data["verdict"] == "CONFIRMED"
     assert result.data.get("preflight_blocked") is not True
+
+
+@pytest.mark.asyncio
+async def test_verify_finding_uses_verifier_role_when_available() -> None:
+    brain = _RoleBrain()
+    tool = VerifyFindingTool(brain=brain)
+    result = await tool.run(
+        title="IDOR",
+        severity="high",
+        finding_type="idor",
+        affected_component="/api/users/2",
+        description="Access to another user's record",
+        impact="Attacker can read another user's data.",
+        technical_analysis=(
+            "Control check: unauthenticated request to /api/users/2 returned 401, "
+            "but the same low-privilege session could access /api/users/3 and receive another user's profile."
+        ),
+        poc_description="Compare the control request and the authenticated replay against adjacent user IDs.",
+        poc_script_code=(
+            "GET /api/users/2 HTTP/1.1\n"
+            "Host: app.local\n\n"
+            "HTTP/1.1 401 Unauthorized\n\n"
+            "GET /api/users/3 HTTP/1.1\n"
+            "Host: app.local\n"
+            "Cookie: session=low-user\n\n"
+            "HTTP/1.1 200 OK\n\n"
+            "{\"id\":3,\"email\":\"victim@app.local\"}"
+        ),
+        evidence="HTTP/1.1 200 OK\n{\"id\":3,\"email\":\"victim@app.local\"}",
+    )
+
+    assert result.ok is True
+    assert result.data["verdict"] == "CONFIRMED"
+    assert brain.roles == ["verifier"]
 
 
 @pytest.mark.asyncio

@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import os
 import shutil
-import socket
 import subprocess
 from dataclasses import dataclass, field
-from urllib.parse import urlparse
 import urllib.request
 
 
@@ -96,13 +94,20 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
             return "claude-code", True
         return "claude-code (binary missing)", False
 
-    # AgentBrain path — API key OR local OpenAI-compatible backend required
-    provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "together")
-    model = os.environ.get("UPSTREAM_LLM_MODEL", "")
-    if provider == "google":
-        provider = "gemini"
+    # AgentBrain path — role-aware director backend required. Legacy
+    # UPSTREAM_* still works, but if a frontier key is available the hybrid
+    # resolver promotes it to director and keeps the local model as worker.
+    from vxis.llm.hybrid_config import resolve_hybrid_model_config
+
+    hybrid = resolve_hybrid_model_config(
+        base_provider=os.environ.get("UPSTREAM_LLM_PROVIDER", ""),
+        base_model=os.environ.get("UPSTREAM_LLM_MODEL", ""),
+        env=os.environ,
+    )
+    provider = hybrid.director.provider
+    model = hybrid.director.model
     if provider == "ollama":
-        base_url = os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+        base_url = hybrid.director.base_url or os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
         model = model or os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", "qwen2.5-coder:14b")
         try:
             req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
@@ -112,7 +117,7 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
         except Exception:
             return f"local:ollama/{model} (unreachable)", False
     if provider == "llamacpp":
-        base_url = os.environ.get("VXIS_LLAMACPP_BASE_URL", "http://localhost:8080").rstrip("/")
+        base_url = hybrid.director.base_url or os.environ.get("VXIS_LLAMACPP_BASE_URL", "http://localhost:8080").rstrip("/")
         model = model or os.environ.get(
             "VXIS_LLAMACPP_MODEL",
             "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
@@ -130,19 +135,21 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
         "together":  "TOGETHER_API_KEY",
         "openai":    "OPENAI_API_KEY",
         "gemini":    "GOOGLE_API_KEY",
+        "deepseek":   "DEEPSEEK_API_KEY",
     }
     key_env = api_key_envs.get(provider)
     has_key = bool(os.environ.get(key_env)) if key_env else False
+    if provider == "openai" and os.environ.get("LLM_API_KEY"):
+        has_key = True
+    if provider == "gemini" and os.environ.get("GEMINI_API_KEY"):
+        has_key = True
 
     if not has_key:
-        for prov, env in api_key_envs.items():
-            if os.environ.get(env):
-                provider = prov
-                has_key = True
-                break
-
-    if not has_key:
-        return "none (no API key / no local ollama/llama.cpp — set API key, use local server, or use --interactive)", False
+        return (
+            "none (director LLM key missing — set VXIS_DIRECTOR_LLM plus provider key, "
+            "or configure a reachable local legacy backend)",
+            False,
+        )
 
     label = f"api:{provider}" + (f"/{model}" if model else "")
     return label, True

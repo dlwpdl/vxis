@@ -342,7 +342,10 @@ class VerifyFindingTool:
                     summary="verify_finding: UNCONFIRMED (medium) — no control comparison recorded",
                 )
 
-        if self._brain is None or not hasattr(self._brain, "_call_llm_with_fallback"):
+        if self._brain is None or not (
+            hasattr(self._brain, "_call_llm_with_fallback")
+            or hasattr(self._brain, "_call_llm_for_role")
+        ):
             return ToolResult(
                 ok=False,
                 summary="verify_finding: no brain instance bound (tool was instantiated without brain)",
@@ -367,33 +370,50 @@ class VerifyFindingTool:
 
         user_prompt += "\nReview this finding. Can you REFUTE it?"
 
-        # Temporarily swap model to gpt-5.4 full if we're currently on mini.
-        orig_model = getattr(self._brain, "_model", None)
+        call_for_role = getattr(self._brain, "_call_llm_for_role", None)
         use_stronger = False
-        if (
-            getattr(self._brain, "_provider", None) == "openai"
-            and os.environ.get("OPENAI_API_KEY")
-            and orig_model
-            and "mini" in str(orig_model)
-        ):
-            self._brain._model = "gpt-5.4"
-            use_stronger = True
+        if callable(call_for_role):
+            try:
+                response = await asyncio.to_thread(
+                    call_for_role,
+                    "verifier",
+                    _REFUTER_SYSTEM_PROMPT,
+                    user_prompt,
+                )
+                use_stronger = True
+            except Exception as e:
+                return ToolResult(
+                    ok=False,
+                    summary=f"verify_finding: LLM call failed: {type(e).__name__}: {e}",
+                    error=str(e),
+                )
+        else:
+            # Back-compat for older/fake Brain objects used in tests.
+            orig_model = getattr(self._brain, "_model", None)
+            if (
+                getattr(self._brain, "_provider", None) == "openai"
+                and os.environ.get("OPENAI_API_KEY")
+                and orig_model
+                and "mini" in str(orig_model)
+            ):
+                self._brain._model = "gpt-5.4"
+                use_stronger = True
 
-        try:
-            response = await asyncio.to_thread(
-                self._brain._call_llm_with_fallback,
-                _REFUTER_SYSTEM_PROMPT,
-                user_prompt,
-            )
-        except Exception as e:
-            return ToolResult(
-                ok=False,
-                summary=f"verify_finding: LLM call failed: {type(e).__name__}: {e}",
-                error=str(e),
-            )
-        finally:
-            if use_stronger and orig_model is not None:
-                self._brain._model = orig_model
+            try:
+                response = await asyncio.to_thread(
+                    self._brain._call_llm_with_fallback,
+                    _REFUTER_SYSTEM_PROMPT,
+                    user_prompt,
+                )
+            except Exception as e:
+                return ToolResult(
+                    ok=False,
+                    summary=f"verify_finding: LLM call failed: {type(e).__name__}: {e}",
+                    error=str(e),
+                )
+            finally:
+                if use_stronger and orig_model is not None:
+                    self._brain._model = orig_model
 
         if not response:
             return ToolResult(

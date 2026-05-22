@@ -1,16 +1,16 @@
-# `src/vxis/agent/tools/` — 23 BrainTool Implementations
+# `src/vxis/agent/tools/` — 25 BrainTool Implementations
 
-> The tools the Brain can call during a scan. `build_default_registry()` registers all 23 into a `ToolRegistry` that `ScanAgentLoop` passes to `think_in_loop` as the tool catalog.
+> The tools the Brain can call during a scan. `build_default_registry()` registers all 25 into a `ToolRegistry` that `ScanAgentLoop` passes to `think_in_loop` as the tool catalog.
 
 ## Registration entry point
 
 ```python
 from vxis.agent.tools import build_default_registry
 reg = build_default_registry(brain=agent_brain)
-# → 23 tools registered
+# -> 25 tools registered
 ```
 
-## Tool catalog (23 tools, grouped by layer)
+## Tool catalog (25 tools, grouped by layer)
 
 ### Control tools (`control_tools.py`) — 3 tools
 
@@ -21,6 +21,12 @@ Tools the Brain uses to manage the loop itself.
 | `finish_scan` | Signal end of scan. ScanAgentLoop stops when this returns `ok=True`. |
 | `think` | Scratchpad. Logs a reasoning step. No side effects. Input: `thought: string`. Think-first pattern: Brain should call this when uncertain. |
 | `wait` | Brief pause (max 5s, clamped). Input: `seconds: number`. Useful for rate-limit backoff. |
+
+### Agent graph tool (`agent_graph_tools.py`) — 1 tool
+
+| Tool | What it does |
+|---|---|
+| `agent_graph` | Records delegated scan tasks, worker roles, messages, statuses, bounded child-turn executions, and final results. Child turns run only when ScanAgentLoop installs an executor, and delegated tasks still require explicit `finish` with a concrete result. |
 
 ### Fingerprint tool (`fingerprint_tools.py`) — 1 tool
 
@@ -98,6 +104,12 @@ In-memory store per scan. Auto-assigns `VXIS-0001`, `VXIS-0002`, ... IDs.
 | Tool | What it does |
 |---|---|
 | `query_scan_memory` | Query the cross-scan episodic memory KB. Returns relevant past findings, techniques, and failed attempts from similar targets. |
+
+### Skill runner (`skill_runner.py`) — 1 tool
+
+| Tool | What it does |
+|---|---|
+| `run_skill` | Execute a curated VXIS skill with structured arguments and loop-guarding. Used for focused recon/exploit/post-auth workflows. |
 
 ### MITRE data (`mitre_data.py`) — not a tool, support module
 

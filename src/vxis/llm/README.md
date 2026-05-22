@@ -7,8 +7,30 @@
 | File | Role |
 |---|---|
 | `client.py` | Unified LLM client wrapper with provider-specific call methods |
+| `hybrid_config.py` | Role-based hybrid model selection for director/worker/verifier/summarizer |
 | `router.py` | Token-budget-aware provider routing + cost tracking |
 | `model_registry.py` | Registry of known models (context window, cost per 1M tokens, vision support) |
+
+## Hybrid Role Policy
+
+VXIS uses a hybrid model split instead of treating every agent call as the
+same model class:
+
+- `director`: frontier/cloud model for root planning, branch choice, and hard
+  judgment. Configure with `VXIS_DIRECTOR_LLM`, or split
+  `VXIS_DIRECTOR_LLM_PROVIDER` + `VXIS_DIRECTOR_LLM_MODEL`.
+- `worker`: local-first model for bounded task execution. Configure with
+  `VXIS_WORKER_LLM` or split provider/model vars. Defaults to `llamacpp` using
+  `VXIS_LLAMACPP_MODEL`.
+- `verifier`: strong model for adversarial finding review. Defaults to the
+  director unless `VXIS_VERIFIER_LLM` is set.
+- `summarizer`: cheap/local model for compression and summarization. Defaults
+  to the worker unless `VXIS_SUMMARIZER_LLM` is set.
+
+Strix uses one LiteLLM-style `provider/model` setting for the main runtime.
+VXIS keeps the same readable format for each role, but separates director cost
+from worker throughput so local 30B-class models can absorb bounded tasks
+without being trusted as the root orchestrator.
 
 ## Context Policy
 

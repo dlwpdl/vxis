@@ -19,6 +19,8 @@ vxis scan <target> [OPTIONS]
 | `--interactive`, `-i` | Claude Code as Brain (InteractiveBrain path, stdin/stdout NDJSON) |
 | `--verbose`, `-v` | DEBUG logging |
 | `--allow-inject` | Auto-approve injection gate (benchmarks only) |
+| `--instruction` | Inline operator instructions for credentials, focus, exclusions, or approach |
+| `--instruction-file` | Markdown/text file with detailed scan instructions |
 
 ## Files
 
@@ -31,7 +33,34 @@ vxis scan <target> [OPTIONS]
 | `preflight.py` | Pre-flight checks (reachable target, required tools, disk space) |
 | `installer.py` | Optional scanner tool installer (apt/pip/go install automation) |
 
-## Local llama.cpp Brain
+## Hybrid LLM Roles
+
+VXIS now resolves role-specific LLM settings before `AgentBrain` starts:
+
+- Director/root brain: `VXIS_DIRECTOR_LLM[_PROVIDER/_MODEL]`
+- Worker/task agents: `VXIS_WORKER_LLM[_PROVIDER/_MODEL/_BASE_URL]`
+- Verifier/judge: `VXIS_VERIFIER_LLM[_PROVIDER/_MODEL]`
+- Summarizer/compressor: `VXIS_SUMMARIZER_LLM[_PROVIDER/_MODEL/_BASE_URL]`
+
+The no-args TUI still writes `UPSTREAM_LLM_PROVIDER` and
+`UPSTREAM_LLM_MODEL` for compatibility. Cloud choices additionally become the
+director/verifier role. Local choices additionally become the worker/summarizer
+role, so a scan can use a frontier director with local bounded task execution.
+
+## Custom Instructions
+
+Strix-style operator instructions are injected into the Brain loop via:
+
+```bash
+vxis scan https://app.example --instruction "Focus on IDOR; exclude /admin"
+vxis scan https://app.example --instruction-file ./pentest-instructions.md
+```
+
+Inline and file instructions can be combined. The merged value is passed as
+`VXIS_SCAN_INSTRUCTIONS` and appears in the model prompt as an explicit
+operator-instruction block.
+
+## Local llama.cpp Worker
 
 The no-args TUI path supports scan start -> AI autonomous scan -> `Local Runtime` -> `llama.cpp server`.
 It sets `UPSTREAM_LLM_PROVIDER=llamacpp`, `UPSTREAM_LLM_MODEL`, and

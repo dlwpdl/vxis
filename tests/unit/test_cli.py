@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from vxis.cli.main import app
@@ -58,7 +59,7 @@ class TestPluginsCommand:
     def test_plugins_cmd_displays_plugin_table(self):
         """When plugins exist, their names appear in the output table."""
         from vxis.plugins.base import BasePlugin, PluginMeta
-        from vxis.core.context import DAGContext, PluginOutput
+        from vxis.core.context import PluginOutput
 
         class FakePlugin(BasePlugin):
             @property
@@ -156,39 +157,54 @@ class TestScanCommandHelp:
 
 
 class TestScanCommand:
-    """Functional tests that stub out the orchestrator so no real tools run."""
+    """Functional tests that stub out preflight and the scan pipeline."""
+
+    def _make_preflight(self):
+        return SimpleNamespace(
+            target_latency_ms=12.0,
+            target_reachable=True,
+            brain_ready=True,
+            brain_backend="mock-brain",
+            docker_available=True,
+            github_token=True,
+            proxy_pool_size=0,
+            warnings=[],
+            errors=[],
+            can_scan=True,
+        )
 
     def _make_mock_result(self, target: str = "example.com"):
-        """Build a minimal ScanResult mock."""
-        from datetime import timedelta
-        from vxis.core.orchestrator import ScanResult
-
-        from datetime import datetime, timezone
-
-        start = datetime.now(timezone.utc)
-        return ScanResult(
+        """Build the minimal scan context consumed by the CLI result renderer."""
+        return SimpleNamespace(
             scan_id="aaaabbbb-cccc-dddd-eeee-ffffffffffff",
             target=target,
             profile="standard",
             findings=[],
             tool_runs=[],
-            started_at=start,
-            finished_at=start + timedelta(seconds=5),
+            duration_seconds=5.0,
+            aggregated_findings=[],
+            target_memory={},
+            vxis_score=None,
+            peak_context_bytes=0,
+            llm_usage={},
         )
+
+    @contextmanager
+    def _patch_scan_runtime(self, mock_result=None, side_effect=None):
+        pipeline = MagicMock()
+        pipeline.run = AsyncMock(return_value=mock_result, side_effect=side_effect)
+        with (
+            patch("vxis.cli.preflight.run_preflight", return_value=self._make_preflight()),
+            patch("vxis.agent.brain.AgentBrain", return_value=MagicMock()),
+            patch("vxis.pipeline.scan_pipeline_v2.ScanPipeline", return_value=pipeline),
+        ):
+            yield pipeline
 
     def test_scan_exits_zero_on_success(self):
         """scan command returns exit code 0 when the scan completes."""
         mock_result = self._make_mock_result()
 
-        with (
-            patch("vxis.cli.main._get_config", return_value=MagicMock()),
-            patch("vxis.core.orchestrator.ScanOrchestrator.__init__", return_value=None),
-            patch(
-                "vxis.core.orchestrator.ScanOrchestrator.run_scan",
-                new_callable=AsyncMock,
-                return_value=mock_result,
-            ),
-        ):
+        with self._patch_scan_runtime(mock_result):
             result = runner.invoke(app, ["scan", "example.com", "--no-report"])
 
         assert result.exit_code == 0
@@ -197,31 +213,17 @@ class TestScanCommand:
         """scan output includes the target name."""
         mock_result = self._make_mock_result("scanme.example.com")
 
-        with (
-            patch("vxis.cli.main._get_config", return_value=MagicMock()),
-            patch("vxis.core.orchestrator.ScanOrchestrator.__init__", return_value=None),
-            patch(
-                "vxis.core.orchestrator.ScanOrchestrator.run_scan",
-                new_callable=AsyncMock,
-                return_value=mock_result,
-            ),
-        ):
+        with self._patch_scan_runtime(mock_result):
             result = runner.invoke(
                 app, ["scan", "scanme.example.com", "--no-report"]
             )
 
+        assert result.exit_code == 0
         assert "scanme.example.com" in result.output
 
     def test_scan_exits_one_on_invalid_profile(self):
         """scan returns exit code 1 when an invalid profile is provided."""
-        with (
-            patch("vxis.cli.main._get_config", return_value=MagicMock()),
-            patch(
-                "vxis.core.orchestrator.ScanOrchestrator.run_scan",
-                new_callable=AsyncMock,
-                side_effect=ValueError("Profile 'badprofile' not found."),
-            ),
-        ):
+        with self._patch_scan_runtime(side_effect=ValueError("Profile 'badprofile' not found.")):
             result = runner.invoke(
                 app, ["scan", "example.com", "--profile", "badprofile"]
             )
@@ -232,16 +234,10 @@ class TestScanCommand:
         """With --no-report the report path message is not shown."""
         mock_result = self._make_mock_result()
 
-        with (
-            patch("vxis.cli.main._get_config", return_value=MagicMock()),
-            patch(
-                "vxis.core.orchestrator.ScanOrchestrator.run_scan",
-                new_callable=AsyncMock,
-                return_value=mock_result,
-            ),
-        ):
+        with self._patch_scan_runtime(mock_result):
             result = runner.invoke(app, ["scan", "example.com", "--no-report"])
 
+        assert result.exit_code == 0
         # The "Report would be written to" message should not appear
         assert "Report would be written to" not in result.output
 
@@ -259,7 +255,11 @@ class TestReportCommand:
 
     def test_report_cmd_exits_zero(self):
         """report command exits with code 0 when report generates successfully."""
-        with patch("vxis.cli.main.asyncio.run", return_value=None):
+        def close_coroutine(coro):
+            coro.close()
+            return None
+
+        with patch("vxis.cli.main.asyncio.run", side_effect=close_coroutine):
             result = runner.invoke(app, ["report", "42"])
         assert result.exit_code == 0
 

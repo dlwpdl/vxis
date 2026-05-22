@@ -3,8 +3,6 @@ from_trivy, and from_dnstwist."""
 
 from __future__ import annotations
 
-import pytest
-
 from vxis.core.normalizer import FindingFactory
 from vxis.models.finding import Severity
 

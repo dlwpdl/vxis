@@ -671,7 +671,10 @@ class ScanPipeline:
             self.brain._target_kind = kind
 
         # 5. Build the tool registry
-        registry = build_default_registry(brain=self.brain)
+        registry = build_default_registry(
+            brain=self.brain,
+            sandbox_key=str(getattr(ctx, "scan_id", "") or ctx.target),
+        )
 
         # 6. Emit a synthetic phase_start so the CLI Rich Live display has content
         self._emit("phase_start", {"phase": "scan_loop", "name": "ScanAgentLoop"})
@@ -818,6 +821,10 @@ class ScanPipeline:
             logger.exception("ScanAgentLoop failed")
             self._emit("error", {"stage": "scan_loop", "error": str(exc)})
             try:
+                await registry.cleanup()
+            except Exception:
+                logger.exception("tool registry cleanup failed after scan_loop error")
+            try:
                 from vxis.agent.tools.browser_tools import shutdown_browser
                 await shutdown_browser()
             except Exception:
@@ -831,6 +838,11 @@ class ScanPipeline:
             # Still attach a score so the CLI doesn't crash
             ctx.vxis_score = _SimpleScore(total=0.0, grade="F")
             return ctx
+
+        try:
+            await registry.cleanup()
+        except Exception:
+            logger.exception("tool registry cleanup failed after scan_loop")
 
         self._emit(
             "phase_end",

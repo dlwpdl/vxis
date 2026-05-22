@@ -18,8 +18,6 @@ import logging
 import os
 import shutil
 import subprocess
-import urllib.request
-import urllib.error
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

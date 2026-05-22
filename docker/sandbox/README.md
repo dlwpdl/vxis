@@ -24,6 +24,7 @@ Image size: ~980 MB.
 | Legacy Perl scanner | `nikto` (cloned from GitHub — `libjson-perl`/`libxml-writer-perl` missing, see Phase B fix) |
 | Python scanners | `wapiti3` (pip, optional — silent fail allowed) |
 | Python runtime | `python3`, `httpx`, `aiohttp`, `requests` (via pip `--break-system-packages`) |
+| Session runtime | `tmux` for persistent `shell_exec(session=...)` and `python_exec(session=...)` |
 | HTTP utility | `curl`, `wget`, `jq`, `unzip`, `git`, `ca-certificates` |
 
 ## Why not Kali?
@@ -37,13 +38,15 @@ The `ShellExecTool` in `src/vxis/agent/tools/shell_tools.py` manages the contain
 1. **Lazy init**: On first `shell_exec` call, `_ensure_sandbox_running()` checks:
    - Docker CLI available on host
    - `vxis/sandbox:latest` image exists locally (if not → error message with build instructions)
-   - Container `vxis-sandbox` is running (if not → `docker run -d --name vxis-sandbox --network host -v /tmp/vxis-workspace:/workspace vxis/sandbox:latest sleep infinity`)
+   - A per-scan container named `vxis-sandbox-<scan>-<hash>` is running (if not, it starts one with `--network host` and a per-scan workspace bind mount)
 
-2. **Warm reuse**: The container stays running across scans (Strix convention). Only the first scan pays the startup cost.
+2. **Per-scan reuse**: `shell_exec` and `python_exec` share one container and one `/workspace` within a scan. The pipeline cleans it up at scan end.
 
-3. **Dispatch**: Every `shell_exec(command=…)` becomes `docker exec vxis-sandbox sh -c '<command>'` with a configurable timeout (default 120s, max 600s).
+3. **Dispatch**: One-shot `shell_exec(command=...)` becomes `docker exec <scan-container> sh -c '<command>'` with a configurable timeout.
 
-4. **Workspace bind mount**: `/tmp/vxis-workspace` on host ↔ `/workspace` inside container. `shell_exec` output files and `python_exec` scripts share this directory. State persists across tool calls within a scan.
+4. **Persistent sessions**: Passing `session="name"` uses tmux to preserve shell cwd/env or Python REPL state across calls.
+
+5. **Workspace bind mount**: `/tmp/vxis-workspaces/<scan>-<hash>` on host ↔ `/workspace` inside container. State persists across tool calls within a scan.
 
 ## Network mode: host
 
@@ -66,7 +69,7 @@ Current working tool set (5/7): sqlmap, ffuf, nuclei, gobuster, dirb — plus cu
 ## Verify a built image
 
 ```bash
-docker exec vxis-sandbox sh -c "sqlmap --version && nuclei -version && ffuf -V && gobuster version"
+docker run --rm vxis/sandbox:latest sh -c "tmux -V && sqlmap --version && nuclei -version && ffuf -V && gobuster version"
 ```
 
 All four should print version strings.

@@ -3,8 +3,6 @@ from_netexec, and from_linpeas."""
 
 from __future__ import annotations
 
-import pytest
-
 from vxis.core.normalizer import FindingFactory
 from vxis.models.finding import Finding, Severity
 

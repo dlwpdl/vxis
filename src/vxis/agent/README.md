@@ -6,8 +6,18 @@
 
 | File | Role |
 |---|---|
-| **`brain.py`** (~2186 lines) | `AgentBrain` class. Contains `think()` (legacy) and **`think_in_loop()`** (live). Owns `AGENT_SYSTEM_PROMPT`, `LOOP_PROMPT_ADAPTER`, `_build_smart_history()` (3-tier compaction), the provider fallback chain (`_call_llm_with_fallback`), `_parse_response` JSON parser. `max_steps=300`. |
-| **`scan_loop.py`** | `ScanAgentLoop` class. Strix-equivalent single `while` loop. Owns `ScanLoopState` (messages, verdict_counts, vector_candidates, branches, belief state). Includes scan dashboard injection, branch-discipline, auto-orchestration safety net (login/ffuf/nuclei/sqlmap), egress filter integration, LLM memory compression trigger, and 1-tool-per-message enforcement. |
+| **`brain.py`** | `AgentBrain` class. Contains `think()` (legacy), **`think_in_loop()`** (live), context fitting, provider routing, and provider calls. Prompt/data contracts live in `brain_prompts.py`; usage counters live in `brain_metrics.py`. |
+| **`scan_loop.py`** | `ScanAgentLoop` assembly class and constructor. Runtime behavior is split into focused mixins so worker/local LLM context can stay compact. |
+| **`scan_loop_run.py`** | Main ReAct loop: iteration control, dispatch guards, finish gates, and final result assembly. |
+| **`scan_loop_run_skills.py`** | Scheduled `run_skill` execution and skill-result-to-finding promotion. |
+| **`scan_loop_run_auto.py`** | Auto-orchestration safety net: browser login probing, ffuf, nuclei, and sqlmap fallback execution. |
+| **`scan_loop_run_followups.py`** | Chain nudges, untried-skill sweep, and director follow-up execution. |
+| **`scan_loop_actions.py`** | Action preprocessing, evidence enrichment, verifier dispatch, branch/candidate bookkeeping, and Brain tool catalog. |
+| **`scan_loop_decision_policy.py`** | Finish-blocking policy, branch scoring, forced replan actions, focus discipline, and target-memory pressure. |
+| **`scan_loop_agent_graph.py`** | Director/worker agent graph state synchronization, child execution crediting, and crown-chain follow-up branch creation. |
+| **`scan_loop_dashboard.py`** | Compact per-iteration scan dashboard rendered into Brain context and TUI state. |
+| **`scan_loop_policy.py`** | Static director prompt and skill-family policy tables. |
+| **`scan_loop_state.py`** | Durable scan state: messages, verdict counts, vector candidates, branch state, review queue, callback/retrieval observations, and branch role/phase helpers. |
 | **`tool_registry.py`** | `BrainTool` runtime-checkable Protocol, `ToolResult` dataclass, and `ToolRegistry` async dispatcher. `describe_all()` output is the Brain's tool catalog. |
 | **`memory_compressor.py`** | LLM-based memory compression — Strix pattern. At 90K tokens, older messages are chunked and summarized. 15 most recent messages always preserved verbatim. |
 | **`egress.py`** | Enterprise egress filter. When `VXIS_EGRESS_STRICT=1`, builds an allowlist from the target URL and blocks sandbox outbound to non-target hosts. |
