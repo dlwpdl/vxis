@@ -177,9 +177,7 @@ def _dict_to_toml_lines(data: dict, _prefix: str = "") -> list[str]:
                     lines.append(f"{k} = [{items}]")
             elif isinstance(v, dict):
                 # Only one level of nesting supported; emit inline
-                inner = ", ".join(
-                    f"{ik} = {_toml_value(iv)}" for ik, iv in v.items()
-                )
+                inner = ", ".join(f"{ik} = {_toml_value(iv)}" for ik, iv in v.items())
                 lines.append(f"{k} = {{{inner}}}")
             else:
                 lines.append(f"{k} = {_toml_value(v)}")
@@ -384,7 +382,7 @@ class ClientManager:
             return []
 
         async def _query() -> list[dict]:
-            from sqlalchemy import func, select, or_
+            from sqlalchemy import func, select
 
             from vxis.core.db import get_session
             from vxis.models.db_models import FindingRecord, ScanRecord

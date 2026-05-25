@@ -2,19 +2,19 @@
 
 from __future__ import annotations
 
-import pytest
-
 
 class TestHandsImport:
     """Hands 모듈 import 및 기본 동작 검증."""
 
     def test_import_session_manager(self):
         from vxis.interaction.hands import SessionManager
+
         mgr = SessionManager()
         assert mgr.active_sessions == {}
 
     def test_import_auth_state(self):
         from vxis.interaction.hands import AuthState
+
         assert AuthState.ANONYMOUS.value == "anonymous"
         assert AuthState.AUTHENTICATED.value == "authenticated"
         assert AuthState.EXPIRED.value == "expired"
@@ -22,6 +22,7 @@ class TestHandsImport:
 
     def test_csrf_tracker(self):
         from vxis.interaction.hands import CSRFTracker, FormData
+
         tracker = CSRFTracker()
         assert not tracker.has_token
 
@@ -42,6 +43,7 @@ class TestHandsImport:
 
     def test_form_parser(self):
         from vxis.interaction.hands import _FormParser
+
         parser = _FormParser()
         parser.feed("""
         <html>
@@ -69,6 +71,7 @@ class TestHandsImport:
     def test_waf_detection(self):
         from vxis.interaction.hands import _detect_waf
         import httpx
+
         headers = httpx.Headers({"server": "cloudflare", "content-type": "text/html"})
         is_waf, name = _detect_waf(headers, "")
         assert is_waf is True
@@ -80,6 +83,7 @@ class TestHandsImport:
 
     def test_chain_interpolation(self):
         from vxis.interaction.hands import RequestChain
+
         result = RequestChain._interpolate(
             "/api/users/{{user_id}}/profile",
             {"user_id": "12345"},
@@ -92,11 +96,13 @@ class TestXRayImport:
 
     def test_import_flow_analyzer(self):
         from vxis.interaction.xray import FlowAnalyzer
+
         analyzer = FlowAnalyzer()
         assert analyzer.flows == []
 
     def test_flow_analysis_auth_detection(self):
         from vxis.interaction.xray import FlowAnalyzer, CapturedFlow
+
         analyzer = FlowAnalyzer()
 
         flow = CapturedFlow(
@@ -113,6 +119,7 @@ class TestXRayImport:
 
     def test_flow_analysis_secret_detection(self):
         from vxis.interaction.xray import FlowAnalyzer, CapturedFlow
+
         analyzer = FlowAnalyzer()
 
         flow = CapturedFlow(
@@ -129,6 +136,7 @@ class TestXRayImport:
 
     def test_flow_analysis_vuln_detection(self):
         from vxis.interaction.xray import FlowAnalyzer, CapturedFlow
+
         analyzer = FlowAnalyzer()
 
         flow = CapturedFlow(
@@ -140,7 +148,8 @@ class TestXRayImport:
             response_headers={"content-type": "text/html"},
         )
         analyzer.update_flow_response(
-            flow, 500,
+            flow,
+            500,
             {"content-type": "text/html"},
             "MySQL error: You have an error in your SQL syntax",
         )
@@ -150,6 +159,7 @@ class TestXRayImport:
 
     def test_traffic_summary(self):
         from vxis.interaction.xray import FlowAnalyzer, CapturedFlow
+
         analyzer = FlowAnalyzer()
 
         for i in range(3):
@@ -170,6 +180,7 @@ class TestXRayImport:
 
     def test_intercept_rules(self):
         from vxis.interaction.xray import FlowAnalyzer, FlowDirection, InterceptRule
+
         analyzer = FlowAnalyzer()
 
         rule = InterceptRule(
@@ -182,7 +193,9 @@ class TestXRayImport:
 
         headers = {"User-Agent": "test"}
         headers, body = analyzer.apply_request_rules(
-            "https://example.com/api", headers, "",
+            "https://example.com/api",
+            headers,
+            "",
         )
         assert headers["X-Custom"] == "injected"
 
@@ -191,13 +204,15 @@ class TestControllerImport:
     """Controller 모듈 import 검증."""
 
     def test_import_controller(self):
-        from vxis.interaction.controller import InteractionController, InteractionMode
+        from vxis.interaction.controller import InteractionMode
+
         assert InteractionMode.HANDS_ONLY.value == "hands"
         assert InteractionMode.EYES_XRAY.value == "eyes+xray"
         assert InteractionMode.FULL.value == "full"
 
     def test_import_action_types(self):
         from vxis.interaction.controller import InteractionAction, InteractionIntent
+
         action = InteractionAction(
             intent=InteractionIntent.LOGIN,
             url="/login",
@@ -208,6 +223,7 @@ class TestControllerImport:
 
     def test_mode_selection(self):
         from vxis.interaction.controller import _select_mode, InteractionIntent, InteractionMode
+
         # 기본: EXPLORE → HANDS_ONLY
         mode = _select_mode(
             InteractionIntent.EXPLORE,
@@ -237,6 +253,7 @@ class TestControllerImport:
 
     def test_result_to_observation(self):
         from vxis.interaction.controller import InteractionResult, InteractionMode
+
         result = InteractionResult(
             success=True,
             mode_used=InteractionMode.HANDS_ONLY,
@@ -256,6 +273,7 @@ class TestEyesImport:
 
     def test_import_without_playwright(self):
         from vxis.interaction.eyes import is_available
+
         # Playwright 없으면 False, 있으면 True — 둘 다 OK
         result = is_available()
         assert isinstance(result, bool)
@@ -267,15 +285,8 @@ class TestPackageInit:
     def test_import_all(self):
         from vxis.interaction import (
             SessionManager,
-            AuthState,
-            TargetSession,
-            FlowAnalyzer,
-            TrafficSummary,
             InteractionController,
-            InteractionMode,
-            InteractionAction,
-            InteractionIntent,
-            InteractionResult,
         )
+
         assert SessionManager is not None
         assert InteractionController is not None

@@ -14,26 +14,24 @@ from __future__ import annotations
 import time
 
 from rich.console import Console, Group
-from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 from rich.text import Text
 
-from vxis.core.events import PluginStatus, ScanSnapshot
+from vxis.core.events import ScanSnapshot
 
 # ---------------------------------------------------------------------------
 # State icons and colors
 # ---------------------------------------------------------------------------
 
 STATE_DISPLAY = {
-    "pending":   ("○", "dim"),
-    "waiting":   ("◌", "yellow"),
-    "running":   ("▶", "bold cyan"),
+    "pending": ("○", "dim"),
+    "waiting": ("◌", "yellow"),
+    "running": ("▶", "bold cyan"),
     "completed": ("✓", "green"),
-    "failed":    ("✗", "bold red"),
-    "skipped":   ("—", "dim"),
+    "failed": ("✗", "bold red"),
+    "skipped": ("—", "dim"),
     "timed_out": ("⏱", "yellow"),
 }
 
@@ -112,7 +110,15 @@ def _build_plugin_table(s: ScanSnapshot) -> Table:
     table.add_column("Detail", ratio=1)
 
     # Sort: running first, then waiting, then pending, then completed
-    order = {"running": 0, "waiting": 1, "pending": 2, "completed": 3, "failed": 4, "skipped": 5, "timed_out": 6}
+    order = {
+        "running": 0,
+        "waiting": 1,
+        "pending": 2,
+        "completed": 3,
+        "failed": 4,
+        "skipped": 5,
+        "timed_out": 6,
+    }
     sorted_plugins = sorted(
         s.plugins.values(),
         key=lambda p: (order.get(p.state, 9), p.name),

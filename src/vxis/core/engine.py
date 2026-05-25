@@ -12,7 +12,6 @@ import time
 from collections.abc import Callable, Awaitable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
 
 from vxis.core.context import PluginOutput
 from vxis.core.events import (
@@ -118,9 +117,7 @@ class DAGExecutor:
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._event_bus = event_bus
         # One asyncio.Event per node; set when the node reaches a terminal state.
-        self._done_events: dict[str, asyncio.Event] = {
-            name: asyncio.Event() for name in nodes
-        }
+        self._done_events: dict[str, asyncio.Event] = {name: asyncio.Event() for name in nodes}
 
     # ------------------------------------------------------------------
     # Public API
@@ -149,8 +146,7 @@ class DAGExecutor:
         self._validate_no_cycles()
 
         tasks = [
-            asyncio.create_task(self._run_node(name, run_func), name=name)
-            for name in self._nodes
+            asyncio.create_task(self._run_node(name, run_func), name=name) for name in self._nodes
         ]
 
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -165,19 +161,24 @@ class DAGExecutor:
         node = self._nodes[name]
 
         # Emit queued event
-        await self._emit(NodeEvent(
-            event_type=EventType.NODE_QUEUED, plugin_name=name,
-        ))
+        await self._emit(
+            NodeEvent(
+                event_type=EventType.NODE_QUEUED,
+                plugin_name=name,
+            )
+        )
 
         # 1. Wait for all hard dependencies to reach a terminal state.
         for dep_name in node.depends_on:
             dep_event = self._done_events.get(dep_name)
             if dep_event is not None:
-                await self._emit(NodeEvent(
-                    event_type=EventType.NODE_WAITING,
-                    plugin_name=name,
-                    waiting_for=dep_name,
-                ))
+                await self._emit(
+                    NodeEvent(
+                        event_type=EventType.NODE_WAITING,
+                        plugin_name=name,
+                        waiting_for=dep_name,
+                    )
+                )
                 await dep_event.wait()
 
         # 2. Wait for optional dependencies (we still want their data if
@@ -199,14 +200,15 @@ class DAGExecutor:
                 )
                 node.state = TaskState.SKIPPED
                 node.error = (
-                    f"Required dependency '{dep_name}' is in state "
-                    f"'{dep_node.state.value}'."
+                    f"Required dependency '{dep_name}' is in state '{dep_node.state.value}'."
                 )
-                await self._emit(NodeEvent(
-                    event_type=EventType.NODE_SKIPPED,
-                    plugin_name=name,
-                    error=node.error,
-                ))
+                await self._emit(
+                    NodeEvent(
+                        event_type=EventType.NODE_SKIPPED,
+                        plugin_name=name,
+                        error=node.error,
+                    )
+                )
                 self._done_events[name].set()
                 return
 
@@ -215,9 +217,12 @@ class DAGExecutor:
             node.state = TaskState.RUNNING
             node.started_at = time.monotonic()
             logger.debug("Starting plugin '%s'.", name)
-            await self._emit(NodeEvent(
-                event_type=EventType.NODE_STARTED, plugin_name=name,
-            ))
+            await self._emit(
+                NodeEvent(
+                    event_type=EventType.NODE_STARTED,
+                    plugin_name=name,
+                )
+            )
 
             try:
                 result = await asyncio.wait_for(
@@ -228,40 +233,44 @@ class DAGExecutor:
                 node.state = TaskState.COMPLETED
                 elapsed = time.monotonic() - node.started_at
                 logger.debug("Plugin '%s' completed successfully.", name)
-                await self._emit(NodeEvent(
-                    event_type=EventType.NODE_COMPLETED,
-                    plugin_name=name,
-                    elapsed_seconds=elapsed,
-                    finding_count=len(result.findings) if result else 0,
-                ))
+                await self._emit(
+                    NodeEvent(
+                        event_type=EventType.NODE_COMPLETED,
+                        plugin_name=name,
+                        elapsed_seconds=elapsed,
+                        finding_count=len(result.findings) if result else 0,
+                    )
+                )
 
             except TimeoutError:
                 node.state = TaskState.TIMED_OUT
                 elapsed = time.monotonic() - node.started_at
-                node.error = (
-                    f"Plugin '{name}' timed out after {node.timeout_seconds}s."
-                )
+                node.error = f"Plugin '{name}' timed out after {node.timeout_seconds}s."
                 logger.error(
                     "Plugin '%s' timed out after %ds.",
                     name,
                     node.timeout_seconds,
                 )
-                await self._emit(NodeEvent(
-                    event_type=EventType.NODE_TIMED_OUT,
-                    plugin_name=name,
-                    elapsed_seconds=elapsed,
-                ))
+                await self._emit(
+                    NodeEvent(
+                        event_type=EventType.NODE_TIMED_OUT,
+                        plugin_name=name,
+                        elapsed_seconds=elapsed,
+                    )
+                )
 
             except asyncio.CancelledError:
                 node.state = TaskState.FAILED
                 elapsed = time.monotonic() - node.started_at
                 node.error = "Cancelled"
-                await self._emit(NodeEvent(
-                    event_type=EventType.NODE_FAILED,
-                    plugin_name=name,
-                    elapsed_seconds=elapsed,
-                    error="Cancelled",
-                ))
+                await self._emit(
+                    NodeEvent(
+                        event_type=EventType.NODE_FAILED,
+                        plugin_name=name,
+                        elapsed_seconds=elapsed,
+                        error="Cancelled",
+                    )
+                )
                 raise
 
             except Exception as exc:  # noqa: BLE001
@@ -269,12 +278,14 @@ class DAGExecutor:
                 elapsed = time.monotonic() - node.started_at
                 node.error = str(exc)
                 logger.exception("Plugin '%s' raised an unexpected error.", name)
-                await self._emit(NodeEvent(
-                    event_type=EventType.NODE_FAILED,
-                    plugin_name=name,
-                    elapsed_seconds=elapsed,
-                    error=str(exc),
-                ))
+                await self._emit(
+                    NodeEvent(
+                        event_type=EventType.NODE_FAILED,
+                        plugin_name=name,
+                        elapsed_seconds=elapsed,
+                        error=str(exc),
+                    )
+                )
 
             finally:
                 node.finished_at = time.monotonic()
@@ -292,19 +303,14 @@ class DAGExecutor:
 
         def _dfs(node_name: str) -> None:
             color[node_name] = 1  # mark as in-stack
-            all_deps = (
-                self._nodes[node_name].depends_on
-                + self._nodes[node_name].optional_depends
-            )
+            all_deps = self._nodes[node_name].depends_on + self._nodes[node_name].optional_depends
             for dep in all_deps:
                 if dep not in color:
                     # unknown node — cycle detection only cares about known ones
                     continue
                 if color[dep] == 1:
                     # Back-edge found → cycle
-                    raise ValueError(
-                        f"Cycle detected in DAG: '{node_name}' -> '{dep}'."
-                    )
+                    raise ValueError(f"Cycle detected in DAG: '{node_name}' -> '{dep}'.")
                 if color[dep] == 0:
                     parent[dep] = node_name
                     _dfs(dep)
@@ -338,14 +344,10 @@ def validate_dag(nodes: dict[str, TaskNode]) -> list[str]:
     for name, node in nodes.items():
         for dep in node.depends_on:
             if dep not in nodes:
-                errors.append(
-                    f"Node '{name}': required dependency '{dep}' is not defined."
-                )
+                errors.append(f"Node '{name}': required dependency '{dep}' is not defined.")
         for dep in node.optional_depends:
             if dep not in nodes:
-                errors.append(
-                    f"Node '{name}': optional dependency '{dep}' is not defined."
-                )
+                errors.append(f"Node '{name}': optional dependency '{dep}' is not defined.")
 
     # Cycle detection — reuse DAGExecutor's DFS implementation.
     try:

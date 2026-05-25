@@ -79,7 +79,7 @@ def _post_json(url: str, payload: dict) -> dict | None:
 
 def _extract_cve_id(aliases: list[str]) -> str:
     """aliases 목록에서 CVE ID를 추출."""
-    for alias in (aliases or []):
+    for alias in aliases or []:
         if alias.upper().startswith("CVE-"):
             return alias.upper()
     return ""
@@ -87,7 +87,7 @@ def _extract_cve_id(aliases: list[str]) -> str:
 
 def _extract_severity(severity_list: list[dict], cvss_score: float) -> str:
     """OSV severity 목록 또는 CVSS 점수에서 심각도를 결정."""
-    for sev in (severity_list or []):
+    for sev in severity_list or []:
         score_type = sev.get("type", "")
         score_val = sev.get("score", "")
         if score_type in ("CVSS_V3", "CVSS_V4") and score_val:
@@ -109,7 +109,7 @@ def _extract_severity(severity_list: list[dict], cvss_score: float) -> str:
 
 def _extract_cvss_score(severity_list: list[dict]) -> tuple[float, str]:
     """OSV severity에서 CVSS 점수와 벡터를 추출."""
-    for sev in (severity_list or []):
+    for sev in severity_list or []:
         score_str = sev.get("score", "")
         if not score_str:
             continue
@@ -132,7 +132,7 @@ def _parse_affected_packages(affected: list[dict]) -> tuple[list[str], list[str]
     versions: list[str] = []
     ecosystems: list[str] = []
 
-    for item in (affected or []):
+    for item in affected or []:
         pkg = item.get("package") or {}
         ecosystem = pkg.get("ecosystem", "")
         name = pkg.get("name", "")
@@ -168,7 +168,7 @@ def _parse_affected_packages(affected: list[dict]) -> tuple[list[str], list[str]
 def _check_exploit_refs(refs: list[dict]) -> tuple[bool, str]:
     """참고 URL에서 exploit 가용 여부 확인."""
     exploit_keywords = ("exploit", "poc", "proof-of-concept", "exploit-db")
-    for ref in (refs or []):
+    for ref in refs or []:
         url = ref.get("url", "")
         ref_type = ref.get("type", "")
         if ref_type == "FIX":
@@ -285,14 +285,11 @@ def fetch_recent(ecosystem: str = "npm", since_hours: int = 1) -> list[CVEEntry]
         vulns: list[dict] = response.get("vulns", [])
         next_page_token: str | None = response.get("next_page_token")
 
-        stop_early = False
         for vuln in vulns:
             published_str = vuln.get("published", "")
             if published_str:
                 try:
-                    pub_dt = datetime.fromisoformat(
-                        published_str.replace("Z", "+00:00")
-                    )
+                    pub_dt = datetime.fromisoformat(published_str.replace("Z", "+00:00"))
                     if pub_dt < cutoff:
                         # OSV는 정렬 순서가 보장되지 않으므로 건너뜀
                         continue

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-from typing import Any
 
 from ..base import AgentResult, BaseAgent
 from ..context import AgentContext
@@ -110,43 +109,51 @@ class ComplianceAgent(BaseAgent):
         # Phase 5: Map findings to compliance frameworks
         violations = self._map_to_frameworks(findings)
         if violations:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Compliance violations mapped for {target}",
-                severity=Severity.HIGH,
-                evidence_type=EvidenceType.OTHER,
-                description=self._format_violation_report(violations),
-                response=json.dumps(violations, indent=2),
-                tags=["compliance", "gdpr", "hipaa", "pci-dss", "soc2"],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Compliance violations mapped for {target}",
+                    severity=Severity.HIGH,
+                    evidence_type=EvidenceType.OTHER,
+                    description=self._format_violation_report(violations),
+                    response=json.dumps(violations, indent=2),
+                    tags=["compliance", "gdpr", "hipaa", "pci-dss", "soc2"],
+                )
+            )
 
         # Phase 6: Fine calculation
         fine_report = self._calculate_potential_fines(violations)
-        findings.append(Evidence(
-            agent_id=self.agent_id,
-            title=f"Potential fine exposure for {target}",
-            severity=Severity.INFO,
-            evidence_type=EvidenceType.OTHER,
-            description=fine_report,
-            response=json.dumps(_FINE_STRUCTURES, indent=2),
-            tags=["compliance", "fines", "risk-assessment"],
-        ))
+        findings.append(
+            Evidence(
+                agent_id=self.agent_id,
+                title=f"Potential fine exposure for {target}",
+                severity=Severity.INFO,
+                evidence_type=EvidenceType.OTHER,
+                description=fine_report,
+                response=json.dumps(_FINE_STRUCTURES, indent=2),
+                tags=["compliance", "fines", "risk-assessment"],
+            )
+        )
 
         # Generate hypotheses
-        hypotheses.append(Hypothesis(
-            title=f"GDPR right-to-erasure violation on {target}",
-            rationale="Data handling practices may not support deletion requests",
-            probability=0.5,
-            impact=0.8,
-            suggested_agent="compliance",
-        ))
-        hypotheses.append(Hypothesis(
-            title=f"PCI-DSS cardholder data exposure on {target}",
-            rationale="Web application may process/store card data insecurely",
-            probability=0.4,
-            impact=0.9,
-            suggested_agent="web",
-        ))
+        hypotheses.append(
+            Hypothesis(
+                title=f"GDPR right-to-erasure violation on {target}",
+                rationale="Data handling practices may not support deletion requests",
+                probability=0.5,
+                impact=0.8,
+                suggested_agent="compliance",
+            )
+        )
+        hypotheses.append(
+            Hypothesis(
+                title=f"PCI-DSS cardholder data exposure on {target}",
+                rationale="Web application may process/store card data insecurely",
+                probability=0.4,
+                impact=0.9,
+                suggested_agent="web",
+            )
+        )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -169,7 +176,13 @@ class ComplianceAgent(BaseAgent):
             return results
 
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-Pn", "--script", "ssl-enum-ciphers", "-p", "443", target,
+            "nmap",
+            "-Pn",
+            "--script",
+            "ssl-enum-ciphers",
+            "-p",
+            "443",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -187,20 +200,22 @@ class ComplianceAgent(BaseAgent):
             violations.append("Known TLS vulnerability present")
 
         if violations:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"TLS compliance violations on {target}",
-                severity=Severity.HIGH,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    f"TLS configuration violations:\n"
-                    + "\n".join(f"- {v}" for v in violations)
-                    + "\n\nAffected frameworks: PCI-DSS Req 4.1, "
-                    "HIPAA §164.312(e)(1), GDPR Art. 32"
-                ),
-                response=output[:2000],
-                tags=["compliance", "tls", "encryption-in-transit"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"TLS compliance violations on {target}",
+                    severity=Severity.HIGH,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        "TLS configuration violations:\n"
+                        + "\n".join(f"- {v}" for v in violations)
+                        + "\n\nAffected frameworks: PCI-DSS Req 4.1, "
+                        "HIPAA §164.312(e)(1), GDPR Art. 32"
+                    ),
+                    response=output[:2000],
+                    tags=["compliance", "tls", "encryption-in-transit"],
+                )
+            )
         return results
 
     async def _check_security_headers(self, target: str) -> list[Evidence]:
@@ -209,7 +224,11 @@ class ComplianceAgent(BaseAgent):
             return results
 
         proc = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-I", "--max-time", "10",
+            "curl",
+            "-s",
+            "-I",
+            "--max-time",
+            "10",
             f"https://{target}/",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -230,18 +249,19 @@ class ComplianceAgent(BaseAgent):
                 missing.append(f"{header}: {desc}")
 
         if missing:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Missing security headers on {target}",
-                severity=Severity.MEDIUM,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    f"Missing security headers:\n"
-                    + "\n".join(f"- {m}" for m in missing)
-                ),
-                response=stdout.decode()[:1000],
-                tags=["compliance", "security-headers", "misconfiguration"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Missing security headers on {target}",
+                    severity=Severity.MEDIUM,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        "Missing security headers:\n" + "\n".join(f"- {m}" for m in missing)
+                    ),
+                    response=stdout.decode()[:1000],
+                    tags=["compliance", "security-headers", "misconfiguration"],
+                )
+            )
         return results
 
     async def _check_cookie_compliance(self, target: str) -> list[Evidence]:
@@ -250,7 +270,11 @@ class ComplianceAgent(BaseAgent):
             return results
 
         proc = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-I", "--max-time", "10",
+            "curl",
+            "-s",
+            "-I",
+            "--max-time",
+            "10",
             f"https://{target}/",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -270,19 +294,21 @@ class ComplianceAgent(BaseAgent):
                     cookie_issues.append("Cookie missing SameSite attribute")
 
         if cookie_issues:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Cookie security issues on {target}",
-                severity=Severity.MEDIUM,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    f"Cookie compliance issues:\n"
-                    + "\n".join(f"- {i}" for i in set(cookie_issues))
-                    + "\n\nGDPR: Insecure cookies may expose user session data. "
-                    "PCI-DSS Req 6.5.10: Broken authentication."
-                ),
-                tags=["compliance", "cookie", "session-security"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Cookie security issues on {target}",
+                    severity=Severity.MEDIUM,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        "Cookie compliance issues:\n"
+                        + "\n".join(f"- {i}" for i in set(cookie_issues))
+                        + "\n\nGDPR: Insecure cookies may expose user session data. "
+                        "PCI-DSS Req 6.5.10: Broken authentication."
+                    ),
+                    tags=["compliance", "cookie", "session-security"],
+                )
+            )
         return results
 
     async def _check_privacy_compliance(self, target: str) -> list[Evidence]:
@@ -295,8 +321,14 @@ class ComplianceAgent(BaseAgent):
         found_privacy = False
         for path in privacy_paths:
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "--max-time", "5",
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "--max-time",
+                "5",
                 f"https://{target}{path}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -307,25 +339,31 @@ class ComplianceAgent(BaseAgent):
                 break
 
         if not found_privacy:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"No privacy policy found on {target}",
-                severity=Severity.MEDIUM,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    "No accessible privacy policy page found. "
-                    "GDPR Art. 13/14 requires clear privacy notices. "
-                    "CCPA also requires disclosure of data practices."
-                ),
-                tags=["compliance", "gdpr", "privacy-policy"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"No privacy policy found on {target}",
+                    severity=Severity.MEDIUM,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        "No accessible privacy policy page found. "
+                        "GDPR Art. 13/14 requires clear privacy notices. "
+                        "CCPA also requires disclosure of data practices."
+                    ),
+                    tags=["compliance", "gdpr", "privacy-policy"],
+                )
+            )
         return results
 
     def _map_to_frameworks(
-        self, findings: list[Evidence],
+        self,
+        findings: list[Evidence],
     ) -> dict[str, list[str]]:
         violations: dict[str, list[str]] = {
-            "GDPR": [], "HIPAA": [], "PCI-DSS": [], "SOC2": [],
+            "GDPR": [],
+            "HIPAA": [],
+            "PCI-DSS": [],
+            "SOC2": [],
         }
         for finding in findings:
             tags = set(finding.tags)
@@ -336,14 +374,13 @@ class ComplianceAgent(BaseAgent):
                 for fw, ctrl in _CONTROL_MAPPINGS["access_control"].items():
                     violations[fw].append(f"{ctrl}: {finding.title}")
             if "privacy-policy" in tags:
-                violations["GDPR"].append(
-                    f"Art. 13/14 — Transparency obligation: {finding.title}"
-                )
+                violations["GDPR"].append(f"Art. 13/14 — Transparency obligation: {finding.title}")
 
         return {k: v for k, v in violations.items() if v}
 
     def _format_violation_report(
-        self, violations: dict[str, list[str]],
+        self,
+        violations: dict[str, list[str]],
     ) -> str:
         lines = ["Compliance Violation Summary:\n"]
         for framework, items in violations.items():
@@ -353,7 +390,8 @@ class ComplianceAgent(BaseAgent):
         return "\n".join(lines)
 
     def _calculate_potential_fines(
-        self, violations: dict[str, list[str]] | None,
+        self,
+        violations: dict[str, list[str]] | None,
     ) -> str:
         if not violations:
             return "No compliance violations detected — no fine exposure."

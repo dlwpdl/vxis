@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
-from typing import Any
 
 from ..base import AgentResult, BaseAgent
 from ..context import AgentContext
@@ -34,8 +32,20 @@ class DeceptionDetectionAgent(BaseAgent):
 
     # Common honeypot ports
     _HONEYPOT_PORTS = [
-        22, 23, 80, 443, 445, 1433, 3306, 3389, 5432,
-        8080, 8443, 9200, 11211, 27017,
+        22,
+        23,
+        80,
+        443,
+        445,
+        1433,
+        3306,
+        3389,
+        5432,
+        8080,
+        8443,
+        9200,
+        11211,
+        27017,
     ]
 
     async def run(self, context: AgentContext) -> AgentResult:
@@ -71,27 +81,33 @@ class DeceptionDetectionAgent(BaseAgent):
         # Generate hypotheses
         honeypot_detected = any("honeypot" in f.tags for f in findings)
         if honeypot_detected:
-            hypotheses.append(Hypothesis(
-                title=f"Deception infrastructure surrounds {target}",
-                rationale="Honeypot indicators detected — adjust attack approach",
-                probability=0.8,
-                impact=0.6,
-                suggested_agent="deception_detection",
-            ))
-            hypotheses.append(Hypothesis(
-                title="SOC team actively monitoring — increase stealth",
-                rationale="Deception technology deployment suggests active SOC",
-                probability=0.7,
-                impact=0.8,
-                suggested_agent="deception_detection",
-            ))
-        hypotheses.append(Hypothesis(
-            title=f"SIEM evasion techniques needed for {target}",
-            rationale="Detection infrastructure likely present",
-            probability=0.6,
-            impact=0.7,
-            suggested_agent="lateral_move",
-        ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Deception infrastructure surrounds {target}",
+                    rationale="Honeypot indicators detected — adjust attack approach",
+                    probability=0.8,
+                    impact=0.6,
+                    suggested_agent="deception_detection",
+                )
+            )
+            hypotheses.append(
+                Hypothesis(
+                    title="SOC team actively monitoring — increase stealth",
+                    rationale="Deception technology deployment suggests active SOC",
+                    probability=0.7,
+                    impact=0.8,
+                    suggested_agent="deception_detection",
+                )
+            )
+        hypotheses.append(
+            Hypothesis(
+                title=f"SIEM evasion techniques needed for {target}",
+                rationale="Detection infrastructure likely present",
+                probability=0.6,
+                impact=0.7,
+                suggested_agent="lateral_move",
+            )
+        )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -116,8 +132,13 @@ class DeceptionDetectionAgent(BaseAgent):
 
         ports_str = ",".join(str(p) for p in self._HONEYPOT_PORTS)
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-Pn", "-sV", "-p", ports_str,
-            "--open", target,
+            "nmap",
+            "-Pn",
+            "-sV",
+            "-p",
+            ports_str,
+            "--open",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -128,38 +149,42 @@ class DeceptionDetectionAgent(BaseAgent):
         for hp_name, signatures in self._HONEYPOT_SIGNATURES.items():
             for sig in signatures:
                 if sig.lower() in output.lower():
-                    results.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"Honeypot detected: {hp_name} on {target}",
-                        severity=Severity.HIGH,
-                        evidence_type=EvidenceType.NETWORK,
-                        description=(
-                            f"Service fingerprint matches {hp_name} honeypot. "
-                            f"Signature: {sig}. Interacting with this host will "
-                            "alert the SOC team."
-                        ),
-                        response=output[:2000],
-                        tags=["deception", "honeypot", hp_name],
-                    ))
+                    results.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title=f"Honeypot detected: {hp_name} on {target}",
+                            severity=Severity.HIGH,
+                            evidence_type=EvidenceType.NETWORK,
+                            description=(
+                                f"Service fingerprint matches {hp_name} honeypot. "
+                                f"Signature: {sig}. Interacting with this host will "
+                                "alert the SOC team."
+                            ),
+                            response=output[:2000],
+                            tags=["deception", "honeypot", hp_name],
+                        )
+                    )
 
         # Heuristic: check for suspiciously identical banners across services
-        lines = [l for l in output.splitlines() if "open" in l]
+        lines = [line for line in output.splitlines() if "open" in line]
         if len(lines) > 5:
-            banners = [l.strip() for l in lines]
+            banners = [line.strip() for line in lines]
             # If many services respond with similar timing, possible honeypot
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Many open ports on {target} — possible honeypot/decoy",
-                severity=Severity.MEDIUM,
-                evidence_type=EvidenceType.NETWORK,
-                description=(
-                    f"{len(lines)} services detected. High port count with "
-                    "uniform response characteristics may indicate a honeypot "
-                    "or deception host."
-                ),
-                response="\n".join(banners[:15]),
-                tags=["deception", "honeypot", "heuristic"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Many open ports on {target} — possible honeypot/decoy",
+                    severity=Severity.MEDIUM,
+                    evidence_type=EvidenceType.NETWORK,
+                    description=(
+                        f"{len(lines)} services detected. High port count with "
+                        "uniform response characteristics may indicate a honeypot "
+                        "or deception host."
+                    ),
+                    response="\n".join(banners[:15]),
+                    tags=["deception", "honeypot", "heuristic"],
+                )
+            )
 
         return results
 
@@ -170,16 +195,25 @@ class DeceptionDetectionAgent(BaseAgent):
 
         # Check for canary token patterns in robots.txt, sitemap, etc.
         canary_paths = [
-            "/robots.txt", "/sitemap.xml", "/.well-known/security.txt",
-            "/admin/login", "/.env",
+            "/robots.txt",
+            "/sitemap.xml",
+            "/.well-known/security.txt",
+            "/admin/login",
+            "/.env",
         ]
         canary_patterns = [
-            "canarytokens.com", "canary.tools",
-            "thinkst", "o365-owa", "clonedsite",
+            "canarytokens.com",
+            "canary.tools",
+            "thinkst",
+            "o365-owa",
+            "clonedsite",
         ]
         for path in canary_paths:
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "--max-time", "5",
+                "curl",
+                "-s",
+                "--max-time",
+                "5",
                 f"https://{target}{path}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -188,46 +222,57 @@ class DeceptionDetectionAgent(BaseAgent):
             content = stdout.decode()
             for pattern in canary_patterns:
                 if pattern in content.lower():
-                    results.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"Canary token detected at {path}",
-                        severity=Severity.HIGH,
-                        evidence_type=EvidenceType.NETWORK,
-                        description=(
-                            f"Canary token ({pattern}) found at {path}. "
-                            "Accessing this resource triggers an alert to defenders."
-                        ),
-                        request=f"GET https://{target}{path}",
-                        response=content[:500],
-                        tags=["deception", "canary", "alert-trigger"],
-                    ))
+                    results.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title=f"Canary token detected at {path}",
+                            severity=Severity.HIGH,
+                            evidence_type=EvidenceType.NETWORK,
+                            description=(
+                                f"Canary token ({pattern}) found at {path}. "
+                                "Accessing this resource triggers an alert to defenders."
+                            ),
+                            request=f"GET https://{target}{path}",
+                            response=content[:500],
+                            tags=["deception", "canary", "alert-trigger"],
+                        )
+                    )
 
         # Check for canary DNS entries
         if shutil.which("dig"):
             canary_subdomains = [
-                "admin", "vpn", "internal", "secret", "backup",
+                "admin",
+                "vpn",
+                "internal",
+                "secret",
+                "backup",
             ]
             for sub in canary_subdomains:
                 proc = await asyncio.create_subprocess_exec(
-                    "dig", "+short", f"{sub}.{target}", "CNAME",
+                    "dig",
+                    "+short",
+                    f"{sub}.{target}",
+                    "CNAME",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
                 stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
                 output = stdout.decode().strip()
                 if any(p in output.lower() for p in canary_patterns):
-                    results.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"DNS canary token: {sub}.{target}",
-                        severity=Severity.HIGH,
-                        evidence_type=EvidenceType.NETWORK,
-                        description=(
-                            f"DNS CNAME for {sub}.{target} points to canary service. "
-                            "Resolving or connecting triggers defender alert."
-                        ),
-                        response=output,
-                        tags=["deception", "canary", "dns"],
-                    ))
+                    results.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title=f"DNS canary token: {sub}.{target}",
+                            severity=Severity.HIGH,
+                            evidence_type=EvidenceType.NETWORK,
+                            description=(
+                                f"DNS CNAME for {sub}.{target} points to canary service. "
+                                "Resolving or connecting triggers defender alert."
+                            ),
+                            response=output,
+                            tags=["deception", "canary", "dns"],
+                        )
+                    )
         return results
 
     async def _detect_deception_network(self, target: str) -> Evidence | None:
@@ -236,8 +281,15 @@ class DeceptionDetectionAgent(BaseAgent):
 
         # Quick scan for port count heuristic
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-Pn", "-sS", "--top-ports", "100",
-            "--open", "-oG", "-", target,
+            "nmap",
+            "-Pn",
+            "-sS",
+            "--top-ports",
+            "100",
+            "--open",
+            "-oG",
+            "-",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -267,11 +319,17 @@ class DeceptionDetectionAgent(BaseAgent):
 
         # Test for HTTP tarpit (extremely slow response)
         import time as _time
-        start = _time.monotonic()
+
+        _time.monotonic()
         proc = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-o", "/dev/null",
-            "-w", "%{time_total}",
-            "--max-time", "15",
+            "curl",
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{time_total}",
+            "--max-time",
+            "15",
             f"https://{target}/",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -280,18 +338,20 @@ class DeceptionDetectionAgent(BaseAgent):
         try:
             elapsed = float(stdout.decode().strip())
             if elapsed > 10.0:
-                results.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"HTTP tarpit detected on {target}",
-                    severity=Severity.MEDIUM,
-                    evidence_type=EvidenceType.NETWORK,
-                    description=(
-                        f"Response took {elapsed:.1f}s — possible HTTP tarpit "
-                        "(e.g., Endlessh for SSH, LaBrea). Tarpits slow down "
-                        "scanners and waste attacker resources."
-                    ),
-                    tags=["deception", "tarpit", "slowdown"],
-                ))
+                results.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"HTTP tarpit detected on {target}",
+                        severity=Severity.MEDIUM,
+                        evidence_type=EvidenceType.NETWORK,
+                        description=(
+                            f"Response took {elapsed:.1f}s — possible HTTP tarpit "
+                            "(e.g., Endlessh for SSH, LaBrea). Tarpits slow down "
+                            "scanners and waste attacker resources."
+                        ),
+                        tags=["deception", "tarpit", "slowdown"],
+                    )
+                )
         except ValueError:
             pass
         return results
@@ -326,12 +386,17 @@ class DeceptionDetectionAgent(BaseAgent):
 
         # Check for planted credentials in common locations
         decoy_paths = [
-            "/.git/config", "/backup/credentials.txt",
-            "/config/database.yml", "/wp-config.php.bak",
+            "/.git/config",
+            "/backup/credentials.txt",
+            "/config/database.yml",
+            "/wp-config.php.bak",
         ]
         for path in decoy_paths:
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "--max-time", "5",
+                "curl",
+                "-s",
+                "--max-time",
+                "5",
                 f"https://{target}{path}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -339,19 +404,21 @@ class DeceptionDetectionAgent(BaseAgent):
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             content = stdout.decode()
             # Check if content looks like planted credentials
-            if ("password" in content.lower() and len(content) < 500):
-                results.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"Possible decoy credentials at {path}",
-                    severity=Severity.MEDIUM,
-                    evidence_type=EvidenceType.OTHER,
-                    description=(
-                        f"Credentials found at {path} may be honeytokens. "
-                        "Using these credentials would trigger SOC alerts. "
-                        "Verify authenticity before use."
-                    ),
-                    request=f"GET https://{target}{path}",
-                    response=content[:200],
-                    tags=["deception", "canary", "decoy-credentials"],
-                ))
+            if "password" in content.lower() and len(content) < 500:
+                results.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"Possible decoy credentials at {path}",
+                        severity=Severity.MEDIUM,
+                        evidence_type=EvidenceType.OTHER,
+                        description=(
+                            f"Credentials found at {path} may be honeytokens. "
+                            "Using these credentials would trigger SOC alerts. "
+                            "Verify authenticity before use."
+                        ),
+                        request=f"GET https://{target}{path}",
+                        response=content[:200],
+                        tags=["deception", "canary", "decoy-credentials"],
+                    )
+                )
         return results

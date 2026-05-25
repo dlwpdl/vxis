@@ -22,7 +22,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
-from sqlalchemy import event, text
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -63,8 +63,8 @@ def create_engine(db_url: str) -> AsyncEngine:
             cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute("PRAGMA synchronous=NORMAL")
-            cursor.execute("PRAGMA cache_size=-65536")   # 64 MB
-            cursor.execute("PRAGMA busy_timeout=5000")   # 5 seconds
+            cursor.execute("PRAGMA cache_size=-65536")  # 64 MB
+            cursor.execute("PRAGMA busy_timeout=5000")  # 5 seconds
             cursor.close()
 
     return engine

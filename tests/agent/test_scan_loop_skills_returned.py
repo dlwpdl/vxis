@@ -15,6 +15,7 @@ manually picks test_signature_audit, no VC credit.
 
 Both must be fixed for VC to reflect actual skill coverage.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -73,13 +74,20 @@ async def test_brain_direct_run_skill_credits_skills_completed() -> None:
         target_kind=TargetKind.DESKTOP,
     )
 
-    decisions = iter([
-        [("run_skill", {
-            "skill": "test_signature_audit",
-            "target_url": "/System/Applications/Calculator.app",
-        })],
-        [("finish_scan", {})],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "run_skill",
+                    {
+                        "skill": "test_signature_audit",
+                        "target_url": "/System/Applications/Calculator.app",
+                    },
+                )
+            ],
+            [("finish_scan", {})],
+        ]
+    )
 
     async def _fake_decide(state):
         try:
@@ -91,8 +99,7 @@ async def test_brain_direct_run_skill_credits_skills_completed() -> None:
     result = await loop.run()
 
     assert "test_signature_audit" in result["skills_completed"], (
-        f"Brain-direct run_skill MUST credit skills_completed, got "
-        f"{result['skills_completed']!r}"
+        f"Brain-direct run_skill MUST credit skills_completed, got {result['skills_completed']!r}"
     )
 
 
@@ -107,7 +114,7 @@ def test_run_method_returns_real_skill_set_not_aliases() -> None:
     (requires iter≥25 + brain decisions + skill registry); this source-level
     check catches the regression directly.
     """
-    src = pathlib.Path("src/vxis/agent/scan_loop.py").read_text()
+    src = pathlib.Path("src/vxis/agent/scan_loop_run.py").read_text()
     # The return dict at the end of run() must use _real_skills_completed
     # for the "skills_completed" key. If someone reverts to
     # `list(_skills_completed)`, this fails.

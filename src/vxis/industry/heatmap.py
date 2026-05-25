@@ -21,12 +21,12 @@ from vxis.industry.discovery import CompanyProfile
 # ---------------------------------------------------------------------------
 
 _GRADE_COLORS_HEX: dict[str, str] = {
-    "A": "#2ecc71",   # 초록
-    "B": "#3498db",   # 파랑
-    "C": "#e67e22",   # 주황
-    "D": "#c0392b",   # 빨강
-    "F": "#7b2c34",   # 진한 빨강
-    "": "#95a5a6",    # 실패 / 등급 없음 (회색)
+    "A": "#2ecc71",  # 초록
+    "B": "#3498db",  # 파랑
+    "C": "#e67e22",  # 주황
+    "D": "#c0392b",  # 빨강
+    "F": "#7b2c34",  # 진한 빨강
+    "": "#95a5a6",  # 실패 / 등급 없음 (회색)
     "N/A": "#95a5a6",
 }
 
@@ -41,26 +41,14 @@ _GRADE_LABELS_KR: dict[str, str] = {
 }
 
 _GRADE_RECOMMENDATIONS: dict[str, str] = {
-    "A": (
-        "현재 보안 수준이 우수합니다. "
-        "정기적인 모니터링과 연간 재검진을 권장합니다."
-    ),
-    "B": (
-        "일부 고위험 취약점이 존재합니다. "
-        "30일 이내 High 취약점을 우선 패치하세요."
-    ),
+    "A": ("현재 보안 수준이 우수합니다. 정기적인 모니터링과 연간 재검진을 권장합니다."),
+    "B": ("일부 고위험 취약점이 존재합니다. 30일 이내 High 취약점을 우선 패치하세요."),
     "C": (
         "다수의 고위험 취약점 또는 Critical 1건이 발견되었습니다. "
         "즉시 취약점 분류 및 긴급 패치 계획 수립을 권장합니다."
     ),
-    "D": (
-        "Critical 취약점이 다수입니다. "
-        "즉각적인 사고 대응 및 격리 조치가 필요합니다."
-    ),
-    "F": (
-        "치명적 취약점이 4건 이상입니다. "
-        "즉시 외부 전문가 투입 및 비상 대응 체계를 가동하세요."
-    ),
+    "D": ("Critical 취약점이 다수입니다. 즉각적인 사고 대응 및 격리 조치가 필요합니다."),
+    "F": ("치명적 취약점이 4건 이상입니다. 즉시 외부 전문가 투입 및 비상 대응 체계를 가동하세요."),
 }
 
 
@@ -101,9 +89,7 @@ def generate_heatmap_report(result: "IndustryScanResult") -> str:
     lines.append(f"| 스캔 실패 | {result.failed_companies:,}개 |")
     lines.append(f"| 평균 보안 등급 | **{result.average_grade}** |")
     lines.append(f"| 총 취약점 수 | {total_findings:,}건 |")
-    lines.append(
-        f"| Critical | {result.industry_findings.get('critical', 0):,}건 |"
-    )
+    lines.append(f"| Critical | {result.industry_findings.get('critical', 0):,}건 |")
     lines.append(f"| High | {result.industry_findings.get('high', 0):,}건 |")
     lines.append(
         f"| 스캔 소요 시간 | {result.scan_duration:.0f}초 ({result.scan_duration / 60:.1f}분) |"
@@ -167,8 +153,7 @@ def generate_heatmap_report(result: "IndustryScanResult") -> str:
         lines.append("|------|--------|--------|----------|")
         for rank, company in enumerate(secure_sorted[:10], 1):
             lines.append(
-                f"| {rank} | {company.name} | {company.domain} "
-                f"| {company.findings_count} |"
+                f"| {rank} | {company.name} | {company.domain} | {company.findings_count} |"
             )
     else:
         lines.append("_A등급 기업이 없습니다._")
@@ -207,9 +192,7 @@ def generate_heatmap_report(result: "IndustryScanResult") -> str:
     # ── 푸터 ─────────────────────────────────────────────────────────────
     lines.append("---")
     lines.append("")
-    lines.append(
-        "_본 리포트는 VXIS 자율 보안 스캔 플랫폼에 의해 자동 생성되었습니다._"
-    )
+    lines.append("_본 리포트는 VXIS 자율 보안 스캔 플랫폼에 의해 자동 생성되었습니다._")
 
     return "\n".join(lines)
 
@@ -376,9 +359,9 @@ def _make_stat_cards(result: "IndustryScanResult", total_findings: int) -> str:
         (str(result.industry_findings.get("high", 0)), "High"),
     ]
     items = "".join(
-        f'<div class="stat-card"><div class="val">{html.escape(v)}</div>'
-        f'<div class="lbl">{html.escape(l)}</div></div>'
-        for v, l in cards
+        f'<div class="stat-card"><div class="val">{html.escape(value)}</div>'
+        f'<div class="lbl">{html.escape(label)}</div></div>'
+        for value, label in cards
     )
     return f'<div class="stat-grid">{items}</div>'
 
@@ -396,11 +379,11 @@ def _make_grade_bars(result: "IndustryScanResult") -> str:
             f'  <div class="grade-label">{html.escape(label)}</div>'
             f'  <div class="grade-bar-bg">'
             f'    <div class="grade-bar-fill" style="width:{pct:.1f}%;background:{color}">'
-            f'      {pct:.1f}%'
-            f'    </div>'
-            f'  </div>'
+            f"      {pct:.1f}%"
+            f"    </div>"
+            f"  </div>"
             f'  <div class="grade-count">{count}개</div>'
-            f'</div>'
+            f"</div>"
         )
     return "\n".join(rows)
 
@@ -425,9 +408,9 @@ def _make_heatmap_grid(companies: list[CompanyProfile]) -> str:
             f'  <div class="company-name">{name}</div>'
             f'  <div class="company-domain">{domain}</div>'
             f'  <div class="finding-row">'
-            f'    Critical: {company.critical_count} &nbsp; High: {company.high_count} &nbsp; 총: {company.findings_count}'
-            f'  </div>'
-            f'</div>'
+            f"    Critical: {company.critical_count} &nbsp; High: {company.high_count} &nbsp; 총: {company.findings_count}"
+            f"  </div>"
+            f"</div>"
         )
 
     grid = "\n".join(cards)
@@ -486,9 +469,9 @@ def _make_vuln_bars(most_common_vulns: list[tuple[str, int]]) -> str:
             f'  <div class="vuln-label">{html.escape(vuln_type)}</div>'
             f'  <div class="vuln-bar-bg">'
             f'    <div class="vuln-bar-fill" style="width:{pct:.1f}%"></div>'
-            f'  </div>'
+            f"  </div>"
             f'  <div class="vuln-count">{count:,}건</div>'
-            f'</div>'
+            f"</div>"
         )
     return "\n".join(rows)
 

@@ -29,7 +29,6 @@ from pathlib import Path
 from typing import Any
 
 from vxis.synthesis.cross_protocol import SynthesizedChain
-from vxis.evidence.schema import Severity
 
 logger = logging.getLogger(__name__)
 
@@ -191,13 +190,14 @@ _TECH_ALIAS: dict[str, str] = {
 
 # ── 데이터 클래스 ────────────────────────────────────────────────
 
+
 @dataclass
 class DockerConfig:
     """생성된 Docker Compose 설정."""
 
-    compose_yaml: str           # 완성된 YAML 문자열
-    services: list[str]         # 포함된 서비스 이름 목록
-    ports: dict[str, list[str]] # 서비스 → 포트 매핑
+    compose_yaml: str  # 완성된 YAML 문자열
+    services: list[str]  # 포함된 서비스 이름 목록
+    ports: dict[str, list[str]]  # 서비스 → 포트 매핑
     project_name: str = "vxis-twin"
     network_name: str = "vxis-twin-isolated"
     tech_stack: list[str] = field(default_factory=list)  # 원본 기술 스택
@@ -235,7 +235,7 @@ class SimResult:
     chain_id: str
     chain_title: str
     success_probability: float  # 0.0~1.0 (실제로 먹힐 확률)
-    evidence: list[str]         # 성공/실패 증거
+    evidence: list[str]  # 성공/실패 증거
     false_positive_risk: float  # 0.0~1.0 (오탐 가능성)
     steps_executed: int = 0
     steps_succeeded: int = 0
@@ -256,6 +256,7 @@ class SimResult:
 
 
 # ── 디지털 트윈 빌더 ─────────────────────────────────────────────
+
 
 class DigitalTwinBuilder:
     """기술 스택에서 Docker Compose 설정을 생성하는 빌더.
@@ -361,19 +362,19 @@ class DigitalTwinBuilder:
                 if key == "labels":
                     lines.append(f"    {key}:")
                     for lk, lv in value.items():
-                        lines.append(f"      {lk}: \"{lv}\"")
+                        lines.append(f'      {lk}: "{lv}"')
                 elif key == "environment":
                     lines.append(f"    {key}:")
                     if isinstance(value, dict):
                         for ek, ev in value.items():
-                            lines.append(f"      {ek}: \"{ev}\"")
+                            lines.append(f'      {ek}: "{ev}"')
                     else:
                         for item in value:
                             lines.append(f"      - {item}")
                 elif key == "ports":
                     lines.append(f"    {key}:")
                     for port in value:
-                        lines.append(f"      - \"{port}\"")
+                        lines.append(f'      - "{port}"')
                 elif key == "depends_on":
                     lines.append(f"    {key}:")
                     for dep in value:
@@ -385,8 +386,8 @@ class DigitalTwinBuilder:
                 else:
                     lines.append(f"    {key}: {_yaml_value(value)}")
 
-            lines.append(f"    networks:")
-            lines.append(f"      - vxis-twin-isolated")
+            lines.append("    networks:")
+            lines.append("      - vxis-twin-isolated")
             lines.append("")
 
         lines += [
@@ -395,14 +396,15 @@ class DigitalTwinBuilder:
             "    driver: bridge",
             "    internal: true  # 인터넷 접근 차단",
             "    labels:",
-            "      vxis.twin: \"true\"",
-            "      vxis.purpose: \"isolated-testing\"",
+            '      vxis.twin: "true"',
+            '      vxis.purpose: "isolated-testing"',
         ]
 
         return "\n".join(lines)
 
 
 # ── 트윈 시뮬레이터 ──────────────────────────────────────────────
+
 
 class TwinSimulator:
     """디지털 트윈에서 공격 시뮬레이션을 실행하는 엔진.
@@ -470,9 +472,7 @@ class TwinSimulator:
         services_lower = [s.lower() for s in twin.services]
 
         for finding in chain.findings:
-            step_success = self._analyze_step_feasibility(
-                finding, twin, services_lower
-            )
+            step_success = self._analyze_step_feasibility(finding, twin, services_lower)
             step = AttackSimStep(
                 name=finding.title,
                 command=f"# 시뮬레이션: {finding.agent_id}",
@@ -488,14 +488,10 @@ class TwinSimulator:
 
             if step_success:
                 success_count += 1
-                evidence.append(
-                    f"트윈 서비스 '{finding.agent_id}'에서 "
-                    f"'{finding.title}' 재현 가능"
-                )
+                evidence.append(f"트윈 서비스 '{finding.agent_id}'에서 '{finding.title}' 재현 가능")
             else:
                 evidence.append(
-                    f"트윈에 '{finding.agent_id}' 서비스 없음 — "
-                    f"'{finding.title}' 재현 불가"
+                    f"트윈에 '{finding.agent_id}' 서비스 없음 — '{finding.title}' 재현 불가"
                 )
 
         # LLM으로 전체 체인 성공 확률 보강
@@ -543,9 +539,7 @@ class TwinSimulator:
 
         return any(svc in services_lower for svc in required_services)
 
-    def _calculate_fpr(
-        self, twin: DockerConfig, chain: SynthesizedChain
-    ) -> float:
+    def _calculate_fpr(self, twin: DockerConfig, chain: SynthesizedChain) -> float:
         """오탐 가능성을 계산한다.
 
         트윈이 실제 환경과 다를 수 있는 요소들을 고려.
@@ -554,6 +548,7 @@ class TwinSimulator:
 
         # 클라우드 레이어가 포함된 체인 → 오탐 위험 증가
         from vxis.synthesis.cross_protocol import OSILayer
+
         if OSILayer.CLOUD in chain.layers_crossed:
             fpr += 0.3
 
@@ -574,8 +569,7 @@ class TwinSimulator:
     ) -> float:
         """LLM으로 공격 성공 확률을 보강 평가한다."""
         findings_text = "\n".join(
-            f"  - [{f.severity.value}] {f.title} (에이전트: {f.agent_id})"
-            for f in chain.findings
+            f"  - [{f.severity.value}] {f.title} (에이전트: {f.agent_id})" for f in chain.findings
         )
 
         prompt = f"""\
@@ -588,7 +582,7 @@ class TwinSimulator:
 {findings_text}
 
 ## 트윈 환경
-서비스: {', '.join(twin.services)}
+서비스: {", ".join(twin.services)}
 포트: {twin.get_exposed_ports()}
 
 ## 기본 평가
@@ -604,11 +598,11 @@ JSON으로 응답:
 
         try:
             from vxis.llm.client import LLMClient
+
             client = LLMClient()
             response = await client.think(
                 system=(
-                    "당신은 레드팀 전문가입니다. "
-                    "공격 시나리오의 실제 성공 가능성을 평가합니다."
+                    "당신은 레드팀 전문가입니다. 공격 시나리오의 실제 성공 가능성을 평가합니다."
                 ),
                 user=prompt,
                 max_tokens=300,
@@ -677,15 +671,14 @@ JSON으로 응답:
                     steps.append(step)
                     if step.success:
                         success_count += 1
-                        result.evidence.append(
-                            f"포트 {port} 연결 확인 — 서비스 응답 정상"
-                        )
+                        result.evidence.append(f"포트 {port} 연결 확인 — 서비스 응답 정상")
 
                 result.steps_executed = len(steps)
                 result.steps_succeeded = success_count
                 result.attack_steps = steps
                 result.success_probability = await self._llm_assess_probability(
-                    chain, twin,
+                    chain,
+                    twin,
                     success_count / len(steps) if steps else 0.0,
                 )
 
@@ -722,9 +715,12 @@ JSON으로 응답:
     ) -> subprocess.CompletedProcess:
         """Docker Compose 명령을 실행한다."""
         cmd = [
-            "docker", "compose",
-            "-f", str(compose_file),
-            "-p", "vxis-twin",
+            "docker",
+            "compose",
+            "-f",
+            str(compose_file),
+            "-p",
+            "vxis-twin",
             *subcommand,
         ]
         return subprocess.run(
@@ -849,6 +845,7 @@ JSON으로 응답:
 
 # ── 헬퍼 함수 ────────────────────────────────────────────────────
 
+
 def _yaml_value(value: Any) -> str:
     """Python 값을 YAML 값 문자열로 변환한다."""
     if isinstance(value, bool):
@@ -856,6 +853,6 @@ def _yaml_value(value: Any) -> str:
     elif isinstance(value, (int, float)):
         return str(value)
     elif isinstance(value, str):
-        return f"\"{value}\""
+        return f'"{value}"'
     else:
         return str(value)

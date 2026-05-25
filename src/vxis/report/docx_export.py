@@ -15,7 +15,7 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches, Pt, RGBColor
 
-from vxis.models.finding import Finding, Severity
+from vxis.models.finding import Finding
 from vxis.report.generator import ReportData
 
 # ---------------------------------------------------------------------------
@@ -373,9 +373,7 @@ def _add_findings_table(doc: Document, data: ReportData) -> None:
 
             cells[2].paragraphs[0].clear()
             cells[2].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            sev_run = cells[2].paragraphs[0].add_run(
-                finding.effective_severity.value.upper()
-            )
+            sev_run = cells[2].paragraphs[0].add_run(finding.effective_severity.value.upper())
             rgb = _SEVERITY_COLORS.get(finding.effective_severity.value, (0, 0, 0))
             sev_run.font.color.rgb = RGBColor(*rgb)
             sev_run.font.bold = True
@@ -482,7 +480,7 @@ def _add_appendix(doc: Document, data: ReportData) -> None:
     doc.add_paragraph(data.methodology, style="Normal")
 
     doc.add_heading("Appendix B — Tool Versions", level=2)
-    p = doc.add_paragraph(
+    doc.add_paragraph(
         "Automated scanning was performed using the following tools:",
         style="Normal",
     )

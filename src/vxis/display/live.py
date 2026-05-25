@@ -1,16 +1,12 @@
 from __future__ import annotations
-import asyncio
 from datetime import datetime, timezone
 from rich.console import Console
 from rich.live import Live
 from rich.table import Table
 from rich.panel import Panel
-from rich.columns import Columns
-from rich.text import Text
 from rich import box
 from ..graph.attack_graph import LivingAttackGraph
 from ..graph.hypothesis import HypothesisQueue
-from ..evidence.schema import Severity
 
 SEVERITY_COLORS = {
     "critical": "bold red",
@@ -67,8 +63,7 @@ class CRTLiveDisplay:
             mode += " [bold green]| stealth[/]"
         title = f"[bold white]VXIS CRT[/] - {mode}"
         content = (
-            f"[dim]Target:[/] [bold]{self.target}[/]   "
-            f"[dim]Elapsed:[/] [bold]{self._elapsed()}[/]"
+            f"[dim]Target:[/] [bold]{self.target}[/]   [dim]Elapsed:[/] [bold]{self._elapsed()}[/]"
         )
         return Panel(content, title=title, border_style="bright_blue")
 
@@ -105,10 +100,7 @@ class CRTLiveDisplay:
         return Panel(content, title=title, border_style="dim")
 
     def _render_hypotheses(self) -> Panel:
-        pending = [
-            h for h in self.hypothesis_queue._heap
-            if h.status.value == "pending"
-        ]
+        pending = [h for h in self.hypothesis_queue._heap if h.status.value == "pending"]
         pending_sorted = sorted(pending, key=lambda h: h.priority_score, reverse=True)
 
         table = Table(box=box.SIMPLE, show_header=False, padding=(0, 1))
@@ -145,6 +137,7 @@ class CRTLiveDisplay:
 
     def _render(self):
         from rich.layout import Layout
+
         layout = Layout()
         layout.split_column(
             Layout(self._render_header(), size=3),

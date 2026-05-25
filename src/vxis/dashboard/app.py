@@ -12,14 +12,11 @@ import tempfile
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
-from sqlalchemy.orm import selectinload
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from vxis.core.db import create_engine, get_session, init_db
@@ -38,6 +35,7 @@ _engine = create_engine(_DEFAULT_DB_URL)
 # ---------------------------------------------------------------------------
 # Application factory
 # ---------------------------------------------------------------------------
+
 
 @asynccontextmanager
 async def _lifespan(application: FastAPI):  # type: ignore[no-untyped-def]
@@ -103,9 +101,8 @@ class _TokenAuthMiddleware(BaseHTTPMiddleware):
 
         # Unauthenticated — decide between JSON 401 or redirect to login page.
         # HTMX requests and non-browser API calls get a JSON 401.
-        if (
-            request.headers.get("hx-request")
-            or "text/html" not in request.headers.get("accept", "")
+        if request.headers.get("hx-request") or "text/html" not in request.headers.get(
+            "accept", ""
         ):
             return JSONResponse(
                 {"detail": "Authentication required"},
@@ -123,6 +120,7 @@ app.add_middleware(_TokenAuthMiddleware)
 templates.env.globals["severity_donut_svg"] = severity_donut_svg
 templates.env.globals["severity_bar_svg"] = severity_bar_svg
 
+
 # Jinja2 filter: format datetime objects
 def _fmt_dt(value: datetime | None, fmt: str = "%Y-%m-%d %H:%M") -> str:
     if value is None:
@@ -138,6 +136,7 @@ templates.env.filters["fmtdt"] = _fmt_dt
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_engine(request: Request):  # type: ignore[return]
     """Return the engine from app state (allows test overrides) or the default."""
@@ -170,6 +169,7 @@ def _counts_from_findings(findings: list[FindingRecord]) -> dict[str, int]:
 # Routes
 # ---------------------------------------------------------------------------
 
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     """Dashboard home — list all scans with summary stats."""
@@ -177,9 +177,7 @@ async def index(request: Request) -> HTMLResponse:
 
     async with get_session(engine) as session:
         # All scans ordered most-recent first
-        result = await session.execute(
-            select(ScanRecord).order_by(ScanRecord.started_at.desc())
-        )
+        result = await session.execute(select(ScanRecord).order_by(ScanRecord.started_at.desc()))
         scans: list[ScanRecord] = list(result.scalars().all())
 
         # Per-scan finding counts in one query
@@ -188,9 +186,7 @@ async def index(request: Request) -> HTMLResponse:
                 FindingRecord.scan_id
             )
         )
-        finding_counts: dict[int, int] = {
-            row[0]: row[1] for row in counts_result.all()
-        }
+        finding_counts: dict[int, int] = {row[0]: row[1] for row in counts_result.all()}
 
         # Critical count across all scans
         crit_result = await session.execute(
@@ -221,9 +217,7 @@ async def scan_detail(request: Request, scan_id: str) -> HTMLResponse:
     engine = _get_engine(request)
 
     async with get_session(engine) as session:
-        scan_result = await session.execute(
-            select(ScanRecord).where(ScanRecord.id == int(scan_id))
-        )
+        scan_result = await session.execute(select(ScanRecord).where(ScanRecord.id == int(scan_id)))
         scan: ScanRecord | None = scan_result.scalar_one_or_none()
 
         if scan is None:
@@ -298,16 +292,12 @@ async def findings_partial(
 
 
 @app.get("/scan/{scan_id}/finding/{finding_id}", response_class=HTMLResponse)
-async def finding_detail(
-    request: Request, scan_id: str, finding_id: str
-) -> HTMLResponse:
+async def finding_detail(request: Request, scan_id: str, finding_id: str) -> HTMLResponse:
     """Finding detail page — full evidence, remediation, and metadata."""
     engine = _get_engine(request)
 
     async with get_session(engine) as session:
-        scan_result = await session.execute(
-            select(ScanRecord).where(ScanRecord.id == int(scan_id))
-        )
+        scan_result = await session.execute(select(ScanRecord).where(ScanRecord.id == int(scan_id)))
         scan: ScanRecord | None = scan_result.scalar_one_or_none()
 
         finding_result = await session.execute(
@@ -361,9 +351,7 @@ async def export_report(
     engine = _get_engine(request)
 
     async with get_session(engine) as session:
-        scan_result = await session.execute(
-            select(ScanRecord).where(ScanRecord.id == int(scan_id))
-        )
+        scan_result = await session.execute(select(ScanRecord).where(ScanRecord.id == int(scan_id)))
         scan: ScanRecord | None = scan_result.scalar_one_or_none()
 
         if scan is None:
@@ -411,9 +399,7 @@ async def export_report(
                 evidence=evidence,
                 remediation=rec.remediation,
                 references=references,
-                analyst_severity=Severity(rec.analyst_severity)
-                if rec.analyst_severity
-                else None,
+                analyst_severity=Severity(rec.analyst_severity) if rec.analyst_severity else None,
                 analyst_notes=rec.analyst_notes,
                 discovered_at=rec.discovered_at,
                 updated_at=rec.updated_at,
@@ -592,9 +578,7 @@ async def client_detail(request: Request, client_id: str) -> HTMLResponse:
                 count_stmt = select(func.count(FindingRecord.id)).where(
                     FindingRecord.scan_id == scan.id
                 )
-                finding_count: int = (
-                    await session.execute(count_stmt)
-                ).scalar_one_or_none() or 0
+                finding_count: int = (await session.execute(count_stmt)).scalar_one_or_none() or 0
 
                 # Severity breakdown for risk grade
                 sev_stmt = (
@@ -603,9 +587,7 @@ async def client_detail(request: Request, client_id: str) -> HTMLResponse:
                     .group_by(FindingRecord.effective_severity)
                 )
                 sev_rows = list((await session.execute(sev_stmt)).all())
-                sev_counts: dict[str, int] = {
-                    sev: cnt for sev, cnt in sev_rows
-                }
+                sev_counts: dict[str, int] = {sev: cnt for sev, cnt in sev_rows}
 
                 # Compute a simple risk grade (A-F) based on critical/high count
                 critical_count = sev_counts.get("critical", 0)
@@ -684,9 +666,7 @@ async def login_submit(request: Request):  # type: ignore[no-untyped-def]
 
     engine = _get_engine(request)
     async with get_session(engine) as session:
-        result = await session.execute(
-            select(UserRecord).where(UserRecord.username == username)
-        )
+        result = await session.execute(select(UserRecord).where(UserRecord.username == username))
         user = result.scalar_one_or_none()
 
     if user is None or not verify_password(password, user.password_hash):
@@ -710,11 +690,17 @@ async def logout(request: Request):  # type: ignore[no-untyped-def]
 # Scan from Dashboard — start, live view, SSE events
 # ---------------------------------------------------------------------------
 
+
 @app.get("/scan/new", response_class=HTMLResponse)
 async def scan_new_page(request: Request) -> HTMLResponse:
     """Scan start form page."""
     scan_types = [
-        ("zero_touch", "제로터치 (Passive)", "\U0001f50d", "대상에 접촉 없이 OSINT만으로 정보 수집"),
+        (
+            "zero_touch",
+            "제로터치 (Passive)",
+            "\U0001f50d",
+            "대상에 접촉 없이 OSINT만으로 정보 수집",
+        ),
         ("external", "외부 스캔", "\U0001f310", "웹/네트워크 취약점 + SSL/DNS 진단"),
         ("internal", "내부 스캔", "\U0001f3e2", "AD/내부 네트워크 환경 진단"),
         ("code", "코드 스캔", "\U0001f4bb", "소스코드 + 의존성 + CI/CD 보안"),
@@ -722,7 +708,9 @@ async def scan_new_page(request: Request) -> HTMLResponse:
         ("full", "전체 스캔", "\U0001f680", "모든 플러그인 실행"),
     ]
     return templates.TemplateResponse(
-        request, "scan_new.html", {"scan_types": scan_types},
+        request,
+        "scan_new.html",
+        {"scan_types": scan_types},
     )
 
 
@@ -749,7 +737,7 @@ async def scan_start_api(request: Request) -> HTMLResponse:
     )
 
     # Return HTMX redirect to live page
-    label = SCAN_TYPE_LABELS.get(scan_type, scan_type)
+    SCAN_TYPE_LABELS.get(scan_type, scan_type)
     return HTMLResponse(
         f'<script>window.location.href="/scan/{managed.scan_id}/live";</script>'
         f'<p class="text-cyan-400">스캔 시작됨: {managed.scan_id} → 라이브 페이지로 이동 중...</p>',
@@ -764,7 +752,8 @@ async def scan_live_page(request: Request, scan_id: str) -> HTMLResponse:
     managed = scan_manager.get_scan(scan_id)
     if managed is None:
         return templates.TemplateResponse(
-            request, "404.html",
+            request,
+            "404.html",
             {"message": f"스캔 {scan_id}를 찾을 수 없습니다"},
             status_code=404,
         )
@@ -772,7 +761,8 @@ async def scan_live_page(request: Request, scan_id: str) -> HTMLResponse:
     label = SCAN_TYPE_LABELS.get(managed.scan_type, managed.scan_type)
 
     return templates.TemplateResponse(
-        request, "scan_live.html",
+        request,
+        "scan_live.html",
         {
             "scan_id": scan_id,
             "target": managed.target,
@@ -828,7 +818,7 @@ async def scan_sse_events(request: Request, scan_id: str):
 
                 except asyncio.TimeoutError:
                     # Send keepalive ping
-                    yield f": keepalive\n\n"
+                    yield ": keepalive\n\n"
 
                 # Check if client disconnected
                 if await request.is_disconnected():
@@ -894,11 +884,7 @@ async def scans_active(request: Request) -> HTMLResponse:
             cfg = scan.config_snapshot or {}
             phases_completed = int(cfg.get("phases_completed", 0) or 0)
             total_phases = int(cfg.get("total_phases", 0) or 0)
-            pct = (
-                round(100.0 * phases_completed / total_phases, 1)
-                if total_phases > 0
-                else 0.0
-            )
+            pct = round(100.0 * phases_completed / total_phases, 1) if total_phases > 0 else 0.0
             scan_rows.append(
                 {
                     "scan": scan,
@@ -911,9 +897,7 @@ async def scans_active(request: Request) -> HTMLResponse:
 
         # Recent findings across all scans (last 20)
         recent_result = await session.execute(
-            select(FindingRecord)
-            .order_by(FindingRecord.discovered_at.desc())
-            .limit(20)
+            select(FindingRecord).order_by(FindingRecord.discovered_at.desc()).limit(20)
         )
         recent_findings: list[FindingRecord] = list(recent_result.scalars().all())
 
@@ -949,11 +933,7 @@ async def scans_active_partial(request: Request) -> HTMLResponse:
             cfg = scan.config_snapshot or {}
             phases_completed = int(cfg.get("phases_completed", 0) or 0)
             total_phases = int(cfg.get("total_phases", 0) or 0)
-            pct = (
-                round(100.0 * phases_completed / total_phases, 1)
-                if total_phases > 0
-                else 0.0
-            )
+            pct = round(100.0 * phases_completed / total_phases, 1) if total_phases > 0 else 0.0
             scan_rows.append(
                 {
                     "scan": scan,
@@ -965,9 +945,7 @@ async def scans_active_partial(request: Request) -> HTMLResponse:
             )
 
         recent_result = await session.execute(
-            select(FindingRecord)
-            .order_by(FindingRecord.discovered_at.desc())
-            .limit(20)
+            select(FindingRecord).order_by(FindingRecord.discovered_at.desc()).limit(20)
         )
         recent_findings: list[FindingRecord] = list(recent_result.scalars().all())
 
@@ -991,7 +969,7 @@ def _line_chart_svg(
     if not points:
         return (
             f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">'
-            f'<text x="{width/2}" y="{height/2}" text-anchor="middle" fill="#64748b" '
+            f'<text x="{width / 2}" y="{height / 2}" text-anchor="middle" fill="#64748b" '
             f'font-family="sans-serif" font-size="13">No data</text></svg>'
         )
 
@@ -1043,10 +1021,10 @@ def _line_chart_svg(
     return (
         f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg" '
         f'class="w-full h-auto">'
-        f'{grid}'
+        f"{grid}"
         f'<path d="{path}" fill="none" stroke="{stroke}" stroke-width="2"/>'
-        f'{dots}{labels}'
-        f'</svg>'
+        f"{dots}{labels}"
+        f"</svg>"
     )
 
 
@@ -1082,11 +1060,7 @@ async def trends_page(request: Request) -> HTMLResponse:
                 sev_rows = list((await session.execute(sev_stmt)).all())
                 sev_counts = {sev: cnt for sev, cnt in sev_rows}
                 score = _risk_score(sev_counts)
-                label = (
-                    scan.started_at.strftime("%m-%d")
-                    if scan.started_at
-                    else f"#{scan.id}"
-                )
+                label = scan.started_at.strftime("%m-%d") if scan.started_at else f"#{scan.id}"
                 points.append((label, score))
 
             target_series.append(
@@ -1124,12 +1098,8 @@ async def phases_page(request: Request) -> HTMLResponse:
                 ToolRunRecord.plugin_name,
                 func.count(ToolRunRecord.id),
                 func.avg(ToolRunRecord.elapsed_seconds),
-                func.sum(
-                    case((ToolRunRecord.state == "failed", 1), else_=0)
-                ),
-                func.sum(
-                    case((ToolRunRecord.state == "timeout", 1), else_=0)
-                ),
+                func.sum(case((ToolRunRecord.state == "failed", 1), else_=0)),
+                func.sum(case((ToolRunRecord.state == "timeout", 1), else_=0)),
             ).group_by(ToolRunRecord.plugin_name)
         )
 
@@ -1138,9 +1108,7 @@ async def phases_page(request: Request) -> HTMLResponse:
                 FindingRecord.source_plugin
             )
         )
-        findings_by_plugin: dict[str, int] = {
-            row[0]: row[1] for row in finding_rows.all()
-        }
+        findings_by_plugin: dict[str, int] = {row[0]: row[1] for row in finding_rows.all()}
 
     phase_rows: list[dict] = []
     for plugin, total, avg_elapsed, failed, timed_out in rows_result.all():
@@ -1213,13 +1181,13 @@ async def users_list(request: Request) -> HTMLResponse:
 
     engine = _get_engine(request)
     async with get_session(engine) as session:
-        result = await session.execute(
-            select(UserRecord).order_by(UserRecord.created_at.desc())
-        )
+        result = await session.execute(select(UserRecord).order_by(UserRecord.created_at.desc()))
         users = list(result.scalars().all())
 
     return templates.TemplateResponse(
-        request, "users.html", {"users": users, "current_user": user},
+        request,
+        "users.html",
+        {"users": users, "current_user": user},
     )
 
 
@@ -1279,18 +1247,17 @@ async def finding_detail_page(request: Request, finding_id: int) -> HTMLResponse
     engine = _get_engine(request)
     async with get_session(engine) as session:
         finding = (
-            await session.execute(
-                select(FindingRecord).where(FindingRecord.id == finding_id)
-            )
+            await session.execute(select(FindingRecord).where(FindingRecord.id == finding_id))
         ).scalar_one_or_none()
         if finding is None:
             return templates.TemplateResponse(
-                request, "404.html", {"message": "Finding not found"}, status_code=404,
+                request,
+                "404.html",
+                {"message": "Finding not found"},
+                status_code=404,
             )
         scan = (
-            await session.execute(
-                select(ScanRecord).where(ScanRecord.id == finding.scan_id)
-            )
+            await session.execute(select(ScanRecord).where(ScanRecord.id == finding.scan_id))
         ).scalar_one_or_none()
 
         comments_rows = (
@@ -1301,17 +1268,19 @@ async def finding_detail_page(request: Request, finding_id: int) -> HTMLResponse
                 .order_by(FindingCommentRecord.created_at.asc())
             )
         ).all()
-        comments = [
-            {"comment": c, "user": u} for c, u in comments_rows
-        ]
+        comments = [{"comment": c, "user": u} for c, u in comments_rows]
 
         review = (
-            await session.execute(
-                select(FindingReviewRecord)
-                .where(FindingReviewRecord.finding_id == finding_id)
-                .order_by(FindingReviewRecord.reviewed_at.desc())
+            (
+                await session.execute(
+                    select(FindingReviewRecord)
+                    .where(FindingReviewRecord.finding_id == finding_id)
+                    .order_by(FindingReviewRecord.reviewed_at.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
     return templates.TemplateResponse(
         request,
@@ -1358,9 +1327,7 @@ async def finding_comments_partial(request: Request, finding_id: int) -> HTMLRes
 
 
 @app.post("/findings/{finding_id}/comments", response_class=HTMLResponse)
-async def finding_comments_create(
-    request: Request, finding_id: int
-) -> HTMLResponse:
+async def finding_comments_create(request: Request, finding_id: int) -> HTMLResponse:
     """Add a comment to a finding (any authenticated user)."""
     from vxis.dashboard.auth import current_user
     from vxis.models.db_models import FindingCommentRecord, UserRecord
@@ -1423,12 +1390,14 @@ async def finding_review_set(request: Request, finding_id: int):  # type: ignore
     engine = _get_engine(request)
     async with get_session(engine) as session:
         existing = (
-            await session.execute(
-                select(FindingReviewRecord).where(
-                    FindingReviewRecord.finding_id == finding_id
+            (
+                await session.execute(
+                    select(FindingReviewRecord).where(FindingReviewRecord.finding_id == finding_id)
                 )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         if existing is None:
             session.add(
                 FindingReviewRecord(

@@ -27,12 +27,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from vxis.evidence.schema import Evidence, Severity
+from vxis.evidence.schema import Evidence
 
 logger = logging.getLogger(__name__)
 
 
 # ── Data Models ──────────────────────────────────────────────────
+
 
 @dataclass
 class ChainLink:
@@ -217,14 +218,13 @@ _KEYWORD_TO_VULN_TYPE: dict[str, list[str]] = {
     # Session
     "session": ["session", "session_data"],
     "cookie": ["session"],
-    "token": ["session"],
+    "token": ["session", "secret_exposure"],
     # Secrets
     "api key": ["secret_exposure"],
     "api_key": ["secret_exposure"],
     "password": ["secret_exposure", "credential_data"],
     "credential": ["secret_exposure", "credential_data"],
     "secret": ["secret_exposure"],
-    "token": ["secret_exposure"],
     # Services
     "redis": ["redis_noauth"],
     "mongodb": ["mongodb_noauth"],
@@ -265,6 +265,7 @@ _KEYWORD_TO_VULN_TYPE: dict[str, list[str]] = {
 
 # ── Chain Reasoner ───────────────────────────────────────────────
 
+
 class ChainReasoner:
     """공격 체인 추론 엔진.
 
@@ -299,7 +300,8 @@ class ChainReasoner:
 
         logger.debug(
             "체인 추론기에 발견물 추가: %s → 유형: %s",
-            evidence.title, vuln_types,
+            evidence.title,
+            vuln_types,
         )
 
     def infer_chains(self) -> list[AttackChain]:
@@ -354,19 +356,21 @@ class ChainReasoner:
             # 패턴의 절반 이상 매칭 + 아직 미완성
             if len(matched) >= len(template.pattern) / 2 and missing:
                 for vuln_type in missing:
-                    hypotheses.append({
-                        "title": f"체인 완성 시도: {template.name}",
-                        "rationale": (
-                            f"발견: {', '.join(matched)} → "
-                            f"미발견: {', '.join(missing)} → "
-                            f"완성 시 {template.severity_upgrade}"
-                        ),
-                        "missing_vuln_type": vuln_type,
-                        "chain_template": template.name,
-                        "potential_severity": template.severity_upgrade,
-                        "impact": template.impact,
-                        "probability": 0.6,  # 절반 이상 발견했으므로 가능성 높음
-                    })
+                    hypotheses.append(
+                        {
+                            "title": f"체인 완성 시도: {template.name}",
+                            "rationale": (
+                                f"발견: {', '.join(matched)} → "
+                                f"미발견: {', '.join(missing)} → "
+                                f"완성 시 {template.severity_upgrade}"
+                            ),
+                            "missing_vuln_type": vuln_type,
+                            "chain_template": template.name,
+                            "potential_severity": template.severity_upgrade,
+                            "impact": template.impact,
+                            "probability": 0.6,  # 절반 이상 발견했으므로 가능성 높음
+                        }
+                    )
 
         return hypotheses
 
@@ -394,9 +398,7 @@ class ChainReasoner:
         if hypotheses:
             lines.append("\n## 체인 완성 가능성")
             for h in hypotheses[:3]:
-                lines.append(
-                    f"- {h['title']}: {h['rationale']}"
-                )
+                lines.append(f"- {h['title']}: {h['rationale']}")
 
         return "\n".join(lines)
 
@@ -414,13 +416,12 @@ class ChainReasoner:
         return list(vuln_types) if vuln_types else ["unknown"]
 
     def _template_matches(
-        self, template: ChainTemplate, available_types: set[str],
+        self,
+        template: ChainTemplate,
+        available_types: set[str],
     ) -> bool:
         """체인 템플릿의 모든 패턴이 현재 발견된 취약점에 매칭되는지 확인."""
-        return all(
-            vuln_type in available_types
-            for vuln_type in template.pattern
-        )
+        return all(vuln_type in available_types for vuln_type in template.pattern)
 
     def _build_chain(
         self,
@@ -436,17 +437,19 @@ class ChainReasoner:
             if not evidence:
                 continue
 
-            role = "entry" if i == 0 else (
-                "impact" if i == len(template.pattern) - 1 else "pivot"
-            )
+            role = "entry" if i == 0 else ("impact" if i == len(template.pattern) - 1 else "pivot")
 
-            links.append(ChainLink(
-                evidence_id=evidence.id,
-                title=evidence.title,
-                severity=evidence.severity.value if hasattr(evidence.severity, 'value') else str(evidence.severity),
-                role=role,
-                technique=vuln_type,
-            ))
+            links.append(
+                ChainLink(
+                    evidence_id=evidence.id,
+                    title=evidence.title,
+                    severity=evidence.severity.value
+                    if hasattr(evidence.severity, "value")
+                    else str(evidence.severity),
+                    role=role,
+                    technique=vuln_type,
+                )
+            )
 
         if len(links) < 2:
             return None
@@ -477,7 +480,8 @@ class ChainReasoner:
         return None
 
     def _deduplicate_chains(
-        self, chains: list[AttackChain],
+        self,
+        chains: list[AttackChain],
     ) -> list[AttackChain]:
         """같은 증거를 사용하는 체인 중 점수 높은 것만 남긴다."""
         seen_evidence_sets: list[set[str]] = []
@@ -487,9 +491,7 @@ class ChainReasoner:
             evidence_set = {link.evidence_id for link in chain.links}
 
             # 이미 사용된 증거 조합인지 확인
-            is_duplicate = any(
-                evidence_set == seen for seen in seen_evidence_sets
-            )
+            is_duplicate = any(evidence_set == seen for seen in seen_evidence_sets)
 
             if not is_duplicate:
                 seen_evidence_sets.append(evidence_set)

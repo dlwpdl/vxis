@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
 
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
@@ -15,7 +14,9 @@ class _ShellTool:
     input_schema = {"type": "object", "properties": {"command": {"type": "string"}}}
 
     async def run(self, **kwargs) -> ToolResult:
-        return ToolResult(ok=True, summary=f"ran {kwargs.get('command', '')}", data={"stdout": "ok"})
+        return ToolResult(
+            ok=True, summary=f"ran {kwargs.get('command', '')}", data={"stdout": "ok"}
+        )
 
 
 def test_scan_loop_emits_ui_events_for_regular_dispatch() -> None:
@@ -69,17 +70,24 @@ def test_scan_loop_spawns_followup_branches_from_finding() -> None:
         )
 
         async def _fake_decide(state):
-            return [(
-                "report_finding",
-                {
-                    "title": "Auth bypass on login",
-                    "severity": "high",
-                    "finding_type": "auth_bypass",
-                    "affected_component": "http://example.test/login",
-                    "description": "The login accepted a bypass payload.",
-                    "evidence": "status 302 -> /admin",
-                },
-            )]
+            return [
+                (
+                    "report_finding",
+                    {
+                        "title": "Auth bypass on login",
+                        "severity": "high",
+                        "finding_type": "auth_bypass",
+                        "affected_component": "http://example.test/login",
+                        "description": "The login accepted a bypass payload.",
+                        "evidence": "status 302 -> /admin",
+                        "impact": "The bypass grants an authenticated session that can be reused against protected routes.",
+                        "technical_analysis": "The login flow returned a redirect to /admin after the bypass payload, indicating an auth boundary crossing.",
+                        "poc_description": "Submit the bypass payload to /login and confirm the 302 redirect into the authenticated area.",
+                        "poc_script_code": "POST /login payload=bypass -> HTTP/302 Location: /admin",
+                        "remediation_steps": "Reject bypass payloads server-side and require verified credentials before issuing sessions.",
+                    },
+                )
+            ]
 
         loop._decide = _fake_decide  # type: ignore[assignment]
         return await loop.run()

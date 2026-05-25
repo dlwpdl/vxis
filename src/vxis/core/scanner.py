@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 _BUFFER_LIMIT = 10 * 1024 * 1024  # 10 MB
@@ -97,9 +97,7 @@ async def run_tool(
             except ProcessLookupError:
                 pass
             await process.wait()
-            raise TimeoutError(
-                f"Command '{command_label}' timed out after {timeout} second(s)."
-            )
+            raise TimeoutError(f"Command '{command_label}' timed out after {timeout} second(s).")
         except asyncio.CancelledError:
             try:
                 process.kill()
@@ -177,9 +175,7 @@ async def _stream_output(
         except ProcessLookupError:
             pass
         await process.wait()
-        raise TimeoutError(
-            f"Command '{command_label}' timed out after {timeout} second(s)."
-        )
+        raise TimeoutError(f"Command '{command_label}' timed out after {timeout} second(s).")
     except asyncio.CancelledError:
         try:
             process.kill()

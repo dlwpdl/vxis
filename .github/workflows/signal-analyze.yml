@@ -216,7 +216,11 @@ jobs:
               print("No proposals applied — skip PR")
               exit(0)
 
-          subprocess.run(["git", "add", "src/vxis/agent/skills/"], check=True)
+          subprocess.run([
+              "git", "add",
+              "src/vxis/agent/skills/",
+              "src/vxis/data/payloads/",
+          ], check=True)
           subprocess.run(["git", "commit", "-m",
               f"feat(growth): {applied} pending skill payload(s) for review"], check=True)
           subprocess.run(["git", "push", "-u", "origin", branch], check=True)

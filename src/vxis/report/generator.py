@@ -7,7 +7,6 @@ in NCC Group style. PDF generation is stubbed pending WeasyPrint availability.
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -19,7 +18,6 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from vxis.models.finding import Finding, Severity
 from vxis.report.charts import severity_bar_svg, severity_donut_svg
 from vxis.report.attack_graph import (
-    AttackGraphData,
     build_attack_graph_from_findings,
     render_attack_graph_svg,
 )
@@ -190,6 +188,7 @@ class ReportData:
 # Jinja2 custom filters
 # ---------------------------------------------------------------------------
 
+
 def _filter_severity_color(severity: str) -> str:
     """Map a severity string to its canonical hex colour."""
     colours: dict[str, str] = {
@@ -244,11 +243,7 @@ def _filter_severity_badge(severity: str) -> str:
     """Return an HTML <span> badge for the given severity level."""
     colour = _filter_severity_color(severity)
     label = severity.upper()
-    return (
-        f'<span class="severity-badge" '
-        f'style="background-color:{colour};">'
-        f'{label}</span>'
-    )
+    return f'<span class="severity-badge" style="background-color:{colour};">{label}</span>'
 
 
 class ReportGenerator:
@@ -421,8 +416,7 @@ def _html_to_pdf(html_path: Path, pdf_path: Path) -> Path:
 
     if result.returncode != 0:
         raise RuntimeError(
-            f"wkhtmltopdf exited with code {result.returncode}.\n"
-            f"stderr: {result.stderr.strip()}"
+            f"wkhtmltopdf exited with code {result.returncode}.\nstderr: {result.stderr.strip()}"
         )
 
     return pdf_path

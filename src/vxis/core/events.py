@@ -16,7 +16,6 @@ import asyncio
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Callable, Awaitable
 
@@ -31,9 +30,9 @@ class EventType(str, Enum):
 
     # DAG engine events
     NODE_QUEUED = "node.queued"
-    NODE_WAITING = "node.waiting"       # Waiting for dependency
+    NODE_WAITING = "node.waiting"  # Waiting for dependency
     NODE_STARTED = "node.started"
-    NODE_PROGRESS = "node.progress"     # Mid-execution update (finding count, etc.)
+    NODE_PROGRESS = "node.progress"  # Mid-execution update (finding count, etc.)
     NODE_COMPLETED = "node.completed"
     NODE_FAILED = "node.failed"
     NODE_SKIPPED = "node.skipped"
@@ -41,11 +40,11 @@ class EventType(str, Enum):
 
     # Scanner events (tool subprocess)
     TOOL_OUTPUT_LINE = "tool.output_line"  # Single line from tool stdout
-    TOOL_FINDING = "tool.finding"          # Real-time finding detected
+    TOOL_FINDING = "tool.finding"  # Real-time finding detected
 
     # Pipeline events
-    PIPELINE_STAGE = "pipeline.stage"      # Normalization, dedup, FP, enrich
-    PIPELINE_METRIC = "pipeline.metric"    # Finding counts at each stage
+    PIPELINE_STAGE = "pipeline.stage"  # Normalization, dedup, FP, enrich
+    PIPELINE_METRIC = "pipeline.metric"  # Finding counts at each stage
 
     # Scan lifecycle
     SCAN_STARTED = "scan.started"
@@ -105,7 +104,7 @@ class ToolFindingEvent(ScanEvent):
 class PipelineEvent(ScanEvent):
     """Event from the post-processing pipeline."""
 
-    stage: str = ""          # normalize, deduplicate, fp_filter, enrich
+    stage: str = ""  # normalize, deduplicate, fp_filter, enrich
     finding_count: int = 0
     detail: str = ""
 
@@ -184,6 +183,7 @@ class ScanEventBus:
             if isinstance(result, Exception):
                 # Avoid importing logging at module level to keep this lightweight
                 import logging
+
                 logging.getLogger(__name__).debug(
                     "Event listener error for %s: %s", event.event_type, result
                 )
@@ -229,7 +229,11 @@ class ScanSnapshot:
     total_findings: int = 0
     severity_counts: dict[str, int] = field(
         default_factory=lambda: {
-            "critical": 0, "high": 0, "medium": 0, "low": 0, "informational": 0
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "informational": 0,
         }
     )
     recent_findings: list[str] = field(default_factory=list)  # Last 5 finding summaries
@@ -243,7 +247,8 @@ class ScanSnapshot:
     @property
     def completed_count(self) -> int:
         return sum(
-            1 for p in self.plugins.values()
+            1
+            for p in self.plugins.values()
             if p.state in ("completed", "failed", "skipped", "timed_out")
         )
 

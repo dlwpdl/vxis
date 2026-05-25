@@ -9,7 +9,6 @@ Manages scan lifecycle from the dashboard:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -44,14 +43,29 @@ class ManagedScan:
 SCAN_TYPE_PLUGINS: dict[str, list[str] | None] = {
     "zero_touch": ["shodan", "crtsh", "subfinder", "dnstwist", "httpx"],
     "external": [
-        "nuclei", "nmap", "httpx", "testssl", "checkdmarc",
-        "wafw00f", "trufflehog", "sslyze", "subfinder", "crtsh",
-        "dnstwist", "shodan",
+        "nuclei",
+        "nmap",
+        "httpx",
+        "testssl",
+        "checkdmarc",
+        "wafw00f",
+        "trufflehog",
+        "sslyze",
+        "subfinder",
+        "crtsh",
+        "dnstwist",
+        "shodan",
     ],
     "internal": ["nmap", "bloodhound", "certipy", "netexec"],
     "code": [
-        "semgrep", "bandit", "checkov", "poutine", "actionlint",
-        "gitleaks", "confused", "trivy",
+        "semgrep",
+        "bandit",
+        "checkov",
+        "poutine",
+        "actionlint",
+        "gitleaks",
+        "confused",
+        "trivy",
     ],
     "cloud": ["prowler", "s3scanner", "trivy_k8s", "kube_bench"],
     "full": None,  # all plugins
@@ -153,24 +167,31 @@ class ScanManager:
             managed.status = "completed"
 
             # Notify SSE subscribers of completion
-            await self._broadcast(managed, {
-                "event": "scan_completed",
-                "findings": len(result.findings),
-                "duration": f"{result.duration_seconds:.1f}s",
-            })
+            await self._broadcast(
+                managed,
+                {
+                    "event": "scan_completed",
+                    "findings": len(result.findings),
+                    "duration": f"{result.duration_seconds:.1f}s",
+                },
+            )
 
         except Exception as exc:
             managed.status = "failed"
             managed.error = str(exc)
             logger.exception("Dashboard scan %s failed", managed.scan_id)
 
-            await self._broadcast(managed, {
-                "event": "scan_failed",
-                "error": str(exc),
-            })
+            await self._broadcast(
+                managed,
+                {
+                    "event": "scan_failed",
+                    "error": str(exc),
+                },
+            )
 
     def _make_sse_broadcaster(self, managed: ManagedScan):
         """Create an event handler that broadcasts to SSE subscribers."""
+
         async def _handler(event: ScanEvent) -> None:
             snapshot = managed.collector.snapshot
             data = {

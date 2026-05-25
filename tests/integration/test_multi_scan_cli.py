@@ -18,7 +18,6 @@ import textwrap
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from typer.testing import CliRunner
 
 from vxis.cli.main import app
@@ -31,6 +30,7 @@ _MULTI_SCAN_PATH = "vxis.cli.multi_scan.multi_scan"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _write_yaml(tmp_path: Path, content: str, name: str = "scan.yml") -> Path:
     p = tmp_path / name
@@ -66,6 +66,7 @@ _INVALID_MANIFEST_YAML = """\
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestManifestCLI:
     def test_valid_manifest_exits_0(self, tmp_path: Path) -> None:

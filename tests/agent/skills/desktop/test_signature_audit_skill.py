@@ -3,9 +3,9 @@
 All subprocess.run calls are mocked so that tests run without invoking
 the real codesign binary.  All tests are async.
 """
+
 from __future__ import annotations
 
-import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +16,7 @@ from vxis.agent.skills.desktop.test_signature_audit import execute
 # ---------------------------------------------------------------------------
 # Mock factory helpers
 # ---------------------------------------------------------------------------
+
 
 def _mock_proc(returncode: int = 0, stderr: str = "", stdout: str = "") -> MagicMock:
     """Build a fake CompletedProcess return value."""
@@ -161,7 +162,9 @@ async def test_apple_signed_passes(tmp_path):
         result = await execute(target_url=str(target))
 
     assert result["signed"] is True
-    assert result["findings"] == [], f"Apple-signed app should have 0 findings, got: {result['findings']}"
+    assert result["findings"] == [], (
+        f"Apple-signed app should have 0 findings, got: {result['findings']}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -205,12 +208,18 @@ async def test_returns_hardened_runtime_field(tmp_path):
     target.mkdir()
 
     proc_with_runtime = _mock_proc(returncode=0, stderr=_VALID_AUTHORITY_STDERR)
-    with patch("vxis.agent.skills.desktop.test_signature_audit.subprocess.run", return_value=proc_with_runtime):
+    with patch(
+        "vxis.agent.skills.desktop.test_signature_audit.subprocess.run",
+        return_value=proc_with_runtime,
+    ):
         result = await execute(target_url=str(target))
     assert result["hardened_runtime"] is True
 
     proc_without_runtime = _mock_proc(returncode=0, stderr=_NO_RUNTIME_STDERR)
-    with patch("vxis.agent.skills.desktop.test_signature_audit.subprocess.run", return_value=proc_without_runtime):
+    with patch(
+        "vxis.agent.skills.desktop.test_signature_audit.subprocess.run",
+        return_value=proc_without_runtime,
+    ):
         result2 = await execute(target_url=str(target))
     assert result2["hardened_runtime"] is False
 
@@ -252,4 +261,6 @@ async def test_finding_has_bilingual_description(tmp_path):
     assert result["findings"], "need at least one finding to test bilingual format"
     for finding in result["findings"]:
         assert "|||" in finding["title"], f"title missing |||: {finding['title']!r}"
-        assert "|||" in finding["description"], f"description missing |||: {finding['description']!r}"
+        assert "|||" in finding["description"], (
+            f"description missing |||: {finding['description']!r}"
+        )

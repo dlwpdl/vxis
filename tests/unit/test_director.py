@@ -1,8 +1,6 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from vxis.agent.director import DirectorAgent
 from vxis.agent.context import AgentContext
-from vxis.agent.base import AgentResult
 from vxis.mission.config import MissionConfig, Depth
 from vxis.graph.attack_graph import LivingAttackGraph
 from vxis.evidence.engine import EvidenceEngine

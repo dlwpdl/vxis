@@ -6,7 +6,7 @@ import re
 import shutil
 import subprocess
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
@@ -32,8 +32,7 @@ class BasePlugin(ABC):
 
     @property
     @abstractmethod
-    def meta(self) -> PluginMeta:
-        ...
+    def meta(self) -> PluginMeta: ...
 
     @abstractmethod
     def build_command(
@@ -73,7 +72,9 @@ class BasePlugin(ABC):
             try:
                 result = subprocess.run(
                     [binary, flag],
-                    capture_output=True, text=True, timeout=5,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 output = (result.stdout + result.stderr).strip()
                 # 버전 패턴: 1.2.3, v1.2.3, 1.2.3-beta 등
@@ -111,7 +112,9 @@ class BasePlugin(ABC):
             try:
                 result = subprocess.run(
                     [binary, flag],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                 )
                 help_text = result.stdout + result.stderr
                 if help_text.strip():
@@ -130,7 +133,7 @@ class BasePlugin(ABC):
             return []  # Can't build command without context — skip validation
 
         # Extract flags from command string (--flag, -f patterns)
-        flags_in_cmd = re.findall(r'(?:^|\s)(--?[a-zA-Z][\w-]*)', cmd)
+        flags_in_cmd = re.findall(r"(?:^|\s)(--?[a-zA-Z][\w-]*)", cmd)
 
         # Check each flag against help text
         warnings = []
@@ -142,8 +145,7 @@ class BasePlugin(ABC):
             # Check if the flag appears in help text
             if flag not in help_text:
                 warnings.append(
-                    f"{self.meta.name}: flag '{flag}' not found in "
-                    f"{self.meta.tool_binary} --help"
+                    f"{self.meta.name}: flag '{flag}' not found in {self.meta.tool_binary} --help"
                 )
 
         return warnings
@@ -158,12 +160,14 @@ class BasePlugin(ABC):
             try:
                 result = subprocess.run(
                     [binary, flag],
-                    capture_output=True, text=True, timeout=5,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 output = (result.stdout + result.stderr).strip()
                 if output:
                     # Extract version-like pattern
-                    match = re.search(r'(\d+\.\d+[\.\d]*)', output)
+                    match = re.search(r"(\d+\.\d+[\.\d]*)", output)
                     if match:
                         return match.group(1)
                     # Return first non-empty line if no version pattern

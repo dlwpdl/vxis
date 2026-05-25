@@ -28,7 +28,6 @@ import subprocess
 import time
 import uuid
 import atexit
-from dataclasses import dataclass
 
 from vxis.core.scanner import ToolResult
 
@@ -121,33 +120,49 @@ class DockerSandbox:
         proxy_env: list[str] = []
         if proxy_url:
             proxy_env = [
-                "--env", f"ALL_PROXY={proxy_url}",
-                "--env", f"HTTPS_PROXY={proxy_url}",
-                "--env", f"HTTP_PROXY={proxy_url}",
-                "--env", "NO_PROXY=localhost,127.0.0.1",
+                "--env",
+                f"ALL_PROXY={proxy_url}",
+                "--env",
+                f"HTTPS_PROXY={proxy_url}",
+                "--env",
+                f"HTTP_PROXY={proxy_url}",
+                "--env",
+                "NO_PROXY=localhost,127.0.0.1",
             ]
             logger.info("컨테이너 프록시 설정: %s", proxy_url)
 
         cmd = [
-            "docker", "run",
+            "docker",
+            "run",
             "--detach",
-            "--name", container_name,
-            "--network", "bridge",
+            "--name",
+            container_name,
+            "--network",
+            "bridge",
             # 워크스페이스 볼륨 마운트
-            "--volume", f"{_WORKSPACE_HOST}:{_WORKSPACE_CONTAINER}:rw",
+            "--volume",
+            f"{_WORKSPACE_HOST}:{_WORKSPACE_CONTAINER}:rw",
             *proxy_env,
             # 리소스 제한 — 단일 컨테이너가 호스트 CPU/메모리를 독점하지 않도록
-            "--memory", "2g",
-            "--cpus", "2.0",
+            "--memory",
+            "2g",
+            "--cpus",
+            "2.0",
             # 보안: 불필요한 privilege 제거, read-only rootfs 불가(도구 설치 필요)
-            "--cap-drop", "ALL",
-            "--cap-add", "NET_RAW",    # nmap SYN scan 필요
-            "--cap-add", "NET_ADMIN",  # nmap/hping 등 raw socket
-            "--security-opt", "no-new-privileges:true",
+            "--cap-drop",
+            "ALL",
+            "--cap-add",
+            "NET_RAW",  # nmap SYN scan 필요
+            "--cap-add",
+            "NET_ADMIN",  # nmap/hping 등 raw socket
+            "--security-opt",
+            "no-new-privileges:true",
             # 레이블: VXIS가 생성한 컨테이너 식별용
-            "--label", "vxis.managed=true",
+            "--label",
+            "vxis.managed=true",
             self.image,
-            "sleep", "infinity",
+            "sleep",
+            "infinity",
         ]
 
         logger.info("Docker 컨테이너 생성 중: image=%s name=%s", self.image, container_name)
@@ -227,8 +242,7 @@ class DockerSandbox:
         """
         if self._container_id is None:
             raise RuntimeError(
-                "컨테이너가 초기화되지 않았습니다. "
-                "먼저 create_container()를 호출하세요."
+                "컨테이너가 초기화되지 않았습니다. 먼저 create_container()를 호출하세요."
             )
 
         effective_timeout = timeout if timeout is not None else self.default_timeout
@@ -237,9 +251,12 @@ class DockerSandbox:
         # `docker exec`로 /bin/bash -c "command" 실행
         # 셸 래핑을 통해 파이프라인, 리다이렉션 등 복합 명령 지원
         exec_cmd = [
-            "docker", "exec",
+            "docker",
+            "exec",
             container_id,
-            "/bin/bash", "-c", command,
+            "/bin/bash",
+            "-c",
+            command,
         ]
 
         command_label = f"[sandbox:{container_id[:12]}] {command}"
@@ -377,9 +394,7 @@ class SandboxManager:
         if not self._sandboxes:
             return
 
-        logger.info(
-            "SandboxManager: %d개 컨테이너 정리 중...", len(self._sandboxes)
-        )
+        logger.info("SandboxManager: %d개 컨테이너 정리 중...", len(self._sandboxes))
 
         tasks = []
         for target, sandbox in list(self._sandboxes.items()):

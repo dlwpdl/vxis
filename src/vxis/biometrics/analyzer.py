@@ -19,12 +19,10 @@ from __future__ import annotations
 
 import json
 import logging
-import re
-import socket
 import subprocess
 import urllib.error
 import urllib.request
-from collections import Counter, defaultdict
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -36,19 +34,41 @@ _GITHUB_API = "https://api.github.com"
 # 높은 권한을 암시하는 키워드 (직책/기술 기반)
 _PRIVILEGED_KEYWORDS = {
     # 클라우드/인프라 권한
-    "aws": 9, "azure": 9, "gcp": 9, "cloud": 7,
-    "kubernetes": 8, "k8s": 8, "terraform": 8, "devops": 7,
-    "infrastructure": 8, "platform": 7,
+    "aws": 9,
+    "azure": 9,
+    "gcp": 9,
+    "cloud": 7,
+    "kubernetes": 8,
+    "k8s": 8,
+    "terraform": 8,
+    "devops": 7,
+    "infrastructure": 8,
+    "platform": 7,
     # 보안/접근 권한
-    "security": 8, "admin": 9, "administrator": 9,
-    "sre": 8, "site reliability": 8,
+    "security": 8,
+    "admin": 9,
+    "administrator": 9,
+    "sre": 8,
+    "site reliability": 8,
     # 데이터 접근 권한
-    "database": 7, "dba": 9, "data engineer": 7,
+    "database": 7,
+    "dba": 9,
+    "data engineer": 7,
     # 개발 권한
-    "lead": 6, "principal": 8, "staff": 7, "architect": 8, "cto": 10,
-    "vp": 9, "director": 8, "manager": 6,
+    "lead": 6,
+    "principal": 8,
+    "staff": 7,
+    "architect": 8,
+    "cto": 10,
+    "vp": 9,
+    "director": 8,
+    "manager": 6,
     # CI/CD 접근
-    "ci": 6, "cd": 6, "pipeline": 6, "jenkins": 7, "github actions": 7,
+    "ci": 6,
+    "cd": 6,
+    "pipeline": 6,
+    "jenkins": 7,
+    "github actions": 7,
 }
 
 # 위험한 기술 조합 (이 기술들을 동시에 가진 직원은 고가치 타겟)
@@ -80,8 +100,8 @@ class GitHubProfile:
     language_distribution: dict[str, int] = field(default_factory=dict)  # 언어 → repo 수
 
     # 활동 시간 패턴 (commit 시간대 분석)
-    active_hours: list[int] = field(default_factory=list)   # 활동 시간대 (0-23)
-    active_days: list[str] = field(default_factory=list)    # 활동 요일
+    active_hours: list[int] = field(default_factory=list)  # 활동 시간대 (0-23)
+    active_days: list[str] = field(default_factory=list)  # 활동 요일
     peak_activity_hour: int = -1  # 가장 많이 커밋하는 시간 (-1이면 데이터 없음)
     avg_commits_per_day: float = 0.0
 
@@ -111,16 +131,17 @@ class SocialFootprint:
 class HighValueTarget:
     """높은 권한이 추정되는 직원 정보."""
 
-    identifier: str          # GitHub username 또는 이메일 (마스킹)
-    display_name: str        # 표시 이름
+    identifier: str  # GitHub username 또는 이메일 (마스킹)
+    display_name: str  # 표시 이름
     estimated_access_level: int  # 1-10 (10이 최고 권한)
     privilege_indicators: list[str]  # 권한 추정 근거
     attack_surface: list[str]  # 공격 표면 설명
     recommended_vectors: list[str]  # 권장 공격 벡터 (레드팀용)
-    risk_score: int          # 0-100
+    risk_score: int  # 0-100
 
 
 # ── 핵심 분석 엔진 ───────────────────────────────────────────────
+
 
 class BehavioralAnalyzer:
     """행동 생체인식 분석 엔진.
@@ -204,9 +225,7 @@ class BehavioralAnalyzer:
         # 4. 공개 조직 멤버십
         orgs_data = self._github_get(f"/users/{username}/orgs")
         if orgs_data and isinstance(orgs_data, list):
-            profile.org_memberships = [
-                org.get("login", "") for org in orgs_data
-            ]
+            profile.org_memberships = [org.get("login", "") for org in orgs_data]
 
         # 5. 위험도 점수 계산
         self._calculate_risk_score(profile)
@@ -221,16 +240,28 @@ class BehavioralAnalyzer:
 
         return profile
 
-    def _analyze_repos(
-        self, profile: GitHubProfile, repos: list[dict]
-    ) -> None:
+    def _analyze_repos(self, profile: GitHubProfile, repos: list[dict]) -> None:
         """저장소 목록에서 언어 패턴과 민감 repo를 분석한다."""
         lang_count: Counter = Counter()
         sensitive_keywords = [
-            "infra", "infrastructure", "deploy", "prod", "production",
-            "k8s", "kubernetes", "terraform", "ansible", "secret",
-            "credential", "auth", "admin", "internal", "private",
-            "security", "pentest", "ctf",
+            "infra",
+            "infrastructure",
+            "deploy",
+            "prod",
+            "production",
+            "k8s",
+            "kubernetes",
+            "terraform",
+            "ansible",
+            "secret",
+            "credential",
+            "auth",
+            "admin",
+            "internal",
+            "private",
+            "security",
+            "pentest",
+            "ctf",
         ]
 
         for repo in repos:
@@ -249,13 +280,9 @@ class BehavioralAnalyzer:
             # 여기서는 가용 공개 이메일만 수집
 
         profile.language_distribution = dict(lang_count)
-        profile.primary_languages = [
-            lang for lang, _ in lang_count.most_common(5)
-        ]
+        profile.primary_languages = [lang for lang, _ in lang_count.most_common(5)]
 
-    def _analyze_activity_pattern(
-        self, profile: GitHubProfile, events: list[dict]
-    ) -> None:
+    def _analyze_activity_pattern(self, profile: GitHubProfile, events: list[dict]) -> None:
         """GitHub 이벤트에서 활동 시간 패턴을 추출한다."""
         hour_counts: Counter = Counter()
         day_counts: Counter = Counter()
@@ -280,6 +307,7 @@ class BehavioralAnalyzer:
                     date_parts = parts[0].split("-")
                     if len(date_parts) == 3:
                         import datetime as dt_module
+
                         d = dt_module.date(
                             int(date_parts[0]),
                             int(date_parts[1]),
@@ -302,17 +330,13 @@ class BehavioralAnalyzer:
             profile.active_hours = sorted(hour_counts.keys())
             profile.peak_activity_hour = hour_counts.most_common(1)[0][0]
             total_events = sum(hour_counts.values())
-            unique_days = len({
-                event.get("created_at", "")[:10]
-                for event in events
-                if event.get("created_at")
-            })
+            unique_days = len(
+                {event.get("created_at", "")[:10] for event in events if event.get("created_at")}
+            )
             if unique_days > 0:
                 profile.avg_commits_per_day = round(total_events / unique_days, 2)
 
-        profile.active_days = [
-            day for day, _ in day_counts.most_common()
-        ]
+        profile.active_days = [day for day, _ in day_counts.most_common()]
         profile.exposed_emails = list(emails_found)[:10]  # 최대 10개만
 
     def _calculate_risk_score(self, profile: GitHubProfile) -> None:
@@ -347,15 +371,12 @@ class BehavioralAnalyzer:
         # 조직 멤버십 (많을수록 내부 접근 가능성)
         if profile.org_memberships:
             score += min(len(profile.org_memberships) * 5, 20)
-            reasons.append(
-                f"공개 조직 멤버: {', '.join(profile.org_memberships[:3])}"
-            )
+            reasons.append(f"공개 조직 멤버: {', '.join(profile.org_memberships[:3])}")
 
         # 활동 패턴 분석 (피싱 타이밍 가치)
         if profile.peak_activity_hour >= 0:
             reasons.append(
-                f"피크 활동 시간: {profile.peak_activity_hour}:00 "
-                f"(이 시간 피싱 이메일 효과 극대화)"
+                f"피크 활동 시간: {profile.peak_activity_hour}:00 (이 시간 피싱 이메일 효과 극대화)"
             )
             score += 10
 
@@ -371,9 +392,7 @@ class BehavioralAnalyzer:
 
     # ── 소셜 풋프린트 분석 ──────────────────────────────────
 
-    async def analyze_social_footprint(
-        self, company_domain: str
-    ) -> SocialFootprint:
+    async def analyze_social_footprint(self, company_domain: str) -> SocialFootprint:
         """회사 도메인 기반 공개 정보를 수집한다.
 
         수집 데이터 (공개 정보만):
@@ -419,9 +438,7 @@ class BehavioralAnalyzer:
                 topics = repo.get("topics", [])
                 footprint.tech_stack_hints.extend(topics)
 
-            footprint.tech_stack_hints.extend(
-                lang for lang, _ in lang_counter.most_common(10)
-            )
+            footprint.tech_stack_hints.extend(lang for lang, _ in lang_counter.most_common(10))
             # 중복 제거 + 정렬
             footprint.tech_stack_hints = list(dict.fromkeys(footprint.tech_stack_hints))
 
@@ -434,11 +451,13 @@ class BehavioralAnalyzer:
             for member in members_data:
                 login = member.get("login", "")
                 if login:
-                    footprint.discovered_employees.append({
-                        "github_username": login,
-                        "profile_url": f"https://github.com/{login}",
-                        "avatar_url": member.get("avatar_url", ""),
-                    })
+                    footprint.discovered_employees.append(
+                        {
+                            "github_username": login,
+                            "profile_url": f"https://github.com/{login}",
+                            "avatar_url": member.get("avatar_url", ""),
+                        }
+                    )
 
         # 5. 공개 DNS 기록 (MX, TXT)
         footprint.dns_records = self._get_dns_records(company_domain)
@@ -468,9 +487,7 @@ class BehavioralAnalyzer:
                 )
                 if result.returncode == 0 and result.stdout.strip():
                     records[record_type] = [
-                        line.strip()
-                        for line in result.stdout.strip().splitlines()
-                        if line.strip()
+                        line.strip() for line in result.stdout.strip().splitlines() if line.strip()
                     ]
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
                 # dig가 없거나 DNS 조회 실패 시 skip
@@ -506,24 +523,17 @@ class BehavioralAnalyzer:
             # 공격 표면 설명
             attack_surface: list[str] = []
             if profile.exposed_emails:
-                attack_surface.append(
-                    f"이메일 {profile.exposed_emails[0]} — 스피어피싱 표적"
-                )
+                attack_surface.append(f"이메일 {profile.exposed_emails[0]} — 스피어피싱 표적")
             if profile.peak_activity_hour >= 0:
                 attack_surface.append(
-                    f"피크 활동 {profile.peak_activity_hour}:00 "
-                    f"— 이 시간 피싱 클릭률 최대화"
+                    f"피크 활동 {profile.peak_activity_hour}:00 — 이 시간 피싱 클릭률 최대화"
                 )
             if profile.security_relevant_repos:
                 attack_surface.append(
-                    f"민감 저장소 접근: "
-                    f"{', '.join(profile.security_relevant_repos[:2])}"
+                    f"민감 저장소 접근: {', '.join(profile.security_relevant_repos[:2])}"
                 )
             if profile.org_memberships:
-                attack_surface.append(
-                    f"조직 내부 접근: "
-                    f"{', '.join(profile.org_memberships[:2])}"
-                )
+                attack_surface.append(f"조직 내부 접근: {', '.join(profile.org_memberships[:2])}")
 
             # 권장 공격 벡터 (레드팀용)
             vectors: list[str] = []
@@ -539,24 +549,20 @@ class BehavioralAnalyzer:
 
             # 이메일 마스킹 (PII 보호)
             display_id = f"@{profile.username}"
-            masked_email = (
-                _mask_email(profile.exposed_emails[0])
-                if profile.exposed_emails
-                else ""
-            )
-            identifier = (
-                f"{display_id} ({masked_email})" if masked_email else display_id
-            )
+            masked_email = _mask_email(profile.exposed_emails[0]) if profile.exposed_emails else ""
+            identifier = f"{display_id} ({masked_email})" if masked_email else display_id
 
-            targets.append(HighValueTarget(
-                identifier=identifier,
-                display_name=profile.name or profile.username,
-                estimated_access_level=access_level,
-                privilege_indicators=profile.risk_reasons,
-                attack_surface=attack_surface,
-                recommended_vectors=vectors,
-                risk_score=profile.risk_score,
-            ))
+            targets.append(
+                HighValueTarget(
+                    identifier=identifier,
+                    display_name=profile.name or profile.username,
+                    estimated_access_level=access_level,
+                    privilege_indicators=profile.risk_reasons,
+                    attack_surface=attack_surface,
+                    recommended_vectors=vectors,
+                    risk_score=profile.risk_score,
+                )
+            )
 
         # 위험도 내림차순 정렬
         targets.sort(key=lambda t: t.risk_score, reverse=True)
@@ -662,6 +668,7 @@ class BehavioralAnalyzer:
 
 
 # ── 헬퍼 함수 ────────────────────────────────────────────────────
+
 
 def _mask_email(email: str) -> str:
     """이메일 주소를 부분 마스킹한다 (PII 보호).

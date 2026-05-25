@@ -7,9 +7,9 @@ spec:
   - 직접 finding_tools.report_finding 을 호출할 때는 현재 ctx 가 없으므로
     pipeline 레이어(_build_finding_from_dict)가 surface 태깅을 담당한다.
 """
+
 from __future__ import annotations
 
-import pytest
 
 from vxis.interaction.surface import TargetKind
 
@@ -107,9 +107,7 @@ def test_build_finding_all_evidences_inherit_surface() -> None:
     )
 
     for ev in finding.evidence:
-        assert ev.surface == TargetKind.DESKTOP, (
-            f"evidence item surface mismatch: {ev.surface}"
-        )
+        assert ev.surface == TargetKind.DESKTOP, f"evidence item surface mismatch: {ev.surface}"
 
 
 # ── cross-surface synthesis 확인 ─────────────────────────────────
@@ -143,9 +141,7 @@ def test_desktop_surface_evidence_triggers_cross_surface_chain() -> None:
     syn.add_findings([desktop_ev, cloud_ev])
     chains = asyncio.run(syn.synthesize())
 
-    cross_surface_chains = [
-        c for c in chains if "crosses surface boundary" in c.description
-    ]
+    cross_surface_chains = [c for c in chains if "crosses surface boundary" in c.description]
     assert cross_surface_chains, (
         "Expected at least one cross-surface boundary chain when evidence spans "
         "DESKTOP and WEB surfaces"

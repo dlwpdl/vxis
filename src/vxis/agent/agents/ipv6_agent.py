@@ -23,28 +23,32 @@ class IPv6Agent(BaseAgent):
         target = context.mission.target
         findings: list[Evidence] = []
         hypotheses: list[Hypothesis] = []
-        stealth = context.mission.stealth
 
         # 1. IPv6 host discovery via nmap
         ipv6_hosts = await self._run_ipv6_scan(target)
         if ipv6_hosts:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"IPv6 enabled on {target}",
-                severity=Severity.INFO,
-                evidence_type=EvidenceType.NETWORK,
-                description=f"IPv6 addresses discovered: {len(ipv6_hosts)}",
-                response=json.dumps(ipv6_hosts[:20], indent=2),
-                tags=["ipv6", "discovery"],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"IPv6 enabled on {target}",
+                    severity=Severity.INFO,
+                    evidence_type=EvidenceType.NETWORK,
+                    description=f"IPv6 addresses discovered: {len(ipv6_hosts)}",
+                    response=json.dumps(ipv6_hosts[:20], indent=2),
+                    tags=["ipv6", "discovery"],
+                )
+            )
 
             # IPv6 with services = expanded attack surface
-            hypotheses.append(Hypothesis(
-                title=f"IPv6-only services bypassing IPv4 firewall on {target}",
-                rationale="IPv6 is active; firewall rules may not cover IPv6 traffic",
-                probability=0.6, impact=0.8,
-                suggested_agent="network",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"IPv6-only services bypassing IPv4 firewall on {target}",
+                    rationale="IPv6 is active; firewall rules may not cover IPv6 traffic",
+                    probability=0.6,
+                    impact=0.8,
+                    suggested_agent="network",
+                )
+            )
 
         # 2. IPv6 service scan on discovered addresses
         for host in ipv6_hosts[:5]:
@@ -52,54 +56,68 @@ class IPv6Agent(BaseAgent):
             if ipv6_addr:
                 ipv6_services = await self._run_ipv6_service_scan(ipv6_addr)
                 if ipv6_services:
-                    findings.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"IPv6 services on {ipv6_addr}",
-                        severity=Severity.MEDIUM,
-                        evidence_type=EvidenceType.NETWORK,
-                        description=f"{len(ipv6_services)} services on IPv6 address",
-                        response=json.dumps(ipv6_services[:20], indent=2),
-                        tags=["ipv6", "services"],
-                    ))
+                    findings.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title=f"IPv6 services on {ipv6_addr}",
+                            severity=Severity.MEDIUM,
+                            evidence_type=EvidenceType.NETWORK,
+                            description=f"{len(ipv6_services)} services on IPv6 address",
+                            response=json.dumps(ipv6_services[:20], indent=2),
+                            tags=["ipv6", "services"],
+                        )
+                    )
 
                     # Check for services only on IPv6 (potential firewall bypass)
-                    hypotheses.append(Hypothesis(
-                        title=f"IPv6-exclusive service exploitation on {ipv6_addr}",
-                        rationale="Services found on IPv6 may bypass IPv4 ACLs/firewall",
-                        probability=0.5, impact=0.85,
-                        suggested_agent="web",
-                    ))
+                    hypotheses.append(
+                        Hypothesis(
+                            title=f"IPv6-exclusive service exploitation on {ipv6_addr}",
+                            rationale="Services found on IPv6 may bypass IPv4 ACLs/firewall",
+                            probability=0.5,
+                            impact=0.85,
+                            suggested_agent="web",
+                        )
+                    )
 
         # 3. Check for 6in4/6to4/Teredo tunnel endpoints
         tunnel_findings = await self._check_tunnel_endpoints(target)
         findings.extend(tunnel_findings)
         if tunnel_findings:
-            hypotheses.append(Hypothesis(
-                title=f"IPv6 tunnel firewall bypass on {target}",
-                rationale="IPv6 tunnel endpoint detected; tunneled traffic may "
-                          "bypass IPv4 firewall inspection",
-                probability=0.6, impact=0.85,
-                suggested_agent="network",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"IPv6 tunnel firewall bypass on {target}",
+                    rationale="IPv6 tunnel endpoint detected; tunneled traffic may "
+                    "bypass IPv4 firewall inspection",
+                    probability=0.6,
+                    impact=0.85,
+                    suggested_agent="network",
+                )
+            )
 
         # 4. NDP/RA analysis via nmap scripts
         ndp_findings = await self._run_ndp_analysis(target)
         findings.extend(ndp_findings)
         if ndp_findings:
-            hypotheses.append(Hypothesis(
-                title=f"NDP spoofing / RA injection on {target} segment",
-                rationale="IPv6 NDP traffic detected; NDP lacks authentication "
-                          "and is susceptible to spoofing",
-                probability=0.7, impact=0.85,
-                suggested_agent="l2_network",
-            ))
-            hypotheses.append(Hypothesis(
-                title=f"SLAAC address manipulation near {target}",
-                rationale="RA messages detected; rogue RA can force SLAAC "
-                          "reconfiguration for MITM",
-                probability=0.6, impact=0.8,
-                suggested_agent="l2_network",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"NDP spoofing / RA injection on {target} segment",
+                    rationale="IPv6 NDP traffic detected; NDP lacks authentication "
+                    "and is susceptible to spoofing",
+                    probability=0.7,
+                    impact=0.85,
+                    suggested_agent="l2_network",
+                )
+            )
+            hypotheses.append(
+                Hypothesis(
+                    title=f"SLAAC address manipulation near {target}",
+                    rationale="RA messages detected; rogue RA can force SLAAC "
+                    "reconfiguration for MITM",
+                    probability=0.6,
+                    impact=0.8,
+                    suggested_agent="l2_network",
+                )
+            )
 
         # 5. DNS AAAA record check
         aaaa_findings = await self._check_aaaa_records(target)
@@ -107,13 +125,16 @@ class IPv6Agent(BaseAgent):
 
         # 6. IPv6 extension header abuse hypothesis
         if ipv6_hosts:
-            hypotheses.append(Hypothesis(
-                title=f"IPv6 extension header firewall evasion on {target}",
-                rationale="IPv6 active; fragmentation and extension headers "
-                          "can bypass stateless firewalls and IDS",
-                probability=0.5, impact=0.7,
-                suggested_agent="network",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"IPv6 extension header firewall evasion on {target}",
+                    rationale="IPv6 active; fragmentation and extension headers "
+                    "can bypass stateless firewalls and IDS",
+                    probability=0.5,
+                    impact=0.7,
+                    suggested_agent="network",
+                )
+            )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -136,7 +157,10 @@ class IPv6Agent(BaseAgent):
             return []
         domain = target.lstrip("*.").split("/")[0].split(":")[0]
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-6", "-sn", domain,
+            "nmap",
+            "-6",
+            "-sn",
+            domain,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -165,8 +189,14 @@ class IPv6Agent(BaseAgent):
         if not shutil.which("nmap"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-6", "-sV", "--top-ports", "1000",
-            "-oX", "-", ipv6_addr,
+            "nmap",
+            "-6",
+            "-sV",
+            "--top-ports",
+            "1000",
+            "-oX",
+            "-",
+            ipv6_addr,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -183,7 +213,13 @@ class IPv6Agent(BaseAgent):
         domain = target.lstrip("*.").split("/")[0].split(":")[0]
         # Protocol 41 = 6in4 encapsulation
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-sO", "-p", "41", "-oX", "-", domain,
+            "nmap",
+            "-sO",
+            "-p",
+            "41",
+            "-oX",
+            "-",
+            domain,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -192,38 +228,48 @@ class IPv6Agent(BaseAgent):
             output = stdout.decode()
             findings: list[Evidence] = []
             if 'state="open"' in output or "ipv6" in output.lower():
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"IPv6 tunnel endpoint (protocol 41) on {target}",
-                    severity=Severity.MEDIUM,
-                    evidence_type=EvidenceType.NETWORK,
-                    description=(
-                        "IP protocol 41 (6in4) is open. This indicates an IPv6 "
-                        "tunnel endpoint that may bypass IPv4 firewall rules."
-                    ),
-                    response=output[:4096],
-                    tags=["ipv6", "tunnel", "6in4", "firewall-bypass"],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"IPv6 tunnel endpoint (protocol 41) on {target}",
+                        severity=Severity.MEDIUM,
+                        evidence_type=EvidenceType.NETWORK,
+                        description=(
+                            "IP protocol 41 (6in4) is open. This indicates an IPv6 "
+                            "tunnel endpoint that may bypass IPv4 firewall rules."
+                        ),
+                        response=output[:4096],
+                        tags=["ipv6", "tunnel", "6in4", "firewall-bypass"],
+                    )
+                )
 
             # Check for Teredo (UDP 3544)
             proc2 = await asyncio.create_subprocess_exec(
-                "nmap", "-sU", "-p", "3544", "-oX", "-", domain,
+                "nmap",
+                "-sU",
+                "-p",
+                "3544",
+                "-oX",
+                "-",
+                domain,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
             stdout2, _ = await asyncio.wait_for(proc2.communicate(), timeout=30)
             output2 = stdout2.decode()
             if 'state="open"' in output2:
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"Teredo tunnel endpoint (UDP/3544) on {target}",
-                    severity=Severity.MEDIUM,
-                    evidence_type=EvidenceType.NETWORK,
-                    description="Teredo tunnel detected; NAT-traversing IPv6 tunnel "
-                                "that may bypass firewall policies",
-                    response=output2[:4096],
-                    tags=["ipv6", "tunnel", "teredo"],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"Teredo tunnel endpoint (UDP/3544) on {target}",
+                        severity=Severity.MEDIUM,
+                        evidence_type=EvidenceType.NETWORK,
+                        description="Teredo tunnel detected; NAT-traversing IPv6 tunnel "
+                        "that may bypass firewall policies",
+                        response=output2[:4096],
+                        tags=["ipv6", "tunnel", "teredo"],
+                    )
+                )
             return findings
         except asyncio.TimeoutError:
             return []
@@ -233,10 +279,15 @@ class IPv6Agent(BaseAgent):
         if not shutil.which("nmap"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-6", "--script",
+            "nmap",
+            "-6",
+            "--script",
             "ipv6-ra-flood,ipv6-node-info",
-            "--script-args", "newtargets",
-            "-e", "eth0", target,
+            "--script-args",
+            "newtargets",
+            "-e",
+            "eth0",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -245,19 +296,21 @@ class IPv6Agent(BaseAgent):
             output = stdout.decode()
             findings: list[Evidence] = []
             if "router" in output.lower() or "ra" in output.lower():
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"IPv6 Router Advertisement detected near {target}",
-                    severity=Severity.MEDIUM,
-                    evidence_type=EvidenceType.NETWORK,
-                    description=(
-                        "Router Advertisements found on the segment. "
-                        "RA spoofing can redirect traffic, inject DNS servers, "
-                        "and force SLAAC reconfiguration."
-                    ),
-                    response=output[:4096],
-                    tags=["ipv6", "ndp", "ra", "slaac"],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"IPv6 Router Advertisement detected near {target}",
+                        severity=Severity.MEDIUM,
+                        evidence_type=EvidenceType.NETWORK,
+                        description=(
+                            "Router Advertisements found on the segment. "
+                            "RA spoofing can redirect traffic, inject DNS servers, "
+                            "and force SLAAC reconfiguration."
+                        ),
+                        response=output[:4096],
+                        tags=["ipv6", "ndp", "ra", "slaac"],
+                    )
+                )
             return findings
         except asyncio.TimeoutError:
             return []
@@ -268,7 +321,10 @@ class IPv6Agent(BaseAgent):
             return []
         domain = target.lstrip("*.").split("/")[0].split(":")[0]
         proc = await asyncio.create_subprocess_exec(
-            "dig", "AAAA", "+short", domain,
+            "dig",
+            "AAAA",
+            "+short",
+            domain,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -277,16 +333,18 @@ class IPv6Agent(BaseAgent):
             output = stdout.decode().strip()
             findings: list[Evidence] = []
             if output and ":" in output:
-                aaaa_records = [l.strip() for l in output.splitlines() if l.strip()]
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"DNS AAAA records for {domain}",
-                    severity=Severity.INFO,
-                    evidence_type=EvidenceType.NETWORK,
-                    description=f"IPv6 addresses in DNS: {', '.join(aaaa_records)}",
-                    response=output,
-                    tags=["ipv6", "dns", "aaaa"],
-                ))
+                aaaa_records = [line.strip() for line in output.splitlines() if line.strip()]
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"DNS AAAA records for {domain}",
+                        severity=Severity.INFO,
+                        evidence_type=EvidenceType.NETWORK,
+                        description=f"IPv6 addresses in DNS: {', '.join(aaaa_records)}",
+                        response=output,
+                        tags=["ipv6", "dns", "aaaa"],
+                    )
+                )
             return findings
         except asyncio.TimeoutError:
             return []
@@ -294,6 +352,7 @@ class IPv6Agent(BaseAgent):
     @staticmethod
     def _parse_nmap_services(xml_output: str) -> list[dict[str, Any]]:
         import xml.etree.ElementTree as ET
+
         results: list[dict[str, Any]] = []
         try:
             root = ET.fromstring(xml_output)
@@ -301,13 +360,19 @@ class IPv6Agent(BaseAgent):
                 state_el = port_el.find("state")
                 service_el = port_el.find("service")
                 if state_el is not None and state_el.get("state") == "open":
-                    results.append({
-                        "port": port_el.get("portid", ""),
-                        "protocol": port_el.get("protocol", "tcp"),
-                        "service": service_el.get("name", "") if service_el is not None else "",
-                        "product": service_el.get("product", "") if service_el is not None else "",
-                        "version": service_el.get("version", "") if service_el is not None else "",
-                    })
+                    results.append(
+                        {
+                            "port": port_el.get("portid", ""),
+                            "protocol": port_el.get("protocol", "tcp"),
+                            "service": service_el.get("name", "") if service_el is not None else "",
+                            "product": service_el.get("product", "")
+                            if service_el is not None
+                            else "",
+                            "version": service_el.get("version", "")
+                            if service_el is not None
+                            else "",
+                        }
+                    )
         except ET.ParseError:
             pass
         return results

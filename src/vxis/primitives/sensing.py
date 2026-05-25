@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 from vxis.interaction.hands import SessionManager, TargetSession
 
@@ -247,13 +247,58 @@ async def primitive_fingerprint(target: str) -> dict:
 
 
 _COMMON_SUBDOMAINS = (
-    "www", "api", "dev", "staging", "test", "admin", "mail", "webmail",
-    "blog", "shop", "store", "app", "beta", "m", "mobile", "secure",
-    "vpn", "remote", "portal", "support", "help", "docs", "status",
-    "cdn", "static", "assets", "img", "images", "media", "files",
-    "ftp", "sftp", "ssh", "ns1", "ns2", "mx", "smtp", "pop", "imap",
-    "cpanel", "whm", "jenkins", "git", "gitlab", "jira", "confluence",
-    "grafana", "prometheus", "kibana", "elastic", "consul", "vault",
+    "www",
+    "api",
+    "dev",
+    "staging",
+    "test",
+    "admin",
+    "mail",
+    "webmail",
+    "blog",
+    "shop",
+    "store",
+    "app",
+    "beta",
+    "m",
+    "mobile",
+    "secure",
+    "vpn",
+    "remote",
+    "portal",
+    "support",
+    "help",
+    "docs",
+    "status",
+    "cdn",
+    "static",
+    "assets",
+    "img",
+    "images",
+    "media",
+    "files",
+    "ftp",
+    "sftp",
+    "ssh",
+    "ns1",
+    "ns2",
+    "mx",
+    "smtp",
+    "pop",
+    "imap",
+    "cpanel",
+    "whm",
+    "jenkins",
+    "git",
+    "gitlab",
+    "jira",
+    "confluence",
+    "grafana",
+    "prometheus",
+    "kibana",
+    "elastic",
+    "consul",
+    "vault",
 )
 
 
@@ -307,7 +352,9 @@ async def primitive_screenshot(url: str, viewport: str = "1920x1080") -> str:
     from vxis.interaction.eyes import BrowserEngine, is_available
 
     if not is_available():
-        raise RuntimeError("Playwright not available — install: pip install playwright && playwright install chromium")
+        raise RuntimeError(
+            "Playwright not available — install: pip install playwright && playwright install chromium"
+        )
 
     try:
         w_str, h_str = viewport.lower().split("x")

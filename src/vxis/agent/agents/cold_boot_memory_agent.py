@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
-from typing import Any
 
 from ..base import AgentResult, BaseAgent
 from ..context import AgentContext
@@ -30,9 +28,12 @@ class ColdBootMemoryAgent(BaseAgent):
     ]
 
     _VM_SNAPSHOT_INDICATORS = [
-        ".vmem", ".vmsn", ".vmss",   # VMware
-        ".sav",                       # Hyper-V
-        ".qcow2", ".img",            # QEMU/KVM
+        ".vmem",
+        ".vmsn",
+        ".vmss",  # VMware
+        ".sav",  # Hyper-V
+        ".qcow2",
+        ".img",  # QEMU/KVM
     ]
 
     async def run(self, context: AgentContext) -> AgentResult:
@@ -62,30 +63,36 @@ class ColdBootMemoryAgent(BaseAgent):
 
         # Generate chain hypotheses
         if any(f.severity in (Severity.CRITICAL, Severity.HIGH) for f in findings):
-            hypotheses.append(Hypothesis(
-                title=f"Credential extraction from memory artifacts on {target}",
-                rationale="Memory artifacts found that may contain plaintext credentials",
-                probability=0.7,
-                impact=0.95,
-                suggested_agent="lateral_move",
-                suggested_tool="volatility",
-            ))
-            hypotheses.append(Hypothesis(
-                title=f"Encryption key recovery from memory on {target}",
-                rationale="Memory dumps may contain disk encryption keys (BitLocker, LUKS)",
-                probability=0.5,
-                impact=0.95,
-                suggested_agent="cold_boot_memory",
-                suggested_tool="aeskeyfind",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Credential extraction from memory artifacts on {target}",
+                    rationale="Memory artifacts found that may contain plaintext credentials",
+                    probability=0.7,
+                    impact=0.95,
+                    suggested_agent="lateral_move",
+                    suggested_tool="volatility",
+                )
+            )
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Encryption key recovery from memory on {target}",
+                    rationale="Memory dumps may contain disk encryption keys (BitLocker, LUKS)",
+                    probability=0.5,
+                    impact=0.95,
+                    suggested_agent="cold_boot_memory",
+                    suggested_tool="aeskeyfind",
+                )
+            )
 
-        hypotheses.append(Hypothesis(
-            title=f"VM escape via snapshot manipulation on {target}",
-            rationale="VM snapshots may expose hypervisor state for escape analysis",
-            probability=0.2,
-            impact=0.95,
-            suggested_agent="virtualization",
-        ))
+        hypotheses.append(
+            Hypothesis(
+                title=f"VM escape via snapshot manipulation on {target}",
+                rationale="VM snapshots may expose hypervisor state for escape analysis",
+                probability=0.2,
+                impact=0.95,
+                suggested_agent="virtualization",
+            )
+        )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -94,9 +101,7 @@ class ColdBootMemoryAgent(BaseAgent):
             status="completed",
             metadata={
                 "total_findings": len(findings),
-                "critical_findings": sum(
-                    1 for f in findings if f.severity == Severity.CRITICAL
-                ),
+                "critical_findings": sum(1 for f in findings if f.severity == Severity.CRITICAL),
                 "assessment_type": "memory_forensics",
             },
         )
@@ -113,13 +118,23 @@ class ColdBootMemoryAgent(BaseAgent):
 
         # Check for exposed hiberfil.sys or pagefile.sys via common paths
         memory_files = [
-            "/hiberfil.sys", "/pagefile.sys", "/swapfile.sys",
-            "/proc/kcore", "/dev/mem", "/dev/kmem",
+            "/hiberfil.sys",
+            "/pagefile.sys",
+            "/swapfile.sys",
+            "/proc/kcore",
+            "/dev/mem",
+            "/dev/kmem",
         ]
         for path in memory_files:
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "--max-time", "5",
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "--max-time",
+                "5",
                 f"http://{target}{path}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -127,20 +142,22 @@ class ColdBootMemoryAgent(BaseAgent):
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
             status = stdout.decode().strip()
             if status in ("200", "206"):
-                results.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"Memory artifact exposed via HTTP: {path}",
-                    severity=Severity.CRITICAL,
-                    evidence_type=EvidenceType.MISCONFIGURATION,
-                    description=(
-                        f"Memory artifact {path} is accessible via HTTP on {target}. "
-                        "This may allow extraction of credentials, encryption keys, "
-                        "and sensitive data from system memory."
-                    ),
-                    request=f"GET http://{target}{path}",
-                    response=f"HTTP {status}",
-                    tags=["memory", "cold-boot", "data-exposure"],
-                ))
+                results.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"Memory artifact exposed via HTTP: {path}",
+                        severity=Severity.CRITICAL,
+                        evidence_type=EvidenceType.MISCONFIGURATION,
+                        description=(
+                            f"Memory artifact {path} is accessible via HTTP on {target}. "
+                            "This may allow extraction of credentials, encryption keys, "
+                            "and sensitive data from system memory."
+                        ),
+                        request=f"GET http://{target}{path}",
+                        response=f"HTTP {status}",
+                        tags=["memory", "cold-boot", "data-exposure"],
+                    )
+                )
         return results
 
     async def _check_vm_snapshots(self, target: str) -> list[Evidence]:
@@ -150,21 +167,24 @@ class ColdBootMemoryAgent(BaseAgent):
             return results
 
         proc = await asyncio.create_subprocess_exec(
-            "smbclient", "-L", target, "-N", "-g",
+            "smbclient",
+            "-L",
+            target,
+            "-N",
+            "-g",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
         output = stdout.decode()
-        shares = [
-            line.split("|")[1]
-            for line in output.splitlines()
-            if line.startswith("Disk|")
-        ]
+        shares = [line.split("|")[1] for line in output.splitlines() if line.startswith("Disk|")]
         for share in shares:
             # Check for VM memory files in accessible shares
             proc2 = await asyncio.create_subprocess_exec(
-                "smbclient", f"//{target}/{share}", "-N", "-c",
+                "smbclient",
+                f"//{target}/{share}",
+                "-N",
+                "-c",
                 "recurse; ls *.vmem; ls *.vmsn; ls *.vmss; ls *.sav",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -173,18 +193,20 @@ class ColdBootMemoryAgent(BaseAgent):
             vm_output = stdout2.decode()
             for ext in self._VM_SNAPSHOT_INDICATORS:
                 if ext in vm_output.lower():
-                    results.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"VM snapshot/memory file found in share //{target}/{share}",
-                        severity=Severity.CRITICAL,
-                        evidence_type=EvidenceType.MISCONFIGURATION,
-                        description=(
-                            f"VM memory/snapshot files ({ext}) accessible in SMB share. "
-                            "These files contain raw memory contents including credentials."
-                        ),
-                        response=vm_output[:2000],
-                        tags=["memory", "vm-snapshot", "smb", "data-exposure"],
-                    ))
+                    results.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title=f"VM snapshot/memory file found in share //{target}/{share}",
+                            severity=Severity.CRITICAL,
+                            evidence_type=EvidenceType.MISCONFIGURATION,
+                            description=(
+                                f"VM memory/snapshot files ({ext}) accessible in SMB share. "
+                                "These files contain raw memory contents including credentials."
+                            ),
+                            response=vm_output[:2000],
+                            tags=["memory", "vm-snapshot", "smb", "data-exposure"],
+                        )
+                    )
                     break
         return results
 
@@ -197,8 +219,15 @@ class ColdBootMemoryAgent(BaseAgent):
         # Check for debug ports that expose memory (JTAG over network, GDB, etc.)
         debug_ports = "1234,3333,4444,9090,11211"
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-Pn", "-sV", "-p", debug_ports,
-            "--open", "-oG", "-", target,
+            "nmap",
+            "-Pn",
+            "-sV",
+            "-p",
+            debug_ports,
+            "--open",
+            "-oG",
+            "-",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -206,18 +235,20 @@ class ColdBootMemoryAgent(BaseAgent):
         output = stdout.decode()
         debug_keywords = ["gdb", "memcached", "debug", "jtag"]
         if any(kw in output.lower() for kw in debug_keywords):
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Debug/memory service detected on {target}",
-                severity=Severity.HIGH,
-                evidence_type=EvidenceType.NETWORK,
-                description=(
-                    "Debug or memory-access service port is open. Services like "
-                    "GDB server or Memcached may allow direct memory reading."
-                ),
-                response=output,
-                tags=["memory", "debug", "gdb"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Debug/memory service detected on {target}",
+                    severity=Severity.HIGH,
+                    evidence_type=EvidenceType.NETWORK,
+                    description=(
+                        "Debug or memory-access service port is open. Services like "
+                        "GDB server or Memcached may allow direct memory reading."
+                    ),
+                    response=output,
+                    tags=["memory", "debug", "gdb"],
+                )
+            )
         return results
 
     def _assess_cold_boot_surface(self, target: str) -> Evidence:
@@ -248,13 +279,22 @@ class ColdBootMemoryAgent(BaseAgent):
 
         # Check for common core dump exposure paths
         core_paths = [
-            "/core", "/tmp/core", "/var/crash/",
-            "/var/cores/", "/.core",
+            "/core",
+            "/tmp/core",
+            "/var/crash/",
+            "/var/cores/",
+            "/.core",
         ]
         for path in core_paths:
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "--max-time", "5",
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "--max-time",
+                "5",
                 f"http://{target}{path}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -262,17 +302,19 @@ class ColdBootMemoryAgent(BaseAgent):
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
             status = stdout.decode().strip()
             if status == "200":
-                results.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"Core dump path accessible: {path}",
-                    severity=Severity.HIGH,
-                    evidence_type=EvidenceType.MISCONFIGURATION,
-                    description=(
-                        f"Core dump path {path} returns HTTP 200 on {target}. "
-                        "Core dumps contain process memory including credentials."
-                    ),
-                    request=f"GET http://{target}{path}",
-                    response=f"HTTP {status}",
-                    tags=["memory", "core-dump", "data-exposure"],
-                ))
+                results.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"Core dump path accessible: {path}",
+                        severity=Severity.HIGH,
+                        evidence_type=EvidenceType.MISCONFIGURATION,
+                        description=(
+                            f"Core dump path {path} returns HTTP 200 on {target}. "
+                            "Core dumps contain process memory including credentials."
+                        ),
+                        request=f"GET http://{target}{path}",
+                        response=f"HTTP {status}",
+                        tags=["memory", "core-dump", "data-exposure"],
+                    )
+                )
         return results

@@ -5,7 +5,6 @@ Unit tests for TokenBucketRateLimiter and GlobalRateLimiter.
 import asyncio
 import time
 
-import pytest
 
 from vxis.core.rate_limiter import GlobalRateLimiter, TokenBucketRateLimiter
 
@@ -45,8 +44,7 @@ class TestTokenBucketRateLimiter:
         elapsed = time.monotonic() - start
 
         assert elapsed >= 0.15, (
-            f"Expected >= 0.15s throttle for 3 requests at rate=10, capacity=1, "
-            f"got {elapsed:.3f}s"
+            f"Expected >= 0.15s throttle for 3 requests at rate=10, capacity=1, got {elapsed:.3f}s"
         )
 
     async def test_zero_rate_never_blocks(self) -> None:
@@ -62,9 +60,7 @@ class TestTokenBucketRateLimiter:
             await limiter.acquire()
         elapsed = time.monotonic() - start
 
-        assert elapsed < 0.1, (
-            f"Expected < 0.1s for rate=0 (no limiting), got {elapsed:.3f}s"
-        )
+        assert elapsed < 0.1, f"Expected < 0.1s for rate=0 (no limiting), got {elapsed:.3f}s"
 
     async def test_negative_rate_never_blocks(self) -> None:
         """
@@ -77,9 +73,7 @@ class TestTokenBucketRateLimiter:
             await limiter.acquire()
         elapsed = time.monotonic() - start
 
-        assert elapsed < 0.1, (
-            f"Expected < 0.1s for rate=-5 (no limiting), got {elapsed:.3f}s"
-        )
+        assert elapsed < 0.1, f"Expected < 0.1s for rate=-5 (no limiting), got {elapsed:.3f}s"
 
     async def test_burst_capacity_allows_initial_burst(self) -> None:
         """
@@ -124,7 +118,7 @@ class TestTokenBucketRateLimiter:
             return time.monotonic() - t
 
         start = time.monotonic()
-        results = await asyncio.gather(*[_acquire() for _ in range(6)])
+        await asyncio.gather(*[_acquire() for _ in range(6)])
         total_elapsed = time.monotonic() - start
 
         # 2 immediate + 4 waiting: at rate=10, 4 tokens take 0.4s to refill.
@@ -148,9 +142,7 @@ class TestTokenBucketRateLimiter:
         # After all acquires complete, refill and check tokens are non-negative
         async with limiter._lock:
             limiter._refill()
-            assert limiter._tokens >= 0, (
-                f"Tokens went negative: {limiter._tokens}"
-            )
+            assert limiter._tokens >= 0, f"Tokens went negative: {limiter._tokens}"
 
     async def test_acquire_multiple_tokens_at_once(self) -> None:
         """
@@ -168,9 +160,7 @@ class TestTokenBucketRateLimiter:
         start = time.monotonic()
         await limiter.acquire(tokens=3)
         elapsed = time.monotonic() - start
-        assert elapsed >= 0.25, (
-            f"Expected >= 0.25s for 3 tokens at rate=10, got {elapsed:.3f}s"
-        )
+        assert elapsed >= 0.25, f"Expected >= 0.25s for 3 tokens at rate=10, got {elapsed:.3f}s"
 
     async def test_refill_caps_at_capacity(self) -> None:
         """
@@ -205,9 +195,7 @@ class TestGlobalRateLimiter:
         limiter_a = glr.get_limiter("192.168.1.1")
         limiter_b = glr.get_limiter("10.0.0.1")
 
-        assert limiter_a is not limiter_b, (
-            "Different targets must have separate limiter instances"
-        )
+        assert limiter_a is not limiter_b, "Different targets must have separate limiter instances"
 
     def test_per_target_same_instance_for_same_target(self) -> None:
         """
@@ -297,9 +285,7 @@ class TestGlobalRateLimiter:
             await limiter_b.acquire()
         elapsed_b = time.monotonic() - start
 
-        assert elapsed_b < 0.05, (
-            f"Unlimited target took {elapsed_b:.3f}s, expected < 0.05s"
-        )
+        assert elapsed_b < 0.05, f"Unlimited target took {elapsed_b:.3f}s, expected < 0.05s"
 
         # Target A with capacity=1 should throttle
         start = time.monotonic()
@@ -307,6 +293,4 @@ class TestGlobalRateLimiter:
             await limiter_a.acquire()
         elapsed_a = time.monotonic() - start
 
-        assert elapsed_a >= 0.15, (
-            f"Rate-limited target took {elapsed_a:.3f}s, expected >= 0.15s"
-        )
+        assert elapsed_a >= 0.15, f"Rate-limited target took {elapsed_a:.3f}s, expected >= 0.15s"

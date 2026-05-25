@@ -21,7 +21,6 @@ import json
 import logging
 import re
 import urllib.parse
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -37,34 +36,69 @@ _CRTSH_URL = "https://crt.sh/"
 
 # 의심 서브도메인 키워드 (피싱/비인가 접근 포인트 지표)
 _SUSPICIOUS_KEYWORDS: list[str] = [
-    "login", "signin", "logon", "auth",
-    "admin", "administrator", "manage", "management", "portal",
-    "vpn", "remote", "rdp", "citrix",
-    "pay", "payment", "billing", "invoice", "checkout",
-    "api", "dev", "staging", "test", "uat", "preprod",
-    "mail", "webmail", "owa", "outlook",
-    "backup", "ftp", "sftp", "git", "gitlab", "github",
-    "jenkins", "jira", "confluence", "sonar",
-    "sso", "saml", "oauth", "idp",
+    "login",
+    "signin",
+    "logon",
+    "auth",
+    "admin",
+    "administrator",
+    "manage",
+    "management",
+    "portal",
+    "vpn",
+    "remote",
+    "rdp",
+    "citrix",
+    "pay",
+    "payment",
+    "billing",
+    "invoice",
+    "checkout",
+    "api",
+    "dev",
+    "staging",
+    "test",
+    "uat",
+    "preprod",
+    "mail",
+    "webmail",
+    "owa",
+    "outlook",
+    "backup",
+    "ftp",
+    "sftp",
+    "git",
+    "gitlab",
+    "github",
+    "jenkins",
+    "jira",
+    "confluence",
+    "sonar",
+    "sso",
+    "saml",
+    "oauth",
+    "idp",
 ]
 
 # 신뢰할 수 있는 CA 목록 (이 외의 CA가 와일드카드 발급 시 high 알림)
-_TRUSTED_CAS: frozenset[str] = frozenset({
-    "let's encrypt",
-    "letsencrypt",
-    "digicert",
-    "comodo",
-    "sectigo",
-    "amazon",
-    "cloudflare",
-    "globalsign",
-    "entrust",
-    "geotrust",
-    "godaddy",
-    "google trust services",
-    "microsoft",
-    "apple",
-})
+_TRUSTED_CAS: frozenset[str] = frozenset(
+    {
+        "let's encrypt",
+        "letsencrypt",
+        "digicert",
+        "comodo",
+        "sectigo",
+        "amazon",
+        "cloudflare",
+        "globalsign",
+        "entrust",
+        "geotrust",
+        "godaddy",
+        "google trust services",
+        "microsoft",
+        "apple",
+    }
+)
 
 
 def _extract_base_domain(url: str) -> str:
@@ -156,9 +190,7 @@ class CertTransparencyWatcher(BaseWatcher):
                 None, lambda d=base_domain, tu=target_url: self._fetch_crtsh(d, tu)
             )
             all_items.extend(items)
-            logger.info(
-                "[CertTransparency] %s: %d개 인증서 수집", base_domain, len(items)
-            )
+            logger.info("[CertTransparency] %s: %d개 인증서 수집", base_domain, len(items))
 
         return all_items
 
@@ -167,10 +199,12 @@ class CertTransparencyWatcher(BaseWatcher):
 
         와일드카드 서브도메인 검색을 위해 %.{domain} 패턴을 사용한다.
         """
-        params = urllib.parse.urlencode({
-            "q": f"%.{domain}",
-            "output": "json",
-        })
+        params = urllib.parse.urlencode(
+            {
+                "q": f"%.{domain}",
+                "output": "json",
+            }
+        )
         url = f"{_CRTSH_URL}?{params}"
 
         resp = self._http_get(
@@ -204,17 +238,19 @@ class CertTransparencyWatcher(BaseWatcher):
 
             for name in all_names:
                 item_id = f"crt_{cert_id}_{name}"
-                items.append({
-                    "id": item_id,
-                    "cert_id": cert_id,
-                    "common_name": name,
-                    "issuer_name": issuer_name,
-                    "not_before": not_before,
-                    "not_after": not_after,
-                    "target_url": target_url,
-                    "base_domain": domain,
-                    "source": "crtsh",
-                })
+                items.append(
+                    {
+                        "id": item_id,
+                        "cert_id": cert_id,
+                        "common_name": name,
+                        "issuer_name": issuer_name,
+                        "not_before": not_before,
+                        "not_after": not_after,
+                        "target_url": target_url,
+                        "base_domain": domain,
+                        "source": "crtsh",
+                    }
+                )
 
         return items
 
@@ -241,20 +277,78 @@ class CertTransparencyWatcher(BaseWatcher):
 
             # 1. 와일드카드 + 비정상 CA 조합 → high
             if _is_wildcard_cert(common_name):
-                issuer_trusted = any(
-                    ca in issuer_name for ca in _TRUSTED_CAS
-                )
+                issuer_trusted = any(ca in issuer_name for ca in _TRUSTED_CAS)
                 if not issuer_trusted:
-                    alerts.append(WatcherAlert(
+                    alerts.append(
+                        WatcherAlert(
+                            watcher_name=self.name,
+                            severity="high",
+                            title=f"[CT] 비정상 CA 와일드카드 인증서: {common_name}",
+                            description=(
+                                f"도메인: {base_domain}\n"
+                                f"인증서 이름: {common_name}\n"
+                                f"발급 CA: {item.get('issuer_name', '알 수 없음')}\n"
+                                f"발급일: {not_before}\n"
+                                f"신뢰되지 않는 CA가 와일드카드 인증서를 발급했습니다."
+                            ),
+                            target=target_url,
+                            source_url=crtsh_link,
+                            data={
+                                "cert_id": cert_id,
+                                "common_name": common_name,
+                                "issuer_name": item.get("issuer_name", ""),
+                                "not_before": not_before,
+                                "is_wildcard": True,
+                            },
+                            actionable=False,
+                        )
+                    )
+                    continue
+
+            # 2. 의심 키워드 서브도메인 → medium
+            suspicious_kw = _is_suspicious_subdomain(common_name)
+            if suspicious_kw:
+                alerts.append(
+                    WatcherAlert(
                         watcher_name=self.name,
-                        severity="high",
-                        title=f"[CT] 비정상 CA 와일드카드 인증서: {common_name}",
+                        severity="medium",
+                        title=f"[CT] 의심 서브도메인 인증서: {common_name}",
                         description=(
                             f"도메인: {base_domain}\n"
                             f"인증서 이름: {common_name}\n"
+                            f"의심 키워드: {suspicious_kw}\n"
                             f"발급 CA: {item.get('issuer_name', '알 수 없음')}\n"
                             f"발급일: {not_before}\n"
-                            f"신뢰되지 않는 CA가 와일드카드 인증서를 발급했습니다."
+                            f"피싱 또는 비인가 접근 포인트일 수 있습니다."
+                        ),
+                        target=target_url,
+                        source_url=crtsh_link,
+                        data={
+                            "cert_id": cert_id,
+                            "common_name": common_name,
+                            "suspicious_keyword": suspicious_kw,
+                            "issuer_name": item.get("issuer_name", ""),
+                            "not_before": not_before,
+                        },
+                        actionable=True,  # 서브도메인 스캔 대상으로 추가
+                    )
+                )
+                continue
+
+            # 3. 신규 서브도메인 → info
+            # (이미 _filter_seen을 통해 이전 실행에서 본 항목은 제거됨)
+            if common_name and not common_name.startswith("*."):
+                alerts.append(
+                    WatcherAlert(
+                        watcher_name=self.name,
+                        severity="info",
+                        title=f"[CT] 신규 서브도메인 탐지: {common_name}",
+                        description=(
+                            f"도메인: {base_domain}\n"
+                            f"신규 서브도메인: {common_name}\n"
+                            f"발급 CA: {item.get('issuer_name', '알 수 없음')}\n"
+                            f"발급일: {not_before}\n"
+                            f"타겟 프로파일에 추가하여 향후 스캔에 포함합니다."
                         ),
                         target=target_url,
                         source_url=crtsh_link,
@@ -263,65 +357,11 @@ class CertTransparencyWatcher(BaseWatcher):
                             "common_name": common_name,
                             "issuer_name": item.get("issuer_name", ""),
                             "not_before": not_before,
-                            "is_wildcard": True,
+                            "new_subdomain": common_name,
                         },
-                        actionable=False,
-                    ))
-                    continue
-
-            # 2. 의심 키워드 서브도메인 → medium
-            suspicious_kw = _is_suspicious_subdomain(common_name)
-            if suspicious_kw:
-                alerts.append(WatcherAlert(
-                    watcher_name=self.name,
-                    severity="medium",
-                    title=f"[CT] 의심 서브도메인 인증서: {common_name}",
-                    description=(
-                        f"도메인: {base_domain}\n"
-                        f"인증서 이름: {common_name}\n"
-                        f"의심 키워드: {suspicious_kw}\n"
-                        f"발급 CA: {item.get('issuer_name', '알 수 없음')}\n"
-                        f"발급일: {not_before}\n"
-                        f"피싱 또는 비인가 접근 포인트일 수 있습니다."
-                    ),
-                    target=target_url,
-                    source_url=crtsh_link,
-                    data={
-                        "cert_id": cert_id,
-                        "common_name": common_name,
-                        "suspicious_keyword": suspicious_kw,
-                        "issuer_name": item.get("issuer_name", ""),
-                        "not_before": not_before,
-                    },
-                    actionable=True,  # 서브도메인 스캔 대상으로 추가
-                ))
-                continue
-
-            # 3. 신규 서브도메인 → info
-            # (이미 _filter_seen을 통해 이전 실행에서 본 항목은 제거됨)
-            if common_name and not common_name.startswith("*."):
-                alerts.append(WatcherAlert(
-                    watcher_name=self.name,
-                    severity="info",
-                    title=f"[CT] 신규 서브도메인 탐지: {common_name}",
-                    description=(
-                        f"도메인: {base_domain}\n"
-                        f"신규 서브도메인: {common_name}\n"
-                        f"발급 CA: {item.get('issuer_name', '알 수 없음')}\n"
-                        f"발급일: {not_before}\n"
-                        f"타겟 프로파일에 추가하여 향후 스캔에 포함합니다."
-                    ),
-                    target=target_url,
-                    source_url=crtsh_link,
-                    data={
-                        "cert_id": cert_id,
-                        "common_name": common_name,
-                        "issuer_name": item.get("issuer_name", ""),
-                        "not_before": not_before,
-                        "new_subdomain": common_name,
-                    },
-                    actionable=True,  # 타겟 프로파일 업데이트
-                ))
+                        actionable=True,  # 타겟 프로파일 업데이트
+                    )
+                )
 
         logger.info("[CertTransparency] 매칭 결과: %d / %d", len(alerts), len(items))
         return alerts
@@ -370,7 +410,8 @@ class CertTransparencyWatcher(BaseWatcher):
                 subdomains.append(new_subdomain)
                 logger.info(
                     "[CertTransparency] 신규 서브도메인 추가: %s → %s",
-                    target_url, new_subdomain,
+                    target_url,
+                    new_subdomain,
                 )
                 actions += 1
                 changed = True
@@ -381,7 +422,9 @@ class CertTransparencyWatcher(BaseWatcher):
                     json.dumps(data, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
-                logger.info("[CertTransparency] agent_memory.json 업데이트 완료 (%d개 추가)", actions)
+                logger.info(
+                    "[CertTransparency] agent_memory.json 업데이트 완료 (%d개 추가)", actions
+                )
             except OSError as exc:
                 logger.warning("[CertTransparency] agent_memory.json 저장 실패: %s", exc)
                 return 0

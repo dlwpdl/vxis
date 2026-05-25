@@ -17,14 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
 
 from .base import BaseAgent, AgentResult
 from .context import AgentContext
 from .registry import spawn
 from ..graph.hypothesis import Hypothesis, HypothesisQueue, HypothesisGenerator
 from ..evidence.schema import Evidence
-from ..evidence.engine import EvidenceEngine
 from ..mission.config import MissionConfig
 from ..mission.selector import AgentSelector
 
@@ -59,18 +57,21 @@ class DirectorAgent:
         """Phase 3 모듈을 지연 초기화한다."""
         try:
             from vxis.graph.chain_reasoner import ChainReasoner
+
             self._chain_reasoner = ChainReasoner()
         except Exception as exc:
             logger.debug("ChainReasoner 초기화 실패 (무시): %s", exc)
 
         try:
             from vxis.knowledge.store import KnowledgeStore
+
             self._knowledge_store = KnowledgeStore()
         except Exception as exc:
             logger.debug("KnowledgeStore 초기화 실패 (무시): %s", exc)
 
         try:
             from vxis.llm.router import TokenRouter
+
             self._token_router = TokenRouter()
         except Exception as exc:
             logger.debug("TokenRouter 초기화 실패 (무시): %s", exc)
@@ -82,9 +83,7 @@ class DirectorAgent:
         # Knowledge Store에서 추천 도구 기반 에이전트 우선순위 조정
         if self._knowledge_store is not None:
             try:
-                skip_tools = self._knowledge_store.get_tools_to_skip(
-                    mission.custom_agents or []
-                )
+                skip_tools = self._knowledge_store.get_tools_to_skip(mission.custom_agents or [])
                 if skip_tools:
                     logger.info(
                         "Knowledge Store 추천: 효과 낮은 에이전트 후순위 — %s",
@@ -139,9 +138,7 @@ class DirectorAgent:
                         "container_escape": "container_k8s",
                         "jwt_vulnerability": "crypto_tls",
                     }
-                    suggested_agent = vuln_to_agent.get(
-                        ch.get("missing_vuln_type", ""), "web"
-                    )
+                    suggested_agent = vuln_to_agent.get(ch.get("missing_vuln_type", ""), "web")
 
                     h = Hypothesis(
                         title=ch["title"],
@@ -173,14 +170,13 @@ class DirectorAgent:
             if hypothesis and hypothesis.suggested_agent:
                 logger.info(
                     "가설 탐색 [%d/%d]: %s → %s (점수: %.2f)",
-                    round_count, max_rounds,
+                    round_count,
+                    max_rounds,
                     hypothesis.title,
                     hypothesis.suggested_agent,
                     hypothesis.priority_score,
                 )
-                await self._run_agents(
-                    [hypothesis.suggested_agent], context
-                )
+                await self._run_agents([hypothesis.suggested_agent], context)
 
         # 미션 완료 후 학습
         self._learn_from_mission(context)

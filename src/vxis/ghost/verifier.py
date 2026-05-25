@@ -1,4 +1,5 @@
 """GhostVerifier — 익명화 적용 여부 사전 검증."""
+
 from __future__ import annotations
 
 import json
@@ -10,7 +11,7 @@ from vxis.ghost.layer import ghost_layer
 # Lazy import to break circular dependency:
 #   interaction.hands → ghost.layer → ghost.__init__ → ghost.verifier → interaction.hands
 if TYPE_CHECKING:
-    from vxis.interaction.hands import TargetSession
+    pass
 
 logger = logging.getLogger(__name__)
 

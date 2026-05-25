@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from vxis.core.normalizer import FindingDeduplicator, FindingFactory
 from vxis.models.finding import Finding, Severity
@@ -129,12 +128,14 @@ class TestFromNuclei:
         ]
         for severity_str, expected in severities:
             parsed = {
-                "results": [{
-                    "template-id": "test",
-                    "info": {"name": "T", "description": "D", "severity": severity_str},
-                    "host": "1.2.3.4",
-                    "matched-at": "http://1.2.3.4/",
-                }]
+                "results": [
+                    {
+                        "template-id": "test",
+                        "info": {"name": "T", "description": "D", "severity": severity_str},
+                        "host": "1.2.3.4",
+                        "matched-at": "http://1.2.3.4/",
+                    }
+                ]
             }
             findings = FindingFactory.from_nuclei(parsed, scan_id="s1")
             assert findings[0].severity == expected, f"Failed for {severity_str}"
@@ -145,12 +146,14 @@ class TestFromNuclei:
 
     def test_target_is_host_field(self):
         parsed = {
-            "results": [{
-                "template-id": "t1",
-                "info": {"name": "N", "description": "D", "severity": "low"},
-                "host": "example.com",
-                "matched-at": "https://example.com/",
-            }]
+            "results": [
+                {
+                    "template-id": "t1",
+                    "info": {"name": "N", "description": "D", "severity": "low"},
+                    "host": "example.com",
+                    "matched-at": "https://example.com/",
+                }
+            ]
         }
         findings = FindingFactory.from_nuclei(parsed, scan_id="s1")
         assert findings[0].target == "example.com"
@@ -198,7 +201,12 @@ class TestFromNmap:
                 {
                     "address": "10.0.0.1",
                     "ports": [
-                        {"port": 22, "state": "open", "protocol": "tcp", "service": {"name": "ssh"}},
+                        {
+                            "port": 22,
+                            "state": "open",
+                            "protocol": "tcp",
+                            "service": {"name": "ssh"},
+                        },
                         {"port": 8080, "state": "closed", "protocol": "tcp", "service": {}},
                         {"port": 9090, "state": "filtered", "protocol": "tcp", "service": {}},
                     ],
@@ -211,31 +219,53 @@ class TestFromNmap:
 
     def test_port_number_is_correct(self):
         parsed = {
-            "hosts": [{
-                "address": "10.0.0.1",
-                "ports": [{"port": 3306, "state": "open", "protocol": "tcp", "service": {"name": "mysql"}}],
-            }]
+            "hosts": [
+                {
+                    "address": "10.0.0.1",
+                    "ports": [
+                        {
+                            "port": 3306,
+                            "state": "open",
+                            "protocol": "tcp",
+                            "service": {"name": "mysql"},
+                        }
+                    ],
+                }
+            ]
         }
         findings = FindingFactory.from_nmap(parsed, scan_id="s1")
         assert findings[0].port == 3306
 
     def test_uses_hostname_when_available(self):
         parsed = {
-            "hosts": [{
-                "address": "10.0.0.1",
-                "hostname": "db.internal",
-                "ports": [{"port": 5432, "state": "open", "protocol": "tcp", "service": {"name": "postgresql"}}],
-            }]
+            "hosts": [
+                {
+                    "address": "10.0.0.1",
+                    "hostname": "db.internal",
+                    "ports": [
+                        {
+                            "port": 5432,
+                            "state": "open",
+                            "protocol": "tcp",
+                            "service": {"name": "postgresql"},
+                        }
+                    ],
+                }
+            ]
         }
         findings = FindingFactory.from_nmap(parsed, scan_id="s1")
         assert findings[0].target == "db.internal"
 
     def test_evidence_includes_port_scan_type(self):
         parsed = {
-            "hosts": [{
-                "address": "1.2.3.4",
-                "ports": [{"port": 22, "state": "open", "protocol": "tcp", "service": {"name": "ssh"}}],
-            }]
+            "hosts": [
+                {
+                    "address": "1.2.3.4",
+                    "ports": [
+                        {"port": 22, "state": "open", "protocol": "tcp", "service": {"name": "ssh"}}
+                    ],
+                }
+            ]
         }
         findings = FindingFactory.from_nmap(parsed, scan_id="s1")
         assert len(findings[0].evidence) == 1
@@ -274,13 +304,19 @@ class TestFromCheckdmarc:
         }
         findings = FindingFactory.from_checkdmarc(parsed, scan_id="s1", domain="example.com")
 
-        p_none_findings = [f for f in findings if "none" in f.title.lower() and "DMARC" in f.affected_component]
+        p_none_findings = [
+            f for f in findings if "none" in f.title.lower() and "DMARC" in f.affected_component
+        ]
         assert len(p_none_findings) >= 1
         assert p_none_findings[0].severity == Severity.high
 
     def test_flags_spf_softfail_as_medium(self):
         parsed = {
-            "dmarc": {"valid": True, "record": "v=DMARC1; p=reject;", "tags": {"p": {"value": "reject"}}},
+            "dmarc": {
+                "valid": True,
+                "record": "v=DMARC1; p=reject;",
+                "tags": {"p": {"value": "reject"}},
+            },
             "spf": {"valid": True, "record": "v=spf1 include:_spf.google.com ~all"},
         }
         findings = FindingFactory.from_checkdmarc(parsed, scan_id="s1", domain="example.com")
@@ -291,7 +327,11 @@ class TestFromCheckdmarc:
 
     def test_flags_missing_spf_as_high(self):
         parsed = {
-            "dmarc": {"valid": True, "record": "v=DMARC1; p=reject;", "tags": {"p": {"value": "reject"}}},
+            "dmarc": {
+                "valid": True,
+                "record": "v=DMARC1; p=reject;",
+                "tags": {"p": {"value": "reject"}},
+            },
             "spf": {"valid": False, "record": ""},
         }
         findings = FindingFactory.from_checkdmarc(parsed, scan_id="s1", domain="example.com")
@@ -302,7 +342,11 @@ class TestFromCheckdmarc:
 
     def test_flags_spf_passall_as_critical(self):
         parsed = {
-            "dmarc": {"valid": True, "record": "v=DMARC1; p=reject;", "tags": {"p": {"value": "reject"}}},
+            "dmarc": {
+                "valid": True,
+                "record": "v=DMARC1; p=reject;",
+                "tags": {"p": {"value": "reject"}},
+            },
             "spf": {"valid": True, "record": "v=spf1 +all"},
         }
         findings = FindingFactory.from_checkdmarc(parsed, scan_id="s1", domain="example.com")
@@ -403,7 +447,9 @@ class TestFromTrufflehog:
 
 
 class TestFindingDeduplicator:
-    def _make_finding(self, target: str, finding_type: str, port: int | None = None, **kwargs) -> Finding:
+    def _make_finding(
+        self, target: str, finding_type: str, port: int | None = None, **kwargs
+    ) -> Finding:
         return make_finding(
             target=target,
             finding_type=finding_type,
@@ -441,8 +487,12 @@ class TestFindingDeduplicator:
 
     def test_deduplicate_keeps_distinct_findings_separate(self):
         """Findings with different targets must not be merged."""
-        f1 = self._make_finding(target="192.168.1.1", finding_type="sqli", port=80, protocol="tcp", id="f1")
-        f2 = self._make_finding(target="192.168.1.2", finding_type="sqli", port=80, protocol="tcp", id="f2")
+        f1 = self._make_finding(
+            target="192.168.1.1", finding_type="sqli", port=80, protocol="tcp", id="f1"
+        )
+        f2 = self._make_finding(
+            target="192.168.1.2", finding_type="sqli", port=80, protocol="tcp", id="f2"
+        )
 
         assert f1.dedup_hash != f2.dedup_hash
 
@@ -455,10 +505,14 @@ class TestFindingDeduplicator:
         """Merged finding should contain evidence from all merged findings."""
         from vxis.models.finding import Evidence
 
-        f1 = self._make_finding(target="10.0.0.1", finding_type="xss", port=443, protocol="tcp", id="f1")
+        f1 = self._make_finding(
+            target="10.0.0.1", finding_type="xss", port=443, protocol="tcp", id="f1"
+        )
         f1.evidence = [Evidence(evidence_type="http_request", title="Req1", content="GET /")]
 
-        f2 = self._make_finding(target="10.0.0.1", finding_type="xss", port=443, protocol="tcp", id="f2")
+        f2 = self._make_finding(
+            target="10.0.0.1", finding_type="xss", port=443, protocol="tcp", id="f2"
+        )
         f2.evidence = [Evidence(evidence_type="http_response", title="Resp1", content="200 OK")]
 
         deduplicator = FindingDeduplicator()
@@ -470,12 +524,20 @@ class TestFindingDeduplicator:
     def test_deduplicate_keeps_higher_severity(self):
         """After merging, the higher severity should be retained."""
         f1 = self._make_finding(
-            target="10.0.0.1", finding_type="rce", port=80, protocol="tcp",
-            id="f1", severity=Severity.medium,
+            target="10.0.0.1",
+            finding_type="rce",
+            port=80,
+            protocol="tcp",
+            id="f1",
+            severity=Severity.medium,
         )
         f2 = self._make_finding(
-            target="10.0.0.1", finding_type="rce", port=80, protocol="tcp",
-            id="f2", severity=Severity.critical,
+            target="10.0.0.1",
+            finding_type="rce",
+            port=80,
+            protocol="tcp",
+            id="f2",
+            severity=Severity.critical,
         )
 
         deduplicator = FindingDeduplicator()
@@ -490,16 +552,27 @@ class TestFindingDeduplicator:
     def test_group_related_groups_by_fuzzy_hash(self):
         """Findings on same target+finding_type should cluster together."""
         f1 = self._make_finding(
-            target="10.0.0.1", finding_type="sqli", port=80,
-            protocol="tcp", affected_component="login", id="f1",
+            target="10.0.0.1",
+            finding_type="sqli",
+            port=80,
+            protocol="tcp",
+            affected_component="login",
+            id="f1",
         )
         f2 = self._make_finding(
-            target="10.0.0.1", finding_type="sqli", port=443,
-            protocol="tcp", affected_component="search", id="f2",
+            target="10.0.0.1",
+            finding_type="sqli",
+            port=443,
+            protocol="tcp",
+            affected_component="search",
+            id="f2",
         )
         f3 = self._make_finding(
-            target="10.0.0.2", finding_type="xss", port=80,
-            protocol="tcp", id="f3",
+            target="10.0.0.2",
+            finding_type="xss",
+            port=80,
+            protocol="tcp",
+            id="f3",
         )
 
         deduplicator = FindingDeduplicator()

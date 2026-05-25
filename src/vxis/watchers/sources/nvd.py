@@ -166,7 +166,6 @@ def _extract_version_ranges(configurations: list[dict]) -> list[str]:
 
 def _check_exploit_references(refs: list[dict]) -> tuple[bool, str]:
     """참고 URL에서 exploit 가용 여부를 확인."""
-    exploit_tags = {"Exploit", "Patch"}
     exploit_keywords = ("exploit", "poc", "proof-of-concept", "exploit-db", "github.com")
 
     for ref in refs:
@@ -223,7 +222,7 @@ def _parse_vulnerability(vuln: dict) -> CVEEntry | None:
     return CVEEntry(
         id=cve_id,
         source="nvd",
-        title=cve_id,           # NVD에는 별도 title 없음, CVE ID 사용
+        title=cve_id,  # NVD에는 별도 title 없음, CVE ID 사용
         description=description,
         severity=severity,
         cvss_score=cvss_score,

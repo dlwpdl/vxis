@@ -24,7 +24,10 @@ _TAKEOVER_FINGERPRINTS: dict[str, dict[str, str]] = {
     "shopify.com": {"service": "Shopify", "indicator": "Sorry, this shop is currently unavailable"},
     "surge.sh": {"service": "Surge", "indicator": "project not found"},
     "zendesk.com": {"service": "Zendesk", "indicator": "Help Center Closed"},
-    "ghost.io": {"service": "Ghost", "indicator": "The thing you were looking for is no longer here"},
+    "ghost.io": {
+        "service": "Ghost",
+        "indicator": "The thing you were looking for is no longer here",
+    },
     "bitbucket.io": {"service": "Bitbucket", "indicator": "Repository not found"},
     "pantheon.io": {"service": "Pantheon", "indicator": "404 error unknown site"},
     "readme.io": {"service": "ReadMe", "indicator": "Project doesnt exist"},
@@ -51,77 +54,95 @@ class SubdomainTakeoverAgent(BaseAgent):
         cname_results = await self._check_cnames(subdomains)
         for result in cname_results:
             if result.get("dangling"):
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"Dangling CNAME: {result['subdomain']} -> {result['cname']}",
-                    severity=Severity.HIGH,
-                    evidence_type=EvidenceType.MISCONFIGURATION,
-                    description=(
-                        f"Subdomain {result['subdomain']} has a CNAME pointing to "
-                        f"{result['cname']} ({result['service']}), which appears unclaimed. "
-                        f"This may allow subdomain takeover."
-                    ),
-                    response=json.dumps(result, indent=2),
-                    tags=["subdomain-takeover", "dangling-dns", result["service"].lower()],
-                ))
-                hypotheses.append(Hypothesis(
-                    title=f"Subdomain takeover of {result['subdomain']} via {result['service']}",
-                    rationale=f"Dangling CNAME to {result['cname']} detected",
-                    probability=0.85, impact=0.9,
-                    suggested_agent="subdomain_takeover",
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"Dangling CNAME: {result['subdomain']} -> {result['cname']}",
+                        severity=Severity.HIGH,
+                        evidence_type=EvidenceType.MISCONFIGURATION,
+                        description=(
+                            f"Subdomain {result['subdomain']} has a CNAME pointing to "
+                            f"{result['cname']} ({result['service']}), which appears unclaimed. "
+                            f"This may allow subdomain takeover."
+                        ),
+                        response=json.dumps(result, indent=2),
+                        tags=["subdomain-takeover", "dangling-dns", result["service"].lower()],
+                    )
+                )
+                hypotheses.append(
+                    Hypothesis(
+                        title=f"Subdomain takeover of {result['subdomain']} via {result['service']}",
+                        rationale=f"Dangling CNAME to {result['cname']} detected",
+                        probability=0.85,
+                        impact=0.9,
+                        suggested_agent="subdomain_takeover",
+                    )
+                )
             elif result.get("cname"):
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"CNAME record: {result['subdomain']} -> {result['cname']}",
-                    severity=Severity.INFO,
-                    evidence_type=EvidenceType.NETWORK,
-                    description=f"CNAME points to {result['cname']}",
-                    tags=["subdomain-takeover", "cname"],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"CNAME record: {result['subdomain']} -> {result['cname']}",
+                        severity=Severity.INFO,
+                        evidence_type=EvidenceType.NETWORK,
+                        description=f"CNAME points to {result['cname']}",
+                        tags=["subdomain-takeover", "cname"],
+                    )
+                )
 
         # Phase 3: Nuclei takeover templates
         nuclei_results = await self._run_nuclei_takeover(subdomains, context.mission.stealth)
         for nf in nuclei_results:
             sev_str = nf.get("info", {}).get("severity", "info").lower()
-            sev_map = {"critical": Severity.CRITICAL, "high": Severity.HIGH,
-                       "medium": Severity.MEDIUM, "low": Severity.LOW}
+            sev_map = {
+                "critical": Severity.CRITICAL,
+                "high": Severity.HIGH,
+                "medium": Severity.MEDIUM,
+                "low": Severity.LOW,
+            }
             severity = sev_map.get(sev_str, Severity.INFO)
             name = nf.get("info", {}).get("name", nf.get("template-id", ""))
             matched = nf.get("matched-at", "")
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Takeover: {name} — {matched}",
-                severity=severity,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=nf.get("info", {}).get("description", ""),
-                request=nf.get("request"),
-                response=nf.get("response"),
-                tags=["subdomain-takeover", "nuclei", nf.get("template-id", "")],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Takeover: {name} — {matched}",
+                    severity=severity,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=nf.get("info", {}).get("description", ""),
+                    request=nf.get("request"),
+                    response=nf.get("response"),
+                    tags=["subdomain-takeover", "nuclei", nf.get("template-id", "")],
+                )
+            )
             if severity in (Severity.CRITICAL, Severity.HIGH):
-                hypotheses.append(Hypothesis(
-                    title=f"Cookie/session hijack via subdomain takeover at {matched}",
-                    rationale=f"Subdomain takeover confirmed: {name}",
-                    probability=0.75, impact=0.9,
-                    suggested_agent="web",
-                ))
+                hypotheses.append(
+                    Hypothesis(
+                        title=f"Cookie/session hijack via subdomain takeover at {matched}",
+                        rationale=f"Subdomain takeover confirmed: {name}",
+                        probability=0.75,
+                        impact=0.9,
+                        suggested_agent="web",
+                    )
+                )
 
         # Phase 4: NS delegation checks
         ns_results = await self._check_ns_takeover(target)
         for ns in ns_results:
             if ns.get("vulnerable"):
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"NS delegation takeover: {ns['subdomain']}",
-                    severity=Severity.CRITICAL,
-                    evidence_type=EvidenceType.MISCONFIGURATION,
-                    description=(
-                        f"NS record for {ns['subdomain']} delegates to {ns['nameserver']} "
-                        f"which does not resolve. Full DNS takeover possible."
-                    ),
-                    tags=["subdomain-takeover", "ns-delegation"],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"NS delegation takeover: {ns['subdomain']}",
+                        severity=Severity.CRITICAL,
+                        evidence_type=EvidenceType.MISCONFIGURATION,
+                        description=(
+                            f"NS record for {ns['subdomain']} delegates to {ns['nameserver']} "
+                            f"which does not resolve. Full DNS takeover possible."
+                        ),
+                        tags=["subdomain-takeover", "ns-delegation"],
+                    )
+                )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -138,13 +159,16 @@ class SubdomainTakeoverAgent(BaseAgent):
         if not shutil.which("subfinder"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "subfinder", "-d", target, "-silent",
+            "subfinder",
+            "-d",
+            target,
+            "-silent",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
         try:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=300)
-            return [l.strip() for l in stdout.decode().splitlines() if l.strip()]
+            return [line.strip() for line in stdout.decode().splitlines() if line.strip()]
         except asyncio.TimeoutError:
             return []
 
@@ -157,7 +181,10 @@ class SubdomainTakeoverAgent(BaseAgent):
 
     async def _check_single_cname(self, subdomain: str) -> dict[str, Any]:
         proc = await asyncio.create_subprocess_exec(
-            "dig", "+short", "CNAME", subdomain,
+            "dig",
+            "+short",
+            "CNAME",
+            subdomain,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -186,7 +213,12 @@ class SubdomainTakeoverAgent(BaseAgent):
         if not shutil.which("curl"):
             return False
         proc = await asyncio.create_subprocess_exec(
-            "curl", "-sS", "-L", f"http://{subdomain}", "--max-time", "10",
+            "curl",
+            "-sS",
+            "-L",
+            f"http://{subdomain}",
+            "--max-time",
+            "10",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -198,16 +230,24 @@ class SubdomainTakeoverAgent(BaseAgent):
             return False
 
     async def _run_nuclei_takeover(
-        self, subdomains: list[str], stealth: bool,
+        self,
+        subdomains: list[str],
+        stealth: bool,
     ) -> list[dict[str, Any]]:
         if not shutil.which("nuclei"):
             return []
         rate = "10" if stealth else "100"
         stdin_data = "\n".join(subdomains[:500]).encode()
         cmd = [
-            "nuclei", "-tags", "takeover",
-            "-severity", "critical,high,medium",
-            "-rate-limit", rate, "-jsonl", "-silent",
+            "nuclei",
+            "-tags",
+            "takeover",
+            "-severity",
+            "critical,high,medium",
+            "-rate-limit",
+            rate,
+            "-jsonl",
+            "-silent",
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -230,7 +270,10 @@ class SubdomainTakeoverAgent(BaseAgent):
             return []
         # Get NS records for the domain
         proc = await asyncio.create_subprocess_exec(
-            "dig", "+short", "NS", target,
+            "dig",
+            "+short",
+            "NS",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -243,17 +286,22 @@ class SubdomainTakeoverAgent(BaseAgent):
                     continue
                 # Check if NS resolves
                 ns_proc = await asyncio.create_subprocess_exec(
-                    "dig", "+short", "A", ns,
+                    "dig",
+                    "+short",
+                    "A",
+                    ns,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL,
                 )
                 ns_stdout, _ = await asyncio.wait_for(ns_proc.communicate(), timeout=10)
                 if not ns_stdout.decode().strip():
-                    results.append({
-                        "subdomain": target,
-                        "nameserver": ns,
-                        "vulnerable": True,
-                    })
+                    results.append(
+                        {
+                            "subdomain": target,
+                            "nameserver": ns,
+                            "vulnerable": True,
+                        }
+                    )
             return results
         except asyncio.TimeoutError:
             return []

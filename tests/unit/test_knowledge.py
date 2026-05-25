@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -246,10 +245,17 @@ class TestBundledKBData:
 
     def test_common_vulns_present(self):
         expected = [
-            "sql_injection", "xss", "ssrf",
-            "weak_tls", "missing_dmarc", "missing_spf",
-            "secret", "exposure", "misconfiguration",
-            "injection", "rce",
+            "sql_injection",
+            "xss",
+            "ssrf",
+            "weak_tls",
+            "missing_dmarc",
+            "missing_spf",
+            "secret",
+            "exposure",
+            "misconfiguration",
+            "injection",
+            "rce",
         ]
         for vtype in expected:
             assert vtype in self.kb, f"Expected vuln type '{vtype}' not in bundled KB"

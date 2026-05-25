@@ -403,7 +403,7 @@ class TestRevalidationToggle:
 
         # With revalidation disabled, no HTTP calls should be made
         with patch.object(pipeline, "_http_revalidation", new_callable=AsyncMock) as mock_reval:
-            result = await pipeline.process([f])
+            await pipeline.process([f])
             mock_reval.assert_not_called()
 
     @pytest.mark.asyncio

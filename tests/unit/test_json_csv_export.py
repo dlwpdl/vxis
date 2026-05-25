@@ -15,7 +15,6 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
 
 from vxis.models.finding import CVSSVector, Finding, Severity
 from vxis.report.csv_export import CSVExporter
@@ -251,9 +250,19 @@ class TestCSVExporterFindings:
             header = next(reader)
 
         expected_headers = [
-            "severity", "title", "target", "port", "finding_type",
-            "source_plugin", "confidence", "cvss_score", "cve_ids",
-            "cwe_ids", "status", "remediation", "discovered_at",
+            "severity",
+            "title",
+            "target",
+            "port",
+            "finding_type",
+            "source_plugin",
+            "confidence",
+            "cvss_score",
+            "cve_ids",
+            "cwe_ids",
+            "status",
+            "remediation",
+            "discovered_at",
         ]
         assert header == expected_headers
 

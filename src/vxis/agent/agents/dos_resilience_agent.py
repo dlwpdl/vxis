@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import shutil
 import time
 from typing import Any
@@ -26,10 +25,10 @@ class DoSResilienceAgent(BaseAgent):
 
     # ReDoS patterns to test against regex endpoints
     _REDOS_PAYLOADS = [
-        "a" * 30 + "!",                       # evil regex: (a+)+
-        "aaaaaaaaaa" * 3 + "@",               # email-like catastrophic backtracking
-        "<" + "a" * 30 + "",                   # HTML tag backtracking
-        "0" * 30 + "x",                        # number validation backtracking
+        "a" * 30 + "!",  # evil regex: (a+)+
+        "aaaaaaaaaa" * 3 + "@",  # email-like catastrophic backtracking
+        "<" + "a" * 30 + "",  # HTML tag backtracking
+        "0" * 30 + "x",  # number validation backtracking
     ]
 
     # GraphQL introspection + depth test queries
@@ -66,45 +65,51 @@ class DoSResilienceAgent(BaseAgent):
         # Phase 1: Rate limiting verification
         rate_limit = await self._check_rate_limiting(target)
         if not rate_limit["limited"]:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"No rate limiting detected on {target}",
-                severity=Severity.HIGH,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    f"Sent {rate_limit['requests']} requests in "
-                    f"{rate_limit['duration_ms']}ms without being rate limited. "
-                    "This allows brute-force, credential stuffing, and resource "
-                    "exhaustion attacks."
-                ),
-                response=json.dumps(rate_limit, indent=2),
-                tags=["dos", "rate-limit", "resilience"],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"No rate limiting detected on {target}",
+                    severity=Severity.HIGH,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        f"Sent {rate_limit['requests']} requests in "
+                        f"{rate_limit['duration_ms']}ms without being rate limited. "
+                        "This allows brute-force, credential stuffing, and resource "
+                        "exhaustion attacks."
+                    ),
+                    response=json.dumps(rate_limit, indent=2),
+                    tags=["dos", "rate-limit", "resilience"],
+                )
+            )
         else:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Rate limiting active on {target}",
-                severity=Severity.INFO,
-                evidence_type=EvidenceType.NETWORK,
-                description=(
-                    f"Rate limiting triggered after {rate_limit['trigger_at']} "
-                    f"requests. Response: HTTP {rate_limit.get('limit_code', 429)}"
-                ),
-                response=json.dumps(rate_limit, indent=2),
-                tags=["dos", "rate-limit", "resilience"],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Rate limiting active on {target}",
+                    severity=Severity.INFO,
+                    evidence_type=EvidenceType.NETWORK,
+                    description=(
+                        f"Rate limiting triggered after {rate_limit['trigger_at']} "
+                        f"requests. Response: HTTP {rate_limit.get('limit_code', 429)}"
+                    ),
+                    response=json.dumps(rate_limit, indent=2),
+                    tags=["dos", "rate-limit", "resilience"],
+                )
+            )
 
         # Phase 2: GraphQL complexity/depth abuse
         graphql_findings = await self._test_graphql_depth(target)
         findings.extend(graphql_findings)
         if graphql_findings:
-            hypotheses.append(Hypothesis(
-                title=f"GraphQL DoS via nested queries on {target}",
-                rationale="GraphQL endpoint accepts deep/complex queries",
-                probability=0.7,
-                impact=0.75,
-                suggested_agent="api",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"GraphQL DoS via nested queries on {target}",
+                    rationale="GraphQL endpoint accepts deep/complex queries",
+                    probability=0.7,
+                    impact=0.75,
+                    suggested_agent="api",
+                )
+            )
 
         # Phase 3: ReDoS pattern testing
         redos_findings = await self._test_redos(target)
@@ -114,13 +119,15 @@ class DoSResilienceAgent(BaseAgent):
         slowloris_result = await self._test_slowloris(target)
         if slowloris_result:
             findings.append(slowloris_result)
-            hypotheses.append(Hypothesis(
-                title=f"Slowloris DoS vulnerability on {target}",
-                rationale="Server keeps slow connections alive indefinitely",
-                probability=0.6,
-                impact=0.7,
-                suggested_agent="dos_resilience",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Slowloris DoS vulnerability on {target}",
+                    rationale="Server keeps slow connections alive indefinitely",
+                    probability=0.6,
+                    impact=0.7,
+                    suggested_agent="dos_resilience",
+                )
+            )
 
         # Phase 5: HTTP/2 rapid reset check (CVE-2023-44487)
         h2_reset = await self._check_h2_rapid_reset(target)
@@ -128,29 +135,33 @@ class DoSResilienceAgent(BaseAgent):
             findings.append(h2_reset)
 
         # Phase 6: Connection pool / file descriptor exhaustion assessment
-        findings.append(Evidence(
-            agent_id=self.agent_id,
-            title=f"Connection pool exhaustion assessment for {target}",
-            severity=Severity.INFO,
-            evidence_type=EvidenceType.OTHER,
-            description=(
-                "Assessment points for connection pool exhaustion:\n"
-                "- WebSocket connections without proper limits\n"
-                "- Database connection pool exhaustion via slow queries\n"
-                "- File descriptor exhaustion via keep-alive connections\n"
-                "- Thread pool starvation via blocking operations\n"
-                "Note: Active testing avoided to prevent service disruption."
-            ),
-            tags=["dos", "connection-pool", "assessment"],
-        ))
+        findings.append(
+            Evidence(
+                agent_id=self.agent_id,
+                title=f"Connection pool exhaustion assessment for {target}",
+                severity=Severity.INFO,
+                evidence_type=EvidenceType.OTHER,
+                description=(
+                    "Assessment points for connection pool exhaustion:\n"
+                    "- WebSocket connections without proper limits\n"
+                    "- Database connection pool exhaustion via slow queries\n"
+                    "- File descriptor exhaustion via keep-alive connections\n"
+                    "- Thread pool starvation via blocking operations\n"
+                    "Note: Active testing avoided to prevent service disruption."
+                ),
+                tags=["dos", "connection-pool", "assessment"],
+            )
+        )
 
-        hypotheses.append(Hypothesis(
-            title=f"Application-layer DoS via resource exhaustion on {target}",
-            rationale="Resilience testing reveals potential weaknesses",
-            probability=0.5,
-            impact=0.7,
-            suggested_agent="web",
-        ))
+        hypotheses.append(
+            Hypothesis(
+                title=f"Application-layer DoS via resource exhaustion on {target}",
+                rationale="Resilience testing reveals potential weaknesses",
+                probability=0.5,
+                impact=0.7,
+                suggested_agent="web",
+            )
+        )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -182,8 +193,15 @@ class DoSResilienceAgent(BaseAgent):
 
         for i in range(1, max_requests + 1):
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-                "--max-time", "3", f"https://{target}/",
+                "curl",
+                "-s",
+                "-o",
+                "/dev/null",
+                "-w",
+                "%{http_code}",
+                "--max-time",
+                "3",
+                f"https://{target}/",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -213,10 +231,16 @@ class DoSResilienceAgent(BaseAgent):
         for endpoint in endpoints:
             payload = json.dumps({"query": self._GRAPHQL_DEPTH_QUERY})
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "--max-time", "15",
-                "-X", "POST",
-                "-H", "Content-Type: application/json",
-                "-d", payload,
+                "curl",
+                "-s",
+                "--max-time",
+                "15",
+                "-X",
+                "POST",
+                "-H",
+                "Content-Type: application/json",
+                "-d",
+                payload,
                 f"https://{target}{endpoint}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -226,34 +250,38 @@ class DoSResilienceAgent(BaseAgent):
             try:
                 data = json.loads(response)
                 if "data" in data and data["data"]:
-                    results.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"GraphQL deep query accepted on {endpoint}",
-                        severity=Severity.HIGH,
-                        evidence_type=EvidenceType.MISCONFIGURATION,
-                        description=(
-                            f"GraphQL endpoint {endpoint} accepts deeply nested "
-                            "queries without depth limiting. An attacker can craft "
-                            "exponentially expensive queries to exhaust resources."
-                        ),
-                        request=self._GRAPHQL_DEPTH_QUERY.strip(),
-                        response=response[:2000],
-                        tags=["dos", "graphql", "query-depth"],
-                    ))
+                    results.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title=f"GraphQL deep query accepted on {endpoint}",
+                            severity=Severity.HIGH,
+                            evidence_type=EvidenceType.MISCONFIGURATION,
+                            description=(
+                                f"GraphQL endpoint {endpoint} accepts deeply nested "
+                                "queries without depth limiting. An attacker can craft "
+                                "exponentially expensive queries to exhaust resources."
+                            ),
+                            request=self._GRAPHQL_DEPTH_QUERY.strip(),
+                            response=response[:2000],
+                            tags=["dos", "graphql", "query-depth"],
+                        )
+                    )
                     break
                 elif "errors" in data:
                     error_msgs = [e.get("message", "") for e in data.get("errors", [])]
                     depth_keywords = ["depth", "complexity", "limit", "too deep"]
                     if any(kw in str(error_msgs).lower() for kw in depth_keywords):
-                        results.append(Evidence(
-                            agent_id=self.agent_id,
-                            title=f"GraphQL depth limiting active on {endpoint}",
-                            severity=Severity.INFO,
-                            evidence_type=EvidenceType.NETWORK,
-                            description="GraphQL query depth/complexity limits enforced",
-                            response=response[:1000],
-                            tags=["dos", "graphql", "mitigated"],
-                        ))
+                        results.append(
+                            Evidence(
+                                agent_id=self.agent_id,
+                                title=f"GraphQL depth limiting active on {endpoint}",
+                                severity=Severity.INFO,
+                                evidence_type=EvidenceType.NETWORK,
+                                description="GraphQL query depth/complexity limits enforced",
+                                response=response[:1000],
+                                tags=["dos", "graphql", "mitigated"],
+                            )
+                        )
                         break
             except json.JSONDecodeError:
                 continue
@@ -273,11 +301,16 @@ class DoSResilienceAgent(BaseAgent):
         for path_template, field_type in test_paths:
             for payload in self._REDOS_PAYLOADS[:2]:
                 path = path_template.replace("{payload}", payload)
-                start = time.monotonic()
+                time.monotonic()
                 proc = await asyncio.create_subprocess_exec(
-                    "curl", "-s", "-o", "/dev/null",
-                    "-w", "%{time_total}",
-                    "--max-time", "10",
+                    "curl",
+                    "-s",
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{time_total}",
+                    "--max-time",
+                    "10",
                     f"https://{target}{path}",
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.DEVNULL,
@@ -288,21 +321,23 @@ class DoSResilienceAgent(BaseAgent):
                 except ValueError:
                     continue
                 if elapsed > 5.0:
-                    results.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"Potential ReDoS on {field_type} endpoint",
-                        severity=Severity.HIGH,
-                        evidence_type=EvidenceType.EXPLOIT,
-                        description=(
-                            f"Request to {path_template} with backtracking payload "
-                            f"took {elapsed:.1f}s (threshold: 5s). This suggests "
-                            "catastrophic regex backtracking (ReDoS)."
-                        ),
-                        request=f"GET https://{target}{path}",
-                        response=f"Response time: {elapsed:.1f}s",
-                        cvss_score=7.5,
-                        tags=["dos", "redos", "regex"],
-                    ))
+                    results.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title=f"Potential ReDoS on {field_type} endpoint",
+                            severity=Severity.HIGH,
+                            evidence_type=EvidenceType.EXPLOIT,
+                            description=(
+                                f"Request to {path_template} with backtracking payload "
+                                f"took {elapsed:.1f}s (threshold: 5s). This suggests "
+                                "catastrophic regex backtracking (ReDoS)."
+                            ),
+                            request=f"GET https://{target}{path}",
+                            response=f"Response time: {elapsed:.1f}s",
+                            cvss_score=7.5,
+                            tags=["dos", "redos", "regex"],
+                        )
+                    )
                     break
         return results
 
@@ -313,10 +348,18 @@ class DoSResilienceAgent(BaseAgent):
 
         # Open a slow connection with very low speed limit
         proc = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-            "--limit-rate", "1",  # 1 byte/sec
-            "--max-time", "10",
-            "-H", "X-Slowloris-Test: true",
+            "curl",
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "--limit-rate",
+            "1",  # 1 byte/sec
+            "--max-time",
+            "10",
+            "-H",
+            "X-Slowloris-Test: true",
             f"https://{target}/",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -346,8 +389,15 @@ class DoSResilienceAgent(BaseAgent):
 
         # Check if HTTP/2 is supported
         proc = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-o", "/dev/null", "-w", "%{http_version}",
-            "--max-time", "5", "--http2",
+            "curl",
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_version}",
+            "--max-time",
+            "5",
+            "--http2",
             f"https://{target}/",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,

@@ -11,29 +11,36 @@ from vxis.agent.scan_loop_run_skills import ScanLoopScheduledSkillsMixin
 logger = logging.getLogger(__name__)
 
 
-class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin, ScanLoopScheduledSkillsMixin):
+class ScanLoopRunMixin(
+    ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin, ScanLoopScheduledSkillsMixin
+):
     async def run(self) -> dict[str, Any]:
         import json as _json
         import re as _re
+
         try:
             from vxis.agent.memory_compressor import reset_memory_compression_stats
+
             reset_memory_compression_stats()
         except Exception:
             pass
         from vxis.interaction.surface import TargetKind as _TK
 
         self.state.add_message("system", f"Scan started on {self.state.target}")
-        self.state.add_message("user", (
-            f"Target: {self.state.target}\n\n"
-            "You are a senior penetration tester. Find as many vulnerabilities as possible. "
-            "The more you find, the better. If there's even the slightest hint of a weakness, "
-            "dig into it — fuzz it, chain it, escalate it until you hit a dead end. "
-            "Use ALL your knowledge: OWASP Top 10, business logic flaws, auth bypasses, "
-            "injection variants, misconfigurations, everything. "
-            "Then chain your findings into attack paths that reach crown jewels "
-            "(admin takeover, DB dump, RCE, data exfil). "
-            "DO NOT stop early. DO NOT be satisfied with surface-level findings."
-        ))
+        self.state.add_message(
+            "user",
+            (
+                f"Target: {self.state.target}\n\n"
+                "You are a senior penetration tester. Find as many vulnerabilities as possible. "
+                "The more you find, the better. If there's even the slightest hint of a weakness, "
+                "dig into it — fuzz it, chain it, escalate it until you hit a dead end. "
+                "Use ALL your knowledge: OWASP Top 10, business logic flaws, auth bypasses, "
+                "injection variants, misconfigurations, everything. "
+                "Then chain your findings into attack paths that reach crown jewels "
+                "(admin takeover, DB dump, RCE, data exfil). "
+                "DO NOT stop early. DO NOT be satisfied with surface-level findings."
+            ),
+        )
         await self._maybe_autostart_proxy()
 
         # Phase B fix: code-level anti-repetition. Track hash of (tool, args)
@@ -65,6 +72,7 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
 
         # Phase C: enterprise egress allowlist. No-op unless VXIS_EGRESS_STRICT=1.
         from vxis.agent.egress import build_allowlist, check_violations, is_strict_mode
+
         _egress_allowlist = build_allowlist(self.state.target)
         _egress_strict = is_strict_mode()
         if _egress_strict:
@@ -110,7 +118,13 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
         # creative sandbox use instead of penalized (prior behavior).
         _sandbox_invocations: list[dict[str, str]] = []
 
-        def _queue_skill(skill_name: str, trigger_iter: int, params: dict[str, Any] | None = None, *, alias: str | None = None) -> bool:
+        def _queue_skill(
+            skill_name: str,
+            trigger_iter: int,
+            params: dict[str, Any] | None = None,
+            *,
+            alias: str | None = None,
+        ) -> bool:
             queue_params = dict(params or {})
             requested = str(queue_params.get("_skill_override") or skill_name).strip().lower()
             if not requested:
@@ -141,18 +155,20 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
             # messages preserved verbatim. Strix pattern.
             try:
                 from vxis.agent.memory_compressor import compress_history
-                self.state.messages = await compress_history(
-                    self.state.messages, self.brain
-                )
+
+                self.state.messages = await compress_history(self.state.messages, self.brain)
             except Exception:
                 pass  # compression is best-effort
             if _priority_action_lane is not None:
-                self.state.add_message("system", {
-                    "hint": (
-                        f"PRIORITY ACTION LANE: execute {_priority_action_lane[0]} next "
-                        f"because the judge escalated this path: {_priority_action_lane[2]}"
-                    ),
-                })
+                self.state.add_message(
+                    "system",
+                    {
+                        "hint": (
+                            f"PRIORITY ACTION LANE: execute {_priority_action_lane[0]} next "
+                            f"because the judge escalated this path: {_priority_action_lane[2]}"
+                        ),
+                    },
+                )
                 actions = [(_priority_action_lane[0], dict(_priority_action_lane[1]))]
                 _priority_action_lane = None
             else:
@@ -161,19 +177,24 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                 _consecutive_empty += 1
                 _min_iters = min(50, self.state.max_iters // 2)
                 if self.state.iteration < _min_iters and _consecutive_empty <= 2:
-                    self.state.add_message("user", (
-                        f"SYSTEM: You returned no actions at iteration "
-                        f"{self.state.iteration}. Minimum {_min_iters} required. "
-                        "You MUST keep scanning. Here are concrete next actions:\n"
-                        f"1. browser_navigate(url=\"{self.state.target}/#/login\") "
-                        "then browser_fill_form with default creds\n"
-                        f"2. shell_exec(command=\"curl -s {self.state.target}/rest/products/search?q=test\")\n"
-                        "3. load_playbook(name=\"injection_vectors\") if not loaded\n"
-                        f"4. python_exec with httpx to test /api/Users, /api/Challenges, /api/SecurityQuestions"
-                    ))
+                    self.state.add_message(
+                        "user",
+                        (
+                            f"SYSTEM: You returned no actions at iteration "
+                            f"{self.state.iteration}. Minimum {_min_iters} required. "
+                            "You MUST keep scanning. Here are concrete next actions:\n"
+                            f'1. browser_navigate(url="{self.state.target}/#/login") '
+                            "then browser_fill_form with default creds\n"
+                            f'2. shell_exec(command="curl -s {self.state.target}/rest/products/search?q=test")\n'
+                            '3. load_playbook(name="injection_vectors") if not loaded\n'
+                            f"4. python_exec with httpx to test /api/Users, /api/Challenges, /api/SecurityQuestions"
+                        ),
+                    )
                     logger.warning(
                         "iter %d: no actions but below min=%d (empty=%d) — nudge",
-                        self.state.iteration, _min_iters, _consecutive_empty,
+                        self.state.iteration,
+                        _min_iters,
+                        _consecutive_empty,
                     )
                     self._emit_control_plane("Brain returned no action; injected a concrete nudge")
                     continue
@@ -197,7 +218,9 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                 _action_candidate_ids = self._candidate_ids_for_action(name, args)
                 _action_branch_ids = self._branch_ids_for_action(name, args)
                 if not _action_branch_ids and _action_candidate_ids:
-                    _action_branch_ids = self._fallback_branch_ids_for_candidates(_action_candidate_ids)
+                    _action_branch_ids = self._fallback_branch_ids_for_candidates(
+                        _action_candidate_ids
+                    )
                 _focus_branch = self._focus_branch()
                 if _focus_branch is None:
                     _focus_drift_count = 0
@@ -219,12 +242,15 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                     _action_candidate_ids,
                 )
                 if self._should_pressure_memory_revalidation(name, args, _action_branch_ids):
-                    self.state.add_message("system", {
-                        "hint": (
-                            "MEMORY PRIORITY HINT: this target has prior confirmed leads or unfinished branches. "
-                            "Revalidate one carry-over memory branch or memory-seeded candidate first, then explore new surface."
-                        ),
-                    })
+                    self.state.add_message(
+                        "system",
+                        {
+                            "hint": (
+                                "MEMORY PRIORITY HINT: this target has prior confirmed leads or unfinished branches. "
+                                "Revalidate one carry-over memory branch or memory-seeded candidate first, then explore new surface."
+                            ),
+                        },
+                    )
                 if _focus_branch and (_focus_related or _off_branch_allowed):
                     _focus_drift_count = 0
                 count = _call_counts.get(key, 0) + 1
@@ -239,7 +265,7 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                 ):
                     _focus_drift_count += 1
                     _branch_summary = (
-                        f"Focus branch { _focus_branch.id } [{_focus_branch.title}] "
+                        f"Focus branch {_focus_branch.id} [{_focus_branch.title}] "
                         f"role={_focus_branch.role} "
                         f"phase={_focus_branch.phase} "
                         f"objective={_focus_branch.objective[:100]} "
@@ -253,19 +279,22 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                         "impact, hit a clear blocker, or spawn a stronger child branch."
                     )
                     if _focus_drift_count >= self._focus_drift_block_threshold():
-                        self.state.add_message("tool", {
-                            "name": name,
-                            "args": args,
-                            "result": {
-                                "ok": False,
-                                "summary": _drift_msg,
-                                "data": {
-                                    "focus_branch_blocked": True,
-                                    "focus_branch": _focus_branch.to_dict(),
-                                    "drift_count": _focus_drift_count,
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": name,
+                                "args": args,
+                                "result": {
+                                    "ok": False,
+                                    "summary": _drift_msg,
+                                    "data": {
+                                        "focus_branch_blocked": True,
+                                        "focus_branch": _focus_branch.to_dict(),
+                                        "drift_count": _focus_drift_count,
+                                    },
                                 },
                             },
-                        })
+                        )
                         logger.warning(
                             "iter %d: blocked off-branch action %s while focus=%s",
                             self.state.iteration,
@@ -304,11 +333,18 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                         f"  report_finding: report what you already discovered\n"
                         f"  finish_scan: if you believe scan is complete"
                     )
-                    self.state.add_message("tool", {"name": name, "args": args, "result": {
-                        "ok": False,
-                        "summary": nudge,
-                        "data": {"dedup": True, "prior_calls": count - 1},
-                    }})
+                    self.state.add_message(
+                        "tool",
+                        {
+                            "name": name,
+                            "args": args,
+                            "result": {
+                                "ok": False,
+                                "summary": nudge,
+                                "data": {"dedup": True, "prior_calls": count - 1},
+                            },
+                        },
+                    )
                     for _cid in _action_candidate_ids:
                         self.state.record_attempt_outcome(
                             _cid,
@@ -328,35 +364,49 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                         )
                     logger.warning(
                         "iter %d: dedup-blocked repeated call: %s (count=%d)",
-                        self.state.iteration, name, count,
+                        self.state.iteration,
+                        name,
+                        count,
                     )
                     self._emit_control_plane(f"Blocked repeated call: {name}")
                     continue
 
                 # Phase C: egress filter — block shell/python/http commands
                 # that reference off-allowlist hosts when strict mode is on.
-                if _egress_strict and name in ("shell_exec", "python_exec", "http_request", "http_get", "http_post"):
+                if _egress_strict and name in (
+                    "shell_exec",
+                    "python_exec",
+                    "http_request",
+                    "http_get",
+                    "http_post",
+                ):
                     blob = ""
                     if isinstance(args, dict):
                         blob = " ".join(str(v) for v in args.values() if v)
                     violations = check_violations(blob, _egress_allowlist)
                     if violations:
-                        self.state.add_message("tool", {
-                            "name": name, "args": args,
-                            "result": {
-                                "ok": False,
-                                "summary": (
-                                    f"EGRESS BLOCKED: command references off-allowlist host(s) "
-                                    f"{violations}. Only these hosts are permitted: "
-                                    f"{sorted(_egress_allowlist)}. Rewrite the command to target "
-                                    f"the authorized scope only."
-                                ),
-                                "data": {"egress_blocked": True, "violations": violations},
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": name,
+                                "args": args,
+                                "result": {
+                                    "ok": False,
+                                    "summary": (
+                                        f"EGRESS BLOCKED: command references off-allowlist host(s) "
+                                        f"{violations}. Only these hosts are permitted: "
+                                        f"{sorted(_egress_allowlist)}. Rewrite the command to target "
+                                        f"the authorized scope only."
+                                    ),
+                                    "data": {"egress_blocked": True, "violations": violations},
+                                },
                             },
-                        })
+                        )
                         logger.warning(
                             "iter %d: egress-blocked %s (violations=%s)",
-                            self.state.iteration, name, violations,
+                            self.state.iteration,
+                            name,
+                            violations,
                         )
                         for _cid in _action_candidate_ids:
                             self.state.record_attempt_outcome(
@@ -375,7 +425,9 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                                 summary=f"egress blocked: {violations}",
                                 blocker="egress allowlist",
                             )
-                        self._emit_control_plane(f"Egress blocked for {name}: {', '.join(violations)}")
+                        self._emit_control_plane(
+                            f"Egress blocked for {name}: {', '.join(violations)}"
+                        )
                         continue
 
                 # Phase C: auto-evidence-enrichment for report_finding.
@@ -387,6 +439,7 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                     if len(evidence) < 200 and component.startswith("http"):
                         try:
                             from vxis.interaction.hands import SessionManager as _SessionManager
+
                             _mgr = _SessionManager()
                             try:
                                 _sess = await _mgr.get_session(component)
@@ -397,9 +450,15 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                                     + "\n".join(f"{k}: {v}" for k, v in _headers)
                                     + f"\n\n{_resp.text[:1500]}"
                                 )
-                                args["evidence"] = _enriched + "\n\n--- Original evidence ---\n" + evidence
-                                logger.info("auto-enriched evidence for %s (%d → %d chars)",
-                                           component, len(evidence), len(args["evidence"]))
+                                args["evidence"] = (
+                                    _enriched + "\n\n--- Original evidence ---\n" + evidence
+                                )
+                                logger.info(
+                                    "auto-enriched evidence for %s (%d → %d chars)",
+                                    component,
+                                    len(evidence),
+                                    len(args["evidence"]),
+                                )
                             finally:
                                 await _mgr.close_all()
                         except Exception:
@@ -437,10 +496,15 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                         if verdict_result.ok:
                             verdict_data = verdict_result.data or {}
                             verdict = verdict_data.get("verdict", "UNCONFIRMED")
-                            reasoning = str(verdict_data.get("reasoning", "")) or f"Verifier returned {verdict}."
+                            reasoning = (
+                                str(verdict_data.get("reasoning", ""))
+                                or f"Verifier returned {verdict}."
+                            )
                             confidence = str(verdict_data.get("confidence", "low"))
                             # Phase C belief state: track verdict counts
-                            self.state.verdict_counts[verdict] = self.state.verdict_counts.get(verdict, 0) + 1
+                            self.state.verdict_counts[verdict] = (
+                                self.state.verdict_counts.get(verdict, 0) + 1
+                            )
                             _belief_entry = {
                                 "iter": self.state.iteration,
                                 "title": args.get("title", ""),
@@ -462,15 +526,18 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                                 reasoning=reasoning,
                                 confidence=confidence,
                             )
-                            self.state.add_message("tool", {
-                                "name": "verify_finding",
-                                "args": verify_args,
-                                "result": {
-                                    "ok": True,
-                                    "summary": verdict_result.summary,
-                                    "data": verdict_data,
+                            self.state.add_message(
+                                "tool",
+                                {
+                                    "name": "verify_finding",
+                                    "args": verify_args,
+                                    "result": {
+                                        "ok": True,
+                                        "summary": verdict_result.summary,
+                                        "data": verdict_data,
+                                    },
                                 },
-                            })
+                            )
                             logger.info(
                                 "iter %d: auto-verify for %s severity=%s → %s",
                                 self.state.iteration,
@@ -482,19 +549,22 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                                 # Block the report_finding dispatch — treat
                                 # as a soft fail so Brain sees the refutation
                                 # reasoning on next iteration.
-                                self.state.add_message("tool", {
-                                    "name": "report_finding",
-                                    "args": args,
-                                    "result": {
-                                        "ok": False,
-                                        "summary": (
-                                            "report_finding BLOCKED by auto-verifier "
-                                            "(REFUTED). Reason: "
-                                            + str(verdict_data.get("reasoning", ""))[:300]
-                                        ),
-                                        "data": {"verifier_blocked": True, "verdict": verdict},
+                                self.state.add_message(
+                                    "tool",
+                                    {
+                                        "name": "report_finding",
+                                        "args": args,
+                                        "result": {
+                                            "ok": False,
+                                            "summary": (
+                                                "report_finding BLOCKED by auto-verifier "
+                                                "(REFUTED). Reason: "
+                                                + str(verdict_data.get("reasoning", ""))[:300]
+                                            ),
+                                            "data": {"verifier_blocked": True, "verdict": verdict},
+                                        },
                                     },
-                                })
+                                )
                                 logger.warning(
                                     "iter %d: report_finding BLOCKED (REFUTED) for %s",
                                     self.state.iteration,
@@ -525,19 +595,24 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                             affected_component=str(args.get("affected_component", "")),
                             source_finding_type=str(args.get("finding_type", "")),
                         )
-                        self.state.add_message("tool", {
-                            "name": "report_finding",
-                            "args": args,
-                            "result": {
-                                "ok": False,
-                                "summary": _reason,
-                                "data": {
-                                    "memory_suppressed": True,
-                                    "refuted_pattern": _refuted_match,
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": "report_finding",
+                                "args": args,
+                                "result": {
+                                    "ok": False,
+                                    "summary": _reason,
+                                    "data": {
+                                        "memory_suppressed": True,
+                                        "refuted_pattern": _refuted_match,
+                                    },
                                 },
                             },
-                        })
-                        self._emit_control_plane("Memory suppressed a previously refuted finding pattern")
+                        )
+                        self._emit_control_plane(
+                            "Memory suppressed a previously refuted finding pattern"
+                        )
                         continue
 
                 # Phase Q: dispatch-level surface guard. The desktop preamble
@@ -559,27 +634,33 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                             f"— surface guard refused dispatch. Use one of: "
                             f"{', '.join(sorted(_DESKTOP_SKILLS))}"
                         )
-                        self.state.add_message("tool", {
-                            "name": "run_skill",
-                            "args": args,
-                            "result": {
-                                "ok": False,
-                                "summary": _block_msg,
-                                "data": {
-                                    "surface_guard_blocked": True,
-                                    "requested_skill": _requested_skill,
-                                    "target_kind": "desktop",
-                                    "allowed_skills": sorted(_DESKTOP_SKILLS),
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": "run_skill",
+                                "args": args,
+                                "result": {
+                                    "ok": False,
+                                    "summary": _block_msg,
+                                    "data": {
+                                        "surface_guard_blocked": True,
+                                        "requested_skill": _requested_skill,
+                                        "target_kind": "desktop",
+                                        "allowed_skills": sorted(_DESKTOP_SKILLS),
+                                    },
                                 },
                             },
-                        })
-                        self.state.add_message("system", {
-                            "hint": (
-                                f"SYSTEM HINT: target is a macOS .app bundle (file://). "
-                                f"Web skill '{_requested_skill}' cannot apply. "
-                                f"Pick a desktop skill: {', '.join(sorted(_DESKTOP_SKILLS - _real_skills_completed))}"
-                            ),
-                        })
+                        )
+                        self.state.add_message(
+                            "system",
+                            {
+                                "hint": (
+                                    f"SYSTEM HINT: target is a macOS .app bundle (file://). "
+                                    f"Web skill '{_requested_skill}' cannot apply. "
+                                    f"Pick a desktop skill: {', '.join(sorted(_DESKTOP_SKILLS - _real_skills_completed))}"
+                                ),
+                            },
+                        )
                         logger.warning(
                             "iter %d: surface_guard BLOCKED run_skill=%s on desktop target",
                             self.state.iteration,
@@ -615,26 +696,38 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                             f"Reason: {str(_memory_refuted_action.get('reasoning', '') or 'prior scan refuted it.')[:180]} "
                             f"Choose a deeper pivot or a materially different control pair."
                         )
-                        self.state.add_message("tool", {
-                            "name": name,
-                            "args": args,
-                            "result": {
-                                "ok": False,
-                                "summary": _memory_block_msg,
-                                "data": {
-                                    "memory_suppressed": True,
-                                    "refuted_pattern": _memory_refuted_action,
-                                    "blocked_stage": "action",
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": name,
+                                "args": args,
+                                "result": {
+                                    "ok": False,
+                                    "summary": _memory_block_msg,
+                                    "data": {
+                                        "memory_suppressed": True,
+                                        "refuted_pattern": _memory_refuted_action,
+                                        "blocked_stage": "action",
+                                    },
                                 },
                             },
-                        })
+                        )
                         self.state.record_review_decision(
                             stage="memory",
                             verdict="SUPPRESSED",
-                            title=str(_memory_refuted_action.get("title") or _memory_refuted_action.get("finding_type") or name),
-                            reason=str(_memory_refuted_action.get("reasoning", "") or "Repeated refuted pattern."),
+                            title=str(
+                                _memory_refuted_action.get("title")
+                                or _memory_refuted_action.get("finding_type")
+                                or name
+                            ),
+                            reason=str(
+                                _memory_refuted_action.get("reasoning", "")
+                                or "Repeated refuted pattern."
+                            ),
                             blocked_action=name,
-                            affected_component=str(_memory_refuted_action.get("affected_component", "")),
+                            affected_component=str(
+                                _memory_refuted_action.get("affected_component", "")
+                            ),
                             source_finding_type=str(_memory_refuted_action.get("finding_type", "")),
                         )
                         for _cid in _action_candidate_ids:
@@ -659,21 +752,28 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
 
                 _memory_success = self._matching_successful_memory_tactic(name, args)
                 if _memory_success is not None and self.state.iteration <= 8:
-                    self.state.add_message("system", {
-                        "hint": (
-                            f"MEMORY TACTIC HINT: prior scan confirmed "
-                            f"{_memory_success.get('finding_type', 'this tactic')} on "
-                            f"{_memory_success.get('affected_component', 'this surface')}. "
-                            f"Revalidate quickly with fresh transcript, then go deeper than before."
-                        ),
-                    })
+                    self.state.add_message(
+                        "system",
+                        {
+                            "hint": (
+                                f"MEMORY TACTIC HINT: prior scan confirmed "
+                                f"{_memory_success.get('finding_type', 'this tactic')} on "
+                                f"{_memory_success.get('affected_component', 'this surface')}. "
+                                f"Revalidate quickly with fresh transcript, then go deeper than before."
+                            ),
+                        },
+                    )
 
                 if name == "finish_scan":
                     _recent_finish_rejections = self._recent_finish_rejections(limit=3)
                     if len(_recent_finish_rejections) >= 2:
                         _latest_titles = {item.title for item in _recent_finish_rejections[-2:]}
                         _latest_title = next(iter(_latest_titles)) if _latest_titles else ""
-                        if len(_latest_titles) == 1 and _latest_title in {"needs_chains", "unfinished_branches", "unattempted_candidates"}:
+                        if len(_latest_titles) == 1 and _latest_title in {
+                            "needs_chains",
+                            "unfinished_branches",
+                            "unattempted_candidates",
+                        }:
                             _chain_candidates = self._suggest_chain_candidates(limit=3)
                             _auto_linked = await self._maybe_auto_link_suggested_chain()
                             _forced_action = self._forced_replan_action(_latest_title)
@@ -683,7 +783,7 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                             _forced_text = ""
                             if _auto_linked is not None:
                                 _auto_link_text = (
-                                    f" Auto-linked { _auto_linked['source_id'] } -> { _auto_linked['target_id'] } "
+                                    f" Auto-linked {_auto_linked['source_id']} -> {_auto_linked['target_id']} "
                                     f"toward {_auto_linked['crown_jewel']}."
                                 )
                             if _forced_action is not None:
@@ -693,33 +793,45 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                                     f"{item['source_id']} -> {item['target_id']} ({item['crown_jewel']})"
                                     for item in _chain_candidates
                                 ]
-                                _candidate_text = " Suggested chain candidates: " + "; ".join(_candidate_lines) + "."
+                                _candidate_text = (
+                                    " Suggested chain candidates: "
+                                    + "; ".join(_candidate_lines)
+                                    + "."
+                                )
                             _replan_msg = (
                                 "JUDGE REPLAN REQUIRED: finish_scan was rejected repeatedly for the same reason. "
                                 f"Last rejection: {_latest_title}.{_auto_link_text}{_forced_text} {_replan_hint}{_candidate_text}"
                             )
-                            self.state.add_message("tool", {
-                                "name": "finish_scan",
-                                "args": args,
-                                "result": {
-                                    "ok": False,
-                                    "summary": _replan_msg,
-                                    "data": {
-                                        "judge_replan_required": True,
-                                        "last_rejection_title": _latest_title,
-                                        "auto_linked_chain": _auto_linked,
-                                        "chain_candidates": _chain_candidates,
-                                        "forced_action": {
-                                            "tool": _forced_action[0],
-                                            "args": _forced_action[1],
-                                            "reason": _forced_action[2],
-                                        } if _forced_action is not None else None,
+                            self.state.add_message(
+                                "tool",
+                                {
+                                    "name": "finish_scan",
+                                    "args": args,
+                                    "result": {
+                                        "ok": False,
+                                        "summary": _replan_msg,
+                                        "data": {
+                                            "judge_replan_required": True,
+                                            "last_rejection_title": _latest_title,
+                                            "auto_linked_chain": _auto_linked,
+                                            "chain_candidates": _chain_candidates,
+                                            "forced_action": {
+                                                "tool": _forced_action[0],
+                                                "args": _forced_action[1],
+                                                "reason": _forced_action[2],
+                                            }
+                                            if _forced_action is not None
+                                            else None,
+                                        },
                                     },
                                 },
-                            })
-                            self.state.add_message("system", {
-                                "hint": f"SYSTEM HINT: {_replan_hint}",
-                            })
+                            )
+                            self.state.add_message(
+                                "system",
+                                {
+                                    "hint": f"SYSTEM HINT: {_replan_hint}",
+                                },
+                            )
                             for _cid in _action_candidate_ids:
                                 self.state.record_attempt_outcome(
                                     _cid,
@@ -750,9 +862,18 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                     _data = result.data if isinstance(result.data, dict) else {}
                     if _data.get("blocked"):
                         self.state.record_blocked_skill(str(args.get("skill") or ""))
-                self.state.add_message("tool", {"name": name, "args": args, "result": {
-                    "ok": result.ok, "summary": result.summary, "data": result.data,
-                }})
+                self.state.add_message(
+                    "tool",
+                    {
+                        "name": name,
+                        "args": args,
+                        "result": {
+                            "ok": result.ok,
+                            "summary": result.summary,
+                            "data": result.data,
+                        },
+                    },
+                )
                 for _cid in _action_candidate_ids:
                     self.state.record_attempt_outcome(
                         _cid,
@@ -793,19 +914,18 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                 # picked test_signature_audit on its own the pipeline's
                 # _DESKTOP_SKILL_TO_VECTORS lookup found nothing → VC=0
                 # despite real skill execution (Q9 smoke proof).
-                if (
-                    name == "run_skill"
-                    and result.ok
-                    and isinstance(args, dict)
-                ):
+                if name == "run_skill" and result.ok and isinstance(args, dict):
                     _real_sk = str(args.get("skill") or "").strip()
                     if _real_sk:
                         _real_skills_completed.add(_real_sk)
                         _skills_completed.add(_real_sk)
                         if isinstance(result.data, dict):
                             await self._promote_direct_run_skill_result(_real_sk, result.data)
+                        _has_findings = bool(
+                            isinstance(result.data, dict) and (result.data.get("findings") or [])
+                        )
                         _promote_alias = f"promote::{_real_sk}::iter{self.state.iteration}"
-                        if _promote_alias not in _skill_promotion_replays:
+                        if _has_findings and _promote_alias not in _skill_promotion_replays:
                             _skill_promotion_replays.add(_promote_alias)
                             _promote_params = dict(args.get("params") or {})
                             _promote_params["_skill_override"] = _real_sk
@@ -846,6 +966,7 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                         if _baseline_size is None:
                             # Assume the most common size is the SPA shell
                             from collections import Counter
+
                             common = Counter(sizes).most_common(1)
                             if common and common[0][1] >= 3:
                                 _baseline_size = common[0][0]
@@ -880,32 +1001,79 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                                 findings_hint.append(
                                     f"  - {code} {size}B {norm_path} → auth-protected enumerable resource = IDOR candidate (severity=medium, finding_type=broken_access_control)"
                                 )
-                            elif code_i == 403 and any(x in lower for x in (".bak", ".old", ".backup", "~")):
+                            elif code_i == 403 and any(
+                                x in lower for x in (".bak", ".old", ".backup", "~")
+                            ):
                                 findings_hint.append(
                                     f"  - {code} {size}B {norm_path} → backup file accessible via bypass = info disclosure (severity=medium, finding_type=information_disclosure)"
                                 )
-                            elif code_i == 200 and "/ftp" in lower and _baseline_size and size != _baseline_size:
+                            elif (
+                                code_i == 200
+                                and "/ftp" in lower
+                                and _baseline_size
+                                and size != _baseline_size
+                            ):
                                 # FTP directory — Juice Shop classic
                                 findings_hint.append(
                                     f"  - {code} {size}B {norm_path} → directory listing exposed (size differs from shell {_baseline_size}) (severity=medium, finding_type=information_disclosure)"
                                 )
-                            elif code_i == 200 and _baseline_size is not None and size != _baseline_size and size > 100:
-                                sensitive = any(x in lower for x in (
-                                    "admin", "config", "api-doc", "swagger", "graphql",
-                                    ".git", ".env", "actuator", "debug", "backup",
-                                    "rest/admin", "rest/user", "rest/basket", "rest/order",
-                                    "rest/memories", "rest/captcha", "rest/languages",
-                                    "registration", "h2-console", "server-status",
-                                    "phpinfo", "wp-config", "wp-login", "wp-admin",
-                                    "phpmyadmin", "heapdump", "beans", "configprops",
-                                ))
+                            elif (
+                                code_i == 200
+                                and _baseline_size is not None
+                                and size != _baseline_size
+                                and size > 100
+                            ):
+                                sensitive = any(
+                                    x in lower
+                                    for x in (
+                                        "admin",
+                                        "config",
+                                        "api-doc",
+                                        "swagger",
+                                        "graphql",
+                                        ".git",
+                                        ".env",
+                                        "actuator",
+                                        "debug",
+                                        "backup",
+                                        "rest/admin",
+                                        "rest/user",
+                                        "rest/basket",
+                                        "rest/order",
+                                        "rest/memories",
+                                        "rest/captcha",
+                                        "rest/languages",
+                                        "registration",
+                                        "h2-console",
+                                        "server-status",
+                                        "phpinfo",
+                                        "wp-config",
+                                        "wp-login",
+                                        "wp-admin",
+                                        "phpmyadmin",
+                                        "heapdump",
+                                        "beans",
+                                        "configprops",
+                                    )
+                                )
                                 if sensitive:
                                     # Critical-level paths get HIGH, others MEDIUM
                                     critical_markers = (
-                                        "admin", "config", ".git", ".env", "actuator",
-                                        "heapdump", "phpinfo", "wp-config", "h2-console",
+                                        "admin",
+                                        "config",
+                                        ".git",
+                                        ".env",
+                                        "actuator",
+                                        "heapdump",
+                                        "phpinfo",
+                                        "wp-config",
+                                        "h2-console",
                                     )
-                                    sev = "high" if any(x in lower for x in critical_markers) else "medium"
+                                    sev = (
+                                        "high"
+                                        if any(x in lower for x in critical_markers)
+                                        else "medium"
+                                    )
                                     findings_hint.append(
                                         f"  - {code} {size}B {norm_path} → sensitive endpoint returning {size}B (differs from SPA shell {_baseline_size}B) (severity={sev}, finding_type=information_disclosure)"
                                     )
@@ -957,7 +1125,8 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                             self.state.add_message("user", hint_msg)
                             logger.info(
                                 "iter %d: injected finding hint with %d candidates",
-                                self.state.iteration, len(findings_hint),
+                                self.state.iteration,
+                                len(findings_hint),
                             )
 
                 # Sticky hint re-injection: after any tool call, check which
@@ -965,12 +1134,16 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                 # If there are still >= 2 unreported items, re-emit a condensed
                 # nudge. This catches the case where Brain reports 2 items and
                 # wanders off without finishing the list.
-                if _pending_findings and name != "report_finding" and _sticky_last_iter < self.state.iteration:
+                if (
+                    _pending_findings
+                    and name != "report_finding"
+                    and _sticky_last_iter < self.state.iteration
+                ):
                     try:
                         from vxis.agent.tools.finding_tools import _get_findings as _fget
+
                         reported_components = {
-                            (f["finding_type"].lower(), f["affected_component"])
-                            for f in _fget()
+                            (f["finding_type"].lower(), f["affected_component"]) for f in _fget()
                         }
                     except Exception:
                         reported_components = set()
@@ -986,6 +1159,7 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                         # Also add path-only version
                         try:
                             from urllib.parse import urlparse as _uparse
+
                             _rp = _uparse(_rc).path
                             if _rp:
                                 refuted_keys.add((str(rf.get("finding_type", "")).lower(), _rp))
@@ -998,20 +1172,24 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                     # Only nudge if there are unreported items AND we've done
                     # at least 2 non-report actions since the last hint (avoid
                     # spam after first emission). Also throttle: once per iter.
-                    if len(still_pending) >= 2 and name in ("python_exec", "shell_exec", "http_request"):
+                    if len(still_pending) >= 2 and name in (
+                        "python_exec",
+                        "shell_exec",
+                        "http_request",
+                    ):
                         _sticky_last_iter = self.state.iteration
                         nudge_lines = list(still_pending.values())[:6]
                         nudge_msg = (
                             "STICKY HINT REMINDER — you still have "
                             f"{len(still_pending)} unreported findings from the earlier "
                             "probe. Emit report_finding for each of these BEFORE any "
-                            "more probing:\n"
-                            + "\n".join(nudge_lines)
+                            "more probing:\n" + "\n".join(nudge_lines)
                         )
                         self.state.add_message("user", nudge_msg)
                         logger.info(
                             "iter %d: sticky re-injection, %d pending",
-                            self.state.iteration, len(still_pending),
+                            self.state.iteration,
+                            len(still_pending),
                         )
 
                 if name == "finish_scan":
@@ -1036,7 +1214,8 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                         )
                         logger.warning(
                             "iter %d: finish_scan rejected (min=%d)",
-                            self.state.iteration, _min_iters,
+                            self.state.iteration,
+                            _min_iters,
                         )
                         continue
 
@@ -1045,7 +1224,11 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                     # IDs + a ready-to-call link_chain template so Brain has
                     # no excuse to spin aimlessly.
                     try:
-                        from vxis.agent.tools.finding_tools import _get_findings as _gf2, _get_chains as _gc2
+                        from vxis.agent.tools.finding_tools import (
+                            _get_findings as _gf2,
+                            _get_chains as _gc2,
+                        )
+
                         _fin_findings = _gf2()
                         _fin_chains = _gc2()
                         _fin_chainable = self._chainable_findings(_fin_findings)
@@ -1075,7 +1258,7 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                                     f"{self.state.iteration} iterations. "
                                     "An empty report is not a scan. Pick a "
                                     "concrete probe NOW:\n"
-                                    "  - run_skill(skill=\"<one of the registered skills>\")\n"
+                                    '  - run_skill(skill="<one of the registered skills>")\n'
                                     "  - shell_exec — sqlmap/nuclei/ffuf for web, "
                                     "otool/codesign/lipo for macOS desktop\n"
                                     "  - report_finding — if you DO have evidence, report it before finishing\n"
@@ -1095,7 +1278,13 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                             # Build concrete chain suggestions from actual IDs.
                             # Group by severity — high/critical first so Brain
                             # is pointed at the most impactful composition.
-                            _sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4}
+                            _sev_order = {
+                                "critical": 0,
+                                "high": 1,
+                                "medium": 2,
+                                "low": 3,
+                                "informational": 4,
+                            }
                             _sorted = sorted(
                                 _fin_findings,
                                 key=lambda f: _sev_order.get(f.get("severity", "low"), 5),
@@ -1103,8 +1292,7 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                             # Take the top 4 and propose pairwise chains.
                             _top = [f["id"] for f in _sorted[:4]]
                             _existing_ids_in_chains = {
-                                tuple(sorted(c.get("finding_ids", [])))
-                                for c in _fin_chains
+                                tuple(sorted(c.get("finding_ids", []))) for c in _fin_chains
                             }
                             _suggestions: list[str] = []
                             for i in range(len(_top)):
@@ -1121,9 +1309,11 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                                         break
                                 if len(_suggestions) >= 4:
                                     break
-                            _sug_block = "\n  ".join(_suggestions) or "(build any chain you can imagine)"
+                            _sug_block = (
+                                "\n  ".join(_suggestions) or "(build any chain you can imagine)"
+                            )
                             _findings_block = "\n  ".join(
-                                f"{f['id']} [{f.get('severity','?').upper()}] {f.get('finding_type','')}: {f.get('title','')[:60]}"
+                                f"{f['id']} [{f.get('severity', '?').upper()}] {f.get('finding_type', '')}: {f.get('title', '')[:60]}"
                                 for f in _sorted[:10]
                             )
                             self._reject_finish_scan(
@@ -1153,12 +1343,18 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                             )
                             logger.warning(
                                 "iter %d: finish_scan rejected (%d chains / %d target, %d findings)",
-                                self.state.iteration, len(_fin_chains),
-                                _fin_desired, len(_fin_findings),
+                                self.state.iteration,
+                                len(_fin_chains),
+                                _fin_desired,
+                                len(_fin_findings),
                             )
                             continue
                         _blocking_branches = self._blocking_finish_branches()
-                        if _blocking_branches and self.state.iteration < self._finish_branch_guard_until(self.state.max_iters):
+                        if (
+                            _blocking_branches
+                            and self.state.iteration
+                            < self._finish_branch_guard_until(self.state.max_iters)
+                        ):
                             _branch_block = "\n  ".join(
                                 f"{b.id} p{b.priority} attempts={b.attempts} title={b.title} "
                                 f"objective={b.objective[:70]} next={b.next_step[:70]}"
@@ -1177,7 +1373,9 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                                     "until you either expand it into real impact/crown-jewel access, or clearly exhaust/block it."
                                 ),
                                 data={
-                                    "unfinished_branches": [b.to_dict() for b in _blocking_branches[:6]],
+                                    "unfinished_branches": [
+                                        b.to_dict() for b in _blocking_branches[:6]
+                                    ],
                                 },
                             )
                             logger.warning(
@@ -1187,7 +1385,9 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
                             )
                             continue
                         if self.state.max_iters >= 30:
-                            _open_candidates = self._remaining_high_yield_family_candidates(_fin_findings)
+                            _open_candidates = self._remaining_high_yield_family_candidates(
+                                _fin_findings
+                            )
                             if _open_candidates:
                                 _cand_block = "\n  ".join(
                                     f"{c.id} ({c.vector_id}) p{c.priority}: {c.title}"
@@ -1293,4 +1493,3 @@ class ScanLoopRunMixin(ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin,
             "retrieval_observations": self.state.retrieval_observations_as_dicts(),
             "shared_notes": list(self.state.shared_notes),
         }
-

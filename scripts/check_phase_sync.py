@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Phase 동기화 검증 스크립트.
+"""Phase/architecture sync check.
 
-pipeline.py의 실제 _run_phase 호출과 CLAUDE.md의 Phase 목록이
-일치하는지 검증한다. CI (lint.yml) 또는 pre-commit hook에서 실행.
+Legacy VXIS used ``pipeline.py`` with hardcoded ``_run_phase`` calls. Current
+VXIS uses ``scan_pipeline_v2.py`` as a thin shim over ``ScanAgentLoop``. This
+script supports both layouts so CI catches stale docs without failing just
+because the legacy pipeline has been removed.
 
 Usage:
     python scripts/check_phase_sync.py
@@ -20,7 +22,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PIPELINE_PY = ROOT / "src" / "vxis" / "pipeline" / "pipeline.py"
+PIPELINE_V2_PY = ROOT / "src" / "vxis" / "pipeline" / "scan_pipeline_v2.py"
 CLAUDE_MD = ROOT / "CLAUDE.md"
+ARCHITECTURE_MD = ROOT / "ARCHITECTURE.md"
 
 
 def extract_pipeline_phases() -> list[str]:
@@ -71,6 +75,9 @@ def extract_pipeline_phase_numbers(phases: list[str]) -> list[str]:
 
 
 def main() -> int:
+    if not PIPELINE_PY.exists():
+        return check_single_loop_architecture()
+
     errors: list[str] = []
 
     # 1. pipeline.py에서 실제 Phase 추출
@@ -92,9 +99,13 @@ def main() -> int:
             only_pipeline = set(pipeline_numbers) - set(claude_numbers)
             only_claude = set(claude_numbers) - set(pipeline_numbers)
             if only_pipeline:
-                errors.append(f"pipeline.py에만 있는 Phase: P{', P'.join(sorted(only_pipeline, key=int))}")
+                errors.append(
+                    f"pipeline.py에만 있는 Phase: P{', P'.join(sorted(only_pipeline, key=int))}"
+                )
             if only_claude:
-                errors.append(f"CLAUDE.md에만 있는 Phase: P{', P'.join(sorted(only_claude, key=int))}")
+                errors.append(
+                    f"CLAUDE.md에만 있는 Phase: P{', P'.join(sorted(only_claude, key=int))}"
+                )
     else:
         errors.append("CLAUDE.md에서 Phase 목록을 찾을 수 없음")
 
@@ -120,8 +131,7 @@ def main() -> int:
         actual_count = len(pipeline_phases)
         if claude_count != actual_count:
             errors.append(
-                f"CLAUDE.md phase count 불일치: "
-                f"'({claude_count} active)' vs 실제 {actual_count}개"
+                f"CLAUDE.md phase count 불일치: '({claude_count} active)' vs 실제 {actual_count}개"
             )
         else:
             print(f"✅ CLAUDE.md phase count: {claude_count} == 실제 {actual_count}")
@@ -135,6 +145,51 @@ def main() -> int:
         return 1
 
     print("\n✅ Phase 동기화 확인 완료 — pipeline.py ↔ CLAUDE.md 일치")
+    return 0
+
+
+def check_single_loop_architecture() -> int:
+    """Validate the post-Phase-A Brain-first architecture contract."""
+    errors: list[str] = []
+
+    if not PIPELINE_V2_PY.exists():
+        errors.append(f"scan_pipeline_v2.py missing: {PIPELINE_V2_PY}")
+    else:
+        code = PIPELINE_V2_PY.read_text(encoding="utf-8")
+        required_terms = [
+            "ScanAgentLoop",
+            "build_default_registry",
+            "_get_findings",
+            "_get_chains",
+            "ReportGenerator",
+            "brain_decision_count",
+        ]
+        missing = [term for term in required_terms if term not in code]
+        if missing:
+            errors.append(f"scan_pipeline_v2.py missing contract term(s): {', '.join(missing)}")
+
+    if not ARCHITECTURE_MD.exists():
+        errors.append("ARCHITECTURE.md missing")
+    else:
+        arch = ARCHITECTURE_MD.read_text(encoding="utf-8")
+        required_docs = [
+            "Brain-First Single-Loop",
+            "ScanPipeline (v2)",
+            "ScanAgentLoop",
+            "AgentBrain",
+            "1 tool per message",
+        ]
+        missing_docs = [term for term in required_docs if term not in arch]
+        if missing_docs:
+            errors.append(f"ARCHITECTURE.md missing contract term(s): {', '.join(missing_docs)}")
+
+    if errors:
+        print(f"\n❌ {len(errors)}개 architecture sync issue(s):", file=sys.stderr)
+        for error in errors:
+            print(f"  - {error}", file=sys.stderr)
+        return 1
+
+    print("✅ Brain-first v2 architecture sync 확인 완료")
     return 0
 
 

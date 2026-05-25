@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 import pytest
 
@@ -262,9 +261,7 @@ async def test_concurrent_execution_for_independent_nodes() -> None:
 
     # If they ran sequentially this would be >= 2 * DELAY; parallel should be
     # close to 1 * DELAY.  Use 1.8 * DELAY as a generous upper bound.
-    assert elapsed < DELAY * 1.8, (
-        f"Nodes appear to have run sequentially: elapsed={elapsed:.3f}s"
-    )
+    assert elapsed < DELAY * 1.8, f"Nodes appear to have run sequentially: elapsed={elapsed:.3f}s"
 
 
 # ---------------------------------------------------------------------------

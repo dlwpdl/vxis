@@ -118,7 +118,7 @@ class CrtshPlugin(BasePlugin):
             not_before_str: str = cert.get("not_before", "")
             not_after_str: str = cert.get("not_after", "")
 
-            not_before = _parse_dt(not_before_str)
+            _parse_dt(not_before_str)
             not_after = _parse_dt(not_after_str)
 
             entry: dict[str, Any] = {
@@ -142,52 +142,58 @@ class CrtshPlugin(BasePlugin):
 
             # --- Finding: expired certificate ---
             if not_after and not_after < now:
-                findings.append({
-                    "type": "expired_certificate",
-                    "severity": "high",
-                    "title": f"Expired Certificate: {common_name}",
-                    "description": (
-                        f"The certificate for '{common_name}' expired on {not_after_str}. "
-                        "Expired certificates cause browser warnings and can indicate "
-                        "neglected certificate management processes."
-                    ),
-                    "common_name": common_name,
-                    "expired_at": not_after_str,
-                    "issuer": issuer_name,
-                })
+                findings.append(
+                    {
+                        "type": "expired_certificate",
+                        "severity": "high",
+                        "title": f"Expired Certificate: {common_name}",
+                        "description": (
+                            f"The certificate for '{common_name}' expired on {not_after_str}. "
+                            "Expired certificates cause browser warnings and can indicate "
+                            "neglected certificate management processes."
+                        ),
+                        "common_name": common_name,
+                        "expired_at": not_after_str,
+                        "issuer": issuer_name,
+                    }
+                )
 
             # --- Finding: wildcard certificate ---
             if "*." in common_name or "*." in name_value:
-                findings.append({
-                    "type": "wildcard_certificate",
-                    "severity": "informational",
-                    "title": f"Wildcard Certificate Detected: {common_name}",
-                    "description": (
-                        f"A wildcard certificate '{common_name}' was found. "
-                        "Wildcard certificates cover all subdomains but increase blast radius "
-                        "if the private key is compromised."
-                    ),
-                    "common_name": common_name,
-                    "issuer": issuer_name,
-                })
+                findings.append(
+                    {
+                        "type": "wildcard_certificate",
+                        "severity": "informational",
+                        "title": f"Wildcard Certificate Detected: {common_name}",
+                        "description": (
+                            f"A wildcard certificate '{common_name}' was found. "
+                            "Wildcard certificates cover all subdomains but increase blast radius "
+                            "if the private key is compromised."
+                        ),
+                        "common_name": common_name,
+                        "issuer": issuer_name,
+                    }
+                )
 
             # --- Finding: unexpected/untrusted CA ---
             issuer_lower = issuer_name.lower()
             is_known_ca = any(frag in issuer_lower for frag in _EXPECTED_CA_FRAGMENTS)
             if issuer_name and not is_known_ca:
-                findings.append({
-                    "type": "unexpected_ca",
-                    "severity": "medium",
-                    "title": f"Certificate Issued by Unexpected CA: {issuer_name}",
-                    "description": (
-                        f"The certificate for '{common_name}' was issued by '{issuer_name}', "
-                        "which is not a commonly recognized public CA. "
-                        "This may indicate a private/internal CA, a misissued certificate, "
-                        "or a potential man-in-the-middle attack."
-                    ),
-                    "common_name": common_name,
-                    "issuer": issuer_name,
-                })
+                findings.append(
+                    {
+                        "type": "unexpected_ca",
+                        "severity": "medium",
+                        "title": f"Certificate Issued by Unexpected CA: {issuer_name}",
+                        "description": (
+                            f"The certificate for '{common_name}' was issued by '{issuer_name}', "
+                            "which is not a commonly recognized public CA. "
+                            "This may indicate a private/internal CA, a misissued certificate, "
+                            "or a potential man-in-the-middle attack."
+                        ),
+                        "common_name": common_name,
+                        "issuer": issuer_name,
+                    }
+                )
 
         return PluginOutput(
             plugin_name=self.meta.name,

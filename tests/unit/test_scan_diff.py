@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 
-from vxis.core.scan_diff import ScanDiffResult, compare_finding_lists, ChangedFinding
+from vxis.core.scan_diff import ScanDiffResult, compare_finding_lists
 from vxis.models.finding import Finding, Severity
 
 

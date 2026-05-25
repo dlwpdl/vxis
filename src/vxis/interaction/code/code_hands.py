@@ -13,10 +13,10 @@ IMPORTANT: CodeHands MUST NOT call report_finding at any point.
            adapter (code_to_hypothesis.py) converts its output into
            unverified Hypothesis objects for the P3 queue.
 """
+
 from __future__ import annotations
 
 import fnmatch
-import os
 import re
 from pathlib import Path
 
@@ -171,9 +171,7 @@ class CodeHands(Hands):
             search_paths = resolved_list
         else:
             search_paths = [
-                f
-                for f in self._root.rglob("*")
-                if f.is_file() and not _is_binary_path(f)
+                f for f in self._root.rglob("*") if f.is_file() and not _is_binary_path(f)
             ]
 
         matches: list[str] = []
@@ -233,8 +231,24 @@ class CodeHands(Hands):
 def _is_binary_path(path: Path) -> bool:
     """Heuristic: skip known binary / compiled extensions."""
     _BINARY_SUFFIXES = {
-        ".pyc", ".pyo", ".so", ".dylib", ".dll", ".exe",
-        ".o", ".a", ".class", ".jar", ".zip", ".tar", ".gz",
-        ".jpg", ".jpeg", ".png", ".gif", ".pdf", ".ico",
+        ".pyc",
+        ".pyo",
+        ".so",
+        ".dylib",
+        ".dll",
+        ".exe",
+        ".o",
+        ".a",
+        ".class",
+        ".jar",
+        ".zip",
+        ".tar",
+        ".gz",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".pdf",
+        ".ico",
     }
     return path.suffix.lower() in _BINARY_SUFFIXES

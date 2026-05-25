@@ -8,12 +8,12 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
-
 from vxis.growth.changelog import ChangeLog
 from vxis.growth.classifier import classify_proposal, should_auto_apply
 from vxis.growth.config import load_bootstrap_config
 from vxis.growth.schemas import NewsIntelligence, Proposal
+
+logger = logging.getLogger(__name__)
 
 PROPOSALS_DIR = Path(".vxis/signals/proposals")
 APPLIED_DIR = Path(".vxis/signals/applied")
@@ -36,14 +36,8 @@ def generate_proposals(intel: NewsIntelligence) -> list[Proposal]:
                 change_data=v,
                 confidence=intel.trust_score * 0.9,
                 risk="low",
-                rationale_en=(
-                    f"New vector from {intel.source_name}: "
-                    f"{v.get('name_en', '')}"
-                ),
-                rationale_ko=(
-                    f"{intel.source_name}에서 도출된 새 벡터: "
-                    f"{v.get('name_ko', '')}"
-                ),
+                rationale_en=(f"New vector from {intel.source_name}: {v.get('name_en', '')}"),
+                rationale_ko=(f"{intel.source_name}에서 도출된 새 벡터: {v.get('name_ko', '')}"),
                 source_url=intel.article_url,
             )
         )
@@ -55,16 +49,12 @@ def generate_proposals(intel: NewsIntelligence) -> list[Proposal]:
                 proposal_id=f"{intel.signal_id}-phase-{i}",
                 source_signal_id=intel.signal_id,
                 change_type="guide_advice_append",
-                target_file=(
-                    f"src/vxis/phases/guides/{phase_id.lower()}.py"
-                ),
+                target_file=(f"src/vxis/phases/guides/{phase_id.lower()}.py"),
                 change_data=pu,
                 confidence=intel.trust_score * 0.85,
                 risk="low",
                 rationale_en=f"Phase update from {intel.source_name}",
-                rationale_ko=(
-                    f"{intel.source_name}에서 도출된 Phase 업데이트"
-                ),
+                rationale_ko=(f"{intel.source_name}에서 도출된 Phase 업데이트"),
                 source_url=intel.article_url,
             )
         )
@@ -80,9 +70,7 @@ def generate_proposals(intel: NewsIntelligence) -> list[Proposal]:
                 confidence=intel.trust_score * 0.8,
                 risk="low",
                 rationale_en=f"KB pattern from {intel.source_name}",
-                rationale_ko=(
-                    f"{intel.source_name}에서 도출된 KB 패턴"
-                ),
+                rationale_ko=(f"{intel.source_name}에서 도출된 KB 패턴"),
                 source_url=intel.article_url,
             )
         )
@@ -108,14 +96,8 @@ def generate_proposals(intel: NewsIntelligence) -> list[Proposal]:
                 change_data=kb,
                 confidence=intel.trust_score * 0.8,
                 risk="low",
-                rationale_en=(
-                    f"New {technique} payload from "
-                    f"{intel.source_name}: {payload[:60]}"
-                ),
-                rationale_ko=(
-                    f"{intel.source_name}에서 새 {technique} "
-                    f"페이로드: {payload[:60]}"
-                ),
+                rationale_en=(f"New {technique} payload from {intel.source_name}: {payload[:60]}"),
+                rationale_ko=(f"{intel.source_name}에서 새 {technique} 페이로드: {payload[:60]}"),
                 source_url=intel.article_url,
             )
         )
@@ -138,19 +120,19 @@ _PAYLOAD_DATA_ROOT = Path("src/vxis/data/payloads")
 # correct because the growth loop shouldn't PR into files it can't
 # schema-validate.
 _TECHNIQUE_TARGETS: dict[str, tuple[str, str, str]] = {
-    "sqli":          ("injection",             "round",          "3"),
-    "sql_injection": ("injection",             "round",          "3"),
-    "xss":           ("xss",                   "round",          "3"),
-    "rce":           ("injection",             "round",          "3"),
-    "ssrf":          ("test_ssrf",             "dataset",        "ssrf_payloads"),
-    "ssti":          ("injection",             "round",          "3"),
-    "cmdi":          ("injection",             "round",          "3"),
-    "nosql":         ("injection",             "round",          "3"),
-    "xxe":           ("injection",             "round",          "3"),
-    "path_traversal":("test_sensitive_files",  "dataset_triple", "sensitive_paths"),
-    "auth_bypass":   ("attempt_auth",          "dataset_tuple",  "default_creds"),
-    "jwt":           ("attempt_auth",          "dataset_tuple",  "default_creds"),
-    "csrf":          ("injection",             "round",          "3"),
+    "sqli": ("injection", "round", "3"),
+    "sql_injection": ("injection", "round", "3"),
+    "xss": ("xss", "round", "3"),
+    "rce": ("injection", "round", "3"),
+    "ssrf": ("test_ssrf", "dataset", "ssrf_payloads"),
+    "ssti": ("injection", "round", "3"),
+    "cmdi": ("injection", "round", "3"),
+    "nosql": ("injection", "round", "3"),
+    "xxe": ("injection", "round", "3"),
+    "path_traversal": ("test_sensitive_files", "dataset_triple", "sensitive_paths"),
+    "auth_bypass": ("attempt_auth", "dataset_tuple", "default_creds"),
+    "jwt": ("attempt_auth", "dataset_tuple", "default_creds"),
+    "csrf": ("injection", "round", "3"),
 }
 
 
@@ -236,11 +218,10 @@ def _apply_skill_payload(proposal: Proposal) -> bool:
             _PayloadFile,
             clear_cache,
         )
+
         _PayloadFile.model_validate(content)
     except Exception as e:
-        logger.warning(
-            "Growth payload injection fails schema for %s: %s", target, e
-        )
+        logger.warning("Growth payload injection fails schema for %s: %s", target, e)
         return False
 
     target.write_text(
@@ -275,16 +256,30 @@ def _load_pending_proposal_records() -> list[tuple[Path, dict]]:
 
 
 def _proposal_is_test_artifact(proposal: Proposal | dict) -> bool:
-    source_signal_id = str(
-        proposal.source_signal_id if isinstance(proposal, Proposal) else proposal.get("source_signal_id", "")
-    ).strip().lower()
-    proposal_id = str(
-        proposal.proposal_id if isinstance(proposal, Proposal) else proposal.get("proposal_id", "")
-    ).strip().lower()
+    source_signal_id = (
+        str(
+            proposal.source_signal_id
+            if isinstance(proposal, Proposal)
+            else proposal.get("source_signal_id", "")
+        )
+        .strip()
+        .lower()
+    )
+    proposal_id = (
+        str(
+            proposal.proposal_id
+            if isinstance(proposal, Proposal)
+            else proposal.get("proposal_id", "")
+        )
+        .strip()
+        .lower()
+    )
     return source_signal_id.startswith("test-") or proposal_id.startswith("test-")
 
 
-def _proposal_meets_pending_threshold(proposal: Proposal | dict, config: dict | None = None) -> bool:
+def _proposal_meets_pending_threshold(
+    proposal: Proposal | dict, config: dict | None = None
+) -> bool:
     cfg = config or load_bootstrap_config()
     confidence = float(
         proposal.confidence if isinstance(proposal, Proposal) else proposal.get("confidence", 0.0)
@@ -370,42 +365,54 @@ def apply_proposals(proposals: list[Proposal]) -> dict:
                 applied = _apply_skill_payload(proposal)
                 if applied:
                     results["skill_files_modified"] += 1
-                    log.record("skill_payload_applied", {
-                        "proposal_id": proposal.proposal_id,
-                        "target_file": proposal.target_file,
-                        "payload": str(proposal.change_data.get("payload", ""))[:60],
-                    })
+                    log.record(
+                        "skill_payload_applied",
+                        {
+                            "proposal_id": proposal.proposal_id,
+                            "target_file": proposal.target_file,
+                            "payload": str(proposal.change_data.get("payload", ""))[:60],
+                        },
+                    )
 
             save_proposal(proposal, APPLIED_DIR)
             proposal.status = "auto_applied"
             proposal.applied_at = datetime.now(timezone.utc).isoformat()
-            log.record("proposal_auto_applied", {
-                "proposal_id": proposal.proposal_id,
-                "change_type": proposal.change_type,
-                "confidence": proposal.confidence,
-                "tier": "high",
-            })
+            log.record(
+                "proposal_auto_applied",
+                {
+                    "proposal_id": proposal.proposal_id,
+                    "change_type": proposal.change_type,
+                    "confidence": proposal.confidence,
+                    "tier": "high",
+                },
+            )
             results["auto_applied"] += 1
 
         elif proposal.confidence >= pr_threshold:
             # 🟡 MEDIUM confidence: pending for PR review
             save_proposal(proposal, PENDING_DIR)
             proposal.status = "pending_review"
-            log.record("proposal_pending_review", {
-                "proposal_id": proposal.proposal_id,
-                "change_type": proposal.change_type,
-                "confidence": proposal.confidence,
-                "tier": "medium",
-            })
+            log.record(
+                "proposal_pending_review",
+                {
+                    "proposal_id": proposal.proposal_id,
+                    "change_type": proposal.change_type,
+                    "confidence": proposal.confidence,
+                    "tier": "medium",
+                },
+            )
             results["pending_review"] += 1
 
         else:
             # 🔴 LOW confidence: discard
-            log.record("proposal_discarded", {
-                "proposal_id": proposal.proposal_id,
-                "confidence": proposal.confidence,
-                "tier": "low",
-            })
+            log.record(
+                "proposal_discarded",
+                {
+                    "proposal_id": proposal.proposal_id,
+                    "confidence": proposal.confidence,
+                    "tier": "low",
+                },
+            )
             results["discarded"] += 1
 
     return results

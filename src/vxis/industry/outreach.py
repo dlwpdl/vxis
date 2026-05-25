@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -76,8 +76,7 @@ class OutreachItem:
     def __post_init__(self) -> None:
         if self.status not in _VALID_STATUSES:
             raise ValueError(
-                f"유효하지 않은 상태: {self.status!r}. "
-                f"허용 값: {sorted(_VALID_STATUSES)}"
+                f"유효하지 않은 상태: {self.status!r}. 허용 값: {sorted(_VALID_STATUSES)}"
             )
 
     def to_dict(self) -> dict[str, object]:
@@ -164,9 +163,7 @@ class OutreachQueue:
         report_path = self._reports_dir / report_filename
 
         report_path.write_text(report_html, encoding="utf-8")
-        logger.info(
-            "리포트 생성됨: %s → %s", company.name, report_path
-        )
+        logger.info("리포트 생성됨: %s → %s", company.name, report_path)
 
         return OutreachItem(
             item_id=item_id,
@@ -206,11 +203,7 @@ class OutreachQueue:
         Returns:
             승인 대기 중인 :class:`OutreachItem` 목록.
         """
-        return [
-            OutreachItem.from_dict(r)
-            for r in self._load_raw()
-            if r.get("status") == "pending"
-        ]
+        return [OutreachItem.from_dict(r) for r in self._load_raw() if r.get("status") == "pending"]
 
     def get_all(self) -> list[OutreachItem]:
         """전체 큐 항목을 반환합니다."""
@@ -275,8 +268,7 @@ class OutreachQueue:
             raise KeyError(f"항목을 찾을 수 없습니다: {item_id}")
         if target.get("status") != "approved":
             raise ValueError(
-                f"발송 처리는 'approved' 상태만 가능합니다. "
-                f"현재 상태: {target.get('status')!r}"
+                f"발송 처리는 'approved' 상태만 가능합니다. 현재 상태: {target.get('status')!r}"
             )
         return self._update_status(item_id, "sent", notes)
 
@@ -284,9 +276,7 @@ class OutreachQueue:
     # 내부 헬퍼
     # ------------------------------------------------------------------
 
-    def _update_status(
-        self, item_id: str, new_status: str, notes: str
-    ) -> OutreachItem:
+    def _update_status(self, item_id: str, new_status: str, notes: str) -> OutreachItem:
         """큐 파일에서 특정 항목의 상태를 업데이트합니다."""
         raw_list = self._load_raw()
         updated: dict | None = None
@@ -306,9 +296,7 @@ class OutreachQueue:
             json.dumps(raw_list, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-        logger.info(
-            "큐 상태 변경: %s → %s (notes=%r)", item_id[:8], new_status, notes[:50]
-        )
+        logger.info("큐 상태 변경: %s → %s (notes=%r)", item_id[:8], new_status, notes[:50])
         return OutreachItem.from_dict(updated)
 
     def _load_raw(self) -> list[dict]:
@@ -340,16 +328,18 @@ class OutreachQueue:
 
         total = len(industry_result.companies)
         worse_than = sum(
-            1
-            for c in industry_result.companies
-            if c.findings_count > company.findings_count
+            1 for c in industry_result.companies if c.findings_count > company.findings_count
         )
         percentile = int((worse_than / total) * 100) if total > 0 else 0
         inverse_pct = 100 - percentile  # 하위 X%
 
         avg_grade = industry_result.average_grade
         grade_label = {
-            "A": "우수", "B": "양호", "C": "주의", "D": "위험", "F": "심각",
+            "A": "우수",
+            "B": "양호",
+            "C": "주의",
+            "D": "위험",
+            "F": "심각",
         }.get(company.security_grade, "미평가")
 
         return f"""
@@ -375,8 +365,11 @@ class OutreachQueue:
         import html as _html
 
         grade_colors = {
-            "A": "#2ecc71", "B": "#3498db", "C": "#e67e22",
-            "D": "#c0392b", "F": "#7b2c34",
+            "A": "#2ecc71",
+            "B": "#3498db",
+            "C": "#e67e22",
+            "D": "#c0392b",
+            "F": "#7b2c34",
         }
         grade_color = grade_colors.get(company.security_grade, "#95a5a6")
         grade = _html.escape(company.security_grade or "N/A")
@@ -385,16 +378,18 @@ class OutreachQueue:
         industry = _html.escape(company.industry or "")
         last_scanned = _html.escape(company.last_scanned or "-")
 
-        severity_rows = "\n".join([
-            f"<tr><td>Critical</td><td style='color:#c0392b;font-weight:700'>{company.critical_count}</td></tr>",
-            f"<tr><td>High</td><td style='color:#e67e22;font-weight:700'>{company.high_count}</td></tr>",
-            f"<tr><td>총 취약점</td><td>{company.findings_count}</td></tr>",
-        ])
+        severity_rows = "\n".join(
+            [
+                f"<tr><td>Critical</td><td style='color:#c0392b;font-weight:700'>{company.critical_count}</td></tr>",
+                f"<tr><td>High</td><td style='color:#e67e22;font-weight:700'>{company.high_count}</td></tr>",
+                f"<tr><td>총 취약점</td><td>{company.findings_count}</td></tr>",
+            ]
+        )
 
         tech_stack_html = (
             " ".join(
                 f'<span style="background:#1e3a5f;padding:2px 8px;border-radius:4px;font-size:0.8em">'
-                f'{_html.escape(t)}</span>'
+                f"{_html.escape(t)}</span>"
                 for t in (company.tech_stack or [])
             )
             or "<em>정보 없음</em>"

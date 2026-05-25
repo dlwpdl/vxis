@@ -1,8 +1,8 @@
 """FileBasedBrain 단위 테스트."""
+
 import json
 import os
 import tempfile
-from pathlib import Path
 
 import pytest
 
@@ -73,12 +73,21 @@ def test_think_writes_observation_and_waits_for_decision():
         def write_decision():
             time.sleep(0.5)
             decision_path = os.path.join(tmpdir, "decision.json")
-            atomic_write(decision_path, {
-                "vector_id": "WEB-XSS-001",
-                "attempt": True,
-                "reasoning": "test decision",
-                "targets": [{"endpoint": "/search.php", "param": "q", "payloads": ["<script>alert(1)</script>"]}],
-            })
+            atomic_write(
+                decision_path,
+                {
+                    "vector_id": "WEB-XSS-001",
+                    "attempt": True,
+                    "reasoning": "test decision",
+                    "targets": [
+                        {
+                            "endpoint": "/search.php",
+                            "param": "q",
+                            "payloads": ["<script>alert(1)</script>"],
+                        }
+                    ],
+                },
+            )
 
         t = threading.Thread(target=write_decision)
         t.start()

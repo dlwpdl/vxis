@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import json
 import zipfile
 from typing import Any
@@ -42,18 +41,13 @@ class BloodhoundPlugin(BasePlugin):
         nameserver: str = tool_config.get("nameserver", "")
 
         if not username or not password:
-            raise ValueError(
-                "bloodhound-python requires 'username' and 'password' in tool_config"
-            )
+            raise ValueError("bloodhound-python requires 'username' and 'password' in tool_config")
 
         # Collection methods: All covers group, localadmin, session, trusts, acl, etc.
         # bloodhound-python accepts a comma-separated list or the shorthand "All".
         collection: str = tool_config.get("collection", "All,Group,LocalAdmin,Session,Trusts")
 
-        cmd = (
-            f"bloodhound-python -d {domain} -u {username} -p {password}"
-            f" -c {collection} --zip"
-        )
+        cmd = f"bloodhound-python -d {domain} -u {username} -p {password} -c {collection} --zip"
         if nameserver:
             cmd += f" -ns {nameserver}"
         return cmd
@@ -173,41 +167,47 @@ class BloodhoundPlugin(BasePlugin):
 
         kerberoastable = summary.get("kerberoastable", 0)
         if kerberoastable > 0:
-            findings.append({
-                "type": "kerberoastable_users",
-                "severity": "high",
-                "title": f"Kerberoastable Users Detected ({kerberoastable})",
-                "description": (
-                    f"{kerberoastable} user account(s) have Service Principal Names (SPNs) "
-                    "set and are vulnerable to Kerberoasting attacks."
-                ),
-                "count": kerberoastable,
-            })
+            findings.append(
+                {
+                    "type": "kerberoastable_users",
+                    "severity": "high",
+                    "title": f"Kerberoastable Users Detected ({kerberoastable})",
+                    "description": (
+                        f"{kerberoastable} user account(s) have Service Principal Names (SPNs) "
+                        "set and are vulnerable to Kerberoasting attacks."
+                    ),
+                    "count": kerberoastable,
+                }
+            )
 
         unconstrained = summary.get("unconstrained_delegation", 0)
         if unconstrained > 0:
-            findings.append({
-                "type": "unconstrained_delegation",
-                "severity": "critical",
-                "title": f"Unconstrained Delegation Enabled ({unconstrained})",
-                "description": (
-                    f"{unconstrained} object(s) have unconstrained delegation enabled. "
-                    "An attacker who compromises these accounts can impersonate any domain user."
-                ),
-                "count": unconstrained,
-            })
+            findings.append(
+                {
+                    "type": "unconstrained_delegation",
+                    "severity": "critical",
+                    "title": f"Unconstrained Delegation Enabled ({unconstrained})",
+                    "description": (
+                        f"{unconstrained} object(s) have unconstrained delegation enabled. "
+                        "An attacker who compromises these accounts can impersonate any domain user."
+                    ),
+                    "count": unconstrained,
+                }
+            )
 
         asrep = summary.get("asreproastable", 0)
         if asrep > 0:
-            findings.append({
-                "type": "asrep_roastable_users",
-                "severity": "medium",
-                "title": f"AS-REP Roastable Users Detected ({asrep})",
-                "description": (
-                    f"{asrep} user account(s) do not require Kerberos pre-authentication "
-                    "and are vulnerable to AS-REP Roasting."
-                ),
-                "count": asrep,
-            })
+            findings.append(
+                {
+                    "type": "asrep_roastable_users",
+                    "severity": "medium",
+                    "title": f"AS-REP Roastable Users Detected ({asrep})",
+                    "description": (
+                        f"{asrep} user account(s) do not require Kerberos pre-authentication "
+                        "and are vulnerable to AS-REP Roasting."
+                    ),
+                    "count": asrep,
+                }
+            )
 
         return findings

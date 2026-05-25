@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from vxis.core.db import create_engine, get_session
-from vxis.models.db_models import FindingRecord, ScanRecord
+from vxis.models.db_models import ScanRecord
 
 router = APIRouter()
 

@@ -25,7 +25,6 @@ from typing import Any
 from vxis.agent.brain import AgentBrain, AgentAction, AgentObservation
 from vxis.agent.sandbox import DockerSandbox, SandboxManager, get_sandbox_manager
 from vxis.config.schema import VXISConfig
-from vxis.core.context import DAGContext, PluginOutput
 from vxis.core.events import ScanEventBus
 from vxis.core.orchestrator import ScanOrchestrator, ScanResult
 from vxis.core.scanner import ToolResult, run_tool
@@ -83,24 +82,28 @@ class AgentExecutor:
 
         try:
             from vxis.knowledge.store import KnowledgeStore
+
             self._knowledge_store = KnowledgeStore()
         except Exception as exc:
             logger.debug("KnowledgeStore 초기화 실패 (무시): %s", exc)
 
         try:
             from vxis.knowledge.compressor import ContextCompressor
+
             self._compressor = ContextCompressor()
         except Exception as exc:
             logger.debug("ContextCompressor 초기화 실패 (무시): %s", exc)
 
         try:
             from vxis.llm.router import TokenRouter
+
             self._token_router = TokenRouter()
         except Exception as exc:
             logger.debug("TokenRouter 초기화 실패 (무시): %s", exc)
 
         try:
             from vxis.graph.chain_reasoner import ChainReasoner
+
             self._chain_reasoner = ChainReasoner()
         except Exception as exc:
             logger.debug("ChainReasoner 초기화 실패 (무시): %s", exc)
@@ -132,6 +135,7 @@ class AgentExecutor:
         self._interaction_controller = None
         try:
             from vxis.interaction.controller import InteractionController
+
             self._interaction_controller_cls = InteractionController
             logger.info("CPR Interaction Layer 활성화")
         except Exception as exc:
@@ -196,11 +200,14 @@ class AgentExecutor:
                     results,
                 ):
                     if isinstance(result, Exception):
-                        self._brain.record_result(action, {
-                            "success": False,
-                            "summary": str(result),
-                            "findings_count": 0,
-                        })
+                        self._brain.record_result(
+                            action,
+                            {
+                                "success": False,
+                                "summary": str(result),
+                                "findings_count": 0,
+                            },
+                        )
                     else:
                         self._brain.record_result(action, result)
 
@@ -317,9 +324,18 @@ class AgentExecutor:
 
         # Map agent actions to orchestrator plugin runs
         plugin_tools = {
-            "nmap", "nuclei", "httpx", "testssl", "sslyze",
-            "subfinder", "checkdmarc", "wafw00f", "trufflehog",
-            "gitleaks", "crtsh", "dnstwist",
+            "nmap",
+            "nuclei",
+            "httpx",
+            "testssl",
+            "sslyze",
+            "subfinder",
+            "checkdmarc",
+            "wafw00f",
+            "trufflehog",
+            "gitleaks",
+            "crtsh",
+            "dnstwist",
         }
 
         if tool in plugin_tools:
@@ -334,11 +350,18 @@ class AgentExecutor:
             return {"success": False, "summary": f"Unknown tool: {tool}", "findings_count": 0}
 
     async def _run_interaction(
-        self, tool: str, target: str, args: dict,
+        self,
+        tool: str,
+        target: str,
+        args: dict,
     ) -> dict[str, Any]:
         """CPR 인터랙션 도구 실행."""
         if self._interaction_controller is None:
-            return {"success": False, "summary": "CPR not available (httpx not installed?)", "findings_count": 0}
+            return {
+                "success": False,
+                "summary": "CPR not available (httpx not installed?)",
+                "findings_count": 0,
+            }
 
         from vxis.interaction.controller import InteractionAction, InteractionIntent
 
@@ -372,20 +395,24 @@ class AgentExecutor:
 
             # 발견된 취약점을 observation에 추가
             for vuln in result.vulnerabilities:
-                self._observation.findings.append({
-                    "severity": "medium",
-                    "title": f"[CPR] {vuln.get('type', 'Unknown')}: {vuln.get('url', '')}",
-                    "source": f"cpr/{tool}",
-                    "target": target,
-                })
+                self._observation.findings.append(
+                    {
+                        "severity": "medium",
+                        "title": f"[CPR] {vuln.get('type', 'Unknown')}: {vuln.get('url', '')}",
+                        "source": f"cpr/{tool}",
+                        "target": target,
+                    }
+                )
 
             # 실행 기록
-            self._observation.executed_tools.append({
-                "tool": tool,
-                "state": "completed",
-                "findings": str(len(result.vulnerabilities)),
-                "details": obs,
-            })
+            self._observation.executed_tools.append(
+                {
+                    "tool": tool,
+                    "state": "completed",
+                    "findings": str(len(result.vulnerabilities)),
+                    "details": obs,
+                }
+            )
 
             summary_parts = [f"{tool}: {result.mode_used.value}"]
             if result.forms_found:
@@ -409,7 +436,10 @@ class AgentExecutor:
             return {"success": False, "summary": f"{tool} failed: {exc}", "findings_count": 0}
 
     async def _run_plugin(
-        self, plugin_name: str, target: str, profile: str,
+        self,
+        plugin_name: str,
+        target: str,
+        profile: str,
     ) -> dict[str, Any]:
         """Run a VXIS plugin via the orchestrator."""
         try:
@@ -423,11 +453,13 @@ class AgentExecutor:
             self._update_observation_from_result(result)
 
             # Record in executed tools
-            self._observation.executed_tools.append({
-                "tool": plugin_name,
-                "state": "completed",
-                "findings": str(len(new_findings)),
-            })
+            self._observation.executed_tools.append(
+                {
+                    "tool": plugin_name,
+                    "state": "completed",
+                    "findings": str(len(new_findings)),
+                }
+            )
 
             return {
                 "success": True,
@@ -435,11 +467,13 @@ class AgentExecutor:
                 "findings_count": len(new_findings),
             }
         except Exception as exc:
-            self._observation.executed_tools.append({
-                "tool": plugin_name,
-                "state": "failed",
-                "findings": "0",
-            })
+            self._observation.executed_tools.append(
+                {
+                    "tool": plugin_name,
+                    "state": "failed",
+                    "findings": "0",
+                }
+            )
             return {
                 "success": False,
                 "summary": f"{plugin_name} failed: {exc}",
@@ -478,6 +512,7 @@ class AgentExecutor:
         # sandbox 미사용 시에만 호스트 설치 여부 체크 (sandbox 안에는 이미 설치됨)
         if not self._sandbox_available:
             import shutil as _shutil
+
             if not _shutil.which("ffuf"):
                 return {"success": False, "summary": "ffuf not installed", "findings_count": 0}
 
@@ -486,11 +521,13 @@ class AgentExecutor:
         try:
             result = await self._run_command(cmd, target=target, timeout=120)
             lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
-            self._observation.executed_tools.append({
-                "tool": "ffuf",
-                "state": "completed",
-                "findings": str(len(lines)),
-            })
+            self._observation.executed_tools.append(
+                {
+                    "tool": "ffuf",
+                    "state": "completed",
+                    "findings": str(len(lines)),
+                }
+            )
             return {
                 "success": True,
                 "summary": f"ffuf: {len(lines)} paths discovered",
@@ -505,6 +542,7 @@ class AgentExecutor:
 
         if not self._sandbox_available:
             import shutil as _shutil
+
             if not _shutil.which("sqlmap"):
                 return {"success": False, "summary": "sqlmap not installed", "findings_count": 0}
 
@@ -519,18 +557,22 @@ class AgentExecutor:
             injectable = "injectable" in result.stdout.lower()
             findings = 1 if injectable else 0
 
-            self._observation.executed_tools.append({
-                "tool": "sqlmap",
-                "state": "completed",
-                "findings": str(findings),
-            })
+            self._observation.executed_tools.append(
+                {
+                    "tool": "sqlmap",
+                    "state": "completed",
+                    "findings": str(findings),
+                }
+            )
 
             if injectable:
-                self._observation.findings.append({
-                    "severity": "critical",
-                    "title": f"SQL Injection detected at {url}",
-                    "source": "sqlmap",
-                })
+                self._observation.findings.append(
+                    {
+                        "severity": "critical",
+                        "title": f"SQL Injection detected at {url}",
+                        "source": "sqlmap",
+                    }
+                )
 
             return {
                 "success": True,
@@ -545,12 +587,14 @@ class AgentExecutor:
     def _update_observation_from_result(self, result: ScanResult) -> None:
         """Extract useful info from scan result into observation."""
         for finding in result.findings:
-            self._observation.findings.append({
-                "severity": finding.severity.value,
-                "title": finding.title,
-                "source": finding.source_plugin,
-                "target": finding.target,
-            })
+            self._observation.findings.append(
+                {
+                    "severity": finding.severity.value,
+                    "title": finding.title,
+                    "source": finding.source_plugin,
+                    "target": finding.target,
+                }
+            )
 
         # Extract tech stack, ports, subdomains from tool runs
         for run in result.tool_runs:
@@ -561,11 +605,12 @@ class AgentExecutor:
 
             existing_tools = {t["tool"] for t in self._observation.executed_tools}
             if plugin not in existing_tools:
-                self._observation.executed_tools.append({
-                    "tool": plugin,
-                    "state": state,
-                    "findings": str(len([
-                        f for f in result.findings
-                        if f.source_plugin == plugin
-                    ])),
-                })
+                self._observation.executed_tools.append(
+                    {
+                        "tool": plugin,
+                        "state": state,
+                        "findings": str(
+                            len([f for f in result.findings if f.source_plugin == plugin])
+                        ),
+                    }
+                )

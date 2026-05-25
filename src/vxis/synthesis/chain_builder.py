@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
 
 from vxis.evidence.schema import Evidence, Severity
 from .cross_protocol import OSILayer, AttackCategory, SynthesizedChain
@@ -115,13 +114,14 @@ class ChainBuilder:
 
     async def build_trees(self) -> list[AttackTree]:
         """각 주요 발견에서 시작하는 공격 트리를 구축한다."""
-        from .cross_protocol import _AGENT_LAYER_MAP, _KEYWORD_CATEGORY_MAP
+        from .cross_protocol import _AGENT_LAYER_MAP
 
         trees = []
 
         # high/critical severity 또는 credential/access 관련 발견만 시드로
         seeds = [
-            f for f in self._findings
+            f
+            for f in self._findings
             if f.severity in (Severity.CRITICAL, Severity.HIGH, Severity.MEDIUM)
         ]
 
@@ -183,8 +183,9 @@ class ChainBuilder:
         hypothetical = await self._ask_llm_next_steps(node, tree)
 
         # 실제 발견 기반 분기
-        for finding in connected[:self._max_branches]:
+        for finding in connected[: self._max_branches]:
             from .cross_protocol import _AGENT_LAYER_MAP
+
             layer = _AGENT_LAYER_MAP.get(finding.agent_id, OSILayer.APPLICATION)
             cats = self._get_categories(finding)
 
@@ -209,16 +210,14 @@ class ChainBuilder:
             await self._expand_node(child, tree, depth + 1)
 
         # LLM 추론 기반 가상 분기
-        for hyp in hypothetical[:self._max_branches]:
+        for hyp in hypothetical[: self._max_branches]:
             child = AttackTreeNode(
                 id=f"hyp_{node.id[:8]}_{depth}_{len(node.children)}",
                 title=hyp.get("title", "추론된 공격 단계"),
                 description=hyp.get("description", ""),
                 severity=Severity(hyp.get("severity", "medium")),
                 layer=OSILayer(hyp.get("layer", "L7_application")),
-                category=AttackCategory(
-                    hyp.get("category", "lateral_movement")
-                ),
+                category=AttackCategory(hyp.get("category", "lateral_movement")),
                 depth=depth,
                 is_hypothetical=True,
                 parent_id=node.id,
@@ -279,10 +278,22 @@ class ChainBuilder:
         # credential → access, access → data 같은 자연 흐름
         natural_flows = {
             AttackCategory.RECONNAISSANCE: {AttackCategory.INITIAL_ACCESS},
-            AttackCategory.INITIAL_ACCESS: {AttackCategory.CREDENTIAL_HARVEST, AttackCategory.LATERAL_MOVEMENT},
-            AttackCategory.CREDENTIAL_HARVEST: {AttackCategory.LATERAL_MOVEMENT, AttackCategory.PRIVILEGE_ESCALATION},
-            AttackCategory.LATERAL_MOVEMENT: {AttackCategory.DATA_EXFILTRATION, AttackCategory.PRIVILEGE_ESCALATION},
-            AttackCategory.PRIVILEGE_ESCALATION: {AttackCategory.DATA_EXFILTRATION, AttackCategory.PERSISTENCE},
+            AttackCategory.INITIAL_ACCESS: {
+                AttackCategory.CREDENTIAL_HARVEST,
+                AttackCategory.LATERAL_MOVEMENT,
+            },
+            AttackCategory.CREDENTIAL_HARVEST: {
+                AttackCategory.LATERAL_MOVEMENT,
+                AttackCategory.PRIVILEGE_ESCALATION,
+            },
+            AttackCategory.LATERAL_MOVEMENT: {
+                AttackCategory.DATA_EXFILTRATION,
+                AttackCategory.PRIVILEGE_ESCALATION,
+            },
+            AttackCategory.PRIVILEGE_ESCALATION: {
+                AttackCategory.DATA_EXFILTRATION,
+                AttackCategory.PERSISTENCE,
+            },
         }
 
         for nc in node_cats:
@@ -341,6 +352,7 @@ JSON 배열로 응답 (빈 배열 가능):
 
         try:
             from vxis.llm.client import LLMClient
+
             client = LLMClient()
             response = await client.think(
                 system="당신은 레드팀 전문가입니다. 현재 공격 위치에서 가능한 다음 단계를 추론합니다.",
@@ -378,7 +390,7 @@ JSON 배열로 응답 (빈 배열 가능):
                     continue
 
                 # 체인 severity 결정: 경로 중 가장 높은 severity
-                max_sev = max(path, key=lambda n: _severity_rank(n.severity))
+                max(path, key=lambda n: _severity_rank(n.severity))
 
                 # 실제 발견만 추출
                 real_findings = [n.source_finding for n in path if n.source_finding]
@@ -399,7 +411,7 @@ JSON 배열로 응답 (빈 배열 가능):
                     individual_severity_sum=individual,
                     escalation_reason=(
                         f"{len(layers)}개 레이어를 넘나드는 체인: "
-                        f"{' → '.join(l.value for l in layers)}. "
+                        f"{' → '.join(layer.value for layer in layers)}. "
                         f"개별 {individual} → 체인 {_escalate_severity(path).value.upper()}"
                     ),
                 )
@@ -411,6 +423,7 @@ JSON 배열로 응답 (빈 배열 가능):
     def _get_categories(finding: Evidence) -> list[AttackCategory]:
         """Finding에서 공격 카테고리를 추출."""
         from .cross_protocol import _KEYWORD_CATEGORY_MAP
+
         text = f"{finding.title} {finding.description}".lower()
         cats = []
         for kw, cat in _KEYWORD_CATEGORY_MAP.items():
@@ -421,6 +434,7 @@ JSON 배열로 응답 (빈 배열 가능):
     @staticmethod
     def _get_categories_from_text(text: str) -> list[AttackCategory]:
         from .cross_protocol import _KEYWORD_CATEGORY_MAP
+
         text = text.lower()
         cats = []
         for kw, cat in _KEYWORD_CATEGORY_MAP.items():
@@ -450,8 +464,10 @@ def _escalate_severity(path: list[AttackTreeNode]) -> Severity:
 
     # credential → data 흐름 → CRITICAL
     categories = [n.category for n in path]
-    if (AttackCategory.CREDENTIAL_HARVEST in categories
-            and AttackCategory.DATA_EXFILTRATION in categories):
+    if (
+        AttackCategory.CREDENTIAL_HARVEST in categories
+        and AttackCategory.DATA_EXFILTRATION in categories
+    ):
         return Severity.CRITICAL
 
     # 기본: 가장 높은 개별 severity
@@ -465,7 +481,13 @@ def _build_chain_narrative(path: list[AttackTreeNode]) -> str:
     lines = ["### 공격 시나리오\n"]
 
     for i, node in enumerate(path, 1):
-        marker = "🔴" if node.severity == Severity.CRITICAL else "🟠" if node.severity == Severity.HIGH else "🟡"
+        marker = (
+            "🔴"
+            if node.severity == Severity.CRITICAL
+            else "🟠"
+            if node.severity == Severity.HIGH
+            else "🟡"
+        )
         hyp_tag = " *(추론)*" if node.is_hypothetical else ""
 
         lines.append(
@@ -482,6 +504,6 @@ def _build_chain_narrative(path: list[AttackTreeNode]) -> str:
             lines.append(f"  {desc}\n")
 
         if i < len(path):
-            lines.append(f"  ↓ *다음 단계로 연결*\n")
+            lines.append("  ↓ *다음 단계로 연결*\n")
 
     return "\n".join(lines)

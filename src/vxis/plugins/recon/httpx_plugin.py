@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
@@ -60,6 +59,7 @@ class HttpxPlugin(BasePlugin):
 
         # 여러 호스트는 /workspace에 파일 저장 (Docker 마운트 경로)
         import os
+
         workspace = "/tmp/vxis_workspace"
         os.makedirs(workspace, exist_ok=True)
         input_file_host = os.path.join(workspace, "httpx_input.txt")

@@ -21,7 +21,6 @@ from vxis.core.db import create_engine, get_session, init_db
 from vxis.core.engine import DAGExecutor, TaskState
 from vxis.core.events import (
     EventType,
-    NodeEvent,
     PipelineEvent,
     ScanEventBus,
     ScanLifecycleEvent,
@@ -171,9 +170,7 @@ class ScanOrchestrator:
         scan_profile = self.config.profiles.get(profile)
         if scan_profile is None:
             available = ", ".join(self.config.profiles.keys())
-            raise ValueError(
-                f"Profile '{profile}' not found. Available profiles: {available}"
-            )
+            raise ValueError(f"Profile '{profile}' not found. Available profiles: {available}")
 
         # --- 2. Scope validation ---
         # When no client config is supplied, the target itself is the only
@@ -204,16 +201,10 @@ class ScanOrchestrator:
         # Filter by tier: only run Tier 1 (recon) plugins for zero-touch scans.
         # Tier 2 (breach) plugins require --tier breach flag (future).
         # tier comes from the parameter above
-        registry = {
-            k: v for k, v in registry.items()
-            if getattr(v.meta, 'tier', 1) <= tier
-        }
+        registry = {k: v for k, v in registry.items() if getattr(v.meta, "tier", 1) <= tier}
 
         # Filter out plugins whose binary is not installed
-        registry = {
-            k: v for k, v in registry.items()
-            if v.validate_environment()
-        }
+        registry = {k: v for k, v in registry.items() if v.validate_environment()}
 
         # Apply profile-level skip list
         for skip_name in scan_profile.skip_plugins:
@@ -237,13 +228,15 @@ class ScanOrchestrator:
         dag_context = DAGContext(target=target, scan_profile=profile)
 
         # --- Emit scan started ---
-        await self.event_bus.emit(ScanLifecycleEvent(
-            event_type=EventType.SCAN_STARTED,
-            scan_id=scan_id,
-            target=target,
-            profile=profile,
-            plugin_count=len(registry),
-        ))
+        await self.event_bus.emit(
+            ScanLifecycleEvent(
+                event_type=EventType.SCAN_STARTED,
+                scan_id=scan_id,
+                target=target,
+                profile=profile,
+                plugin_count=len(registry),
+            )
+        )
 
         # --- 6. Configure rate limiter for this target ---
         if scan_profile.rate_limit > 0:
@@ -309,36 +302,42 @@ class ScanOrchestrator:
             all_raw_findings.extend(normalized)
 
         # --- 9. Deduplicate ---
-        await self.event_bus.emit(PipelineEvent(
-            event_type=EventType.PIPELINE_STAGE,
-            scan_id=scan_id,
-            stage="deduplicate",
-            finding_count=len(all_raw_findings),
-            detail=f"{len(all_raw_findings)} raw findings",
-        ))
+        await self.event_bus.emit(
+            PipelineEvent(
+                event_type=EventType.PIPELINE_STAGE,
+                scan_id=scan_id,
+                stage="deduplicate",
+                finding_count=len(all_raw_findings),
+                detail=f"{len(all_raw_findings)} raw findings",
+            )
+        )
         deduplicator = FindingDeduplicator()
         deduped = deduplicator.deduplicate(all_raw_findings)
 
         # --- 10. False-positive pipeline ---
-        await self.event_bus.emit(PipelineEvent(
-            event_type=EventType.PIPELINE_STAGE,
-            scan_id=scan_id,
-            stage="fp_filter",
-            finding_count=len(deduped),
-            detail=f"{len(deduped)} after dedup",
-        ))
+        await self.event_bus.emit(
+            PipelineEvent(
+                event_type=EventType.PIPELINE_STAGE,
+                scan_id=scan_id,
+                stage="fp_filter",
+                finding_count=len(deduped),
+                detail=f"{len(deduped)} after dedup",
+            )
+        )
         tech_stack = self._detect_tech_stack(dag_context)
         fp_pipeline = FPPipeline(tech_stack=tech_stack)
         filtered = await fp_pipeline.process(deduped)
 
         # --- 11. Enrich ---
-        await self.event_bus.emit(PipelineEvent(
-            event_type=EventType.PIPELINE_STAGE,
-            scan_id=scan_id,
-            stage="enrich",
-            finding_count=len(filtered),
-            detail=f"{len(filtered)} after FP filter",
-        ))
+        await self.event_bus.emit(
+            PipelineEvent(
+                event_type=EventType.PIPELINE_STAGE,
+                scan_id=scan_id,
+                stage="enrich",
+                finding_count=len(filtered),
+                detail=f"{len(filtered)} after FP filter",
+            )
+        )
         enricher = FindingEnricher()
         enriched = enricher.enrich(filtered)
 
@@ -361,14 +360,16 @@ class ScanOrchestrator:
             status="completed",
         )
 
-        await self.event_bus.emit(ScanLifecycleEvent(
-            event_type=EventType.SCAN_COMPLETED,
-            scan_id=scan_id,
-            target=target,
-            profile=profile,
-            finding_count=len(enriched),
-            duration_seconds=(finished_at - started_at).total_seconds(),
-        ))
+        await self.event_bus.emit(
+            ScanLifecycleEvent(
+                event_type=EventType.SCAN_COMPLETED,
+                scan_id=scan_id,
+                target=target,
+                profile=profile,
+                finding_count=len(enriched),
+                duration_seconds=(finished_at - started_at).total_seconds(),
+            )
+        )
 
         logger.info(
             "Scan %s completed: %d findings in %.1fs.",
@@ -451,13 +452,15 @@ class ScanOrchestrator:
             _scan_id = scan_id
 
             async def _on_line(line: str, is_stderr: bool) -> None:
-                await _event_bus.emit(ToolOutputEvent(
-                    event_type=EventType.TOOL_OUTPUT_LINE,
-                    scan_id=_scan_id,
-                    plugin_name=plugin_name,
-                    line=line,
-                    is_stderr=is_stderr,
-                ))
+                await _event_bus.emit(
+                    ToolOutputEvent(
+                        event_type=EventType.TOOL_OUTPUT_LINE,
+                        scan_id=_scan_id,
+                        plugin_name=plugin_name,
+                        line=line,
+                        is_stderr=is_stderr,
+                    )
+                )
                 # Detect findings in real-time from JSON Lines tools
                 if not is_stderr and line.startswith("{"):
                     _try_emit_finding(line, plugin_name)
@@ -465,28 +468,40 @@ class ScanOrchestrator:
             def _try_emit_finding(line: str, pname: str) -> None:
                 """Best-effort real-time finding detection from JSON output."""
                 import json as _json
+
                 try:
                     data = _json.loads(line)
                     # Nuclei format
                     if "info" in data and "severity" in data.get("info", {}):
-                        asyncio.create_task(_event_bus.emit(ToolFindingEvent(
-                            event_type=EventType.TOOL_FINDING,
-                            scan_id=_scan_id,
-                            plugin_name=pname,
-                            severity=data["info"]["severity"],
-                            title=data["info"].get("name", data.get("template-id", "")),
-                            target=data.get("host", data.get("matched-at", "")),
-                        )))
+                        asyncio.create_task(
+                            _event_bus.emit(
+                                ToolFindingEvent(
+                                    event_type=EventType.TOOL_FINDING,
+                                    scan_id=_scan_id,
+                                    plugin_name=pname,
+                                    severity=data["info"]["severity"],
+                                    title=data["info"].get("name", data.get("template-id", "")),
+                                    target=data.get("host", data.get("matched-at", "")),
+                                )
+                            )
+                        )
                     # Trufflehog format
                     elif "DetectorName" in data:
-                        asyncio.create_task(_event_bus.emit(ToolFindingEvent(
-                            event_type=EventType.TOOL_FINDING,
-                            scan_id=_scan_id,
-                            plugin_name=pname,
-                            severity="high",
-                            title=f"Secret: {data.get('DetectorName', '')}",
-                            target=data.get("SourceMetadata", {}).get("Data", {}).get("Github", {}).get("repository", ""),
-                        )))
+                        asyncio.create_task(
+                            _event_bus.emit(
+                                ToolFindingEvent(
+                                    event_type=EventType.TOOL_FINDING,
+                                    scan_id=_scan_id,
+                                    plugin_name=pname,
+                                    severity="high",
+                                    title=f"Secret: {data.get('DetectorName', '')}",
+                                    target=data.get("SourceMetadata", {})
+                                    .get("Data", {})
+                                    .get("Github", {})
+                                    .get("repository", ""),
+                                )
+                            )
+                        )
                 except (_json.JSONDecodeError, KeyError, TypeError):
                     pass
 
@@ -610,9 +625,7 @@ class ScanOrchestrator:
                     kwargs["target"] = target
             return factory_method(data, scan_id, **kwargs)
         except Exception:
-            logger.exception(
-                "Failed to normalize output for plugin '%s'. Skipping.", name
-            )
+            logger.exception("Failed to normalize output for plugin '%s'. Skipping.", name)
             return []
 
     @staticmethod
@@ -692,9 +705,7 @@ class ScanOrchestrator:
                 state = run.get("state", "")
                 if state == "completed":
                     # 이 도구가 실제로 finding을 냈는지 확인
-                    plugin_findings = [
-                        f for f in findings if f.source_plugin == plugin
-                    ]
+                    plugin_findings = [f for f in findings if f.source_plugin == plugin]
                     if plugin_findings:
                         effective.append(plugin)
                     else:
@@ -799,9 +810,7 @@ class ScanOrchestrator:
                         protocol=finding.protocol,
                         affected_component=finding.affected_component,
                         cvss_score=finding.cvss.base_score if finding.cvss else None,
-                        cvss_vector=(
-                            finding.cvss.vector_string if finding.cvss else None
-                        ),
+                        cvss_vector=(finding.cvss.vector_string if finding.cvss else None),
                         cve_ids=finding.cve_ids or None,
                         cwe_ids=finding.cwe_ids or None,
                         source_plugin=finding.source_plugin,
@@ -809,9 +818,7 @@ class ScanOrchestrator:
                         confidence=finding.confidence,
                         remediation=finding.remediation,
                         evidence=(
-                            [e.model_dump() for e in finding.evidence]
-                            if finding.evidence
-                            else None
+                            [e.model_dump() for e in finding.evidence] if finding.evidence else None
                         ),
                         references=(
                             [r.model_dump() for r in finding.references]
@@ -819,14 +826,10 @@ class ScanOrchestrator:
                             else None
                         ),
                         mitre_attack=(
-                            finding.mitre_attack.model_dump()
-                            if finding.mitre_attack
-                            else None
+                            finding.mitre_attack.model_dump() if finding.mitre_attack else None
                         ),
                         analyst_severity=(
-                            finding.analyst_severity.value
-                            if finding.analyst_severity
-                            else None
+                            finding.analyst_severity.value if finding.analyst_severity else None
                         ),
                         analyst_notes=finding.analyst_notes,
                         discovered_at=finding.discovered_at,

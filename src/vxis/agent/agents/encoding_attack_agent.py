@@ -54,113 +54,136 @@ class EncodingAttackAgent(BaseAgent):
         norm_results = await self._test_unicode_normalization(target)
         for result in norm_results:
             if result["vulnerable"]:
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"Unicode normalization bypass: {result['name']} on {target}",
-                    severity=Severity.HIGH,
-                    evidence_type=EvidenceType.HTTP_EXCHANGE,
-                    description=(
-                        f"The application normalizes Unicode input in a way that bypasses "
-                        f"security controls. Attack type: {result['name']}. "
-                        f"Payload: {result['payload_desc']}"
-                    ),
-                    request=result.get("request", ""),
-                    response=result.get("response", "")[:4096],
-                    tags=["encoding", "unicode", "normalization", result["tag"]],
-                ))
-                hypotheses.append(Hypothesis(
-                    title=f"WAF bypass via Unicode normalization on {target}",
-                    rationale=f"Unicode normalization vulnerability ({result['name']}) may bypass WAF rules",
-                    probability=0.75, impact=0.85,
-                    suggested_agent="web",
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"Unicode normalization bypass: {result['name']} on {target}",
+                        severity=Severity.HIGH,
+                        evidence_type=EvidenceType.HTTP_EXCHANGE,
+                        description=(
+                            f"The application normalizes Unicode input in a way that bypasses "
+                            f"security controls. Attack type: {result['name']}. "
+                            f"Payload: {result['payload_desc']}"
+                        ),
+                        request=result.get("request", ""),
+                        response=result.get("response", "")[:4096],
+                        tags=["encoding", "unicode", "normalization", result["tag"]],
+                    )
+                )
+                hypotheses.append(
+                    Hypothesis(
+                        title=f"WAF bypass via Unicode normalization on {target}",
+                        rationale=f"Unicode normalization vulnerability ({result['name']}) may bypass WAF rules",
+                        probability=0.75,
+                        impact=0.85,
+                        suggested_agent="web",
+                    )
+                )
 
         # Phase 2: UTF-8 Overlong encoding
         overlong_results = await self._test_overlong_utf8(target)
         for result in overlong_results:
             if result["vulnerable"]:
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"UTF-8 overlong encoding bypass: {result['name']} on {target}",
-                    severity=Severity.HIGH,
-                    evidence_type=EvidenceType.HTTP_EXCHANGE,
-                    description=(
-                        f"Server accepts overlong UTF-8 sequences, which may bypass path "
-                        f"validation. Payload: {result['payload']}"
-                    ),
-                    request=result.get("request", ""),
-                    response=result.get("response", "")[:4096],
-                    tags=["encoding", "utf8", "overlong", result["tag"]],
-                ))
-                hypotheses.append(Hypothesis(
-                    title=f"Path traversal via overlong UTF-8 on {target}",
-                    rationale="Overlong UTF-8 accepted, path traversal likely possible",
-                    probability=0.7, impact=0.9,
-                    suggested_agent="web",
-                    suggested_tool="nuclei",
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"UTF-8 overlong encoding bypass: {result['name']} on {target}",
+                        severity=Severity.HIGH,
+                        evidence_type=EvidenceType.HTTP_EXCHANGE,
+                        description=(
+                            f"Server accepts overlong UTF-8 sequences, which may bypass path "
+                            f"validation. Payload: {result['payload']}"
+                        ),
+                        request=result.get("request", ""),
+                        response=result.get("response", "")[:4096],
+                        tags=["encoding", "utf8", "overlong", result["tag"]],
+                    )
+                )
+                hypotheses.append(
+                    Hypothesis(
+                        title=f"Path traversal via overlong UTF-8 on {target}",
+                        rationale="Overlong UTF-8 accepted, path traversal likely possible",
+                        probability=0.7,
+                        impact=0.9,
+                        suggested_agent="web",
+                        suggested_tool="nuclei",
+                    )
+                )
 
         # Phase 3: Null byte injection
         null_results = await self._test_null_byte(target)
         for result in null_results:
             if result["vulnerable"]:
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"Null byte injection: {result['name']} on {target}",
-                    severity=Severity.HIGH,
-                    evidence_type=EvidenceType.HTTP_EXCHANGE,
-                    description=(
-                        f"Application is vulnerable to null byte injection, which can truncate "
-                        f"strings and bypass validation. Payload: {result['payload']}"
-                    ),
-                    request=result.get("request", ""),
-                    response=result.get("response", "")[:4096],
-                    tags=["encoding", "null-byte", result["tag"]],
-                ))
-                hypotheses.append(Hypothesis(
-                    title=f"File upload bypass via null byte on {target}",
-                    rationale="Null byte injection can bypass file extension validation",
-                    probability=0.65, impact=0.85,
-                    suggested_agent="web",
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"Null byte injection: {result['name']} on {target}",
+                        severity=Severity.HIGH,
+                        evidence_type=EvidenceType.HTTP_EXCHANGE,
+                        description=(
+                            f"Application is vulnerable to null byte injection, which can truncate "
+                            f"strings and bypass validation. Payload: {result['payload']}"
+                        ),
+                        request=result.get("request", ""),
+                        response=result.get("response", "")[:4096],
+                        tags=["encoding", "null-byte", result["tag"]],
+                    )
+                )
+                hypotheses.append(
+                    Hypothesis(
+                        title=f"File upload bypass via null byte on {target}",
+                        rationale="Null byte injection can bypass file extension validation",
+                        probability=0.65,
+                        impact=0.85,
+                        suggested_agent="web",
+                    )
+                )
 
         # Phase 4: RTLO character injection
         rtlo_results = await self._test_rtlo(target)
         for result in rtlo_results:
             if result["vulnerable"]:
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"RTLO character accepted: {result['name']} on {target}",
-                    severity=Severity.MEDIUM,
-                    evidence_type=EvidenceType.HTTP_EXCHANGE,
-                    description=(
-                        f"Application accepts Right-To-Left Override characters, enabling "
-                        f"visual spoofing of filenames or content."
-                    ),
-                    request=result.get("request", ""),
-                    response=result.get("response", "")[:4096],
-                    tags=["encoding", "rtlo", "spoofing", result["tag"]],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"RTLO character accepted: {result['name']} on {target}",
+                        severity=Severity.MEDIUM,
+                        evidence_type=EvidenceType.HTTP_EXCHANGE,
+                        description=(
+                            "Application accepts Right-To-Left Override characters, enabling "
+                            "visual spoofing of filenames or content."
+                        ),
+                        request=result.get("request", ""),
+                        response=result.get("response", "")[:4096],
+                        tags=["encoding", "rtlo", "spoofing", result["tag"]],
+                    )
+                )
 
         # Phase 5: Nuclei encoding templates
         nuclei_results = await self._run_nuclei_encoding(target, context.mission.stealth)
         for nf in nuclei_results:
             sev_str = nf.get("info", {}).get("severity", "info").lower()
-            sev_map = {"critical": Severity.CRITICAL, "high": Severity.HIGH,
-                       "medium": Severity.MEDIUM, "low": Severity.LOW}
+            sev_map = {
+                "critical": Severity.CRITICAL,
+                "high": Severity.HIGH,
+                "medium": Severity.MEDIUM,
+                "low": Severity.LOW,
+            }
             severity = sev_map.get(sev_str, Severity.INFO)
             name = nf.get("info", {}).get("name", nf.get("template-id", ""))
             matched = nf.get("matched-at", target)
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"{name} — {matched}",
-                severity=severity,
-                evidence_type=EvidenceType.HTTP_EXCHANGE,
-                description=nf.get("info", {}).get("description", ""),
-                request=nf.get("request"),
-                response=nf.get("response"),
-                tags=["encoding", "nuclei", nf.get("template-id", "")],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"{name} — {matched}",
+                    severity=severity,
+                    evidence_type=EvidenceType.HTTP_EXCHANGE,
+                    description=nf.get("info", {}).get("description", ""),
+                    request=nf.get("request"),
+                    response=nf.get("response"),
+                    tags=["encoding", "nuclei", nf.get("template-id", "")],
+                )
+            )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -183,8 +206,17 @@ class EncodingAttackAgent(BaseAgent):
         for payload, tag, desc in _UNICODE_NORMALIZATION_PAYLOADS:
             test_url = f"{target}/{payload}"
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-sS", "-o", "/dev/stdout", "-w", "\n%{http_code}",
-                "-H", "User-Agent: Mozilla/5.0", test_url, "--max-time", "10",
+                "curl",
+                "-sS",
+                "-o",
+                "/dev/stdout",
+                "-w",
+                "\n%{http_code}",
+                "-H",
+                "User-Agent: Mozilla/5.0",
+                test_url,
+                "--max-time",
+                "10",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -200,16 +232,20 @@ class EncodingAttackAgent(BaseAgent):
                     and len(body) > 100
                     and "404" not in body.lower()[:200]
                 )
-                results.append({
-                    "tag": tag,
-                    "name": desc,
-                    "payload_desc": repr(payload),
-                    "vulnerable": vulnerable,
-                    "request": f"GET {test_url}",
-                    "response": f"HTTP {status}\n{body[:2048]}",
-                })
+                results.append(
+                    {
+                        "tag": tag,
+                        "name": desc,
+                        "payload_desc": repr(payload),
+                        "vulnerable": vulnerable,
+                        "request": f"GET {test_url}",
+                        "response": f"HTTP {status}\n{body[:2048]}",
+                    }
+                )
             except asyncio.TimeoutError:
-                results.append({"tag": tag, "name": desc, "payload_desc": repr(payload), "vulnerable": False})
+                results.append(
+                    {"tag": tag, "name": desc, "payload_desc": repr(payload), "vulnerable": False}
+                )
         return results
 
     async def _test_overlong_utf8(self, target: str) -> list[dict[str, Any]]:
@@ -219,8 +255,16 @@ class EncodingAttackAgent(BaseAgent):
         for payload, tag, desc in _OVERLONG_UTF8_PAYLOADS:
             test_url = f"{target}/{payload}"
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-sS", "--path-as-is", "-o", "/dev/stdout",
-                "-w", "\n%{http_code}", test_url, "--max-time", "10",
+                "curl",
+                "-sS",
+                "--path-as-is",
+                "-o",
+                "/dev/stdout",
+                "-w",
+                "\n%{http_code}",
+                test_url,
+                "--max-time",
+                "10",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -231,18 +275,19 @@ class EncodingAttackAgent(BaseAgent):
                 body = lines[0] if len(lines) > 1 else ""
                 status = lines[-1].strip()
                 # Overlong bypass detected if we get non-error response
-                vulnerable = (
-                    status == "200"
-                    and ("root:" in body or "passwd" in body or len(body) > 200)
+                vulnerable = status == "200" and (
+                    "root:" in body or "passwd" in body or len(body) > 200
                 )
-                results.append({
-                    "tag": tag,
-                    "name": desc,
-                    "payload": payload,
-                    "vulnerable": vulnerable,
-                    "request": f"GET {test_url}",
-                    "response": f"HTTP {status}\n{body[:2048]}",
-                })
+                results.append(
+                    {
+                        "tag": tag,
+                        "name": desc,
+                        "payload": payload,
+                        "vulnerable": vulnerable,
+                        "request": f"GET {test_url}",
+                        "response": f"HTTP {status}\n{body[:2048]}",
+                    }
+                )
             except asyncio.TimeoutError:
                 results.append({"tag": tag, "name": desc, "payload": payload, "vulnerable": False})
         return results
@@ -254,8 +299,16 @@ class EncodingAttackAgent(BaseAgent):
         for payload, tag, desc in _NULL_BYTE_PAYLOADS:
             test_url = f"{target}/{payload}"
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-sS", "--path-as-is", "-o", "/dev/stdout",
-                "-w", "\n%{http_code}", test_url, "--max-time", "10",
+                "curl",
+                "-sS",
+                "--path-as-is",
+                "-o",
+                "/dev/stdout",
+                "-w",
+                "\n%{http_code}",
+                test_url,
+                "--max-time",
+                "10",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -266,14 +319,16 @@ class EncodingAttackAgent(BaseAgent):
                 body = lines[0] if len(lines) > 1 else ""
                 status = lines[-1].strip()
                 vulnerable = status == "200" and len(body) > 100
-                results.append({
-                    "tag": tag,
-                    "name": desc,
-                    "payload": payload,
-                    "vulnerable": vulnerable,
-                    "request": f"GET {test_url}",
-                    "response": f"HTTP {status}\n{body[:2048]}",
-                })
+                results.append(
+                    {
+                        "tag": tag,
+                        "name": desc,
+                        "payload": payload,
+                        "vulnerable": vulnerable,
+                        "request": f"GET {test_url}",
+                        "response": f"HTTP {status}\n{body[:2048]}",
+                    }
+                )
             except asyncio.TimeoutError:
                 results.append({"tag": tag, "name": desc, "payload": payload, "vulnerable": False})
         return results
@@ -285,9 +340,17 @@ class EncodingAttackAgent(BaseAgent):
         for payload, tag, desc in _RTLO_PAYLOADS:
             # Test RTLO in a form/upload parameter
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-sS", "-X", "POST", target,
-                "-d", f"filename={payload}",
-                "-w", "\n%{http_code}", "--max-time", "10",
+                "curl",
+                "-sS",
+                "-X",
+                "POST",
+                target,
+                "-d",
+                f"filename={payload}",
+                "-w",
+                "\n%{http_code}",
+                "--max-time",
+                "10",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -299,28 +362,39 @@ class EncodingAttackAgent(BaseAgent):
                 status = lines[-1].strip()
                 # RTLO accepted if server doesn't reject/sanitize the character
                 vulnerable = status in ("200", "201") and "\u202e" not in body
-                results.append({
-                    "tag": tag,
-                    "name": desc,
-                    "vulnerable": vulnerable,
-                    "request": f"POST {target} filename={repr(payload)}",
-                    "response": f"HTTP {status}\n{body[:2048]}",
-                })
+                results.append(
+                    {
+                        "tag": tag,
+                        "name": desc,
+                        "vulnerable": vulnerable,
+                        "request": f"POST {target} filename={repr(payload)}",
+                        "response": f"HTTP {status}\n{body[:2048]}",
+                    }
+                )
             except asyncio.TimeoutError:
                 results.append({"tag": tag, "name": desc, "vulnerable": False})
         return results
 
     async def _run_nuclei_encoding(
-        self, target: str, stealth: bool,
+        self,
+        target: str,
+        stealth: bool,
     ) -> list[dict[str, Any]]:
         if not shutil.which("nuclei"):
             return []
         rate = "10" if stealth else "100"
         cmd = [
-            "nuclei", "-u", target,
-            "-tags", "traversal,lfi,rfi,bypass,unicode",
-            "-severity", "critical,high,medium",
-            "-rate-limit", rate, "-jsonl", "-silent",
+            "nuclei",
+            "-u",
+            target,
+            "-tags",
+            "traversal,lfi,rfi,bypass,unicode",
+            "-severity",
+            "critical,high,medium",
+            "-rate-limit",
+            rate,
+            "-jsonl",
+            "-silent",
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,

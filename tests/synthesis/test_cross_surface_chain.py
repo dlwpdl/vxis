@@ -13,12 +13,12 @@ Tests cover six concerns:
   G.5 — scan_pipeline_v2 _build_finding_from_dict propagates ctx.kind
   G.6 — desktop_ipc_to_lateral pattern + back-compat sanity
 """
+
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
-import pytest
 
 from vxis.evidence.schema import Evidence as SchemaEvidence
 from vxis.evidence.schema import EvidenceType, Severity
@@ -79,9 +79,7 @@ def test_tag_layer_uses_desktop_for_desktop_agent_prefix() -> None:
     from vxis.synthesis.cross_protocol import CrossProtocolSynthesizer, OSILayer
 
     syn = CrossProtocolSynthesizer()
-    e = _make_schema_evidence(
-        agent_id="desktop_local_storage_secrets", title="x", description="y"
-    )
+    e = _make_schema_evidence(agent_id="desktop_local_storage_secrets", title="x", description="y")
     assert syn._tag_layer(e) == OSILayer.DESKTOP
 
 
@@ -142,7 +140,9 @@ def test_desktop_creds_to_cloud_chain_synthesizes() -> None:
     assert any(
         c.pattern_name == "desktop_creds_to_cloud" and c.severity == Severity.CRITICAL
         for c in chains
-    ), f"expected desktop_creds_to_cloud CRITICAL chain, got: {[(c.pattern_name, c.severity) for c in chains]}"
+    ), (
+        f"expected desktop_creds_to_cloud CRITICAL chain, got: {[(c.pattern_name, c.severity) for c in chains]}"
+    )
 
 
 # ── G.4 — Surface-boundary description decorator ────────────────────────
@@ -175,7 +175,9 @@ def test_chain_description_marks_cross_surface_boundary() -> None:
     chains = asyncio.run(syn.synthesize())
 
     cross_surface = [c for c in chains if "crosses surface boundary" in c.description]
-    assert cross_surface, "expected at least one cross-surface boundary marker in chain descriptions"
+    assert cross_surface, (
+        "expected at least one cross-surface boundary marker in chain descriptions"
+    )
     # The marker should name both surfaces
     blob = cross_surface[0].description
     assert "desktop" in blob.lower()
@@ -287,9 +289,9 @@ def test_desktop_ipc_to_lateral_chain_synthesizes() -> None:
     syn.add_findings([ipc_initial, app_pe])
     chains = asyncio.run(syn.synthesize())
 
-    assert any(
-        c.pattern_name == "desktop_ipc_to_lateral" for c in chains
-    ), f"expected desktop_ipc_to_lateral chain, got: {[c.pattern_name for c in chains]}"
+    assert any(c.pattern_name == "desktop_ipc_to_lateral" for c in chains), (
+        f"expected desktop_ipc_to_lateral chain, got: {[c.pattern_name for c in chains]}"
+    )
 
 
 def test_existing_web_patterns_unaffected() -> None:

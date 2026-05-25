@@ -19,7 +19,6 @@ import hashlib
 import json
 import logging
 import os
-import subprocess
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -127,13 +126,13 @@ class DarkWebIntelWatcher(BaseWatcher):
         # 1단계: 검색 시작
         search_payload = {
             "term": domain,
-            "buckets": [],          # 빈 배열 = 전체 소스
+            "buckets": [],  # 빈 배열 = 전체 소스
             "lookuplevel": 0,
             "maxresults": 20,
             "timeout": 20,
             "datefrom": "",
             "dateto": "",
-            "sort": 4,              # 관련도순
+            "sort": 4,  # 관련도순
             "media": 0,
             "terminate": [],
         }
@@ -177,29 +176,33 @@ class DarkWebIntelWatcher(BaseWatcher):
 
             bucket = record.get("bucket", "unknown")
             system_id = record.get("systemid", "")
-            record_id = f"intelx:{domain}:{system_id}" if system_id else (
-                f"intelx:{domain}:{hashlib.md5(json.dumps(record, sort_keys=True).encode()).hexdigest()[:12]}"
+            record_id = (
+                f"intelx:{domain}:{system_id}"
+                if system_id
+                else (
+                    f"intelx:{domain}:{hashlib.md5(json.dumps(record, sort_keys=True).encode()).hexdigest()[:12]}"
+                )
             )
 
-            items.append({
-                "id": record_id,
-                "source": "intelx",
-                "domain": domain,
-                "bucket": bucket,
-                "name": record.get("name", ""),
-                "date": record.get("date", ""),
-                "system_id": system_id,
-                "size": record.get("size", 0),
-                "media": record.get("media", 0),
-                "raw": record,
-            })
+            items.append(
+                {
+                    "id": record_id,
+                    "source": "intelx",
+                    "domain": domain,
+                    "bucket": bucket,
+                    "name": record.get("name", ""),
+                    "date": record.get("date", ""),
+                    "system_id": system_id,
+                    "size": record.get("size", 0),
+                    "media": record.get("media", 0),
+                    "raw": record,
+                }
+            )
 
         logger.debug("[dark_web_intel] IntelX: %d건 (도메인: %s)", len(items), domain)
         return items
 
-    def _fetch_github_code(
-        self, domain: str, token: str
-    ) -> list[dict[str, Any]]:
+    def _fetch_github_code(self, domain: str, token: str) -> list[dict[str, Any]]:
         """GitHub Code Search API로 도메인 언급 코드 검색.
 
         키워드: 도메인 + password / secret / api_key 조합
@@ -241,26 +244,26 @@ class DarkWebIntelWatcher(BaseWatcher):
                         f"{hashlib.md5(item.get('html_url', '').encode()).hexdigest()[:12]}"
                     )
 
-                items.append({
-                    "id": item_id,
-                    "source": "github_code",
-                    "domain": domain,
-                    "query": query,
-                    "file_name": item.get("name", ""),
-                    "repo_full_name": repo.get("full_name", ""),
-                    "repo_private": repo.get("private", False),
-                    "html_url": item.get("html_url", ""),
-                    "sha": item.get("sha", ""),
-                })
+                items.append(
+                    {
+                        "id": item_id,
+                        "source": "github_code",
+                        "domain": domain,
+                        "query": query,
+                        "file_name": item.get("name", ""),
+                        "repo_full_name": repo.get("full_name", ""),
+                        "repo_private": repo.get("private", False),
+                        "html_url": item.get("html_url", ""),
+                        "sha": item.get("sha", ""),
+                    }
+                )
 
         logger.debug("[dark_web_intel] GitHub: %d건 (도메인: %s)", len(items), domain)
         return items
 
     # ── match ────────────────────────────────────────────────────
 
-    async def match(
-        self, items: list[dict[str, Any]]
-    ) -> list[WatcherAlert]:
+    async def match(self, items: list[dict[str, Any]]) -> list[WatcherAlert]:
         """수집된 항목을 분류하고 심각도별 알림 생성."""
         alerts: list[WatcherAlert] = []
 
@@ -280,9 +283,7 @@ class DarkWebIntelWatcher(BaseWatcher):
 
         return alerts
 
-    def _match_intelx_item(
-        self, item: dict[str, Any], domain: str
-    ) -> WatcherAlert | None:
+    def _match_intelx_item(self, item: dict[str, Any], domain: str) -> WatcherAlert | None:
         """IntelligenceX 항목 분류."""
         bucket = item.get("bucket", "unknown")
         severity = _BUCKET_SEVERITY.get(bucket, "medium")
@@ -320,9 +321,7 @@ class DarkWebIntelWatcher(BaseWatcher):
             actionable=(severity in ("critical", "high")),
         )
 
-    def _match_github_item(
-        self, item: dict[str, Any], domain: str
-    ) -> WatcherAlert | None:
+    def _match_github_item(self, item: dict[str, Any], domain: str) -> WatcherAlert | None:
         """GitHub 코드 검색 항목 분류.
 
         검색 쿼리에 password/secret/api_key가 포함된 경우 자격증명 노출로 판단.
@@ -375,19 +374,23 @@ class DarkWebIntelWatcher(BaseWatcher):
             if alert.severity not in ("critical", "high"):
                 continue
 
-            report_path = report_dir / f"dark_web_{alert.data.get('bucket', 'github')}_{alert.target}.json"
+            report_path = (
+                report_dir / f"dark_web_{alert.data.get('bucket', 'github')}_{alert.target}.json"
+            )
             try:
                 existing: list[dict] = []
                 if report_path.exists():
                     existing = json.loads(report_path.read_text(encoding="utf-8"))
-                existing.append({
-                    "title": alert.title,
-                    "severity": alert.severity,
-                    "description": alert.description,
-                    "source_url": alert.source_url,
-                    "timestamp": alert.timestamp,
-                    "data": alert.data,
-                })
+                existing.append(
+                    {
+                        "title": alert.title,
+                        "severity": alert.severity,
+                        "description": alert.description,
+                        "source_url": alert.source_url,
+                        "timestamp": alert.timestamp,
+                        "data": alert.data,
+                    }
+                )
                 report_path.write_text(
                     json.dumps(existing, ensure_ascii=False, indent=2),
                     encoding="utf-8",
@@ -405,6 +408,7 @@ class DarkWebIntelWatcher(BaseWatcher):
 
 
 # ── 문법 자가 검증 ────────────────────────────────────────────────
+
 
 def _self_verify() -> None:
     """모듈 로드 시 ast.parse로 자신의 소스 문법 검증."""

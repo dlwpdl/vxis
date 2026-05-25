@@ -20,8 +20,7 @@ from __future__ import annotations
 import ast
 import json
 import logging
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -36,15 +35,16 @@ AGENT_MEMORY_PATH = Path("~/.vxis/agent_memory.json").expanduser()
 
 # ── Data Models ─────────────────────────────────────────────────
 
+
 @dataclass
 class HoneypotConfig:
     """생성된 허니팟 설정 및 코드."""
 
-    app_code: str           # Python Flask 앱 코드 (실행 가능)
-    dockerfile: str         # Dockerfile 내용
-    deploy_command: str     # 배포 명령어
-    log_path: str           # 로그 파일 경로
-    description: str        # 허니팟 설명 (한국어)
+    app_code: str  # Python Flask 앱 코드 (실행 가능)
+    dockerfile: str  # Dockerfile 내용
+    deploy_command: str  # 배포 명령어
+    log_path: str  # 로그 파일 경로
+    description: str  # 허니팟 설명 (한국어)
 
     def verify_syntax(self) -> bool:
         """생성된 Python 코드가 문법적으로 올바른지 검증한다."""
@@ -57,6 +57,7 @@ class HoneypotConfig:
 
 
 # ── Fake Response Templates ──────────────────────────────────────
+
 
 class _FakeResponseTemplates:
     """공격 유형별 가짜 응답 데이터."""
@@ -158,6 +159,7 @@ class _FakeResponseTemplates:
 
 
 # ── Honeypot App Code Generator ─────────────────────────────────
+
 
 def _generate_flask_app(exploit: VerifiedExploit) -> str:
     """허니팟 Flask 앱 Python 코드를 생성한다."""
@@ -322,30 +324,30 @@ def _build_fake_response_code(attack: str) -> str:
 
     handlers: dict[str, str] = {
         "sqli": (
-            f'{indent}# SQL Injection — 가짜 DB 행 반환\n'
-            f'{indent}data = {{\n'
+            f"{indent}# SQL Injection — 가짜 DB 행 반환\n"
+            f"{indent}data = {{\n"
             f'{indent}    "status": "success",\n'
             f'{indent}    "data": [\n'
             f'{indent}        {{"id": 1, "username": "admin", "email": "admin@internal.corp", "role": "administrator"}},\n'
             f'{indent}        {{"id": 2, "username": "dbuser", "email": "dbuser@internal.corp", "role": "user"}},\n'
-            f'{indent}    ],\n'
+            f"{indent}    ],\n"
             f'{indent}    "rows_affected": 2,\n'
-            f'{indent}}}\n'
-            f'{indent}_json_response(self, 200, data)'
+            f"{indent}}}\n"
+            f"{indent}_json_response(self, 200, data)"
         ),
         "xss": (
-            f'{indent}# XSS — 페이로드 반사된 것처럼 가짜 응답\n'
+            f"{indent}# XSS — 페이로드 반사된 것처럼 가짜 응답\n"
             f'{indent}safe_payload = payload[:200].replace("<", "&lt;").replace(">", "&gt;")\n'
-            f'{indent}data = {{\n'
+            f"{indent}data = {{\n"
             f'{indent}    "status": "ok",\n'
             f'{indent}    "message": f"검색 결과: {{safe_payload}}",\n'
             f'{indent}    "results": [{{"title": "Article", "content": f"내용: {{safe_payload}}"}}],\n'
-            f'{indent}}}\n'
-            f'{indent}_json_response(self, 200, data)'
+            f"{indent}}}\n"
+            f"{indent}_json_response(self, 200, data)"
         ),
         "ssrf": (
-            f'{indent}# SSRF — 가짜 AWS 메타데이터 응답\n'
-            f'{indent}data = {{\n'
+            f"{indent}# SSRF — 가짜 AWS 메타데이터 응답\n"
+            f"{indent}data = {{\n"
             f'{indent}    "status": "ok",\n'
             f'{indent}    "service": "internal-metadata-service",\n'
             f'{indent}    "data": {{\n'
@@ -355,45 +357,46 @@ def _build_fake_response_code(attack: str) -> str:
             f'{indent}            "AccessKeyId": "AKIAIOSFODNN7EXAMPLE",\n'
             f'{indent}            "SecretAccessKey": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",\n'
             f'{indent}            "Token": "AQoDYXdzEJr...",\n'
-            f'{indent}        }},\n'
-            f'{indent}    }},\n'
-            f'{indent}}}\n'
-            f'{indent}_json_response(self, 200, data)'
+            f"{indent}        }},\n"
+            f"{indent}    }},\n"
+            f"{indent}}}\n"
+            f"{indent}_json_response(self, 200, data)"
         ),
         "lfi": (
-            f'{indent}# LFI — 가짜 /etc/passwd 반환\n'
-            f'{indent}fake_passwd = (\n'
+            f"{indent}# LFI — 가짜 /etc/passwd 반환\n"
+            f"{indent}fake_passwd = (\n"
             f'{indent}    "root:x:0:0:root:/root:/bin/bash\\n"\n'
             f'{indent}    "daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\\n"\n'
             f'{indent}    "www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\\n"\n'
             f'{indent}    "ubuntu:x:1000:1000:Ubuntu:/home/ubuntu:/bin/bash\\n"\n'
             f'{indent}    "deploy:x:1001:1001:Deploy:/home/deploy:/bin/bash\\n"\n'
-            f'{indent})\n'
-            f'{indent}_text_response(self, 200, fake_passwd)'
+            f"{indent})\n"
+            f"{indent}_text_response(self, 200, fake_passwd)"
         ),
         "rce": (
-            f'{indent}# RCE — 가짜 명령어 실행 결과\n'
-            f'{indent}data = {{\n'
+            f"{indent}# RCE — 가짜 명령어 실행 결과\n"
+            f"{indent}data = {{\n"
             f'{indent}    "status": "executed",\n'
             f'{indent}    "output": "uid=33(www-data) gid=33(www-data) groups=33(www-data)\\n",\n'
             f'{indent}    "exit_code": 0,\n'
             f'{indent}    "duration_ms": 42,\n'
-            f'{indent}}}\n'
-            f'{indent}_json_response(self, 200, data)'
+            f"{indent}}}\n"
+            f"{indent}_json_response(self, 200, data)"
         ),
     }
 
     # 기본: 공격 유형 불명 시 일반 성공 응답
     default = (
-        f'{indent}# 일반 가짜 성공 응답\n'
+        f"{indent}# 일반 가짜 성공 응답\n"
         f'{indent}data = {{"status": "ok", "message": "요청이 처리되었습니다.", "code": 200}}\n'
-        f'{indent}_json_response(self, 200, data)'
+        f"{indent}_json_response(self, 200, data)"
     )
 
     return handlers.get(attack, default)
 
 
 # ── Honeypot Generator ───────────────────────────────────────────
+
 
 class HoneypotGenerator:
     """취약한 엔드포인트를 모방하는 허니팟을 생성한다.
@@ -409,14 +412,13 @@ class HoneypotGenerator:
         """허니팟 Flask 앱 코드와 Dockerfile을 생성한다."""
         logger.info(
             "허니팟 생성 시작: %s (%s)",
-            exploit.title, exploit.attack_type,
+            exploit.title,
+            exploit.attack_type,
         )
 
         app_code = _generate_flask_app(exploit)
         dockerfile = self._generate_dockerfile(exploit)
-        log_path = str(
-            HONEYPOT_LOG_DIR / f"honeypot_{exploit.finding_id[:8]}.jsonl"
-        )
+        log_path = str(HONEYPOT_LOG_DIR / f"honeypot_{exploit.finding_id[:8]}.jsonl")
         deploy_command = self._generate_deploy_command(exploit)
         description = self._generate_description(exploit)
 
@@ -440,7 +442,7 @@ class HoneypotGenerator:
         """허니팟 컨테이너용 Dockerfile 생성."""
         return f"""\
 # VXIS 허니팟 Dockerfile — {exploit.attack_type} 추적용
-# 생성: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}
+# 생성: {datetime.now(timezone.utc).strftime("%Y-%m-%d")}
 
 FROM python:3.11-slim
 
@@ -506,19 +508,19 @@ CMD ["python3", "honeypot_app.py", "8080"]
     def _fallback_app_code(self, exploit: VerifiedExploit) -> str:
         """문법 오류 발생 시 안전한 최소 허니팟 코드."""
         return (
-            '#!/usr/bin/env python3\n'
+            "#!/usr/bin/env python3\n"
             '"""VXIS 허니팟 — 최소 구현."""\n\n'
-            'from http.server import BaseHTTPRequestHandler, HTTPServer\n'
-            'import json\n\n'
-            'class Handler(BaseHTTPRequestHandler):\n'
-            '    def do_GET(self):\n'
+            "from http.server import BaseHTTPRequestHandler, HTTPServer\n"
+            "import json\n\n"
+            "class Handler(BaseHTTPRequestHandler):\n"
+            "    def do_GET(self):\n"
             '        body = json.dumps({"status": "ok"}).encode()\n'
-            '        self.send_response(200)\n'
+            "        self.send_response(200)\n"
             '        self.send_header("Content-Type", "application/json")\n'
             '        self.send_header("Content-Length", str(len(body)))\n'
-            '        self.end_headers()\n'
-            '        self.wfile.write(body)\n'
-            '    do_POST = do_GET\n\n'
+            "        self.end_headers()\n"
+            "        self.wfile.write(body)\n"
+            "    do_POST = do_GET\n\n"
             'if __name__ == "__main__":\n'
             '    HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()\n'
         )
@@ -548,6 +550,7 @@ CMD ["python3", "honeypot_app.py", "8080"]
 
 
 # ── Honeypot Logger ──────────────────────────────────────────────
+
 
 class HoneypotLogger:
     """허니팟 로그를 읽고 분석하는 클래스.
@@ -735,6 +738,7 @@ def _detect_attack_techniques(payloads: list[str]) -> list[str]:
 
 # ── VXIS Feedback ────────────────────────────────────────────────
 
+
 def feed_back_to_vxis(log_analysis: dict[str, Any]) -> None:
     """허니팟 분석 결과를 VXIS 에이전트 메모리에 피드백한다.
 
@@ -758,13 +762,16 @@ def feed_back_to_vxis(log_analysis: dict[str, Any]) -> None:
             logger.warning("agent_memory.json 로드 실패: %s", exc)
 
     # 허니팟 데이터 섹션 업데이트
-    honeypot_data = existing_memory.get("honeypot_intelligence", {
-        "attacker_ips": [],
-        "captured_payloads": [],
-        "attack_techniques": [],
-        "waf_rules_generated": [],
-        "last_updated": "",
-    })
+    honeypot_data = existing_memory.get(
+        "honeypot_intelligence",
+        {
+            "attacker_ips": [],
+            "captured_payloads": [],
+            "attack_techniques": [],
+            "waf_rules_generated": [],
+            "last_updated": "",
+        },
+    )
 
     # 공격자 IP 추가 (중복 제거)
     existing_ips: set[str] = set(honeypot_data.get("attacker_ips", []))
@@ -785,9 +792,7 @@ def feed_back_to_vxis(log_analysis: dict[str, Any]) -> None:
     honeypot_data["attack_techniques"] = list(existing_techniques)
 
     # 수집된 페이로드로 WAF 규칙 생성
-    new_rules = _generate_waf_rules_from_payloads(
-        log_analysis.get("top_payloads", [])[:20]
-    )
+    new_rules = _generate_waf_rules_from_payloads(log_analysis.get("top_payloads", [])[:20])
     existing_waf_rules: set[str] = set(honeypot_data.get("waf_rules_generated", []))
     for rule in new_rules:
         existing_waf_rules.add(rule)
@@ -826,7 +831,7 @@ def _generate_waf_rules_from_payloads(payloads: list[str]) -> list[str]:
         rule = (
             f'SecRule ARGS|REQUEST_BODY "@rx {escaped}" '
             f'"id:9{i:05d},phase:2,deny,status:403,'
-            f'msg:\'VXIS Honeypot: Captured payload blocked\''
+            f"msg:'VXIS Honeypot: Captured payload blocked'"
             f'"'
         )
         rules.append(rule)

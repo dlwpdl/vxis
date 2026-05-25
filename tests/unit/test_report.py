@@ -17,7 +17,6 @@ import pytest
 from vxis.models.finding import (
     Evidence,
     Finding,
-    FindingStatus,
     MitreAttack,
     Reference,
     Severity,
@@ -71,10 +70,7 @@ def make_report_data(findings: list[Finding] | None = None, **overrides) -> Repo
 
 def make_generator() -> ReportGenerator:
     """Return a ReportGenerator pointed at the real templates directory."""
-    template_dir = (
-        Path(__file__).parent.parent.parent
-        / "src" / "vxis" / "report" / "templates"
-    )
+    template_dir = Path(__file__).parent.parent.parent / "src" / "vxis" / "report" / "templates"
     return ReportGenerator(template_dir=template_dir)
 
 
@@ -187,9 +183,7 @@ class TestReportDataRiskScore:
         assert score == pytest.approx(10.0, abs=0.01)
 
     def test_all_informational_is_low(self):
-        findings = [
-            make_finding(id=f"f{i}", severity=Severity.informational) for i in range(5)
-        ]
+        findings = [make_finding(id=f"f{i}", severity=Severity.informational) for i in range(5)]
         score = make_report_data(findings=findings).risk_score
         # informational weight 0.1 / critical weight 10.0 * 10 = 0.1
         assert score < 1.0
@@ -262,7 +256,7 @@ class TestReportGeneratorRenderHtml:
     def test_html_document_structure(self):
         html = make_generator().render_html(make_report_data())
         assert "<head>" in html
-        assert "<body" in html   # template uses <body class="lang-en">
+        assert "<body" in html  # template uses <body class="lang-en">
         assert "</body>" in html
 
     def test_scan_id_included(self):
@@ -472,21 +466,15 @@ class TestSeverityBarSvg:
 
 class TestGenerateExecutiveSummary:
     def test_fallback_returns_string(self):
-        summary = asyncio.run(
-            generate_executive_summary([], "TestCorp", api_key=None)
-        )
+        summary = asyncio.run(generate_executive_summary([], "TestCorp", api_key=None))
         assert isinstance(summary, str)
 
     def test_fallback_mentions_client_name(self):
-        summary = asyncio.run(
-            generate_executive_summary([], "Acme Industries", api_key=None)
-        )
+        summary = asyncio.run(generate_executive_summary([], "Acme Industries", api_key=None))
         assert "Acme Industries" in summary
 
     def test_fallback_with_no_findings_mentions_no_findings(self):
-        summary = asyncio.run(
-            generate_executive_summary([], "Acme Corp", api_key=None)
-        )
+        summary = asyncio.run(generate_executive_summary([], "Acme Corp", api_key=None))
         # Should mention zero findings or no findings
         assert re.search(r"0|[Nn]o.*finding", summary)
 
@@ -496,16 +484,14 @@ class TestGenerateExecutiveSummary:
             make_finding(id="f2", severity=Severity.high),
             make_finding(id="f3", severity=Severity.medium),
         ]
-        summary = asyncio.run(
-            generate_executive_summary(findings, "BetaCorp", api_key=None)
-        )
+        summary = asyncio.run(generate_executive_summary(findings, "BetaCorp", api_key=None))
         assert "3" in summary
 
     def test_fallback_mentions_critical_finding_in_prose(self):
-        findings = [make_finding(id="f1", title="Remote Code Execution", severity=Severity.critical)]
-        summary = asyncio.run(
-            generate_executive_summary(findings, "GammaCorp", api_key=None)
-        )
+        findings = [
+            make_finding(id="f1", title="Remote Code Execution", severity=Severity.critical)
+        ]
+        summary = asyncio.run(generate_executive_summary(findings, "GammaCorp", api_key=None))
         assert "Remote Code Execution" in summary
 
     def test_fallback_recommends_remediation_of_critical_high(self):
@@ -513,16 +499,12 @@ class TestGenerateExecutiveSummary:
             make_finding(id="f1", severity=Severity.critical),
             make_finding(id="f2", severity=Severity.high),
         ]
-        summary = asyncio.run(
-            generate_executive_summary(findings, "DeltaCorp", api_key=None)
-        )
+        summary = asyncio.run(generate_executive_summary(findings, "DeltaCorp", api_key=None))
         # Should mention remediation priority language
         assert re.search(r"[Cc]ritical|[Hh]igh|remediat|prioriti", summary)
 
     def test_fallback_is_non_empty(self):
-        summary = asyncio.run(
-            generate_executive_summary([], "Corp", api_key=None)
-        )
+        summary = asyncio.run(generate_executive_summary([], "Corp", api_key=None))
         assert len(summary.strip()) > 100
 
 

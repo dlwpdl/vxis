@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -91,10 +91,7 @@ class ContextCompressor:
             합쳐진 프롬프트 문자열
         """
         per_tool = max(100, total_max_tokens // max(len(outputs), 1))
-        compressed = [
-            self.compress(tool, raw, max_tokens=per_tool)
-            for tool, raw in outputs
-        ]
+        compressed = [self.compress(tool, raw, max_tokens=per_tool) for tool, raw in outputs]
         return "\n".join(c.as_prompt for c in compressed)
 
     # ── Tool-specific parsers ────────────────────────────────────
@@ -156,10 +153,7 @@ class ContextCompressor:
                 interesting.append(line[:80])
 
             # 스크립트 결과 중 중요한 것
-            if any(
-                kw in line.lower()
-                for kw in ["vulnerable", "anonymous", "no auth", "default"]
-            ):
+            if any(kw in line.lower() for kw in ["vulnerable", "anonymous", "no auth", "default"]):
                 interesting.append(line[:80])
 
         summary = f"{len(open_ports)} ports open" if open_ports else "no open ports"
@@ -176,7 +170,11 @@ class ContextCompressor:
     def _parse_nuclei(self, raw: str) -> CompressedOutput:
         """nuclei 출력을 심각도별 요약으로 압축."""
         severity_counts: dict[str, int] = {
-            "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0,
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "info": 0,
         }
         findings: list[dict[str, str]] = []
         interesting: list[str] = []
@@ -247,9 +245,7 @@ class ContextCompressor:
 
                 # 흥미로운 헤더
                 if data.get("status_code") in (401, 403, 500, 502):
-                    interesting.append(
-                        f"{data.get('url', '')}: HTTP {data.get('status_code')}"
-                    )
+                    interesting.append(f"{data.get('url', '')}: HTTP {data.get('status_code')}")
             except (json.JSONDecodeError, TypeError):
                 # JSON이 아닌 라인은 URL만 추출
                 if line.startswith("http"):
@@ -287,10 +283,7 @@ class ContextCompressor:
                     interesting.append(f"/{url_path} ({result.get('status')})")
         except (json.JSONDecodeError, TypeError):
             for line in raw.splitlines():
-                if any(
-                    code in line
-                    for code in ["200", "301", "302", "403"]
-                ):
+                if any(code in line for code in ["200", "301", "302", "403"]):
                     paths.append({"raw": line.strip()[:80]})
 
         summary = f"{len(paths)} paths discovered"
@@ -309,9 +302,21 @@ class ContextCompressor:
         protocol_issues: list[str] = []
 
         vuln_keywords = [
-            "vulnerable", "not ok", "warn", "medium", "high",
-            "critical", "heartbleed", "robot", "beast", "poodle",
-            "freak", "logjam", "drown", "sweet32", "lucky13",
+            "vulnerable",
+            "not ok",
+            "warn",
+            "medium",
+            "high",
+            "critical",
+            "heartbleed",
+            "robot",
+            "beast",
+            "poodle",
+            "freak",
+            "logjam",
+            "drown",
+            "sweet32",
+            "lucky13",
         ]
 
         for line in raw.splitlines():
@@ -319,16 +324,10 @@ class ContextCompressor:
             if any(kw in line_lower for kw in vuln_keywords):
                 cleaned = line.strip()[:80]
                 vulns.append(cleaned)
-                if any(
-                    kw in line_lower
-                    for kw in ["vulnerable", "critical", "high"]
-                ):
+                if any(kw in line_lower for kw in ["vulnerable", "critical", "high"]):
                     interesting.append(cleaned)
 
-            if any(
-                proto in line_lower
-                for proto in ["sslv2", "sslv3", "tls1.0", "tls 1.0"]
-            ):
+            if any(proto in line_lower for proto in ["sslv2", "sslv3", "tls1.0", "tls 1.0"]):
                 protocol_issues.append(line.strip()[:60])
 
         summary = f"{len(vulns)} TLS issues"
@@ -360,8 +359,15 @@ class ContextCompressor:
             if any(
                 kw in sub
                 for kw in [
-                    "admin", "dev", "staging", "test", "api",
-                    "internal", "vpn", "jenkins", "gitlab",
+                    "admin",
+                    "dev",
+                    "staging",
+                    "test",
+                    "api",
+                    "internal",
+                    "vpn",
+                    "jenkins",
+                    "gitlab",
                 ]
             ):
                 interesting.append(sub)
@@ -385,8 +391,11 @@ class ContextCompressor:
 
             # 주입 유형 추출
             for injection_type in [
-                "boolean-based", "time-based", "union-based",
-                "error-based", "stacked queries",
+                "boolean-based",
+                "time-based",
+                "union-based",
+                "error-based",
+                "stacked queries",
             ]:
                 if injection_type in raw.lower():
                     interesting.append(f"Type: {injection_type}")
@@ -467,19 +476,18 @@ class ContextCompressor:
                 data = json.loads(line)
                 secret_info = {
                     "type": data.get("DetectorName", data.get("RuleID", "unknown")),
-                    "file": data.get("SourceMetadata", {}).get("Data", {}).get(
-                        "Filesystem", {},
-                    ).get("file", "")[:40],
+                    "file": data.get("SourceMetadata", {})
+                    .get("Data", {})
+                    .get(
+                        "Filesystem",
+                        {},
+                    )
+                    .get("file", "")[:40],
                 }
                 secrets.append(secret_info)
-                interesting.append(
-                    f"Secret: {secret_info['type']} in {secret_info['file']}"
-                )
+                interesting.append(f"Secret: {secret_info['type']} in {secret_info['file']}")
             except (json.JSONDecodeError, TypeError):
-                if any(
-                    kw in line.lower()
-                    for kw in ["secret", "key", "token", "password", "api"]
-                ):
+                if any(kw in line.lower() for kw in ["secret", "key", "token", "password", "api"]):
                     secrets.append({"raw": line[:60]})
                     interesting.append(line[:60])
 
@@ -525,9 +533,19 @@ class ContextCompressor:
 
         # 키워드 기반 중요 라인 추출
         important_keywords = [
-            "vulnerability", "vulnerable", "critical", "high",
-            "warning", "error", "found", "detected", "exploit",
-            "injection", "bypass", "unauthorized", "leaked",
+            "vulnerability",
+            "vulnerable",
+            "critical",
+            "high",
+            "warning",
+            "error",
+            "found",
+            "detected",
+            "exploit",
+            "injection",
+            "bypass",
+            "unauthorized",
+            "leaked",
         ]
 
         for line in lines:
@@ -557,8 +575,7 @@ class ContextCompressor:
 
         # interesting 부터 자름
         while (
-            ContextCompressor._estimate_tokens(output.as_prompt) > max_tokens
-            and output.interesting
+            ContextCompressor._estimate_tokens(output.as_prompt) > max_tokens and output.interesting
         ):
             output.interesting.pop()
 

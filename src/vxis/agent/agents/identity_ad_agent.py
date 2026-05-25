@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-from typing import Any
 
 from ..base import AgentResult, BaseAgent
 from ..context import AgentContext
@@ -29,23 +28,29 @@ class IdentityADAgent(BaseAgent):
         for bf in bh_findings:
             findings.append(bf)
             if bf.severity in (Severity.CRITICAL, Severity.HIGH):
-                hypotheses.append(Hypothesis(
-                    title=f"Privilege escalation via AD path: {bf.title}",
-                    rationale=f"BloodHound identified attack path",
-                    probability=0.8, impact=0.95,
-                    suggested_agent="os_host",
-                ))
+                hypotheses.append(
+                    Hypothesis(
+                        title=f"Privilege escalation via AD path: {bf.title}",
+                        rationale="BloodHound identified attack path",
+                        probability=0.8,
+                        impact=0.95,
+                        suggested_agent="os_host",
+                    )
+                )
 
         # 2. Kerberoasting (impacket GetUserSPNs)
         kerb_findings = await self._run_kerberoast(target)
         findings.extend(kerb_findings)
         if kerb_findings:
-            hypotheses.append(Hypothesis(
-                title=f"Offline password cracking of kerberoasted accounts",
-                rationale=f"{len(kerb_findings)} SPN accounts found",
-                probability=0.7, impact=0.9,
-                suggested_agent="lateral_move",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title="Offline password cracking of kerberoasted accounts",
+                    rationale=f"{len(kerb_findings)} SPN accounts found",
+                    probability=0.7,
+                    impact=0.9,
+                    suggested_agent="lateral_move",
+                )
+            )
 
         # 3. AS-REP Roasting (impacket GetNPUsers)
         asrep_findings = await self._run_asrep_roast(target)
@@ -56,12 +61,15 @@ class IdentityADAgent(BaseAgent):
         findings.extend(cert_findings)
         for cf in cert_findings:
             if cf.severity in (Severity.CRITICAL, Severity.HIGH):
-                hypotheses.append(Hypothesis(
-                    title="Domain admin via AD CS certificate abuse",
-                    rationale=f"Certipy found: {cf.title}",
-                    probability=0.75, impact=1.0,
-                    suggested_agent="lateral_move",
-                ))
+                hypotheses.append(
+                    Hypothesis(
+                        title="Domain admin via AD CS certificate abuse",
+                        rationale=f"Certipy found: {cf.title}",
+                        probability=0.75,
+                        impact=1.0,
+                        suggested_agent="lateral_move",
+                    )
+                )
 
         # 5. NetExec SMB enumeration
         smb_findings = await self._run_netexec(target)
@@ -83,7 +91,12 @@ class IdentityADAgent(BaseAgent):
         if not shutil.which("bloodhound-python"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "bloodhound-python", "-d", target, "-c", "All", "--zip",
+            "bloodhound-python",
+            "-d",
+            target,
+            "-c",
+            "All",
+            "--zip",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -92,15 +105,17 @@ class IdentityADAgent(BaseAgent):
             output = stdout.decode() + stderr.decode()
             findings: list[Evidence] = []
             if "Done" in output or proc.returncode == 0:
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"BloodHound collection completed for {target}",
-                    severity=Severity.INFO,
-                    evidence_type=EvidenceType.NETWORK,
-                    description="AD enumeration data collected for attack path analysis",
-                    response=output[:4096],
-                    tags=["ad", "bloodhound", "enumeration"],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"BloodHound collection completed for {target}",
+                        severity=Severity.INFO,
+                        evidence_type=EvidenceType.NETWORK,
+                        description="AD enumeration data collected for attack path analysis",
+                        response=output[:4096],
+                        tags=["ad", "bloodhound", "enumeration"],
+                    )
+                )
             return findings
         except asyncio.TimeoutError:
             return []
@@ -109,7 +124,11 @@ class IdentityADAgent(BaseAgent):
         if not shutil.which("impacket-GetUserSPNs"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "impacket-GetUserSPNs", f"{target}/", "-no-pass", "-dc-ip", target,
+            "impacket-GetUserSPNs",
+            f"{target}/",
+            "-no-pass",
+            "-dc-ip",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -119,15 +138,17 @@ class IdentityADAgent(BaseAgent):
             findings: list[Evidence] = []
             for line in output.splitlines():
                 if "$krb5tgs$" in line:
-                    findings.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"Kerberoastable SPN account found",
-                        severity=Severity.HIGH,
-                        evidence_type=EvidenceType.NETWORK,
-                        description="Service account with crackable TGS ticket",
-                        response=line[:512],
-                        tags=["ad", "kerberoasting", "credential"],
-                    ))
+                    findings.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title="Kerberoastable SPN account found",
+                            severity=Severity.HIGH,
+                            evidence_type=EvidenceType.NETWORK,
+                            description="Service account with crackable TGS ticket",
+                            response=line[:512],
+                            tags=["ad", "kerberoasting", "credential"],
+                        )
+                    )
             return findings
         except asyncio.TimeoutError:
             return []
@@ -136,7 +157,11 @@ class IdentityADAgent(BaseAgent):
         if not shutil.which("impacket-GetNPUsers"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "impacket-GetNPUsers", f"{target}/", "-no-pass", "-dc-ip", target,
+            "impacket-GetNPUsers",
+            f"{target}/",
+            "-no-pass",
+            "-dc-ip",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -146,15 +171,17 @@ class IdentityADAgent(BaseAgent):
             findings: list[Evidence] = []
             for line in output.splitlines():
                 if "$krb5asrep$" in line:
-                    findings.append(Evidence(
-                        agent_id=self.agent_id,
-                        title="AS-REP roastable account found",
-                        severity=Severity.HIGH,
-                        evidence_type=EvidenceType.NETWORK,
-                        description="Account with Kerberos pre-auth disabled",
-                        response=line[:512],
-                        tags=["ad", "asrep", "credential"],
-                    ))
+                    findings.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title="AS-REP roastable account found",
+                            severity=Severity.HIGH,
+                            evidence_type=EvidenceType.NETWORK,
+                            description="Account with Kerberos pre-auth disabled",
+                            response=line[:512],
+                            tags=["ad", "asrep", "credential"],
+                        )
+                    )
             return findings
         except asyncio.TimeoutError:
             return []
@@ -163,7 +190,14 @@ class IdentityADAgent(BaseAgent):
         if not shutil.which("certipy"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "certipy", "find", "-u", "", "-dc-ip", target, "-vulnerable", "-json",
+            "certipy",
+            "find",
+            "-u",
+            "",
+            "-dc-ip",
+            target,
+            "-vulnerable",
+            "-json",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -176,15 +210,17 @@ class IdentityADAgent(BaseAgent):
                 for tmpl in templates:
                     vuln_to = tmpl.get("Vulnerabilities", [])
                     if vuln_to:
-                        findings.append(Evidence(
-                            agent_id=self.agent_id,
-                            title=f"Vulnerable AD CS template: {tmpl.get('Template Name', '')}",
-                            severity=Severity.CRITICAL,
-                            evidence_type=EvidenceType.MISCONFIGURATION,
-                            description=f"Vulnerabilities: {', '.join(str(v) for v in vuln_to)}",
-                            response=json.dumps(tmpl, indent=2)[:4096],
-                            tags=["ad", "adcs", "certipy", "certificate"],
-                        ))
+                        findings.append(
+                            Evidence(
+                                agent_id=self.agent_id,
+                                title=f"Vulnerable AD CS template: {tmpl.get('Template Name', '')}",
+                                severity=Severity.CRITICAL,
+                                evidence_type=EvidenceType.MISCONFIGURATION,
+                                description=f"Vulnerabilities: {', '.join(str(v) for v in vuln_to)}",
+                                response=json.dumps(tmpl, indent=2)[:4096],
+                                tags=["ad", "adcs", "certipy", "certificate"],
+                            )
+                        )
             except json.JSONDecodeError:
                 pass
             return findings
@@ -195,7 +231,10 @@ class IdentityADAgent(BaseAgent):
         if not shutil.which("netexec"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "netexec", "smb", target, "--shares",
+            "netexec",
+            "smb",
+            target,
+            "--shares",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -204,15 +243,17 @@ class IdentityADAgent(BaseAgent):
             output = stdout.decode()
             findings: list[Evidence] = []
             if "READ" in output or "WRITE" in output:
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"SMB shares accessible on {target}",
-                    severity=Severity.MEDIUM,
-                    evidence_type=EvidenceType.NETWORK,
-                    description="Accessible SMB shares detected via anonymous/guest login",
-                    response=output[:4096],
-                    tags=["ad", "smb", "shares"],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"SMB shares accessible on {target}",
+                        severity=Severity.MEDIUM,
+                        evidence_type=EvidenceType.NETWORK,
+                        description="Accessible SMB shares detected via anonymous/guest login",
+                        response=output[:4096],
+                        tags=["ad", "smb", "shares"],
+                    )
+                )
             return findings
         except asyncio.TimeoutError:
             return []

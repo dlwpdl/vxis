@@ -16,11 +16,11 @@ from vxis.scope.pii_detector import PIIDetector
 _DESTRUCTIVE_URL_HINTS: dict[str, str] = {
     "delete": "file_deletions",
     "remove": "file_deletions",
-    "drop":   "database_writes",
+    "drop": "database_writes",
     "upload": "file_uploads",
-    "send":   "email_sending",
-    "sms":    "sms_sending",
-    "mail":   "email_sending",
+    "send": "email_sending",
+    "sms": "sms_sending",
+    "mail": "email_sending",
 }
 
 
@@ -58,18 +58,15 @@ class ScopeEnforcer:
         # In-scope domains (if list non-empty, host must match)
         if self.scope.in_scope_domains:
             host_ok = False
-            matched = ""
             for dom in self.scope.in_scope_domains:
                 pattern = dom.lower()
                 if pattern.startswith("*."):
                     suffix = pattern[2:]
                     if host == suffix or host.endswith("." + suffix):
                         host_ok = True
-                        matched = pattern
                         break
                 if fnmatch.fnmatch(host, pattern):
                     host_ok = True
-                    matched = pattern
                     break
             if not host_ok:
                 return ScopeCheckResult(

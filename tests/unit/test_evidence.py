@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import hashlib
 
-import pytest
 
 from vxis.models.evidence import (
-    EvidenceItem,
     create_evidence,
     mask_secret,
     transfer_custody,

@@ -28,6 +28,7 @@ from vxis.interaction.surface import TargetKind
 # Minimal stubs
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _FakeCtx:
     findings: list[Any] = field(default_factory=list)
@@ -73,9 +74,10 @@ _SCAN_TARGET_PATH = "vxis.cli.multi_scan._scan_target"
 # Tests: dispatch order
 # ---------------------------------------------------------------------------
 
+
 class TestDispatchOrder:
     def test_single_web_target_dispatched(self) -> None:
-        pipeline = _fake_pipeline()
+        _fake_pipeline()
         call_order: list[str] = []
 
         async def fake_scan_target(target, scan_id, max_iters):  # type: ignore[no-untyped-def]
@@ -99,11 +101,17 @@ class TestDispatchOrder:
             call_order.append(target.name)
             return []
 
-        manifest = _make_manifest(targets=[
-            ManifestTarget(name="studio", kind=TargetKind.DESKTOP, entry="/path/App.app"),
-            ManifestTarget(name="cloud-api", kind=TargetKind.WEB, entry="http://localhost:3333"),
-            ManifestTarget(name="mcp-proxy", kind=TargetKind.WEB, entry="http://localhost:8000"),
-        ])
+        manifest = _make_manifest(
+            targets=[
+                ManifestTarget(name="studio", kind=TargetKind.DESKTOP, entry="/path/App.app"),
+                ManifestTarget(
+                    name="cloud-api", kind=TargetKind.WEB, entry="http://localhost:3333"
+                ),
+                ManifestTarget(
+                    name="mcp-proxy", kind=TargetKind.WEB, entry="http://localhost:8000"
+                ),
+            ]
+        )
 
         with (
             patch(_SCAN_TARGET_PATH, side_effect=fake_scan_target),
@@ -121,11 +129,13 @@ class TestDispatchOrder:
             call_order.append(target.name)
             return []
 
-        manifest = _make_manifest(targets=[
-            ManifestTarget(name="active", kind=TargetKind.WEB, entry="http://a"),
-            ManifestTarget(name="skipped", kind=TargetKind.WEB, entry="http://b", skip=True),
-            ManifestTarget(name="also-active", kind=TargetKind.WEB, entry="http://c"),
-        ])
+        manifest = _make_manifest(
+            targets=[
+                ManifestTarget(name="active", kind=TargetKind.WEB, entry="http://a"),
+                ManifestTarget(name="skipped", kind=TargetKind.WEB, entry="http://b", skip=True),
+                ManifestTarget(name="also-active", kind=TargetKind.WEB, entry="http://c"),
+            ]
+        )
 
         with (
             patch(_SCAN_TARGET_PATH, side_effect=fake_scan_target),
@@ -142,10 +152,12 @@ class TestDispatchOrder:
     def test_skip_true_real_impl_not_scanned(self) -> None:
         """Real _scan_target: skip=True returns [] without touching pipeline."""
         pipeline = _fake_pipeline()
-        manifest = _make_manifest(targets=[
-            ManifestTarget(name="active", kind=TargetKind.WEB, entry="http://a"),
-            ManifestTarget(name="skipped", kind=TargetKind.WEB, entry="http://b", skip=True),
-        ])
+        manifest = _make_manifest(
+            targets=[
+                ManifestTarget(name="active", kind=TargetKind.WEB, entry="http://a"),
+                ManifestTarget(name="skipped", kind=TargetKind.WEB, entry="http://b", skip=True),
+            ]
+        )
 
         with (
             patch(_PIPELINE_PATH, return_value=pipeline),
@@ -163,14 +175,19 @@ class TestDispatchOrder:
 
     def test_manifest_target_hints_are_forwarded_to_pipeline(self) -> None:
         pipeline = _fake_pipeline()
-        manifest = _make_manifest(targets=[
-            ManifestTarget(
-                name="api",
-                kind=TargetKind.WEB,
-                entry="http://localhost:3000",
-                hints={"compose_file": "infra/benchmarks/juice-shop.yml", "service": "juice-shop"},
-            ),
-        ])
+        manifest = _make_manifest(
+            targets=[
+                ManifestTarget(
+                    name="api",
+                    kind=TargetKind.WEB,
+                    entry="http://localhost:3000",
+                    hints={
+                        "compose_file": "infra/benchmarks/juice-shop.yml",
+                        "service": "juice-shop",
+                    },
+                ),
+            ]
+        )
 
         with (
             patch(_PIPELINE_PATH, return_value=pipeline),
@@ -190,6 +207,7 @@ class TestDispatchOrder:
 # ---------------------------------------------------------------------------
 # Tests: Phase-G synthesis
 # ---------------------------------------------------------------------------
+
 
 class TestPhaseGSynthesis:
     def test_phase_g_called_when_correlation_true(self) -> None:
@@ -258,15 +276,18 @@ class TestPhaseGSynthesis:
 # Tests: CODE surface graceful skip
 # ---------------------------------------------------------------------------
 
+
 class TestCodeSurfaceGracefulSkip:
     def test_code_surface_not_implemented_skips_gracefully(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """When CODE surface raises NotImplementedError, warn and continue."""
-        manifest = _make_manifest(targets=[
-            ManifestTarget(name="web-target", kind=TargetKind.WEB, entry="http://a"),
-            ManifestTarget(name="code-target", kind=TargetKind.CODE, entry="/path/to/repo"),
-        ])
+        manifest = _make_manifest(
+            targets=[
+                ManifestTarget(name="web-target", kind=TargetKind.WEB, entry="http://a"),
+                ManifestTarget(name="code-target", kind=TargetKind.CODE, entry="/path/to/repo"),
+            ]
+        )
 
         web_pipeline = _fake_pipeline()
 
@@ -299,18 +320,17 @@ class TestCodeSurfaceGracefulSkip:
         assert web_pipeline.run.call_count == 1
 
         # WARN logged for code-target skip
-        assert any(
-            "CODE surface not yet available" in rec.message
-            for rec in caplog.records
-        )
+        assert any("CODE surface not yet available" in rec.message for rec in caplog.records)
 
     def test_code_surface_import_error_skips_gracefully(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """When SurfaceFactory import fails entirely, warn and continue."""
-        manifest = _make_manifest(targets=[
-            ManifestTarget(name="code-only", kind=TargetKind.CODE, entry="/path/repo"),
-        ])
+        manifest = _make_manifest(
+            targets=[
+                ManifestTarget(name="code-only", kind=TargetKind.CODE, entry="/path/repo"),
+            ]
+        )
 
         with (
             patch(_PIPELINE_PATH, return_value=_fake_pipeline()),
@@ -332,6 +352,7 @@ class TestCodeSurfaceGracefulSkip:
 # Tests: exit codes
 # ---------------------------------------------------------------------------
 
+
 class TestExitCodes:
     def test_returns_0_on_success(self) -> None:
         pipeline = _fake_pipeline()
@@ -347,10 +368,12 @@ class TestExitCodes:
         assert exit_code == 0
 
     def test_returns_1_when_all_skipped(self) -> None:
-        manifest = _make_manifest(targets=[
-            ManifestTarget(name="a", kind=TargetKind.WEB, entry="http://x", skip=True),
-            ManifestTarget(name="b", kind=TargetKind.WEB, entry="http://y", skip=True),
-        ])
+        manifest = _make_manifest(
+            targets=[
+                ManifestTarget(name="a", kind=TargetKind.WEB, entry="http://x", skip=True),
+                ManifestTarget(name="b", kind=TargetKind.WEB, entry="http://y", skip=True),
+            ]
+        )
 
         with (
             patch(_PIPELINE_PATH, return_value=_fake_pipeline()),

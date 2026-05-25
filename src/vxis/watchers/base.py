@@ -31,7 +31,7 @@ import time
 import urllib.request
 import urllib.error
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,7 @@ STATE_DIR = Path("~/.vxis/watchers").expanduser()
 
 
 # ── Common data models ──────────────────────────────────────────
+
 
 @dataclass
 class WatcherAlert:
@@ -54,9 +55,7 @@ class WatcherAlert:
     target: str = ""  # 매칭된 타겟 (있으면)
     source_url: str = ""
     data: dict[str, Any] = field(default_factory=dict)
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     actionable: bool = False  # 자동 행동이 가능한 알림인가
 
 
@@ -74,6 +73,7 @@ class WatcherResult:
 
 
 # ── Base Watcher ────────────────────────────────────────────────
+
 
 class BaseWatcher(ABC):
     """모든 워처의 기반 클래스.
@@ -112,9 +112,7 @@ class BaseWatcher(ABC):
         ...
 
     @abstractmethod
-    async def match(
-        self, items: list[dict[str, Any]]
-    ) -> list[WatcherAlert]:
+    async def match(self, items: list[dict[str, Any]]) -> list[WatcherAlert]:
         """수집된 항목을 타겟 프로파일과 매칭. 알림 리스트 반환."""
         ...
 
@@ -244,7 +242,9 @@ class BaseWatcher(ABC):
             return {}
 
     @staticmethod
-    def _http_post(url: str, data: dict, headers: dict | None = None, timeout: int = 30) -> dict | list:
+    def _http_post(
+        url: str, data: dict, headers: dict | None = None, timeout: int = 30
+    ) -> dict | list:
         """urllib POST 요청."""
         req_headers = {
             "User-Agent": "VXIS-Watcher/1.0",
@@ -289,6 +289,7 @@ def get_watcher(name: str) -> BaseWatcher | None:
 
 # ── Watcher Orchestrator ────────────────────────────────────────
 
+
 class WatcherOrchestrator:
     """모든 워처를 병렬 실행하고 통합 알림을 보내는 오케스트레이터."""
 
@@ -305,10 +306,12 @@ class WatcherOrchestrator:
             if isinstance(r, WatcherResult):
                 final.append(r)
             elif isinstance(r, Exception):
-                final.append(WatcherResult(
-                    watcher_name="unknown",
-                    error=str(r),
-                ))
+                final.append(
+                    WatcherResult(
+                        watcher_name="unknown",
+                        error=str(r),
+                    )
+                )
 
         # 통합 알림
         all_alerts = [a for r in final for a in r.alerts]
@@ -342,7 +345,7 @@ class WatcherOrchestrator:
         }
 
         lines = [
-            f"\U0001f6e1 <b>VXIS Intelligence Network</b>",
+            "\U0001f6e1 <b>VXIS Intelligence Network</b>",
             f"\U0001f4c5 {time_str}",
             f"\U0001f4ca {len(alerts)}건 감지\n",
         ]
@@ -365,12 +368,14 @@ class WatcherOrchestrator:
         text = "\n".join(lines)
 
         # Send (reuse pattern from upstream_watch)
-        payload = json.dumps({
-            "chat_id": chat_id,
-            "text": text[:4000],
-            "parse_mode": "HTML",
-            "disable_web_page_preview": True,
-        }).encode("utf-8")
+        payload = json.dumps(
+            {
+                "chat_id": chat_id,
+                "text": text[:4000],
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            }
+        ).encode("utf-8")
 
         req = urllib.request.Request(
             f"https://api.telegram.org/bot{token}/sendMessage",

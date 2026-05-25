@@ -204,10 +204,12 @@ class SupplyChainWatcher(BaseWatcher):
         items: list[dict[str, Any]] = []
 
         for pkg_name in known_packages[:20]:  # 레이트 리밋 고려, 최대 20개
-            params = urllib.parse.urlencode({
-                "text": pkg_name,
-                "size": 10,
-            })
+            params = urllib.parse.urlencode(
+                {
+                    "text": pkg_name,
+                    "size": 10,
+                }
+            )
             url = f"{_NPM_SEARCH_URL}?{params}"
             resp = self._http_get(url, timeout=15)
 
@@ -232,20 +234,22 @@ class SupplyChainWatcher(BaseWatcher):
                 publisher: str = (pkg.get("publisher") or {}).get("username", "")
                 item_id = f"npm_candidate_{candidate_name}"
 
-                items.append({
-                    "id": item_id,
-                    "ecosystem": "npm",
-                    "candidate_package": candidate_name,
-                    "original_package": original,
-                    "version": pkg_version,
-                    "description": pkg_description,
-                    "published_at": pkg_date,
-                    "publisher": publisher,
-                    "is_typosquatting": is_typo,
-                    "is_suspicious_pattern": is_suspicious,
-                    "source": "npm_registry",
-                    "link": f"https://www.npmjs.com/package/{urllib.parse.quote(candidate_name)}",
-                })
+                items.append(
+                    {
+                        "id": item_id,
+                        "ecosystem": "npm",
+                        "candidate_package": candidate_name,
+                        "original_package": original,
+                        "version": pkg_version,
+                        "description": pkg_description,
+                        "published_at": pkg_date,
+                        "publisher": publisher,
+                        "is_typosquatting": is_typo,
+                        "is_suspicious_pattern": is_suspicious,
+                        "source": "npm_registry",
+                        "link": f"https://www.npmjs.com/package/{urllib.parse.quote(candidate_name)}",
+                    }
+                )
 
         return items
 
@@ -286,18 +290,20 @@ class SupplyChainWatcher(BaseWatcher):
                 item_id = f"pypi_vuln_{pkg_name}_{vuln_id}"
                 cve_ids = [a for a in aliases if a.startswith("CVE-")]
 
-                items.append({
-                    "id": item_id,
-                    "ecosystem": "pypi",
-                    "package": pkg_name,
-                    "latest_version": latest_version,
-                    "vuln_id": vuln_id,
-                    "cve_ids": cve_ids,
-                    "details": details[:500],
-                    "fixed_in": fixed_in,
-                    "source": "pypi_advisory",
-                    "link": pkg_url,
-                })
+                items.append(
+                    {
+                        "id": item_id,
+                        "ecosystem": "pypi",
+                        "package": pkg_name,
+                        "latest_version": latest_version,
+                        "vuln_id": vuln_id,
+                        "cve_ids": cve_ids,
+                        "details": details[:500],
+                        "fixed_in": fixed_in,
+                        "source": "pypi_advisory",
+                        "link": pkg_url,
+                    }
+                )
 
         return items
 
@@ -323,12 +329,14 @@ class SupplyChainWatcher(BaseWatcher):
             if not known:
                 continue
 
-            params = urllib.parse.urlencode({
-                "ecosystem": ecosystem,
-                "per_page": 30,
-                "sort": "updated",
-                "direction": "desc",
-            })
+            params = urllib.parse.urlencode(
+                {
+                    "ecosystem": ecosystem,
+                    "per_page": 30,
+                    "sort": "updated",
+                    "direction": "desc",
+                }
+            )
             url = f"{_GHSA_URL}?{params}"
 
             resp = self._http_get(url, headers=headers, timeout=20)
@@ -361,19 +369,21 @@ class SupplyChainWatcher(BaseWatcher):
                     continue
 
                 item_id = f"ghsa_{ghsa_id}_{ecosystem}"
-                items.append({
-                    "id": item_id,
-                    "ecosystem": ecosystem,
-                    "ghsa_id": ghsa_id,
-                    "cve_id": cve_id,
-                    "summary": summary,
-                    "severity": severity,
-                    "published_at": published_at,
-                    "affected_packages": affected_pkgs,
-                    "matched_packages": matched_pkgs,
-                    "source": "github_advisory",
-                    "link": html_url,
-                })
+                items.append(
+                    {
+                        "id": item_id,
+                        "ecosystem": ecosystem,
+                        "ghsa_id": ghsa_id,
+                        "cve_id": cve_id,
+                        "summary": summary,
+                        "severity": severity,
+                        "published_at": published_at,
+                        "affected_packages": affected_pkgs,
+                        "matched_packages": matched_pkgs,
+                        "source": "github_advisory",
+                        "link": html_url,
+                    }
+                )
 
         return items
 
@@ -426,7 +436,7 @@ class SupplyChainWatcher(BaseWatcher):
             title = f"[공급망] npm 의심 패키지 탐지: {candidate}"
             desc_lines = [
                 f"패키지: {candidate}",
-                f"의심 사유: 이름 패턴 이상",
+                "의심 사유: 이름 패턴 이상",
                 f"버전: {item.get('version', '알 수 없음')}",
                 f"링크: {item.get('link', '')}",
             ]
@@ -436,8 +446,7 @@ class SupplyChainWatcher(BaseWatcher):
         # 영향받는 타겟 URL 조회
         target_pkgs = _load_target_packages("npm")
         affected_targets = [
-            url for url, pkgs in target_pkgs.items()
-            if original in pkgs or candidate in pkgs
+            url for url, pkgs in target_pkgs.items() if original in pkgs or candidate in pkgs
         ]
         target_display = affected_targets[0] if affected_targets else "npm 생태계"
 
@@ -472,24 +481,23 @@ class SupplyChainWatcher(BaseWatcher):
         fixed_str = ", ".join(fixed_in) if fixed_in else "없음 (미패치)"
 
         target_pkgs = _load_target_packages("pypi")
-        affected_targets = [
-            url for url, pkgs in target_pkgs.items()
-            if pkg_name in pkgs
-        ]
+        affected_targets = [url for url, pkgs in target_pkgs.items() if pkg_name in pkgs]
         target_display = affected_targets[0] if affected_targets else "PyPI 생태계"
 
         return WatcherAlert(
             watcher_name=self.name,
             severity="medium",
             title=f"[공급망] PyPI 취약 패키지: {pkg_name} ({cve_str})",
-            description="\n".join([
-                f"패키지: {pkg_name}",
-                f"현재 버전: {latest_version}",
-                f"취약점 ID: {cve_str}",
-                f"수정 버전: {fixed_str}",
-                f"상세: {details[:300]}",
-                f"링크: {item.get('link', '')}",
-            ]),
+            description="\n".join(
+                [
+                    f"패키지: {pkg_name}",
+                    f"현재 버전: {latest_version}",
+                    f"취약점 ID: {cve_str}",
+                    f"수정 버전: {fixed_str}",
+                    f"상세: {details[:300]}",
+                    f"링크: {item.get('link', '')}",
+                ]
+            ),
             target=target_display,
             source_url=item.get("link", ""),
             data={
@@ -539,14 +547,16 @@ class SupplyChainWatcher(BaseWatcher):
             watcher_name=self.name,
             severity=severity,
             title=f"[공급망] {ecosystem} 어드바이저리: {id_display} — {summary[:80]}",
-            description="\n".join([
-                f"어드바이저리: {ghsa_id}",
-                f"CVE: {cve_id or '없음'}",
-                f"에코시스템: {ecosystem}",
-                f"영향 패키지: {pkgs_str}",
-                f"요약: {summary[:400]}",
-                f"링크: {item.get('link', '')}",
-            ]),
+            description="\n".join(
+                [
+                    f"어드바이저리: {ghsa_id}",
+                    f"CVE: {cve_id or '없음'}",
+                    f"에코시스템: {ecosystem}",
+                    f"영향 패키지: {pkgs_str}",
+                    f"요약: {summary[:400]}",
+                    f"링크: {item.get('link', '')}",
+                ]
+            ),
             target=target_display,
             source_url=item.get("link", ""),
             data={
@@ -604,9 +614,7 @@ class SupplyChainWatcher(BaseWatcher):
                         json.dumps(advisory_data, ensure_ascii=False, indent=2),
                         encoding="utf-8",
                     )
-                    logger.info(
-                        "[SupplyChain] 어드바이저리 생성: %s", advisory_file
-                    )
+                    logger.info("[SupplyChain] 어드바이저리 생성: %s", advisory_file)
                     actions += 1
                 except OSError as exc:
                     logger.warning("[SupplyChain] 어드바이저리 저장 실패: %s", exc)

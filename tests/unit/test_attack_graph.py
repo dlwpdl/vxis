@@ -1,6 +1,4 @@
-import pytest
 from vxis.graph.attack_graph import LivingAttackGraph
-from vxis.graph.node import GraphNode, NodeType
 from vxis.evidence.schema import Evidence, Severity, EvidenceType
 
 

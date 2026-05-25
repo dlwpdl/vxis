@@ -1,11 +1,12 @@
 import pytest
 from vxis.mission.config import MissionConfig, Depth, Perspective, Scope
+from vxis.mission.selector import AgentSelector
 
 
 def test_mission_config_defaults():
     cfg = MissionConfig(target="example.com")
     assert cfg.depth == Depth.NORMAL
-    assert cfg.stealth == False
+    assert not cfg.stealth
     assert cfg.perspective == Perspective.EXTERNAL
 
 
@@ -20,7 +21,7 @@ def test_mission_config_full():
     )
     assert cfg.target == "*.acme.com"
     assert cfg.depth == Depth.ELITE
-    assert cfg.stealth == True
+    assert cfg.stealth
 
 
 def test_mission_config_from_toml(tmp_path):
@@ -46,9 +47,6 @@ learn = true
 def test_invalid_depth_raises():
     with pytest.raises(ValueError):
         MissionConfig(target="example.com", depth="ultra")
-
-
-from vxis.mission.selector import AgentSelector
 
 
 def test_selector_web_scope():

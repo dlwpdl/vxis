@@ -17,7 +17,9 @@ from ...graph.hypothesis import Hypothesis
 @register
 class QUICHttp3Agent(BaseAgent):
     agent_id = "quic_http3"
-    description = "QUIC 0-RTT replay attacks, Connection Migration abuse, HTTP/3, UDP firewall bypass"
+    description = (
+        "QUIC 0-RTT replay attacks, Connection Migration abuse, HTTP/3, UDP firewall bypass"
+    )
 
     async def run(self, context: AgentContext) -> AgentResult:
         target = context.mission.target
@@ -29,14 +31,16 @@ class QUICHttp3Agent(BaseAgent):
         # 1. Check if QUIC/HTTP3 is supported (Alt-Svc header)
         quic_supported = await self._check_quic_support(domain)
         if not quic_supported:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"QUIC/HTTP3 not detected on {domain}",
-                severity=Severity.INFO,
-                evidence_type=EvidenceType.NETWORK,
-                description="No Alt-Svc h3 header or QUIC endpoint detected",
-                tags=["quic", "http3", "not-detected"],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"QUIC/HTTP3 not detected on {domain}",
+                    severity=Severity.INFO,
+                    evidence_type=EvidenceType.NETWORK,
+                    description="No Alt-Svc h3 header or QUIC endpoint detected",
+                    tags=["quic", "http3", "not-detected"],
+                )
+            )
             return AgentResult(
                 agent_id=self.agent_id,
                 findings=findings,
@@ -45,15 +49,17 @@ class QUICHttp3Agent(BaseAgent):
                 metadata={"quic_supported": False},
             )
 
-        findings.append(Evidence(
-            agent_id=self.agent_id,
-            title=f"QUIC/HTTP3 enabled on {domain}",
-            severity=Severity.INFO,
-            evidence_type=EvidenceType.NETWORK,
-            description=f"QUIC/HTTP3 support detected: {quic_supported}",
-            response=quic_supported,
-            tags=["quic", "http3", "enabled"],
-        ))
+        findings.append(
+            Evidence(
+                agent_id=self.agent_id,
+                title=f"QUIC/HTTP3 enabled on {domain}",
+                severity=Severity.INFO,
+                evidence_type=EvidenceType.NETWORK,
+                description=f"QUIC/HTTP3 support detected: {quic_supported}",
+                response=quic_supported,
+                tags=["quic", "http3", "enabled"],
+            )
+        )
 
         # 2. UDP port scan for QUIC endpoints
         udp_findings = await self._scan_quic_ports(domain)
@@ -62,91 +68,116 @@ class QUICHttp3Agent(BaseAgent):
         # 3. Check for 0-RTT support (replay attack surface)
         zero_rtt = await self._check_0rtt(domain)
         if zero_rtt:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"QUIC 0-RTT enabled on {domain}",
-                severity=Severity.MEDIUM,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    "QUIC 0-RTT (early data) is enabled. 0-RTT data is "
-                    "replayable — if non-idempotent operations accept 0-RTT, "
-                    "replay attacks are possible."
-                ),
-                response=zero_rtt,
-                tags=["quic", "0-rtt", "replay"],
-            ))
-            hypotheses.append(Hypothesis(
-                title=f"0-RTT replay attack on {domain}",
-                rationale="QUIC 0-RTT enabled; early data can be replayed to "
-                          "duplicate transactions or bypass rate limits",
-                probability=0.5, impact=0.75,
-                suggested_agent="web",
-            ))
-            hypotheses.append(Hypothesis(
-                title=f"0-RTT state manipulation on {domain}",
-                rationale="If server accepts non-idempotent requests in 0-RTT, "
-                          "state-changing operations can be replayed",
-                probability=0.4, impact=0.8,
-                suggested_agent="api",
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"QUIC 0-RTT enabled on {domain}",
+                    severity=Severity.MEDIUM,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        "QUIC 0-RTT (early data) is enabled. 0-RTT data is "
+                        "replayable — if non-idempotent operations accept 0-RTT, "
+                        "replay attacks are possible."
+                    ),
+                    response=zero_rtt,
+                    tags=["quic", "0-rtt", "replay"],
+                )
+            )
+            hypotheses.append(
+                Hypothesis(
+                    title=f"0-RTT replay attack on {domain}",
+                    rationale="QUIC 0-RTT enabled; early data can be replayed to "
+                    "duplicate transactions or bypass rate limits",
+                    probability=0.5,
+                    impact=0.75,
+                    suggested_agent="web",
+                )
+            )
+            hypotheses.append(
+                Hypothesis(
+                    title=f"0-RTT state manipulation on {domain}",
+                    rationale="If server accepts non-idempotent requests in 0-RTT, "
+                    "state-changing operations can be replayed",
+                    probability=0.4,
+                    impact=0.8,
+                    suggested_agent="api",
+                )
+            )
 
         # 4. Connection migration analysis
-        findings.append(Evidence(
-            agent_id=self.agent_id,
-            title=f"QUIC Connection Migration surface on {domain}",
-            severity=Severity.LOW,
-            evidence_type=EvidenceType.NETWORK,
-            description=(
-                "QUIC supports connection migration across IP addresses. "
-                "If not properly validated, an attacker can hijack QUIC "
-                "connections by spoofing migration packets."
-            ),
-            tags=["quic", "connection-migration"],
-        ))
-        hypotheses.append(Hypothesis(
-            title=f"QUIC connection hijacking via migration on {domain}",
-            rationale="QUIC connection migration can be abused for session hijacking "
-                      "if path validation is weak",
-            probability=0.3, impact=0.85,
-            suggested_agent="network",
-        ))
+        findings.append(
+            Evidence(
+                agent_id=self.agent_id,
+                title=f"QUIC Connection Migration surface on {domain}",
+                severity=Severity.LOW,
+                evidence_type=EvidenceType.NETWORK,
+                description=(
+                    "QUIC supports connection migration across IP addresses. "
+                    "If not properly validated, an attacker can hijack QUIC "
+                    "connections by spoofing migration packets."
+                ),
+                tags=["quic", "connection-migration"],
+            )
+        )
+        hypotheses.append(
+            Hypothesis(
+                title=f"QUIC connection hijacking via migration on {domain}",
+                rationale="QUIC connection migration can be abused for session hijacking "
+                "if path validation is weak",
+                probability=0.3,
+                impact=0.85,
+                suggested_agent="network",
+            )
+        )
 
         # 5. UDP firewall bypass analysis
-        hypotheses.append(Hypothesis(
-            title=f"Firewall bypass via QUIC/UDP on {domain}",
-            rationale="QUIC uses UDP/443; many firewalls and DPI systems "
-                      "cannot inspect QUIC encrypted payloads",
-            probability=0.6, impact=0.7,
-            suggested_agent="network",
-        ))
+        hypotheses.append(
+            Hypothesis(
+                title=f"Firewall bypass via QUIC/UDP on {domain}",
+                rationale="QUIC uses UDP/443; many firewalls and DPI systems "
+                "cannot inspect QUIC encrypted payloads",
+                probability=0.6,
+                impact=0.7,
+                suggested_agent="network",
+            )
+        )
 
         # 6. Nuclei HTTP/3 specific checks
         nuclei_results = await self._run_nuclei_http3(target, context.mission.stealth)
         for nf in nuclei_results:
             sev_str = nf.get("info", {}).get("severity", "info").lower()
-            sev_map = {"critical": Severity.CRITICAL, "high": Severity.HIGH,
-                       "medium": Severity.MEDIUM, "low": Severity.LOW}
+            sev_map = {
+                "critical": Severity.CRITICAL,
+                "high": Severity.HIGH,
+                "medium": Severity.MEDIUM,
+                "low": Severity.LOW,
+            }
             severity = sev_map.get(sev_str, Severity.INFO)
             name = nf.get("info", {}).get("name", "")
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"{name} — {domain}",
-                severity=severity,
-                evidence_type=EvidenceType.HTTP_EXCHANGE,
-                description=nf.get("info", {}).get("description", ""),
-                request=nf.get("request"),
-                response=nf.get("response"),
-                tags=["quic", "http3", "nuclei", nf.get("template-id", "")],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"{name} — {domain}",
+                    severity=severity,
+                    evidence_type=EvidenceType.HTTP_EXCHANGE,
+                    description=nf.get("info", {}).get("description", ""),
+                    request=nf.get("request"),
+                    response=nf.get("response"),
+                    tags=["quic", "http3", "nuclei", nf.get("template-id", "")],
+                )
+            )
 
         # 7. Version negotiation / downgrade hypothesis
-        hypotheses.append(Hypothesis(
-            title=f"QUIC version downgrade attack on {domain}",
-            rationale="If server supports multiple QUIC versions, "
-                      "version negotiation may be manipulated",
-            probability=0.3, impact=0.6,
-            suggested_agent="crypto_tls",
-        ))
+        hypotheses.append(
+            Hypothesis(
+                title=f"QUIC version downgrade attack on {domain}",
+                rationale="If server supports multiple QUIC versions, "
+                "version negotiation may be manipulated",
+                probability=0.3,
+                impact=0.6,
+                suggested_agent="crypto_tls",
+            )
+        )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -165,7 +196,11 @@ class QUICHttp3Agent(BaseAgent):
         if shutil.which("curl"):
             # Check Alt-Svc header
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "-I", "-m", "10",
+                "curl",
+                "-s",
+                "-I",
+                "-m",
+                "10",
                 f"https://{domain}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
@@ -181,7 +216,12 @@ class QUICHttp3Agent(BaseAgent):
 
             # Try curl --http3 if available
             proc = await asyncio.create_subprocess_exec(
-                "curl", "-s", "--http3", "-I", "-m", "10",
+                "curl",
+                "-s",
+                "--http3",
+                "-I",
+                "-m",
+                "10",
                 f"https://{domain}",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -189,7 +229,7 @@ class QUICHttp3Agent(BaseAgent):
             try:
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
                 if proc.returncode == 0 and stdout:
-                    return f"HTTP/3 direct connection successful"
+                    return "HTTP/3 direct connection successful"
             except asyncio.TimeoutError:
                 pass
 
@@ -200,8 +240,14 @@ class QUICHttp3Agent(BaseAgent):
         if not shutil.which("nmap"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-sU", "-p", "443,8443,4433",
-            "-sV", "-oX", "-", domain,
+            "nmap",
+            "-sU",
+            "-p",
+            "443,8443,4433",
+            "-sV",
+            "-oX",
+            "-",
+            domain,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -210,15 +256,17 @@ class QUICHttp3Agent(BaseAgent):
             output = stdout.decode()
             findings: list[Evidence] = []
             if 'state="open"' in output:
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"QUIC UDP ports open on {domain}",
-                    severity=Severity.INFO,
-                    evidence_type=EvidenceType.NETWORK,
-                    description="UDP ports for QUIC protocol are accessible",
-                    response=output[:4096],
-                    tags=["quic", "udp", "portscan"],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"QUIC UDP ports open on {domain}",
+                        severity=Severity.INFO,
+                        evidence_type=EvidenceType.NETWORK,
+                        description="UDP ports for QUIC protocol are accessible",
+                        response=output[:4096],
+                        tags=["quic", "udp", "portscan"],
+                    )
+                )
             return findings
         except asyncio.TimeoutError:
             return []
@@ -229,15 +277,21 @@ class QUICHttp3Agent(BaseAgent):
             return ""
         # TLS 1.3 early data check (QUIC uses TLS 1.3)
         proc = await asyncio.create_subprocess_exec(
-            "openssl", "s_client", "-connect", f"{domain}:443",
-            "-tls1_3", "-servername", domain,
+            "openssl",
+            "s_client",
+            "-connect",
+            f"{domain}:443",
+            "-tls1_3",
+            "-servername",
+            domain,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
         try:
             stdout, stderr = await asyncio.wait_for(
-                proc.communicate(input=b""), timeout=10,
+                proc.communicate(input=b""),
+                timeout=10,
             )
             combined = stdout.decode() + stderr.decode()
             if "early data" in combined.lower() or "0-rtt" in combined.lower():
@@ -247,16 +301,25 @@ class QUICHttp3Agent(BaseAgent):
         return ""
 
     async def _run_nuclei_http3(
-        self, target: str, stealth: bool,
+        self,
+        target: str,
+        stealth: bool,
     ) -> list[dict[str, Any]]:
         if not shutil.which("nuclei"):
             return []
         rate = "10" if stealth else "60"
         cmd = [
-            "nuclei", "-u", target,
-            "-tags", "http,quic,h3,http3",
-            "-severity", "critical,high,medium",
-            "-rate-limit", rate, "-jsonl", "-silent",
+            "nuclei",
+            "-u",
+            target,
+            "-tags",
+            "http,quic,h3,http3",
+            "-severity",
+            "critical,high,medium",
+            "-rate-limit",
+            rate,
+            "-jsonl",
+            "-silent",
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,

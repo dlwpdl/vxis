@@ -12,7 +12,6 @@ Playwright가 설치되지 않은 환경에서는 urllib 기반 헤더 체크만
 from __future__ import annotations
 
 import logging
-import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -93,9 +92,7 @@ class EvidenceBundle:
     console_errors: list[str] = field(default_factory=list)
     """브라우저 콘솔에서 수집한 오류 메시지 목록."""
 
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     """ISO-8601 형식의 캡처 시각 (UTC)."""
 
     missing_security_headers: list[str] = field(default_factory=list)
@@ -136,9 +133,7 @@ def check_security_headers(url: str) -> list[dict[str, Any]]:
             method="GET",
         )
         with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310
-            response_headers = {
-                k.lower(): v for k, v in response.headers.items()
-            }
+            response_headers = {k.lower(): v for k, v in response.headers.items()}
     except urllib.error.URLError as exc:
         logger.warning("check_security_headers: URL 접근 실패 (%s): %s", url, exc)
         return findings
@@ -223,9 +218,7 @@ class EvidenceCollector:
             Playwright 미설치 시 빈 문자열을 반환한다.
         """
         if not self.is_available():
-            logger.warning(
-                "capture_screenshot: Playwright 미설치 — 스크린샷 건너뜀 (%s)", url
-            )
+            logger.warning("capture_screenshot: Playwright 미설치 — 스크린샷 건너뜀 (%s)", url)
             return ""
 
         dest = self._resolve_screenshot_path(url, filename)
@@ -278,17 +271,13 @@ class EvidenceCollector:
         # 2단계: Playwright로 스크린샷·콘솔 에러 수집
         if self.is_available():
             try:
-                screenshot_path, console_errors = (
-                    await self._playwright_full_capture(url, payload)
-                )
+                screenshot_path, console_errors = await self._playwright_full_capture(url, payload)
                 bundle.screenshot_path = screenshot_path
                 bundle.console_errors = console_errors
             except Exception as exc:  # noqa: BLE001
                 logger.error("Playwright 캡처 실패 (%s): %s", url, exc)
         else:
-            logger.info(
-                "capture_with_payload: Playwright 미설치 — 헤더 전용 모드로 동작"
-            )
+            logger.info("capture_with_payload: Playwright 미설치 — 헤더 전용 모드로 동작")
 
         return bundle
 
@@ -332,22 +321,16 @@ class EvidenceCollector:
                     method=method,
                 )
                 with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310
-                    headers = {
-                        k.lower(): v for k, v in response.headers.items()
-                    }
+                    headers = {k.lower(): v for k, v in response.headers.items()}
                     return headers, response.status
             except urllib.error.HTTPError as exc:
                 # 4xx/5xx 도 응답 헤더를 포함하므로 수집 후 반환
                 headers = {k.lower(): v for k, v in exc.headers.items()}
                 return headers, exc.code
             except urllib.error.URLError as exc:
-                logger.debug(
-                    "_fetch_headers_urllib %s 실패 (%s): %s", method, url, exc
-                )
+                logger.debug("_fetch_headers_urllib %s 실패 (%s): %s", method, url, exc)
             except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    "_fetch_headers_urllib 예상 외 오류 (%s): %s", url, exc
-                )
+                logger.debug("_fetch_headers_urllib 예상 외 오류 (%s): %s", url, exc)
 
         return {}, 0
 
@@ -355,9 +338,7 @@ class EvidenceCollector:
     def _compute_missing_headers(headers: dict[str, str]) -> list[str]:
         """응답 헤더에서 누락된 보안 헤더 이름 목록을 반환한다."""
         return [
-            policy["name"]
-            for policy in _SECURITY_HEADERS
-            if policy["name"].lower() not in headers
+            policy["name"] for policy in _SECURITY_HEADERS if policy["name"].lower() not in headers
         ]
 
     # ------------------------------------------------------------------
@@ -434,17 +415,13 @@ class EvidenceCollector:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True)
             try:
-                context = await browser.new_context(
-                    user_agent="VXIS-SecurityScanner/1.0"
-                )
+                context = await browser.new_context(user_agent="VXIS-SecurityScanner/1.0")
                 page = await context.new_page()
 
                 # 콘솔 에러 리스너 등록
                 page.on(
                     "console",
-                    lambda msg: console_errors.append(msg.text)
-                    if msg.type == "error"
-                    else None,
+                    lambda msg: console_errors.append(msg.text) if msg.type == "error" else None,
                 )
 
                 await page.goto(url, wait_until="networkidle", timeout=30_000)

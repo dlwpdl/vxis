@@ -64,10 +64,10 @@ logger = logging.getLogger(__name__)
 class AuthState(Enum):
     """인증 상태 FSM."""
 
-    ANONYMOUS = "anonymous"          # 인증 안 됨
+    ANONYMOUS = "anonymous"  # 인증 안 됨
     AUTHENTICATED = "authenticated"  # 로그인 성공
-    EXPIRED = "expired"              # 세션 만료 감지
-    BLOCKED = "blocked"              # WAF/Rate limit 차단
+    EXPIRED = "expired"  # 세션 만료 감지
+    BLOCKED = "blocked"  # WAF/Rate limit 차단
 
 
 # ── Response Analysis ────────────────────────────────────────────
@@ -197,15 +197,17 @@ class _FormParser(html.parser.HTMLParser):
                     csrf_value = fval
                     break
 
-            self.forms.append(FormData(
-                action=self._current_form["action"],
-                method=self._current_form["method"],
-                fields=dict(self._current_fields),
-                has_csrf=has_csrf,
-                csrf_field=csrf_field,
-                csrf_value=csrf_value,
-                enctype=self._current_form["enctype"],
-            ))
+            self.forms.append(
+                FormData(
+                    action=self._current_form["action"],
+                    method=self._current_form["method"],
+                    fields=dict(self._current_fields),
+                    has_csrf=has_csrf,
+                    csrf_field=csrf_field,
+                    csrf_value=csrf_value,
+                    enctype=self._current_form["enctype"],
+                )
+            )
             self._current_form = None
             self._current_fields = {}
 
@@ -333,9 +335,7 @@ def _analyze_response(resp: httpx.Response, base_url: str) -> AnalyzedResponse:
         is_auth_required = True
     if not is_auth_required and body and resp.status_code >= 400:
         # 에러 응답에서만 인증 패턴 검색 (일반 페이지의 "login" 링크 오탐 방지)
-        is_auth_required = any(
-            re.search(p, body, re.IGNORECASE) for p in _AUTH_REQUIRED_PATTERNS
-        )
+        is_auth_required = any(re.search(p, body, re.IGNORECASE) for p in _AUTH_REQUIRED_PATTERNS)
 
     # 리다이렉트 감지 — follow_redirects=True라서 resp.history로 판단
     was_redirected = bool(resp.history)
@@ -387,11 +387,11 @@ class CSRFTracker:
     def update_from_cookies(self, cookies: httpx.Cookies) -> None:
         # 쿠키 이름 → 요청 헤더 이름 매핑 (프레임워크별)
         _cookie_header_map = {
-            "csrftoken": "X-CSRFToken",        # Django
-            "csrf_token": "X-CSRF-Token",       # Rails, general
-            "_csrf": "X-CSRF-Token",            # Express
-            "XSRF-TOKEN": "X-XSRF-TOKEN",      # Angular, Axios
-            "_csrf_token": "X-CSRF-Token",      # Phoenix
+            "csrftoken": "X-CSRFToken",  # Django
+            "csrf_token": "X-CSRF-Token",  # Rails, general
+            "_csrf": "X-CSRF-Token",  # Express
+            "XSRF-TOKEN": "X-XSRF-TOKEN",  # Angular, Axios
+            "_csrf_token": "X-CSRF-Token",  # Phoenix
         }
         for cookie_name, header_name in _cookie_header_map.items():
             val = cookies.get(cookie_name)
@@ -448,6 +448,7 @@ class TargetSession:
 
         # Profile에 따른 기본 딜레이 설정
         import os as _os
+
         _profile = _os.environ.get("VXIS_SCAN_PROFILE", "standard")
         _profile_delays = {"stealth": 2.0, "standard": 0.1, "aggressive": 0.0}
         self._min_delay = _profile_delays.get(_profile, 0.1)
@@ -489,6 +490,7 @@ class TargetSession:
         path: str,
         data: dict[str, Any] | None = None,
         json_data: dict[str, Any] | None = None,
+        content: str | bytes | None = None,
         headers: dict[str, str] | None = None,
         params: dict[str, str] | None = None,
     ) -> AnalyzedResponse:
@@ -508,17 +510,23 @@ class TargetSession:
         # 한 번이 전체 스캔을 마비시켰음. 45초 넘어가면 그 엔드포인트가
         # 진짜 죽은 거니 Pipeline executor가 다음 벡터로 넘어가게 둔다.
         _ADAPTIVE_CAP = 1.5
-        if self._consecutive_timeouts >= 2 and self._effective_timeout < self._base_timeout * _ADAPTIVE_CAP:
+        if (
+            self._consecutive_timeouts >= 2
+            and self._effective_timeout < self._base_timeout * _ADAPTIVE_CAP
+        ):
             new_timeout = min(self._effective_timeout * 1.5, self._base_timeout * _ADAPTIVE_CAP)
             if new_timeout > self._effective_timeout:
                 self._effective_timeout = new_timeout
                 self._client.timeout = httpx.Timeout(self._effective_timeout)
-                logger.info("  [ADAPTIVE] Slow target detected — timeout → %.0fs", self._effective_timeout)
+                logger.info(
+                    "  [ADAPTIVE] Slow target detected — timeout → %.0fs", self._effective_timeout
+                )
 
         try:
             resp = await self._client.request(
                 method=method.upper(),
                 url=path,
+                content=content,
                 data=data,
                 json=json_data,
                 headers=extra_headers if extra_headers else None,
@@ -528,7 +536,9 @@ class TargetSession:
         except httpx.TimeoutException:
             self._consecutive_timeouts += 1
             _display_url = path if path.startswith("http") else f"{self.base_url}{path}"
-            logger.warning("Timeout (%ds): %s %s", int(self._effective_timeout), method, _display_url)
+            logger.warning(
+                "Timeout (%ds): %s %s", int(self._effective_timeout), method, _display_url
+            )
             raise
         except httpx.ConnectError as e:
             _display_url = path if path.startswith("http") else f"{self.base_url}{path}"
@@ -542,7 +552,7 @@ class TargetSession:
         analyzed = _analyze_response(resp, self.base_url)
         self._history.append(analyzed)
         if len(self._history) > self._max_history:
-            self._history = self._history[-self._max_history:]
+            self._history = self._history[-self._max_history :]
 
         # CSRF 토큰 갱신
         for form in analyzed.forms:
@@ -566,8 +576,12 @@ class TargetSession:
 
         logger.debug(
             "%s %s → %d (%d bytes, %d forms, %d links)",
-            method, path, analyzed.status, analyzed.body_length,
-            len(analyzed.forms), len(analyzed.links),
+            method,
+            path,
+            analyzed.status,
+            analyzed.body_length,
+            len(analyzed.forms),
+            len(analyzed.links),
         )
 
         return analyzed
@@ -703,9 +717,7 @@ class TargetSession:
             "endpoints_discovered": len(self._discovered_endpoints),
             "tech_stack": sorted(all_tech),
             "security_headers": all_sec_headers,
-            "missing_security_headers": [
-                h for h in _SECURITY_HEADERS if h not in all_sec_headers
-            ],
+            "missing_security_headers": [h for h in _SECURITY_HEADERS if h not in all_sec_headers],
             "error_patterns": sorted(all_errors),
             "waf_detected": waf_detected,
             "has_csrf": self.csrf.has_token,
@@ -739,7 +751,11 @@ class TargetSession:
             elapsed = time.monotonic() - self._last_request_time
             if elapsed < effective:
                 await asyncio.sleep(effective - elapsed)
-            elif not ghost_layer.is_active() and self._min_delay > 0 and elapsed > self._min_delay * 3:
+            elif (
+                not ghost_layer.is_active()
+                and self._min_delay > 0
+                and elapsed > self._min_delay * 3
+            ):
                 self._min_delay = max(self._min_delay - 0.2, 0.0)
 
 
@@ -774,9 +790,15 @@ class RequestChain:
         json_data: dict[str, Any] | None = None,
         **kwargs: Any,
     ) -> RequestChain:
-        self._steps.append(ChainStep(
-            method="POST", path=path, data=data, json_data=json_data, **kwargs,
-        ))
+        self._steps.append(
+            ChainStep(
+                method="POST",
+                path=path,
+                data=data,
+                json_data=json_data,
+                **kwargs,
+            )
+        )
         return self
 
     def put(self, path: str, **kwargs: Any) -> RequestChain:
@@ -798,7 +820,8 @@ class RequestChain:
                 data = self._interpolate_dict(step.data, result.extracted) if step.data else None
                 json_data = (
                     self._interpolate_dict(step.json_data, result.extracted)
-                    if step.json_data else None
+                    if step.json_data
+                    else None
                 )
 
                 resp = await self._session.request(
@@ -815,14 +838,18 @@ class RequestChain:
                     for name, pattern in step.extract.items():
                         match = re.search(pattern, resp.text)
                         if match:
-                            result.extracted[name] = match.group(1) if match.groups() else match.group(0)
+                            result.extracted[name] = (
+                                match.group(1) if match.groups() else match.group(0)
+                            )
                             logger.debug("Extracted %s=%s", name, result.extracted[name][:50])
 
                 # 에러 체크
                 if resp.is_error and stop_on_error:
                     result.success = False
                     result.failed_at = i
-                    logger.warning("Chain failed at step %d: %s %s → %d", i, step.method, path, resp.status)
+                    logger.warning(
+                        "Chain failed at step %d: %s %s → %d", i, step.method, path, resp.status
+                    )
                     break
 
             except Exception as exc:
@@ -885,7 +912,9 @@ class SessionManager:
             await session.close()
             self._sessions.pop(key, None)
             session = None
-            logger.info("Session recreated with new proxy: %s (proxy=%s)", base_url, proxy or "direct")
+            logger.info(
+                "Session recreated with new proxy: %s (proxy=%s)", base_url, proxy or "direct"
+            )
         if session is None:
             # GhostLayer 활성 시 GhostTransport 주입
             if ghost_layer.is_active() and "transport" not in kwargs:

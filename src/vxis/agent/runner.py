@@ -10,7 +10,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -39,30 +38,44 @@ SCAN_TYPE_MISSIONS = {
     "external": {
         "scope": "external",
         "agents": [
-            "recon", "web", "api", "crypto_tls", "email_security",
-            "dns_deep", "subdomain_takeover", "cms_biz_platform",
+            "recon",
+            "web",
+            "api",
+            "crypto_tls",
+            "email_security",
+            "dns_deep",
+            "subdomain_takeover",
+            "cms_biz_platform",
         ],
         "max_rounds": 8,
     },
     "internal": {
         "scope": "internal",
         "agents": [
-            "network", "identity_ad", "database", "container_k8s",
-            "remote_access", "l2_network",
+            "network",
+            "identity_ad",
+            "database",
+            "container_k8s",
+            "remote_access",
+            "l2_network",
         ],
         "max_rounds": 8,
     },
     "code": {
         "scope": "code",
         "agents": [
-            "supply_chain", "deserialization", "encoding_attack",
+            "supply_chain",
+            "deserialization",
+            "encoding_attack",
         ],
         "max_rounds": 5,
     },
     "cloud": {
         "scope": "cloud",
         "agents": [
-            "cloud", "container_k8s", "iam_rbac",
+            "cloud",
+            "container_k8s",
+            "iam_rbac",
         ],
         "max_rounds": 5,
     },
@@ -92,7 +105,13 @@ class RunnerResult:
 
     @property
     def severity_counts(self) -> dict[str, int]:
-        counts: dict[str, int] = {"critical": 0, "high": 0, "medium": 0, "low": 0, "informational": 0}
+        counts: dict[str, int] = {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0,
+            "informational": 0,
+        }
         for f in self.findings:
             sev = getattr(f, "severity", None)
             if sev:
@@ -164,10 +183,13 @@ class AgentRunner:
         # Step 3: Director
         director = DirectorAgent()
 
-        self._emit("에이전트 선택", {
-            "agents": mission.custom_agents or [],
-            "max_rounds": mission.max_rounds,
-        })
+        self._emit(
+            "에이전트 선택",
+            {
+                "agents": mission.custom_agents or [],
+                "max_rounds": mission.max_rounds,
+            },
+        )
 
         # Step 4: Run mission
         log_entries: list[str] = []
@@ -199,7 +221,7 @@ class AgentRunner:
         duration = time.monotonic() - started_at
 
         # Get chain report
-        chain_report = director.get_chain_report()
+        director.get_chain_report()
         attack_chains = []
         if director._chain_reasoner:
             try:
@@ -227,7 +249,9 @@ class AgentRunner:
             attack_chains=attack_chains,
             agents_used=list(director._active_agents),
             agents_completed=list(director._completed_agents),
-            hypotheses_explored=director.hypothesis_queue.total_processed if hasattr(director.hypothesis_queue, "total_processed") else 0,
+            hypotheses_explored=director.hypothesis_queue.total_processed
+            if hasattr(director.hypothesis_queue, "total_processed")
+            else 0,
             steps_taken=len(log_entries),
             duration_seconds=duration,
             token_usage=token_usage,

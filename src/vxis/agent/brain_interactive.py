@@ -17,8 +17,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from dataclasses import field
-from datetime import datetime, timezone
 from typing import Any, TextIO
 
 from vxis.ghost.trigger import detect_ghost_keyword
@@ -73,7 +71,12 @@ class InteractiveBrain:
             # ghost 키워드 감지 (JSON 파싱 전 raw text 검사)
             if detect_ghost_keyword(line) and not ghost_layer.is_active():
                 ghost_layer.activate()
-                self._emit({"type": "ghost_activated", "message": "[GHOST MODE ACTIVATED] 익명화 모드 활성화됨"})
+                self._emit(
+                    {
+                        "type": "ghost_activated",
+                        "message": "[GHOST MODE ACTIVATED] 익명화 모드 활성화됨",
+                    }
+                )
                 logger.info("[Ghost] Brain 자연어 트리거 감지 → 활성화")
 
             return json.loads(line.strip())
@@ -112,12 +115,14 @@ class InteractiveBrain:
         # 파싱
         actions: list[AgentAction] = []
         for a in decision.get("actions", []):
-            actions.append(AgentAction(
-                tool=a.get("tool", "DONE"),
-                args=a.get("args", {}),
-                reasoning=a.get("reasoning", ""),
-                priority=a.get("priority", "medium"),
-            ))
+            actions.append(
+                AgentAction(
+                    tool=a.get("tool", "DONE"),
+                    args=a.get("args", {}),
+                    reasoning=a.get("reasoning", ""),
+                    priority=a.get("priority", "medium"),
+                )
+            )
 
         if not actions:
             actions = [AgentAction(tool="DONE", reasoning="no actions provided")]
@@ -127,11 +132,13 @@ class InteractiveBrain:
             self.is_done = True
 
         # 스텝 기록
-        self._steps.append(AgentStep(
-            step_number=self._step_count,
-            observation_summary=f"Step {self._step_count}: {len(observation.findings)} findings, {len(observation.executed_tools)} tools run",
-            actions=actions,
-        ))
+        self._steps.append(
+            AgentStep(
+                step_number=self._step_count,
+                observation_summary=f"Step {self._step_count}: {len(observation.findings)} findings, {len(observation.executed_tools)} tools run",
+                actions=actions,
+            )
+        )
 
         logger.info(
             "Step %d: %d action(s) — %s",
@@ -144,19 +151,23 @@ class InteractiveBrain:
 
     def record_result(self, action: AgentAction, result: dict[str, Any]) -> None:
         """실행 결과를 stdout으로 알림 (Claude Code가 다음 판단에 참고)."""
-        self._emit({
-            "type": "result",
-            "action": {"tool": action.tool, "args": action.args, "reasoning": action.reasoning},
-            "result": result,
-        })
+        self._emit(
+            {
+                "type": "result",
+                "action": {"tool": action.tool, "args": action.args, "reasoning": action.reasoning},
+                "result": result,
+            }
+        )
 
         if self._steps:
-            self._steps[-1].results.append({
-                "tool": action.tool,
-                "result_summary": str(result.get("summary", ""))[:500],
-                "findings_count": result.get("findings_count", 0),
-                "success": result.get("success", True),
-            })
+            self._steps[-1].results.append(
+                {
+                    "tool": action.tool,
+                    "result_summary": str(result.get("summary", ""))[:500],
+                    "findings_count": result.get("findings_count", 0),
+                    "success": result.get("success", True),
+                }
+            )
 
     def get_execution_log(self) -> str:
         """실행 로그 반환."""

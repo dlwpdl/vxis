@@ -10,9 +10,9 @@ Tests cover:
 - Missing path error handling
 - Bilingual description (|||) requirement
 """
+
 from __future__ import annotations
 
-import os
 import pytest
 
 from vxis.agent.skills.desktop.test_local_storage_secrets import execute
@@ -121,9 +121,9 @@ async def test_respects_skip_dirs(tmp_path):
     result = await execute(target_url=str(tmp_path))
 
     # Must not find the secret buried in node_modules
-    assert all(
-        "node_modules" not in f.get("path", "") for f in result["findings"]
-    ), f"node_modules secret leaked into findings: {result['findings']}"
+    assert all("node_modules" not in f.get("path", "") for f in result["findings"]), (
+        f"node_modules secret leaked into findings: {result['findings']}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +149,9 @@ async def test_walks_app_bundle_from_macho_path(tmp_path):
 
     result = await execute(target_url=str(binary_path))
 
-    assert any(
-        f["pattern"] == "aws_access_key" for f in result["findings"]
-    ), f"Expected aws_access_key in findings after bundle climb; got: {result['findings']}"
+    assert any(f["pattern"] == "aws_access_key" for f in result["findings"]), (
+        f"Expected aws_access_key in findings after bundle climb; got: {result['findings']}"
+    )
 
 
 # ---------------------------------------------------------------------------

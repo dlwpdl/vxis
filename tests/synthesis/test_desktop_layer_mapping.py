@@ -7,9 +7,9 @@ spec:
   - test_dylib_hijack → DESKTOP (명시적 맵 또는 prefix 폴백).
   - 기존 web / cloud 매핑이 깨지지 않음.
 """
+
 from __future__ import annotations
 
-import pytest
 
 from vxis.synthesis.cross_protocol import OSILayer, _agent_to_layer
 
@@ -50,9 +50,7 @@ def test_desktop_explicit_map_wins() -> None:
         "desktop_dependency_confusion",
     ]
     for agent in desktop_agents:
-        assert _agent_to_layer(agent) == OSILayer.DESKTOP, (
-            f"{agent} should map to DESKTOP"
-        )
+        assert _agent_to_layer(agent) == OSILayer.DESKTOP, f"{agent} should map to DESKTOP"
 
 
 def test_desktop_prefix_fallback() -> None:

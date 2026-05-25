@@ -8,9 +8,6 @@ from vxis.models.finding import (
     CVSSVector,
     Evidence,
     Finding,
-    FindingStatus,
-    MitreAttack,
-    Reference,
     Severity,
 )
 
@@ -115,7 +112,9 @@ class TestCVSSVector:
         assert v.severity_from_score == Severity.critical
 
     def test_score_10_is_critical(self):
-        v = CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", base_score=10.0)
+        v = CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", base_score=10.0
+        )
         assert v.severity_from_score == Severity.critical
 
     def test_score_out_of_range_raises(self):

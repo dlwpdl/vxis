@@ -9,7 +9,6 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
-import sys
 
 from rich.console import Console
 from rich.table import Table
@@ -180,7 +179,9 @@ def _run_install(command: list[str], desc: str) -> bool:
     try:
         result = subprocess.run(
             command,
-            capture_output=True, text=True, timeout=300,
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         if result.returncode == 0:
             console.print(f"  [green]✓[/green] {desc}")
@@ -222,8 +223,10 @@ def show_status() -> None:
 
     table = Table(
         title="🔌 VXIS 도구 설치 현황",
-        show_header=True, header_style="bold",
-        border_style="cyan", expand=True,
+        show_header=True,
+        header_style="bold",
+        border_style="cyan",
+        expand=True,
     )
     table.add_column("도구", no_wrap=True, min_width=16)
     table.add_column("설명", min_width=16)
@@ -264,6 +267,7 @@ def show_status() -> None:
     # Plugin flag validation — check for CLI compatibility issues
     try:
         from vxis.plugins.registry import discover_plugins
+
         registry = discover_plugins()
         console.print("\n[bold]🔍 플러그인 CLI 호환성 검증[/bold]")
         all_warnings: list[str] = []
@@ -281,7 +285,9 @@ def show_status() -> None:
         if not all_warnings:
             console.print("  [green]모든 플러그인 호환성 확인 완료[/green]")
         else:
-            console.print(f"\n  [yellow]⚠ {len(all_warnings)}개 경고 — 플러그인 업데이트 필요[/yellow]")
+            console.print(
+                f"\n  [yellow]⚠ {len(all_warnings)}개 경고 — 플러그인 업데이트 필요[/yellow]"
+            )
     except Exception:
         pass  # Registry import 실패 시 조용히 넘어감
 
@@ -308,7 +314,9 @@ def install_missing(selected: list[str] | None = None) -> tuple[int, int]:
 
     if os_type == "macos" and not has_brew:
         console.print("[yellow]Homebrew가 설치되어 있지 않습니다.[/yellow]")
-        console.print("[dim]설치: /bin/bash -c \"$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\"[/dim]")
+        console.print(
+            '[dim]설치: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"[/dim]'
+        )
 
     console.print(f"\n[bold]🔧 {len(to_install)}개 도구 설치 시작...[/bold]\n")
 
@@ -359,9 +367,7 @@ def install_missing(selected: list[str] | None = None) -> tuple[int, int]:
         console.print()
 
     console.print(
-        f"[bold]설치 완료:[/bold] "
-        f"[green]{success}개 성공[/green], "
-        f"[red]{fail}개 실패[/red]"
+        f"[bold]설치 완료:[/bold] [green]{success}개 성공[/green], [red]{fail}개 실패[/red]"
     )
     return success, fail
 
@@ -369,7 +375,6 @@ def install_missing(selected: list[str] | None = None) -> tuple[int, int]:
 def install_interactive() -> None:
     """Interactive tool installer with selection."""
     from InquirerPy import inquirer
-    from InquirerPy.separator import Separator
 
     show_status()
     console.print()
@@ -400,10 +405,12 @@ def install_interactive() -> None:
         for binary in missing:
             recipe = INSTALL_RECIPES.get(binary, {})
             desc = recipe.get("desc", "")
-            choices.append({
-                "name": f"{binary:20s} {desc}",
-                "value": binary,
-            })
+            choices.append(
+                {
+                    "name": f"{binary:20s} {desc}",
+                    "value": binary,
+                }
+            )
 
         selected = inquirer.checkbox(
             message="설치할 도구를 선택하세요",

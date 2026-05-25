@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, computed_field, field_validator, model_serializer
+from pydantic import BaseModel, Field, computed_field
 
 from vxis.interaction.surface import TargetKind
 
@@ -100,7 +100,9 @@ class MitreAttack(BaseModel):
     tactic_id: str = Field(description="Tactic ID, e.g. TA0001")
     tactic_name: str = Field(description="Tactic name, e.g. Initial Access")
     technique_id: str = Field(description="Technique ID, e.g. T1190")
-    technique_name: str = Field(description="Technique name, e.g. Exploit Public-Facing Application")
+    technique_name: str = Field(
+        description="Technique name, e.g. Exploit Public-Facing Application"
+    )
     subtechnique_id: str | None = Field(
         default=None, description="Sub-technique ID, e.g. T1190.001"
     )
@@ -112,7 +114,9 @@ class Evidence(BaseModel):
     evidence_type: str = Field(description="Type of evidence, e.g. screenshot, log, packet_capture")
     title: str = Field(description="Human-readable title for the evidence artifact")
     content: str = Field(description="Evidence content or description")
-    file_path: str | None = Field(default=None, description="Path to the evidence file if stored on disk")
+    file_path: str | None = Field(
+        default=None, description="Path to the evidence file if stored on disk"
+    )
     content_type: str = Field(default="text/plain", description="MIME type of the evidence content")
     # phase-G: which Surface produced this evidence (web/desktop/mobile/game).
     # Default WEB for back-compat — pre-existing evidence/reports validate unchanged;
@@ -160,14 +164,18 @@ class Finding(BaseModel):
 
     # --- Classification ---
     severity: Severity = Field(description="Scanner-assessed severity level")
-    status: FindingStatus = Field(default=FindingStatus.open, description="Current lifecycle status")
+    status: FindingStatus = Field(
+        default=FindingStatus.open, description="Current lifecycle status"
+    )
 
     # --- Target ---
     target: str = Field(description="Target host, URL, or asset identifier")
     affected_component: str = Field(
         default="", description="Specific component or service affected within the target"
     )
-    port: int | None = Field(default=None, ge=1, le=65535, description="TCP/UDP port number if applicable")
+    port: int | None = Field(
+        default=None, ge=1, le=65535, description="TCP/UDP port number if applicable"
+    )
     protocol: str | None = Field(default=None, description="Network protocol, e.g. tcp, udp, http")
 
     # --- Finding Classification ---
@@ -175,7 +183,9 @@ class Finding(BaseModel):
     cvss: CVSSVector | None = Field(default=None, description="CVSS vector and score")
     cve_ids: list[str] = Field(default_factory=list, description="Associated CVE identifiers")
     cwe_ids: list[str] = Field(default_factory=list, description="Associated CWE identifiers")
-    mitre_attack: MitreAttack | None = Field(default=None, description="MITRE ATT&CK classification")
+    mitre_attack: MitreAttack | None = Field(
+        default=None, description="MITRE ATT&CK classification"
+    )
 
     # --- Source ---
     source_plugin: str = Field(description="Primary plugin that discovered this finding")
@@ -194,13 +204,16 @@ class Finding(BaseModel):
     )
 
     # --- Evidence & Remediation ---
-    evidence: list[Evidence] = Field(default_factory=list, description="Attached evidence artifacts")
+    evidence: list[Evidence] = Field(
+        default_factory=list, description="Attached evidence artifacts"
+    )
     remediation: str | None = Field(default=None, description="Recommended remediation steps")
     references: list[Reference] = Field(default_factory=list, description="External references")
 
     # --- Analyst Workflow ---
     analyst_severity: Severity | None = Field(
-        default=None, description="Analyst-overridden severity (takes precedence over scanner severity)"
+        default=None,
+        description="Analyst-overridden severity (takes precedence over scanner severity)",
     )
     analyst_notes: str | None = Field(default=None, description="Analyst comments or notes")
 
@@ -239,14 +252,16 @@ class Finding(BaseModel):
         port_str = str(self.port) if self.port is not None else ""
         protocol_str = self.protocol or ""
 
-        raw = "|".join([
-            self.target,
-            port_str,
-            protocol_str,
-            self.finding_type,
-            primary_cve,
-            self.affected_component,
-        ])
+        raw = "|".join(
+            [
+                self.target,
+                port_str,
+                protocol_str,
+                self.finding_type,
+                primary_cve,
+                self.affected_component,
+            ]
+        )
         return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
     @computed_field  # type: ignore[prop-decorator]

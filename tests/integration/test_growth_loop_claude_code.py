@@ -1,12 +1,10 @@
 """FileBasedBrain E2E 통합 테스트."""
+
 import json
-import os
 import tempfile
 import threading
 import time
 from pathlib import Path
-
-import pytest
 
 
 def test_filebased_brain_protocol_roundtrip():
@@ -35,8 +33,10 @@ def test_filebased_brain_protocol_roundtrip():
                 for _ in range(50):
                     if status_path.exists():
                         status = json.loads(status_path.read_text())
-                        if (status.get("state") == STATE_WAITING_FOR_BRAIN
-                                and status.get("vector_index") == idx):
+                        if (
+                            status.get("state") == STATE_WAITING_FOR_BRAIN
+                            and status.get("vector_index") == idx
+                        ):
                             break
                     time.sleep(0.1)
 
@@ -47,12 +47,17 @@ def test_filebased_brain_protocol_roundtrip():
                     results.append({"vector": vector_id, "obs_step": obs.get("step")})
 
                 # decision.json 작성
-                atomic_write(str(dec_path), {
-                    "vector_id": vector_id,
-                    "attempt": attempt,
-                    "reasoning": reasoning,
-                    "targets": [{"endpoint": "/test", "param": "q", "payloads": ["test"]}] if attempt else [],
-                })
+                atomic_write(
+                    str(dec_path),
+                    {
+                        "vector_id": vector_id,
+                        "attempt": attempt,
+                        "reasoning": reasoning,
+                        "targets": [{"endpoint": "/test", "param": "q", "payloads": ["test"]}]
+                        if attempt
+                        else [],
+                    },
+                )
 
         t = threading.Thread(target=brain_simulator)
         t.start()

@@ -21,8 +21,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
-import time
 import urllib.request
 import urllib.error
 import uuid
@@ -42,6 +40,7 @@ INTEL_DIR = HONEYPOT_DIR / "intel"
 # Level 2: 개미지옥 (Deep Deception)
 # ═══════════════════════════════════════════════════════════════
 
+
 @dataclass
 class CanaryToken:
     """추적용 카나리 토큰 — 공격자가 사용하면 즉시 알림."""
@@ -51,9 +50,7 @@ class CanaryToken:
     token_value: str = ""  # 실제 토큰 값 (가짜지만 진짜처럼 보임)
     callback_url: str = ""  # 사용 시 호출될 URL
     description: str = ""
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     triggered: bool = False
     triggered_at: str = ""
     triggered_by: dict[str, Any] = field(default_factory=dict)
@@ -69,12 +66,8 @@ class CanaryFactory:
     def create_fake_aws_key(self) -> CanaryToken:
         """진짜처럼 보이는 가짜 AWS 자격증명."""
         # AWS 키 형식: AKIA + 16 alphanumeric
-        fake_access = "AKIA" + hashlib.sha256(
-            uuid.uuid4().bytes
-        ).hexdigest()[:16].upper()
-        fake_secret = hashlib.sha256(
-            uuid.uuid4().bytes
-        ).hexdigest()[:40]
+        fake_access = "AKIA" + hashlib.sha256(uuid.uuid4().bytes).hexdigest()[:16].upper()
+        fake_secret = hashlib.sha256(uuid.uuid4().bytes).hexdigest()[:40]
 
         canary = CanaryToken(
             token_type="aws_credential",
@@ -95,9 +88,7 @@ class CanaryFactory:
             "twilio": "SK",
         }
         prefix = prefixes.get(service, "api_")
-        fake_key = prefix + hashlib.sha256(
-            uuid.uuid4().bytes
-        ).hexdigest()[:32]
+        fake_key = prefix + hashlib.sha256(uuid.uuid4().bytes).hexdigest()[:32]
 
         canary = CanaryToken(
             token_type="api_key",
@@ -128,16 +119,18 @@ class CanaryFactory:
             name = random.choice(last_names) + random.choice(first_names)
             # 카나리 마커가 이메일에 숨겨져 있음
             email = f"{name.lower()}.{canary_id[:4]}t{i:03d}@{random.choice(domains)}"
-            phone = f"010-{random.randint(1000,9999)}-{random.randint(1000,9999)}"
+            phone = f"010-{random.randint(1000, 9999)}-{random.randint(1000, 9999)}"
 
-            records.append({
-                "id": i + 1,
-                "name": name,
-                "email": email,
-                "phone": phone,
-                "address": f"서울시 강남구 테헤란로 {random.randint(1,500)}",
-                "created_at": f"2025-{random.randint(1,12):02d}-{random.randint(1,28):02d}",
-            })
+            records.append(
+                {
+                    "id": i + 1,
+                    "name": name,
+                    "email": email,
+                    "phone": phone,
+                    "address": f"서울시 강남구 테헤란로 {random.randint(1, 500)}",
+                    "created_at": f"2025-{random.randint(1, 12):02d}-{random.randint(1, 28):02d}",
+                }
+            )
 
         dump_text = json.dumps(records, ensure_ascii=False, indent=2)
 
@@ -259,10 +252,11 @@ class DeepDeceptionEngine:
         db_canary = canaries.get("db_dump")
         db_value = db_canary.token_value[:500] if db_canary else "[]"
 
-        fake_vuln = layers.get("layer1_fake_vuln", "")
-        fake_data = layers.get("layer2_fake_data", "")
+        layers.get("layer1_fake_vuln", "")
+        layers.get("layer2_fake_data", "")
 
-        code = '''#!/usr/bin/env python3
+        code = (
+            '''#!/usr/bin/env python3
 """VXIS 개미지옥 허니팟 — 자동 생성. 수정하지 마세요."""
 
 import json
@@ -279,7 +273,9 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 FAKE_ENV = """
 # Production Environment
 DATABASE_URL=postgresql://admin:P@ssw0rd123@db.internal:5432/production
-''' + f'AWS_ACCESS_KEY_ID={aws_value.split(chr(10))[0].split("=")[-1] if "=" in aws_value else "AKIAIOSFODNN7EXAMPLE"}' + '''
+'''
+            + f"AWS_ACCESS_KEY_ID={aws_value.split(chr(10))[0].split('=')[-1] if '=' in aws_value else 'AKIAIOSFODNN7EXAMPLE'}"
+            + '''
 AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
 STRIPE_SECRET_KEY=sk_live_51H7bLfKs8WpJ2mRwY7FvZYx
 SLACK_BOT_TOKEN=xoxb-123456789012-1234567890123-aB1cD2eF3gH4iJ5kL6mN7oP
@@ -287,7 +283,9 @@ REDIS_URL=redis://redis.internal:6379/0
 JWT_SECRET=super-secret-jwt-key-2025
 """
 
-FAKE_DB = """ ''' + repr(db_value[:200]) + ''' """
+FAKE_DB = """ '''
+            + repr(db_value[:200])
+            + ''' """
 
 FAKE_INTERNAL_APIS = {
     "/api/v1/internal/users": [
@@ -394,6 +392,7 @@ if __name__ == "__main__":
     print(f"Logs: {LOG_DIR}")
     server.serve_forever()
 '''
+        )
 
         return code
 
@@ -408,14 +407,16 @@ if __name__ == "__main__":
         return responses.get(attack_type.lower(), "Error occurred")
 
     def _fake_success_data(self, attack_type: str) -> str:
-        return json.dumps({
-            "status": "success",
-            "data": {
-                "users_count": 15847,
-                "latest_backup": "2026-03-20T03:00:00Z",
-                "admin_email": "admin@internal.company.com",
-            },
-        })
+        return json.dumps(
+            {
+                "status": "success",
+                "data": {
+                    "users_count": 15847,
+                    "latest_backup": "2026-03-20T03:00:00Z",
+                    "admin_email": "admin@internal.company.com",
+                },
+            }
+        )
 
     def _fake_internal_api(self) -> dict:
         return {
@@ -428,6 +429,7 @@ if __name__ == "__main__":
 # ═══════════════════════════════════════════════════════════════
 # Level 3: 학습 루프 (Adaptive Learning)
 # ═══════════════════════════════════════════════════════════════
+
 
 class HoneypotLearner:
     """허니팟 로그에서 학습하여 VXIS를 강화한다.
@@ -496,6 +498,7 @@ class HoneypotLearner:
         for payload in analysis.get("payloads", [])[:50]:
             # 위험한 패턴 추출
             import re
+
             dangerous_patterns = re.findall(
                 r"(union\s+select|or\s+1\s*=\s*1|<script|javascript:|exec\(|system\(|\.\.\/)",
                 payload,
@@ -507,7 +510,7 @@ class HoneypotLearner:
                 rule = (
                     f'SecRule ARGS|REQUEST_BODY "@rx (?i){escaped}" '
                     f'"id:{100100 + len(rules)},phase:2,deny,status:403,'
-                    f'msg:\'VXIS Honeypot learned: {escaped[:30]}\'"'
+                    f"msg:'VXIS Honeypot learned: {escaped[:30]}'\""
                 )
                 if rule not in rules:
                     rules.append(rule)
@@ -565,7 +568,7 @@ http:
                     {
                         "type": "honeypot_intel",
                         "title": f"허니팟 수집: {analysis.get('total_requests', 0)}건 요청, "
-                                 f"{analysis.get('unique_ips', 0)}개 IP",
+                        f"{analysis.get('unique_ips', 0)}개 IP",
                     }
                 ],
                 "effective_tools": [],
@@ -580,9 +583,7 @@ http:
             memories = [m for m in memories if m.get("target") != "honeypot_learning"]
             memories.append(honeypot_entry)
 
-            memory_path.write_text(
-                json.dumps(memories, ensure_ascii=False, indent=2)
-            )
+            memory_path.write_text(json.dumps(memories, ensure_ascii=False, indent=2))
 
             logger.info(
                 "Knowledge Store 업데이트: %d IPs, %d 페이로드",
@@ -597,6 +598,7 @@ http:
 # ═══════════════════════════════════════════════════════════════
 # Level 4: 카운터 인텔리전스 (합법적 역추적)
 # ═══════════════════════════════════════════════════════════════
+
 
 @dataclass
 class AttackerProfile:
@@ -652,13 +654,11 @@ class CounterIntelligence:
             profile.first_seen = timestamps[0]
             profile.last_seen = timestamps[-1]
 
-            profile.user_agents = list(set(
-                e.get("user_agent", "")[:100] for e in ip_entries
-            ))[:10]
+            profile.user_agents = list(set(e.get("user_agent", "")[:100] for e in ip_entries))[:10]
 
-            profile.attack_paths = list(set(
-                e.get("path", "").split("?")[0] for e in ip_entries
-            ))[:20]
+            profile.attack_paths = list(set(e.get("path", "").split("?")[0] for e in ip_entries))[
+                :20
+            ]
 
         # WHOIS 조회 (공개 정보)
         whois_info = self._whois_lookup(ip)

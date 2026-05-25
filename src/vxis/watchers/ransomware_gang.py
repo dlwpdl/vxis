@@ -19,7 +19,6 @@ from __future__ import annotations
 import ast
 import json
 import logging
-import os
 import re
 import urllib.parse
 import urllib.request
@@ -64,11 +63,13 @@ def _load_target_profiles() -> list[dict[str, Any]]:
                 aliases = []
 
             if domain:
-                profiles.append({
-                    "domain": domain,
-                    "company": company,
-                    "aliases": aliases,
-                })
+                profiles.append(
+                    {
+                        "domain": domain,
+                        "company": company,
+                        "aliases": aliases,
+                    }
+                )
         return profiles
     except Exception as exc:
         logger.warning("[ransomware_gang] agent_memory.json 파싱 오류: %s", exc)
@@ -79,9 +80,7 @@ def _normalize_name(name: str) -> str:
     """기업명 정규화: 소문자, 특수문자/법인 접미사 제거."""
     name = name.lower().strip()
     # 법인 유형 접미사 제거
-    suffixes = (
-        r"\s+(inc\.?|corp\.?|co\.?|ltd\.?|llc\.?|plc\.?|gmbh|ag|sa|bv|nv|oy|ab)$"
-    )
+    suffixes = r"\s+(inc\.?|corp\.?|co\.?|ltd\.?|llc\.?|plc\.?|gmbh|ag|sa|bv|nv|oy|ab)$"
     name = re.sub(suffixes, "", name, flags=re.IGNORECASE)
     # 특수문자 → 공백
     name = re.sub(r"[^\w\s]", " ", name)
@@ -231,17 +230,19 @@ class RansomwareGangWatcher(BaseWatcher):
             # 결정론적 ID (공백/대소문자 정규화)
             normalized_id = re.sub(r"\s+", "_", raw_id.lower().strip())
 
-            items.append({
-                "id": normalized_id,
-                "source": "ransomware_live",
-                "group_name": group,
-                "victim_name": name,
-                "website": victim.get("website", "") or victim.get("url", ""),
-                "country": victim.get("country", ""),
-                "published": published,
-                "description": victim.get("description", ""),
-                "post_url": victim.get("post_url", ""),
-            })
+            items.append(
+                {
+                    "id": normalized_id,
+                    "source": "ransomware_live",
+                    "group_name": group,
+                    "victim_name": name,
+                    "website": victim.get("website", "") or victim.get("url", ""),
+                    "country": victim.get("country", ""),
+                    "published": published,
+                    "description": victim.get("description", ""),
+                    "post_url": victim.get("post_url", ""),
+                }
+            )
 
         logger.debug("[ransomware_gang] ransomware.live: %d건", len(items))
         return items
@@ -273,26 +274,26 @@ class RansomwareGangWatcher(BaseWatcher):
             raw_id = f"rlo:{group}:{name}:{published}"
             normalized_id = re.sub(r"\s+", "_", raw_id.lower().strip())
 
-            items.append({
-                "id": normalized_id,
-                "source": "ransomlook",
-                "group_name": group,
-                "victim_name": name,
-                "website": post.get("url", "") or post.get("website", ""),
-                "country": post.get("country", ""),
-                "published": published,
-                "description": post.get("description", ""),
-                "post_url": post.get("post_url", ""),
-            })
+            items.append(
+                {
+                    "id": normalized_id,
+                    "source": "ransomlook",
+                    "group_name": group,
+                    "victim_name": name,
+                    "website": post.get("url", "") or post.get("website", ""),
+                    "country": post.get("country", ""),
+                    "published": published,
+                    "description": post.get("description", ""),
+                    "post_url": post.get("post_url", ""),
+                }
+            )
 
         logger.debug("[ransomware_gang] ransomlook.io: %d건", len(items))
         return items
 
     # ── match ────────────────────────────────────────────────────
 
-    async def match(
-        self, items: list[dict[str, Any]]
-    ) -> list[WatcherAlert]:
+    async def match(self, items: list[dict[str, Any]]) -> list[WatcherAlert]:
         """피해자 목록과 타겟 프로파일 매칭 → CRITICAL 알림 생성."""
         profiles = _load_target_profiles()
         if not profiles:
@@ -347,10 +348,7 @@ class RansomwareGangWatcher(BaseWatcher):
         date_display = published[:10] if published else "날짜 미상"
         country_display = f" ({country})" if country else ""
 
-        title = (
-            f"[랜섬웨어 피해] {company}{country_display} — "
-            f"{group} 그룹 ({date_display})"
-        )
+        title = f"[랜섬웨어 피해] {company}{country_display} — {group} 그룹 ({date_display})"
         description_lines = [
             f"랜섬웨어 그룹 '{group}'이 '{company}'을 피해자로 등록했습니다.",
             f"기업: {victim_name}{country_display}",
@@ -363,9 +361,7 @@ class RansomwareGangWatcher(BaseWatcher):
             description_lines.append(f"설명: {description[:300]}")
         if post_url:
             description_lines.append(f"피해자 게시 URL: {post_url}")
-        description_lines.append(
-            "즉시 침해 지표(IOC)를 확인하고 인시던트 대응 절차를 개시하세요."
-        )
+        description_lines.append("즉시 침해 지표(IOC)를 확인하고 인시던트 대응 절차를 개시하세요.")
 
         return WatcherAlert(
             watcher_name=self.name,
@@ -373,7 +369,7 @@ class RansomwareGangWatcher(BaseWatcher):
             title=title,
             description="\n".join(description_lines),
             target=target_domain,
-            source_url=post_url or f"https://ransomware.live",
+            source_url=post_url or "https://ransomware.live",
             data={
                 "group": group,
                 "victim_name": victim_name,
@@ -425,23 +421,18 @@ class RansomwareGangWatcher(BaseWatcher):
                 # 중복 인시던트 방지 (published + group 조합)
                 dup_key = f"{group}:{alert.data.get('published', '')}"
                 if not any(
-                    f"{e.get('group', '')}:{e.get('published', '')}" == dup_key
-                    for e in existing
+                    f"{e.get('group', '')}:{e.get('published', '')}" == dup_key for e in existing
                 ):
                     existing.append(incident)
                     report_path.write_text(
                         json.dumps(existing, ensure_ascii=False, indent=2),
                         encoding="utf-8",
                     )
-                    logger.warning(
-                        "[ransomware_gang] 인시던트 리포트 저장: %s", report_path
-                    )
+                    logger.warning("[ransomware_gang] 인시던트 리포트 저장: %s", report_path)
                     actions += 1
 
             except Exception as exc:
-                logger.warning(
-                    "[ransomware_gang] 인시던트 리포트 저장 실패 (%s): %s", target, exc
-                )
+                logger.warning("[ransomware_gang] 인시던트 리포트 저장 실패 (%s): %s", target, exc)
 
             # 2. 그룹 통계 업데이트
             stats_path = report_dir / "ransomware_group_stats.json"
@@ -461,14 +452,13 @@ class RansomwareGangWatcher(BaseWatcher):
                     encoding="utf-8",
                 )
             except Exception as exc:
-                logger.warning(
-                    "[ransomware_gang] 그룹 통계 업데이트 실패: %s", exc
-                )
+                logger.warning("[ransomware_gang] 그룹 통계 업데이트 실패: %s", exc)
 
         return actions
 
 
 # ── 문법 자가 검증 ────────────────────────────────────────────────
+
 
 def _self_verify() -> None:
     """모듈 로드 시 ast.parse로 자신의 소스 문법 검증."""

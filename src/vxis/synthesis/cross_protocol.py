@@ -42,9 +42,8 @@ Architecture:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any
 
 from vxis.evidence.schema import Evidence, Severity
 from vxis.interaction.surface import TargetKind
@@ -54,38 +53,39 @@ logger = logging.getLogger(__name__)
 
 # ── OSI Layer Classification ────────────────────────────────────
 
+
 class OSILayer(str, Enum):
     """OSI 7계층 + 추가 카테고리."""
 
-    PHYSICAL = "L1_physical"      # USB, 물리 접근
-    DATA_LINK = "L2_data_link"    # ARP, 802.1Q, Wi-Fi
-    NETWORK = "L3_network"        # IP, BGP, DNS
-    TRANSPORT = "L4_transport"    # TCP/UDP, TLS
-    SESSION = "L5_session"        # 인증, 세션, AD
+    PHYSICAL = "L1_physical"  # USB, 물리 접근
+    DATA_LINK = "L2_data_link"  # ARP, 802.1Q, Wi-Fi
+    NETWORK = "L3_network"  # IP, BGP, DNS
+    TRANSPORT = "L4_transport"  # TCP/UDP, TLS
+    SESSION = "L5_session"  # 인증, 세션, AD
     PRESENTATION = "L6_presentation"  # 직렬화, 인코딩
-    APPLICATION = "L7_application"    # HTTP, API, 웹앱
+    APPLICATION = "L7_application"  # HTTP, API, 웹앱
 
     # 비OSI 확장 카테고리
-    CLOUD = "cloud"               # AWS/Azure/GCP 설정
-    SUPPLY_CHAIN = "supply_chain" # 의존성, CI/CD
-    HUMAN = "human"               # 소셜 엔지니어링, 피싱
-    DATA = "data"                 # DB, 파일, 시크릿
-    DESKTOP = "desktop"           # phase-G: native desktop apps (Win/macOS/Linux)
-    MOBILE = "mobile"             # phase-G: iOS/Android apps (stubs in phase-H)
-    GAME = "game"                 # phase-G: game protocols (stubs in phase-H)
+    CLOUD = "cloud"  # AWS/Azure/GCP 설정
+    SUPPLY_CHAIN = "supply_chain"  # 의존성, CI/CD
+    HUMAN = "human"  # 소셜 엔지니어링, 피싱
+    DATA = "data"  # DB, 파일, 시크릿
+    DESKTOP = "desktop"  # phase-G: native desktop apps (Win/macOS/Linux)
+    MOBILE = "mobile"  # phase-G: iOS/Android apps (stubs in phase-H)
+    GAME = "game"  # phase-G: game protocols (stubs in phase-H)
 
 
 class AttackCategory(str, Enum):
     """공격 카테고리 — Finding이 어떤 종류의 공격에 기여하는가."""
 
-    INITIAL_ACCESS = "initial_access"         # 초기 진입점
-    CREDENTIAL_HARVEST = "credential_harvest" # 자격증명 수집
-    LATERAL_MOVEMENT = "lateral_movement"     # 횡적 이동
+    INITIAL_ACCESS = "initial_access"  # 초기 진입점
+    CREDENTIAL_HARVEST = "credential_harvest"  # 자격증명 수집
+    LATERAL_MOVEMENT = "lateral_movement"  # 횡적 이동
     PRIVILEGE_ESCALATION = "privilege_escalation"  # 권한 상승
-    DATA_EXFILTRATION = "data_exfiltration"   # 데이터 탈취
-    PERSISTENCE = "persistence"               # 지속성 확보
-    IMPACT = "impact"                         # 최종 임팩트
-    RECONNAISSANCE = "reconnaissance"         # 정찰 정보
+    DATA_EXFILTRATION = "data_exfiltration"  # 데이터 탈취
+    PERSISTENCE = "persistence"  # 지속성 확보
+    IMPACT = "impact"  # 최종 임팩트
+    RECONNAISSANCE = "reconnaissance"  # 정찰 정보
 
 
 # ── Layer Tagging Rules ─────────────────────────────────────────
@@ -126,22 +126,22 @@ _AGENT_LAYER_MAP: dict[str, OSILayer] = {
     # phase-G: desktop attack skills (impl phase-C/F). Listed individually so
     # explicit mapping wins over the prefix fallback in _tag_layer.
     "desktop_local_storage_secrets": OSILayer.DESKTOP,
-    "desktop_electron_misconfig":    OSILayer.DESKTOP,
-    "desktop_ipc_injection":         OSILayer.DESKTOP,
-    "desktop_update_mitm":           OSILayer.DESKTOP,
-    "desktop_deeplink_abuse":        OSILayer.DESKTOP,
-    "desktop_binary_protections":    OSILayer.DESKTOP,
-    "desktop_privilege_escalation":  OSILayer.DESKTOP,
-    "desktop_dependency_confusion":  OSILayer.DESKTOP,
+    "desktop_electron_misconfig": OSILayer.DESKTOP,
+    "desktop_ipc_injection": OSILayer.DESKTOP,
+    "desktop_update_mitm": OSILayer.DESKTOP,
+    "desktop_deeplink_abuse": OSILayer.DESKTOP,
+    "desktop_binary_protections": OSILayer.DESKTOP,
+    "desktop_privilege_escalation": OSILayer.DESKTOP,
+    "desktop_dependency_confusion": OSILayer.DESKTOP,
     # macOS-specific skill names used in phase-C skill tests — explicit entries
     # so _agent_to_layer() answers DESKTOP even when called with the raw skill
     # function name rather than an agent_id carrying the `desktop_` prefix.
-    "test_dylib_hijack":             OSILayer.DESKTOP,
-    "test_local_storage_secrets":    OSILayer.DESKTOP,
-    "test_electron_misconfig":       OSILayer.DESKTOP,
-    "test_entitlement_audit":        OSILayer.DESKTOP,
-    "test_signature_audit":          OSILayer.DESKTOP,
-    "test_deeplink_abuse":           OSILayer.DESKTOP,
+    "test_dylib_hijack": OSILayer.DESKTOP,
+    "test_local_storage_secrets": OSILayer.DESKTOP,
+    "test_electron_misconfig": OSILayer.DESKTOP,
+    "test_entitlement_audit": OSILayer.DESKTOP,
+    "test_signature_audit": OSILayer.DESKTOP,
+    "test_deeplink_abuse": OSILayer.DESKTOP,
 }
 
 
@@ -218,6 +218,7 @@ _KEYWORD_CATEGORY_MAP: dict[str, AttackCategory] = {
 
 # ── Cross-Layer Connection Patterns ─────────────────────────────
 # "이 두 레이어의 발견이 이런 패턴이면 체인이 된다"
+
 
 @dataclass
 class ConnectionPattern:
@@ -377,6 +378,7 @@ KNOWN_PATTERNS: list[ConnectionPattern] = [
 
 # ── Synthesized Attack Chain ────────────────────────────────────
 
+
 @dataclass
 class SynthesizedChain:
     """합성된 크로스-프로토콜 공격 체인."""
@@ -396,6 +398,7 @@ class SynthesizedChain:
 
 
 # ── Core Synthesizer ────────────────────────────────────────────
+
 
 class CrossProtocolSynthesizer:
     """크로스-프로토콜 공격 체인 합성 엔진.
@@ -446,10 +449,11 @@ class CrossProtocolSynthesizer:
         if new_chains:
             logger.info(
                 "크로스-프로토콜 합성: %d개 새 체인 발견 (총 %d개)",
-                len(new_chains), len(self._chains),
+                len(new_chains),
+                len(self._chains),
             )
             for chain in new_chains:
-                layers = " → ".join(l.value for l in chain.layers_crossed)
+                layers = " → ".join(layer.value for layer in chain.layers_crossed)
                 logger.info(
                     "  [%s] %s (%s) — 신뢰도 %.0f%%",
                     chain.severity.value.upper(),
@@ -473,14 +477,16 @@ class CrossProtocolSynthesizer:
         for pattern in KNOWN_PATTERNS:
             # Source 레이어 + 카테고리에 매칭되는 발견 찾기
             sources = [
-                (f, layer, cats) for f, layer, cats in self._tagged
+                (f, layer, cats)
+                for f, layer, cats in self._tagged
                 if layer == pattern.source_layer
                 and any(c in pattern.source_categories for c in cats)
             ]
 
             # Target 레이어 + 카테고리에 매칭되는 발견 찾기
             targets = [
-                (f, layer, cats) for f, layer, cats in self._tagged
+                (f, layer, cats)
+                for f, layer, cats in self._tagged
                 if layer == pattern.target_layer
                 and any(c in pattern.target_categories for c in cats)
             ]
@@ -595,6 +601,7 @@ JSON으로 응답:
 
         try:
             from vxis.llm.client import LLMClient
+
             client = LLMClient()
             response = await client.think(
                 system="당신은 엘리트 레드팀 전문가입니다. 개별 취약점을 연결하여 치명적인 공격 체인을 합성합니다.",
@@ -616,8 +623,7 @@ JSON으로 응답:
             for item in data.get("chains", []):
                 # Resolve finding references
                 chain_findings = [
-                    finding_map[fid] for fid in item.get("finding_ids", [])
-                    if fid in finding_map
+                    finding_map[fid] for fid in item.get("finding_ids", []) if fid in finding_map
                 ]
                 if len(chain_findings) < 2:
                     continue
@@ -630,18 +636,20 @@ JSON으로 응답:
                     except ValueError:
                         pass
 
-                chains.append(SynthesizedChain(
-                    id=f"chain_llm_{len(chains)}",
-                    title=item.get("title", "LLM 합성 체인"),
-                    description=item.get("description", ""),
-                    severity=Severity(item.get("severity", "high")),
-                    kill_chain_stages=item.get("kill_chain_stages", []),
-                    findings=chain_findings,
-                    layers_crossed=layers,
-                    pattern_name="llm_synthesized",
-                    confidence=item.get("confidence", 0.6),
-                    escalation_reason=item.get("escalation_reason", ""),
-                ))
+                chains.append(
+                    SynthesizedChain(
+                        id=f"chain_llm_{len(chains)}",
+                        title=item.get("title", "LLM 합성 체인"),
+                        description=item.get("description", ""),
+                        severity=Severity(item.get("severity", "high")),
+                        kill_chain_stages=item.get("kill_chain_stages", []),
+                        findings=chain_findings,
+                        layers_crossed=layers,
+                        pattern_name="llm_synthesized",
+                        confidence=item.get("confidence", 0.6),
+                        escalation_reason=item.get("escalation_reason", ""),
+                    )
+                )
 
             return chains
 
@@ -712,7 +720,7 @@ JSON으로 응답:
             lines.append(f"### {sev.value.upper()} 체인 ({len(sev_chains)}개)\n")
 
             for chain in sev_chains:
-                layers = " → ".join(l.value for l in chain.layers_crossed)
+                layers = " → ".join(layer.value for layer in chain.layers_crossed)
                 lines.append(f"#### ⛓ {chain.title}")
                 lines.append(f"**레이어:** {layers}")
                 lines.append(f"**신뢰도:** {chain.confidence:.0%}")
@@ -724,9 +732,7 @@ JSON으로 응답:
                 if chain.findings:
                     lines.append("**구성 요소:**")
                     for f in chain.findings:
-                        lines.append(
-                            f"- [{f.severity.value}] {f.title} ({f.agent_id})"
-                        )
+                        lines.append(f"- [{f.severity.value}] {f.title} ({f.agent_id})")
                 lines.append("")
 
         return "\n".join(lines)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
 
 from vxis.agent.tools.proxy_runtime import ProxyRuntime
 from vxis.interaction.xray import CapturedFlow

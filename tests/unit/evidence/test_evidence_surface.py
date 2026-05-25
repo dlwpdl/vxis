@@ -6,9 +6,9 @@ spec:
   - 명시적으로 다른 surface 지정 가능.
   - model_validate(model_dump()) round-trip 에서 값 보존.
 """
+
 from __future__ import annotations
 
-import pytest
 
 from vxis.evidence.schema import Evidence, EvidenceType, Severity
 from vxis.interaction.surface import TargetKind

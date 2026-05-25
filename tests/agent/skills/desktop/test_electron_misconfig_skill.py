@@ -4,9 +4,9 @@ Fixtures use tmp_path to simulate Electron .app bundles without touching real
 apps.  All tests are async — Electron framework marker detection and JS walk
 run in-process (no I/O to real Electron binaries).
 """
+
 from __future__ import annotations
 
-import os
 import pytest
 
 from vxis.agent.skills.desktop.test_electron_misconfig import execute
@@ -15,6 +15,7 @@ from vxis.agent.skills.desktop.test_electron_misconfig import execute
 # ---------------------------------------------------------------------------
 # Shared fixture helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_electron_app(tmp_path, main_js_content: str = "") -> tuple[str, str]:
     """Create a minimal Electron .app structure under tmp_path.
@@ -144,9 +145,7 @@ async def test_skips_node_modules(tmp_path):
     app_root, _ = _make_electron_app(tmp_path, "// clean main.js")
 
     # Plant a misconfig inside node_modules — must NOT be reported.
-    nm = (
-        tmp_path / "MyApp.app" / "Contents" / "Resources" / "app" / "node_modules" / "foo"
-    )
+    nm = tmp_path / "MyApp.app" / "Contents" / "Resources" / "app" / "node_modules" / "foo"
     nm.mkdir(parents=True)
     (nm / "index.js").write_text("new BrowserWindow({ nodeIntegration: true });")
 
@@ -235,9 +234,7 @@ async def test_finding_descriptions_bilingual(tmp_path):
 
     assert result["findings"], "expected at least one finding for bilingual check"
     for finding in result["findings"]:
-        assert "|||" in finding["title"], (
-            f"title missing |||: {finding['title']!r}"
-        )
+        assert "|||" in finding["title"], f"title missing |||: {finding['title']!r}"
         assert "|||" in finding["description"], (
             f"description missing |||: {finding['description']!r}"
         )

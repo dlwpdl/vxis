@@ -5,8 +5,6 @@ Tests that require actual DNS resolution (google.com) are marked
 to be skipped if network access is unavailable.
 """
 
-import pytest
-
 from vxis.core.dns_resolver import DNSPinningResolver
 
 
@@ -60,9 +58,7 @@ class TestDNSPinningResolver:
 
         canonical = resolver.get_canonical_target(ip)
 
-        assert canonical == ip, (
-            f"Expected canonical target to be the IP itself, got {canonical!r}"
-        )
+        assert canonical == ip, f"Expected canonical target to be the IP itself, got {canonical!r}"
 
     async def test_resolve_invalid_domain_returns_empty_list(self) -> None:
         """

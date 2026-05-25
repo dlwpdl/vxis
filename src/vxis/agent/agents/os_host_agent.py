@@ -33,43 +33,55 @@ class OSHostAgent(BaseAgent):
         findings.extend(nmap_findings)
         for nf in nmap_findings:
             if "outdated" in nf.description.lower() or "eol" in nf.description.lower():
-                hypotheses.append(Hypothesis(
-                    title=f"Kernel exploit on {target}",
-                    rationale=f"Outdated OS/service detected: {nf.title}",
-                    probability=0.7, impact=1.0,
-                    suggested_agent="os_host",
-                    suggested_tool="searchsploit",
-                ))
+                hypotheses.append(
+                    Hypothesis(
+                        title=f"Kernel exploit on {target}",
+                        rationale=f"Outdated OS/service detected: {nf.title}",
+                        probability=0.7,
+                        impact=1.0,
+                        suggested_agent="os_host",
+                        suggested_tool="searchsploit",
+                    )
+                )
 
         # 3. Nuclei OS-level templates
         nuclei_results = await self._run_nuclei_host(target, context.mission.stealth)
         for nf in nuclei_results:
             sev_str = nf.get("info", {}).get("severity", "info").lower()
-            sev_map = {"critical": Severity.CRITICAL, "high": Severity.HIGH,
-                       "medium": Severity.MEDIUM, "low": Severity.LOW}
+            sev_map = {
+                "critical": Severity.CRITICAL,
+                "high": Severity.HIGH,
+                "medium": Severity.MEDIUM,
+                "low": Severity.LOW,
+            }
             severity = sev_map.get(sev_str, Severity.INFO)
             name = nf.get("info", {}).get("name", "")
             matched = nf.get("matched-at", target)
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"{name} — {matched}",
-                severity=severity,
-                evidence_type=EvidenceType.EXPLOIT,
-                description=nf.get("info", {}).get("description", ""),
-                request=nf.get("request"),
-                response=nf.get("response"),
-                tags=["os", "nuclei", nf.get("template-id", "")],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"{name} — {matched}",
+                    severity=severity,
+                    evidence_type=EvidenceType.EXPLOIT,
+                    description=nf.get("info", {}).get("description", ""),
+                    request=nf.get("request"),
+                    response=nf.get("response"),
+                    tags=["os", "nuclei", nf.get("template-id", "")],
+                )
+            )
 
         # Privilege escalation findings → lateral movement hypothesis
         privesc = [f for f in findings if f.severity in (Severity.CRITICAL, Severity.HIGH)]
         if privesc:
-            hypotheses.append(Hypothesis(
-                title=f"Lateral movement after privilege escalation on {target}",
-                rationale=f"{len(privesc)} privilege escalation vectors found",
-                probability=0.8, impact=0.95,
-                suggested_agent="lateral_move",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Lateral movement after privilege escalation on {target}",
+                    rationale=f"{len(privesc)} privilege escalation vectors found",
+                    probability=0.8,
+                    impact=0.95,
+                    suggested_agent="lateral_move",
+                )
+            )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -87,7 +99,8 @@ class OSHostAgent(BaseAgent):
             return []
         binary = "linpeas.sh" if shutil.which("linpeas.sh") else "linpeas"
         proc = await asyncio.create_subprocess_exec(
-            binary, "-q",  # quiet mode
+            binary,
+            "-q",  # quiet mode
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -105,17 +118,21 @@ class OSHostAgent(BaseAgent):
                 "docker": ("Docker group / socket access", Severity.HIGH, "container-escape"),
             }
             for keyword, (title_prefix, severity, tag) in indicators.items():
-                matching_lines = [l for l in output.splitlines() if keyword.lower() in l.lower()]
+                matching_lines = [
+                    line for line in output.splitlines() if keyword.lower() in line.lower()
+                ]
                 if matching_lines:
-                    findings.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"{title_prefix} on {target}",
-                        severity=severity,
-                        evidence_type=EvidenceType.EXPLOIT,
-                        description=f"{len(matching_lines)} indicators found",
-                        response="\n".join(matching_lines[:20]),
-                        tags=["os", "linpeas", tag],
-                    ))
+                    findings.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title=f"{title_prefix} on {target}",
+                            severity=severity,
+                            evidence_type=EvidenceType.EXPLOIT,
+                            description=f"{len(matching_lines)} indicators found",
+                            response="\n".join(matching_lines[:20]),
+                            tags=["os", "linpeas", tag],
+                        )
+                    )
             return findings
         except asyncio.TimeoutError:
             return []
@@ -124,7 +141,14 @@ class OSHostAgent(BaseAgent):
         if not shutil.which("nmap"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-sV", "-O", "--top-ports", "100", "-oX", "-", target,
+            "nmap",
+            "-sV",
+            "-O",
+            "--top-ports",
+            "100",
+            "-oX",
+            "-",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -134,30 +158,41 @@ class OSHostAgent(BaseAgent):
             findings: list[Evidence] = []
             # Basic OS detection reporting
             if "<osmatch" in output:
-                findings.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"OS fingerprint detected on {target}",
-                    severity=Severity.INFO,
-                    evidence_type=EvidenceType.NETWORK,
-                    description="Nmap OS detection completed",
-                    response=output[:4096],
-                    tags=["os", "nmap", "fingerprint"],
-                ))
+                findings.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"OS fingerprint detected on {target}",
+                        severity=Severity.INFO,
+                        evidence_type=EvidenceType.NETWORK,
+                        description="Nmap OS detection completed",
+                        response=output[:4096],
+                        tags=["os", "nmap", "fingerprint"],
+                    )
+                )
             return findings
         except asyncio.TimeoutError:
             return []
 
     async def _run_nuclei_host(
-        self, target: str, stealth: bool,
+        self,
+        target: str,
+        stealth: bool,
     ) -> list[dict[str, Any]]:
         if not shutil.which("nuclei"):
             return []
         rate = "10" if stealth else "100"
         cmd = [
-            "nuclei", "-u", target,
-            "-tags", "default-login,panel,ssh,rdp,ftp,telnet",
-            "-severity", "critical,high,medium",
-            "-rate-limit", rate, "-jsonl", "-silent",
+            "nuclei",
+            "-u",
+            target,
+            "-tags",
+            "default-login,panel,ssh,rdp,ftp,telnet",
+            "-severity",
+            "critical,high,medium",
+            "-rate-limit",
+            rate,
+            "-jsonl",
+            "-silent",
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,

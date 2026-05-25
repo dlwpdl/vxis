@@ -30,91 +30,114 @@ class OSINTAgent(BaseAgent):
         hosts = harvester_results.get("hosts", [])
 
         if emails:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Email addresses discovered for {target}: {len(emails)} found",
-                severity=Severity.LOW,
-                evidence_type=EvidenceType.OSINT,
-                description=f"Harvested email addresses from public sources for {target}.",
-                response=json.dumps(emails[:100], indent=2),
-                tags=["osint", "email", "harvester"],
-            ))
-            hypotheses.append(Hypothesis(
-                title=f"Credential stuffing with harvested emails for {target}",
-                rationale=f"{len(emails)} email addresses found via OSINT",
-                probability=0.6, impact=0.85,
-                suggested_agent="identity_ad",
-            ))
-            hypotheses.append(Hypothesis(
-                title=f"Phishing attack surface via harvested emails for {target}",
-                rationale=f"Email addresses exposed in public sources",
-                probability=0.7, impact=0.7,
-                suggested_agent="email_security",
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Email addresses discovered for {target}: {len(emails)} found",
+                    severity=Severity.LOW,
+                    evidence_type=EvidenceType.OSINT,
+                    description=f"Harvested email addresses from public sources for {target}.",
+                    response=json.dumps(emails[:100], indent=2),
+                    tags=["osint", "email", "harvester"],
+                )
+            )
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Credential stuffing with harvested emails for {target}",
+                    rationale=f"{len(emails)} email addresses found via OSINT",
+                    probability=0.6,
+                    impact=0.85,
+                    suggested_agent="identity_ad",
+                )
+            )
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Phishing attack surface via harvested emails for {target}",
+                    rationale="Email addresses exposed in public sources",
+                    probability=0.7,
+                    impact=0.7,
+                    suggested_agent="email_security",
+                )
+            )
 
         if hosts:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Hosts discovered for {target}: {len(hosts)} found",
-                severity=Severity.INFO,
-                evidence_type=EvidenceType.OSINT,
-                description=f"Hosts and subdomains found via OSINT sources.",
-                response=json.dumps(hosts[:100], indent=2),
-                tags=["osint", "hosts", "harvester"],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Hosts discovered for {target}: {len(hosts)} found",
+                    severity=Severity.INFO,
+                    evidence_type=EvidenceType.OSINT,
+                    description="Hosts and subdomains found via OSINT sources.",
+                    response=json.dumps(hosts[:100], indent=2),
+                    tags=["osint", "hosts", "harvester"],
+                )
+            )
 
         # Phase 2: Nuclei exposure templates
         nuclei_results = await self._run_nuclei_exposure(target, context.mission.stealth)
         for nf in nuclei_results:
             sev_str = nf.get("info", {}).get("severity", "info").lower()
-            sev_map = {"critical": Severity.CRITICAL, "high": Severity.HIGH,
-                       "medium": Severity.MEDIUM, "low": Severity.LOW}
+            sev_map = {
+                "critical": Severity.CRITICAL,
+                "high": Severity.HIGH,
+                "medium": Severity.MEDIUM,
+                "low": Severity.LOW,
+            }
             severity = sev_map.get(sev_str, Severity.INFO)
             name = nf.get("info", {}).get("name", nf.get("template-id", ""))
             matched = nf.get("matched-at", target)
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"{name} — {matched}",
-                severity=severity,
-                evidence_type=EvidenceType.OSINT,
-                description=nf.get("info", {}).get("description", ""),
-                request=nf.get("request"),
-                response=nf.get("response"),
-                tags=["osint", "nuclei", nf.get("template-id", "")],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"{name} — {matched}",
+                    severity=severity,
+                    evidence_type=EvidenceType.OSINT,
+                    description=nf.get("info", {}).get("description", ""),
+                    request=nf.get("request"),
+                    response=nf.get("response"),
+                    tags=["osint", "nuclei", nf.get("template-id", "")],
+                )
+            )
 
         # Phase 3: GitHub dork scan for leaked secrets
         github_results = await self._github_dork(target)
         for gr in github_results:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"GitHub exposure: {gr['description']}",
-                severity=gr.get("severity", Severity.MEDIUM),
-                evidence_type=EvidenceType.OSINT,
-                description=gr["description"],
-                response=gr.get("detail", ""),
-                tags=["osint", "github", "leak"],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"GitHub exposure: {gr['description']}",
+                    severity=gr.get("severity", Severity.MEDIUM),
+                    evidence_type=EvidenceType.OSINT,
+                    description=gr["description"],
+                    response=gr.get("detail", ""),
+                    tags=["osint", "github", "leak"],
+                )
+            )
             if gr.get("severity") in (Severity.HIGH, Severity.CRITICAL):
-                hypotheses.append(Hypothesis(
-                    title=f"Secret exposure in GitHub repos for {target}",
-                    rationale=gr["description"],
-                    probability=0.8, impact=0.9,
-                    suggested_agent="secrets_lifecycle",
-                    suggested_tool="trufflehog",
-                ))
+                hypotheses.append(
+                    Hypothesis(
+                        title=f"Secret exposure in GitHub repos for {target}",
+                        rationale=gr["description"],
+                        probability=0.8,
+                        impact=0.9,
+                        suggested_agent="secrets_lifecycle",
+                        suggested_tool="trufflehog",
+                    )
+                )
 
         # Phase 4: Metadata / tech-stack OSINT via DNS TXT records
         txt_findings = await self._check_dns_txt(target)
         for tf in txt_findings:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"DNS TXT record leaks info: {tf['record'][:80]}",
-                severity=Severity.INFO,
-                evidence_type=EvidenceType.OSINT,
-                description=f"DNS TXT record for {target} reveals: {tf['record']}",
-                tags=["osint", "dns", "txt"],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"DNS TXT record leaks info: {tf['record'][:80]}",
+                    severity=Severity.INFO,
+                    evidence_type=EvidenceType.OSINT,
+                    description=f"DNS TXT record for {target} reveals: {tf['record']}",
+                    tags=["osint", "dns", "txt"],
+                )
+            )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -132,7 +155,13 @@ class OSINTAgent(BaseAgent):
         if not shutil.which("theHarvester"):
             return {"emails": [], "hosts": []}
         proc = await asyncio.create_subprocess_exec(
-            "theHarvester", "-d", target, "-b", "all", "-f", "/dev/stdout",
+            "theHarvester",
+            "-d",
+            target,
+            "-b",
+            "all",
+            "-f",
+            "/dev/stdout",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -162,16 +191,25 @@ class OSINTAgent(BaseAgent):
             return {"emails": [], "hosts": []}
 
     async def _run_nuclei_exposure(
-        self, target: str, stealth: bool,
+        self,
+        target: str,
+        stealth: bool,
     ) -> list[dict[str, Any]]:
         if not shutil.which("nuclei"):
             return []
         rate = "10" if stealth else "100"
         cmd = [
-            "nuclei", "-u", target,
-            "-tags", "exposure,osint,disclosure,listing",
-            "-severity", "critical,high,medium,low",
-            "-rate-limit", rate, "-jsonl", "-silent",
+            "nuclei",
+            "-u",
+            target,
+            "-tags",
+            "exposure,osint,disclosure,listing",
+            "-severity",
+            "critical,high,medium,low",
+            "-rate-limit",
+            rate,
+            "-jsonl",
+            "-silent",
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -193,10 +231,15 @@ class OSINTAgent(BaseAgent):
         if not shutil.which("nuclei"):
             return []
         cmd = [
-            "nuclei", "-u", f"https://github.com",
-            "-tags", "exposure",
-            "-var", f"domain={target}",
-            "-jsonl", "-silent",
+            "nuclei",
+            "-u",
+            "https://github.com",
+            "-tags",
+            "exposure",
+            "-var",
+            f"domain={target}",
+            "-jsonl",
+            "-silent",
         ]
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -210,11 +253,13 @@ class OSINTAgent(BaseAgent):
                 if line.strip():
                     try:
                         data = json.loads(line)
-                        results.append({
-                            "description": data.get("info", {}).get("name", "GitHub exposure"),
-                            "severity": Severity.MEDIUM,
-                            "detail": json.dumps(data)[:2048],
-                        })
+                        results.append(
+                            {
+                                "description": data.get("info", {}).get("name", "GitHub exposure"),
+                                "severity": Severity.MEDIUM,
+                                "detail": json.dumps(data)[:2048],
+                            }
+                        )
                     except json.JSONDecodeError:
                         continue
             return results
@@ -225,7 +270,10 @@ class OSINTAgent(BaseAgent):
         if not shutil.which("dig"):
             return []
         proc = await asyncio.create_subprocess_exec(
-            "dig", "+short", "TXT", target,
+            "dig",
+            "+short",
+            "TXT",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )

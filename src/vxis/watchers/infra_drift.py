@@ -108,10 +108,12 @@ def _run_nmap(host: str) -> dict[str, Any]:
 
     cmd = [
         "nmap",
-        "--top-ports", "100",
+        "--top-ports",
+        "100",
         "-T4",
         "--open",
-        "-oG", "-",  # Grepable 형식으로 stdout 출력
+        "-oG",
+        "-",  # Grepable 형식으로 stdout 출력
         host,
     ]
 
@@ -175,7 +177,7 @@ def _run_dig(host: str) -> dict[str, list[str]]:
                 text=True,
                 timeout=15,
             )
-            lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+            lines = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
             records[rtype] = sorted(lines)
         except Exception as exc:
             logger.debug("[InfraDrift] dig %s %s 실패: %s", rtype, host, exc)
@@ -201,9 +203,7 @@ def _fetch_http_headers(target: str) -> dict[str, Any]:
     try:
         with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
             result["status"] = resp.status
-            result["headers"] = {
-                k.lower(): v for k, v in resp.headers.items()
-            }
+            result["headers"] = {k.lower(): v for k, v in resp.headers.items()}
     except urllib.error.HTTPError as e:
         result["status"] = e.code
         result["headers"] = {k.lower(): v for k, v in e.headers.items()}
@@ -321,15 +321,17 @@ class InfraDriftWatcher(BaseWatcher):
                     (p["service"] for p in current["nmap"]["open_ports"] if p["port"] == port),
                     "",
                 )
-                alerts.append(WatcherAlert(
-                    watcher_name=self.name,
-                    severity="medium",
-                    title=f"새 포트 열림: {port}/{service or 'unknown'}",
-                    description=f"타겟 {target}에서 포트 {port}({service})가 새로 열렸습니다.",
-                    target=target,
-                    data={"port": port, "service": service},
-                    actionable=True,
-                ))
+                alerts.append(
+                    WatcherAlert(
+                        watcher_name=self.name,
+                        severity="medium",
+                        title=f"새 포트 열림: {port}/{service or 'unknown'}",
+                        description=f"타겟 {target}에서 포트 {port}({service})가 새로 열렸습니다.",
+                        target=target,
+                        data={"port": port, "service": service},
+                        actionable=True,
+                    )
+                )
                 logger.info("[InfraDrift] 새 포트 감지: %s → %d/%s", target, port, service)
 
             for port in closed_ports:
@@ -353,19 +355,21 @@ class InfraDriftWatcher(BaseWatcher):
                         f"타겟 {target}의 DNS {rtype} 레코드가 변경되었습니다. "
                         f"추가: {sorted(new_records)}, 제거: {sorted(removed_records)}"
                     )
-                    alerts.append(WatcherAlert(
-                        watcher_name=self.name,
-                        severity=severity,
-                        title=title,
-                        description=description,
-                        target=target,
-                        data={
-                            "record_type": rtype,
-                            "added": sorted(new_records),
-                            "removed": sorted(removed_records),
-                        },
-                        actionable=False,
-                    ))
+                    alerts.append(
+                        WatcherAlert(
+                            watcher_name=self.name,
+                            severity=severity,
+                            title=title,
+                            description=description,
+                            target=target,
+                            data={
+                                "record_type": rtype,
+                                "added": sorted(new_records),
+                                "removed": sorted(removed_records),
+                            },
+                            actionable=False,
+                        )
+                    )
                     logger.info("[InfraDrift] DNS %s 변화: %s", rtype, target)
 
             # ── HTTP 헤더 / 보안 헤더 변화 감지 ─────────────────────
@@ -376,18 +380,20 @@ class InfraDriftWatcher(BaseWatcher):
             curr_status = curr_http.get("status", 0)
 
             if prev_status != curr_status and curr_status != 0 and prev_status != 0:
-                alerts.append(WatcherAlert(
-                    watcher_name=self.name,
-                    severity="medium",
-                    title=f"HTTP 상태 코드 변경: {prev_status} → {curr_status}",
-                    description=(
-                        f"타겟 {target}의 HTTP 응답 코드가 "
-                        f"{prev_status}에서 {curr_status}로 변경되었습니다."
-                    ),
-                    target=target,
-                    data={"prev_status": prev_status, "curr_status": curr_status},
-                    actionable=False,
-                ))
+                alerts.append(
+                    WatcherAlert(
+                        watcher_name=self.name,
+                        severity="medium",
+                        title=f"HTTP 상태 코드 변경: {prev_status} → {curr_status}",
+                        description=(
+                            f"타겟 {target}의 HTTP 응답 코드가 "
+                            f"{prev_status}에서 {curr_status}로 변경되었습니다."
+                        ),
+                        target=target,
+                        data={"prev_status": prev_status, "curr_status": curr_status},
+                        actionable=False,
+                    )
+                )
 
             # 보안 헤더 제거 감지
             prev_headers = prev_http.get("headers", {})
@@ -397,21 +403,23 @@ class InfraDriftWatcher(BaseWatcher):
                 was_present = sec_header in prev_headers
                 is_present = sec_header in curr_headers
                 if was_present and not is_present:
-                    alerts.append(WatcherAlert(
-                        watcher_name=self.name,
-                        severity="high",
-                        title=f"보안 헤더 제거됨: {sec_header}",
-                        description=(
-                            f"타겟 {target}에서 보안 헤더 '{sec_header}'가 제거되었습니다. "
-                            f"이전 값: {prev_headers.get(sec_header, 'N/A')}"
-                        ),
-                        target=target,
-                        data={
-                            "header": sec_header,
-                            "prev_value": prev_headers.get(sec_header, ""),
-                        },
-                        actionable=True,
-                    ))
+                    alerts.append(
+                        WatcherAlert(
+                            watcher_name=self.name,
+                            severity="high",
+                            title=f"보안 헤더 제거됨: {sec_header}",
+                            description=(
+                                f"타겟 {target}에서 보안 헤더 '{sec_header}'가 제거되었습니다. "
+                                f"이전 값: {prev_headers.get(sec_header, 'N/A')}"
+                            ),
+                            target=target,
+                            data={
+                                "header": sec_header,
+                                "prev_value": prev_headers.get(sec_header, ""),
+                            },
+                            actionable=True,
+                        )
+                    )
                     logger.warning("[InfraDrift] 보안 헤더 제거: %s ← %s", sec_header, target)
 
         # 스캔 결과 저장 (기준선 업데이트)
@@ -435,8 +443,6 @@ class InfraDriftWatcher(BaseWatcher):
         rescan_targets = list({a.target for a in actionable})
 
         for target in rescan_targets:
-            logger.warning(
-                "[InfraDrift] 재스캔 필요 타겟: %s (변화 감지)", target
-            )
+            logger.warning("[InfraDrift] 재스캔 필요 타겟: %s (변화 감지)", target)
 
         return len(rescan_targets)

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-from typing import Any
 
 from ..base import AgentResult, BaseAgent
 from ..context import AgentContext
@@ -35,27 +34,31 @@ class SS7CellularAgent(BaseAgent):
         # Phase 1: Scan for SS7/Diameter signalling ports
         open_ports = await self._scan_ss7_ports(target)
         if open_ports:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"SS7/Diameter signalling ports open on {target}",
-                severity=Severity.CRITICAL,
-                evidence_type=EvidenceType.NETWORK,
-                description=(
-                    f"Open SS7/Diameter signalling ports detected: {open_ports}. "
-                    "These ports may allow SS7 message injection if not properly "
-                    "filtered by the signalling firewall."
-                ),
-                response=json.dumps({"open_ports": open_ports}, indent=2),
-                tags=["ss7", "diameter", "telecom", "signalling"],
-            ))
-            hypotheses.append(Hypothesis(
-                title=f"SS7 message injection possible on {target}",
-                rationale=f"Open SS7 signalling ports: {open_ports}",
-                probability=0.4,
-                impact=0.95,
-                suggested_agent="ss7_cellular",
-                suggested_tool="sigploit",
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"SS7/Diameter signalling ports open on {target}",
+                    severity=Severity.CRITICAL,
+                    evidence_type=EvidenceType.NETWORK,
+                    description=(
+                        f"Open SS7/Diameter signalling ports detected: {open_ports}. "
+                        "These ports may allow SS7 message injection if not properly "
+                        "filtered by the signalling firewall."
+                    ),
+                    response=json.dumps({"open_ports": open_ports}, indent=2),
+                    tags=["ss7", "diameter", "telecom", "signalling"],
+                )
+            )
+            hypotheses.append(
+                Hypothesis(
+                    title=f"SS7 message injection possible on {target}",
+                    rationale=f"Open SS7 signalling ports: {open_ports}",
+                    probability=0.4,
+                    impact=0.95,
+                    suggested_agent="ss7_cellular",
+                    suggested_tool="sigploit",
+                )
+            )
 
         # Phase 2: Check for exposed telecom management interfaces
         mgmt_findings = await self._check_telecom_mgmt(target)
@@ -65,51 +68,59 @@ class SS7CellularAgent(BaseAgent):
         sms_risk = self._assess_sms_2fa_risk(context)
         if sms_risk:
             findings.append(sms_risk)
-            hypotheses.append(Hypothesis(
-                title="SIM swap attack for account takeover",
-                rationale="Target uses SMS-based 2FA which is vulnerable to SIM swap",
-                probability=0.6,
-                impact=0.9,
-                suggested_agent="identity_ad",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title="SIM swap attack for account takeover",
+                    rationale="Target uses SMS-based 2FA which is vulnerable to SIM swap",
+                    probability=0.6,
+                    impact=0.9,
+                    suggested_agent="identity_ad",
+                )
+            )
 
         # Phase 4: IMSI catcher detection assessment
-        findings.append(Evidence(
-            agent_id=self.agent_id,
-            title="IMSI catcher exposure assessment",
-            severity=Severity.INFO,
-            evidence_type=EvidenceType.OTHER,
-            description=(
-                "Assessment: Mobile devices connecting to the target network "
-                "may be vulnerable to IMSI catchers (Stingrays). Mitigation "
-                "requires enforcing LTE/5G-only mode and mutual authentication. "
-                "Active testing requires specialized RF equipment and licensing."
-            ),
-            tags=["ss7", "imsi-catcher", "assessment"],
-        ))
+        findings.append(
+            Evidence(
+                agent_id=self.agent_id,
+                title="IMSI catcher exposure assessment",
+                severity=Severity.INFO,
+                evidence_type=EvidenceType.OTHER,
+                description=(
+                    "Assessment: Mobile devices connecting to the target network "
+                    "may be vulnerable to IMSI catchers (Stingrays). Mitigation "
+                    "requires enforcing LTE/5G-only mode and mutual authentication. "
+                    "Active testing requires specialized RF equipment and licensing."
+                ),
+                tags=["ss7", "imsi-catcher", "assessment"],
+            )
+        )
 
         # Phase 5: Document SIM swap social engineering risk
-        findings.append(Evidence(
-            agent_id=self.agent_id,
-            title="SIM swap social engineering risk",
-            severity=Severity.HIGH,
-            evidence_type=EvidenceType.OTHER,
-            description=(
-                "SIM swap attacks exploit carrier customer support processes. "
-                "Risk factors: SMS-based 2FA usage, publicly available PII of "
-                "key personnel, carrier porting policies. Recommend replacing "
-                "SMS 2FA with hardware tokens or authenticator apps."
-            ),
-            tags=["ss7", "sim-swap", "social-engineering"],
-        ))
+        findings.append(
+            Evidence(
+                agent_id=self.agent_id,
+                title="SIM swap social engineering risk",
+                severity=Severity.HIGH,
+                evidence_type=EvidenceType.OTHER,
+                description=(
+                    "SIM swap attacks exploit carrier customer support processes. "
+                    "Risk factors: SMS-based 2FA usage, publicly available PII of "
+                    "key personnel, carrier porting policies. Recommend replacing "
+                    "SMS 2FA with hardware tokens or authenticator apps."
+                ),
+                tags=["ss7", "sim-swap", "social-engineering"],
+            )
+        )
 
-        hypotheses.append(Hypothesis(
-            title=f"VoIP/telephony infrastructure exposed on {target}",
-            rationale="SS7 reconnaissance suggests possible VoIP presence",
-            probability=0.5,
-            impact=0.7,
-            suggested_agent="voip",
-        ))
+        hypotheses.append(
+            Hypothesis(
+                title=f"VoIP/telephony infrastructure exposed on {target}",
+                rationale="SS7 reconnaissance suggests possible VoIP presence",
+                probability=0.5,
+                impact=0.7,
+                suggested_agent="voip",
+            )
+        )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -132,8 +143,15 @@ class SS7CellularAgent(BaseAgent):
             return []
         ports_str = ",".join(str(p) for p in self._SS7_PORTS + self._DIAMETER_PORTS)
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-Pn", "-sS", "-p", ports_str,
-            "--open", "-oG", "-", target,
+            "nmap",
+            "-Pn",
+            "-sS",
+            "-p",
+            ports_str,
+            "--open",
+            "-oG",
+            "-",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -161,8 +179,15 @@ class SS7CellularAgent(BaseAgent):
         # Common telecom management ports
         mgmt_ports = "8080,8443,443,80,161,162,830,8008"
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-Pn", "-sV", "-p", mgmt_ports,
-            "--open", "-oG", "-", target,
+            "nmap",
+            "-Pn",
+            "-sV",
+            "-p",
+            mgmt_ports,
+            "--open",
+            "-oG",
+            "-",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -170,15 +195,17 @@ class SS7CellularAgent(BaseAgent):
         output = stdout.decode()
         telecom_keywords = ["hlr", "msc", "smsc", "bsc", "ericsson", "nokia", "huawei"]
         if any(kw in output.lower() for kw in telecom_keywords):
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Telecom management interface detected on {target}",
-                severity=Severity.HIGH,
-                evidence_type=EvidenceType.NETWORK,
-                description="Exposed telecom management interface found during port scan",
-                response=output,
-                tags=["ss7", "telecom", "management-interface"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Telecom management interface detected on {target}",
+                    severity=Severity.HIGH,
+                    evidence_type=EvidenceType.NETWORK,
+                    description="Exposed telecom management interface found during port scan",
+                    response=output,
+                    tags=["ss7", "telecom", "management-interface"],
+                )
+            )
         return results
 
     def _assess_sms_2fa_risk(self, context: AgentContext) -> Evidence | None:

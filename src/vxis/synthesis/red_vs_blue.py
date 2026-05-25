@@ -55,6 +55,7 @@ OUTPUT_DIR = Path("~/.vxis/defense").expanduser()
 
 # ── Data Models ─────────────────────────────────────────────────
 
+
 @dataclass
 class VerifiedExploit:
     """PoC가 검증된 공격 — Blue 대응의 입력."""
@@ -94,14 +95,12 @@ class DefenseReport:
     patch_recommendation: str = ""
     hotfix_steps: list[str] = field(default_factory=list)
     monitoring_queries: list[str] = field(default_factory=list)
-    generated_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_markdown(self) -> str:
         """마크다운 보고서 생성."""
         lines = [
-            f"# 🛡️ Blue Team 방어 대응 보고서",
+            "# 🛡️ Blue Team 방어 대응 보고서",
             f"**생성 시각:** {self.generated_at}",
             f"**대상:** {self.exploit.target}",
             f"**취약점:** {self.exploit.title}",
@@ -165,6 +164,7 @@ class DefenseReport:
 
 # ── Blue Team Responder ─────────────────────────────────────────
 
+
 class BlueTeamResponder:
     """PoC 검증된 공격에 대한 방어 대응을 자동 생성한다.
 
@@ -180,7 +180,8 @@ class BlueTeamResponder:
         """검증된 공격에 대한 전체 방어 대응을 생성한다."""
         logger.info(
             "Blue Team 대응 시작: %s (%s)",
-            exploit.title, exploit.attack_type,
+            exploit.title,
+            exploit.attack_type,
         )
 
         report = DefenseReport(exploit=exploit)
@@ -218,107 +219,122 @@ class BlueTeamResponder:
 
         # ModSecurity
         if attack in ("sqli", "sql_injection", "sql injection"):
-            rules.append(DefenseRule(
-                rule_type="waf",
-                platform="ModSecurity",
-                rule_content=(
-                    f'SecRule REQUEST_URI "{_escape_modsec(path)}" \\\n'
-                    f'  "id:100001,phase:2,deny,status:403,\\\n'
-                    f'  msg:\'VXIS: SQLi blocked on {path}\',\\\n'
-                    f'  chain"\n'
-                    f'SecRule ARGS|ARGS_NAMES|REQUEST_BODY "@rx '
-                    f'(?i)(union\\s+select|or\\s+1\\s*=\\s*1|\\x27|--)" \\\n'
-                    f'  "t:none,t:urlDecodeUni"'
-                ),
-                description=f"SQL Injection 차단 — {path}",
-                false_positive_risk="low",
-            ))
+            rules.append(
+                DefenseRule(
+                    rule_type="waf",
+                    platform="ModSecurity",
+                    rule_content=(
+                        f'SecRule REQUEST_URI "{_escape_modsec(path)}" \\\n'
+                        f'  "id:100001,phase:2,deny,status:403,\\\n'
+                        f"  msg:'VXIS: SQLi blocked on {path}',\\\n"
+                        f'  chain"\n'
+                        f'SecRule ARGS|ARGS_NAMES|REQUEST_BODY "@rx '
+                        f'(?i)(union\\s+select|or\\s+1\\s*=\\s*1|\\x27|--)" \\\n'
+                        f'  "t:none,t:urlDecodeUni"'
+                    ),
+                    description=f"SQL Injection 차단 — {path}",
+                    false_positive_risk="low",
+                )
+            )
 
         elif attack in ("xss", "cross-site scripting"):
-            rules.append(DefenseRule(
-                rule_type="waf",
-                platform="ModSecurity",
-                rule_content=(
-                    f'SecRule REQUEST_URI "{_escape_modsec(path)}" \\\n'
-                    f'  "id:100002,phase:2,deny,status:403,\\\n'
-                    f'  msg:\'VXIS: XSS blocked on {path}\',\\\n'
-                    f'  chain"\n'
-                    f'SecRule ARGS|REQUEST_BODY "@rx (?i)(<script|javascript:|on\\w+\\s*=)" \\\n'
-                    f'  "t:none,t:urlDecodeUni,t:htmlEntityDecode"'
-                ),
-                description=f"XSS 차단 — {path}",
-                false_positive_risk="medium",
-            ))
+            rules.append(
+                DefenseRule(
+                    rule_type="waf",
+                    platform="ModSecurity",
+                    rule_content=(
+                        f'SecRule REQUEST_URI "{_escape_modsec(path)}" \\\n'
+                        f'  "id:100002,phase:2,deny,status:403,\\\n'
+                        f"  msg:'VXIS: XSS blocked on {path}',\\\n"
+                        f'  chain"\n'
+                        f'SecRule ARGS|REQUEST_BODY "@rx (?i)(<script|javascript:|on\\w+\\s*=)" \\\n'
+                        f'  "t:none,t:urlDecodeUni,t:htmlEntityDecode"'
+                    ),
+                    description=f"XSS 차단 — {path}",
+                    false_positive_risk="medium",
+                )
+            )
 
         elif attack in ("ssrf", "server-side request forgery"):
-            rules.append(DefenseRule(
-                rule_type="waf",
-                platform="ModSecurity",
-                rule_content=(
-                    f'SecRule ARGS|REQUEST_BODY "@rx '
-                    f'(?i)(127\\.0\\.0\\.1|localhost|169\\.254\\.|10\\.|172\\.(1[6-9]|2|3[01])\\.|192\\.168\\.)" \\\n'
-                    f'  "id:100003,phase:2,deny,status:403,\\\n'
-                    f'  msg:\'VXIS: SSRF blocked — internal IP detected\'"'
-                ),
-                description="SSRF 차단 — 내부 IP 접근 방지",
-                false_positive_risk="low",
-            ))
+            rules.append(
+                DefenseRule(
+                    rule_type="waf",
+                    platform="ModSecurity",
+                    rule_content=(
+                        'SecRule ARGS|REQUEST_BODY "@rx '
+                        '(?i)(127\\.0\\.0\\.1|localhost|169\\.254\\.|10\\.|172\\.(1[6-9]|2|3[01])\\.|192\\.168\\.)" \\\n'
+                        '  "id:100003,phase:2,deny,status:403,\\\n'
+                        "  msg:'VXIS: SSRF blocked — internal IP detected'\""
+                    ),
+                    description="SSRF 차단 — 내부 IP 접근 방지",
+                    false_positive_risk="low",
+                )
+            )
 
         elif attack in ("rce", "remote code execution", "command injection"):
-            rules.append(DefenseRule(
-                rule_type="waf",
-                platform="ModSecurity",
-                rule_content=(
-                    f'SecRule ARGS|REQUEST_BODY "@rx '
-                    f'(?i)(;|\\||\\$\\(|`|\\{{\\{{|exec|system|passthru|popen)" \\\n'
-                    f'  "id:100004,phase:2,deny,status:403,\\\n'
-                    f'  msg:\'VXIS: Command Injection blocked\'"'
-                ),
-                description="RCE/Command Injection 차단",
-                false_positive_risk="medium",
-            ))
+            rules.append(
+                DefenseRule(
+                    rule_type="waf",
+                    platform="ModSecurity",
+                    rule_content=(
+                        'SecRule ARGS|REQUEST_BODY "@rx '
+                        '(?i)(;|\\||\\$\\(|`|\\{\\{|exec|system|passthru|popen)" \\\n'
+                        '  "id:100004,phase:2,deny,status:403,\\\n'
+                        "  msg:'VXIS: Command Injection blocked'\""
+                    ),
+                    description="RCE/Command Injection 차단",
+                    false_positive_risk="medium",
+                )
+            )
 
         elif attack in ("lfi", "local file inclusion", "path traversal"):
-            rules.append(DefenseRule(
-                rule_type="waf",
-                platform="ModSecurity",
-                rule_content=(
-                    f'SecRule ARGS|REQUEST_URI "@rx (\\.\\./|\\.\\.\\\\|%2e%2e)" \\\n'
-                    f'  "id:100005,phase:2,deny,status:403,\\\n'
-                    f'  msg:\'VXIS: Path Traversal blocked\'"'
-                ),
-                description="LFI/Path Traversal 차단",
-                false_positive_risk="low",
-            ))
+            rules.append(
+                DefenseRule(
+                    rule_type="waf",
+                    platform="ModSecurity",
+                    rule_content=(
+                        'SecRule ARGS|REQUEST_URI "@rx (\\.\\./|\\.\\.\\\\|%2e%2e)" \\\n'
+                        '  "id:100005,phase:2,deny,status:403,\\\n'
+                        "  msg:'VXIS: Path Traversal blocked'\""
+                    ),
+                    description="LFI/Path Traversal 차단",
+                    false_positive_risk="low",
+                )
+            )
 
         # AWS WAF (JSON format)
         if payload:
-            rules.append(DefenseRule(
-                rule_type="waf",
-                platform="AWS WAF",
-                rule_content=json.dumps({
-                    "Name": f"VXIS-Block-{attack.upper()}-{exploit.finding_id[:8]}",
-                    "Priority": 1,
-                    "Action": {"Block": {}},
-                    "Statement": {
-                        "RegexPatternSetReferenceStatement": {
-                            "ARN": "arn:aws:wafv2:REGION:ACCOUNT:regional/regexpatternset/VXIS-Patterns/ID",
-                            "FieldToMatch": {"Body": {}},
-                            "TextTransformations": [
-                                {"Priority": 0, "Type": "URL_DECODE"},
-                                {"Priority": 1, "Type": "HTML_ENTITY_DECODE"},
-                            ],
-                        }
-                    },
-                    "VisibilityConfig": {
-                        "SampledRequestsEnabled": True,
-                        "CloudWatchMetricsEnabled": True,
-                        "MetricName": f"VXIS-{attack}",
-                    },
-                }, indent=2),
-                description=f"AWS WAF 규칙 — {attack} 차단",
-                false_positive_risk="low",
-            ))
+            rules.append(
+                DefenseRule(
+                    rule_type="waf",
+                    platform="AWS WAF",
+                    rule_content=json.dumps(
+                        {
+                            "Name": f"VXIS-Block-{attack.upper()}-{exploit.finding_id[:8]}",
+                            "Priority": 1,
+                            "Action": {"Block": {}},
+                            "Statement": {
+                                "RegexPatternSetReferenceStatement": {
+                                    "ARN": "arn:aws:wafv2:REGION:ACCOUNT:regional/regexpatternset/VXIS-Patterns/ID",
+                                    "FieldToMatch": {"Body": {}},
+                                    "TextTransformations": [
+                                        {"Priority": 0, "Type": "URL_DECODE"},
+                                        {"Priority": 1, "Type": "HTML_ENTITY_DECODE"},
+                                    ],
+                                }
+                            },
+                            "VisibilityConfig": {
+                                "SampledRequestsEnabled": True,
+                                "CloudWatchMetricsEnabled": True,
+                                "MetricName": f"VXIS-{attack}",
+                            },
+                        },
+                        indent=2,
+                    ),
+                    description=f"AWS WAF 규칙 — {attack} 차단",
+                    false_positive_risk="low",
+                )
+            )
 
         return rules
 
@@ -335,21 +351,23 @@ class BlueTeamResponder:
         # Suricata rule
         if exploit.payload:
             escaped_payload = exploit.payload[:100].replace('"', '\\"')
-            rules.append(DefenseRule(
-                rule_type="ids",
-                platform="Suricata",
-                rule_content=(
-                    f'alert http any any -> $HOME_NET any (\\\n'
-                    f'  msg:"VXIS: {attack.upper()} attempt on {target_host}";\\\n'
-                    f'  flow:established,to_server;\\\n'
-                    f'  content:"{escaped_payload}";\\\n'
-                    f'  sid:{sid_base}; rev:1;\\\n'
-                    f'  classtype:web-application-attack;\\\n'
-                    f'  metadata:affected_host {target_host}, attack_type {attack};\\\n'
-                    f')'
-                ),
-                description=f"Suricata 탐지 규칙 — {attack} on {target_host}",
-            ))
+            rules.append(
+                DefenseRule(
+                    rule_type="ids",
+                    platform="Suricata",
+                    rule_content=(
+                        f"alert http any any -> $HOME_NET any (\\\n"
+                        f'  msg:"VXIS: {attack.upper()} attempt on {target_host}";\\\n'
+                        f"  flow:established,to_server;\\\n"
+                        f'  content:"{escaped_payload}";\\\n'
+                        f"  sid:{sid_base}; rev:1;\\\n"
+                        f"  classtype:web-application-attack;\\\n"
+                        f"  metadata:affected_host {target_host}, attack_type {attack};\\\n"
+                        f")"
+                    ),
+                    description=f"Suricata 탐지 규칙 — {attack} on {target_host}",
+                )
+            )
 
         return rules
 
@@ -373,44 +391,47 @@ class BlueTeamResponder:
 
         pattern = splunk_patterns.get(attack, "")
         if pattern:
-            rules.append(DefenseRule(
-                rule_type="siem",
-                platform="Splunk SPL",
-                rule_content=(
-                    f'index=web host="{target_host}" {pattern.format(path=path)}\n'
-                    f'| stats count by src_ip, uri_path, uri_query\n'
-                    f'| where count > 5\n'
-                    f'| sort -count'
-                ),
-                description=f"Splunk 탐지 쿼리 — {attack} 시도 모니터링",
-            ))
+            rules.append(
+                DefenseRule(
+                    rule_type="siem",
+                    platform="Splunk SPL",
+                    rule_content=(
+                        f'index=web host="{target_host}" {pattern.format(path=path)}\n'
+                        f"| stats count by src_ip, uri_path, uri_query\n"
+                        f"| where count > 5\n"
+                        f"| sort -count"
+                    ),
+                    description=f"Splunk 탐지 쿼리 — {attack} 시도 모니터링",
+                )
+            )
 
         # Elastic KQL
         elastic_patterns = {
             "sqli": f'url.path:"{path}" AND (url.query:*union* OR url.query:*select* OR url.query:*%27*)',
             "xss": f'url.path:"{path}" AND (url.query:*script* OR url.query:*javascript* OR url.query:*onerror*)',
-            "ssrf": 'url.query:(*127.0.0.1* OR *localhost* OR *169.254*)',
-            "rce": 'url.query:(*%3B* OR *%7C* OR *%24%28* OR *%60*)',
-            "lfi": 'url.query:(*..%2F* OR *%2e%2e*)',
+            "ssrf": "url.query:(*127.0.0.1* OR *localhost* OR *169.254*)",
+            "rce": "url.query:(*%3B* OR *%7C* OR *%24%28* OR *%60*)",
+            "lfi": "url.query:(*..%2F* OR *%2e%2e*)",
         }
 
         elastic_q = elastic_patterns.get(attack, "")
         if elastic_q:
-            rules.append(DefenseRule(
-                rule_type="siem",
-                platform="Elastic KQL",
-                rule_content=(
-                    f'host.name:"{target_host}" AND {elastic_q}'
-                ),
-                description=f"Elastic 탐지 쿼리 — {attack} 모니터링",
-            ))
+            rules.append(
+                DefenseRule(
+                    rule_type="siem",
+                    platform="Elastic KQL",
+                    rule_content=(f'host.name:"{target_host}" AND {elastic_q}'),
+                    description=f"Elastic 탐지 쿼리 — {attack} 모니터링",
+                )
+            )
 
         return rules
 
     # ── Patch Recommendation (Tier 3 — LLM) ─────────────────────
 
     async def _generate_patch_recommendation(
-        self, exploit: VerifiedExploit,
+        self,
+        exploit: VerifiedExploit,
     ) -> dict[str, Any]:
         """LLM을 사용하여 구체적인 패치 권고를 생성한다."""
         prompt = f"""\
@@ -422,14 +443,14 @@ class BlueTeamResponder:
 - 심각도: {exploit.severity}
 - 대상: {exploit.target}
 - 영향 컴포넌트: {exploit.affected_component}
-- CVE: {exploit.cve_id or '없음'}
+- CVE: {exploit.cve_id or "없음"}
 - 설명: {exploit.description[:500]}
 
 공격 요청:
-{exploit.request[:500] if exploit.request else '없음'}
+{exploit.request[:500] if exploit.request else "없음"}
 
 페이로드:
-{exploit.payload[:300] if exploit.payload else '없음'}
+{exploit.payload[:300] if exploit.payload else "없음"}
 
 다음을 JSON으로 생성하라:
 {{
@@ -441,6 +462,7 @@ class BlueTeamResponder:
 
         try:
             from vxis.llm.client import LLMClient
+
             client = LLMClient()
             response = await client.think(
                 system="당신은 시니어 보안 엔지니어입니다. 검증된 취약점에 대한 구체적인 방어 대응을 생성합니다.",
@@ -515,9 +537,10 @@ class BlueTeamResponder:
 
 # ── Helpers ─────────────────────────────────────────────────────
 
+
 def _escape_for_regex(text: str) -> str:
     """정규식 메타문자 이스케이프."""
-    return re.sub(r'([.+*?^${}()|[\]\\])', r'\\\1', text)
+    return re.sub(r"([.+*?^${}()|[\]\\])", r"\\\1", text)
 
 
 def _escape_modsec(text: str) -> str:

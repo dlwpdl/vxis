@@ -28,5 +28,6 @@ logs/
 
 # VXIS ingest raw material is generated state. Commit curated digests instead.
 .vxis/cache/extractions/
+.vxis/retrospectives/
 .vxis/signals/inbox/ingest-*.jsonl
 .vxis/signals/inbox/upstream-*.md

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
@@ -80,15 +79,16 @@ class TrivyPlugin(BasePlugin):
             logger.critical(
                 "BLOCKED: Trivy %s is compromised (CVE-2026-33634). "
                 "DO NOT RUN. Upgrade to >= %s immediately.",
-                version, _TRIVY_SAFE_MIN_VERSION,
+                version,
+                _TRIVY_SAFE_MIN_VERSION,
             )
             return False
 
         if not _is_version_safe(version) and version not in ("not installed", "unknown"):
             logger.warning(
-                "Trivy %s — version not verified safe. "
-                "Recommended: >= %s (CVE-2026-33634)",
-                version, _TRIVY_SAFE_MIN_VERSION,
+                "Trivy %s — version not verified safe. Recommended: >= %s (CVE-2026-33634)",
+                version,
+                _TRIVY_SAFE_MIN_VERSION,
             )
 
         return True
@@ -112,9 +112,7 @@ class TrivyPlugin(BasePlugin):
         source_path = tool_config.get("source_path", ".")
 
         common_flags = (
-            "--scanners vuln,secret,misconfig"
-            " --format json"
-            " --severity CRITICAL,HIGH,MEDIUM"
+            "--scanners vuln,secret,misconfig --format json --severity CRITICAL,HIGH,MEDIUM"
         )
 
         if repo_url:

@@ -1,8 +1,8 @@
 """Skill: test_injection — SQLi/XSS/SSTI/CMDi on a URL+parameter."""
+
 from __future__ import annotations
 import asyncio
 import logging
-import re
 from typing import Any
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
@@ -20,11 +20,13 @@ def _payloads_for_round(r: int) -> list[dict]:
     Payloads live in ``src/vxis/data/payloads/injection.json`` (ADR-007).
     """
     from vxis.agent.skills._payload_loader import load_skill_payloads
+
     return load_skill_payloads("injection", r)
 
 
-async def execute(url: str, param_name: str | None = None, round: int = 1,
-                  **kwargs: Any) -> dict[str, Any]:
+async def execute(
+    url: str, param_name: str | None = None, round: int = 1, **kwargs: Any
+) -> dict[str, Any]:
     """Test injection on a URL with query parameter.
 
     If url contains ?param=value, tests on that param.
@@ -77,7 +79,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
         base_r = await _session.request("GET", url)
         baseline_status = base_r.status
         baseline_size = base_r.body_length
-        baseline_body = base_r.text.lower()
+        base_r.text.lower()
     except Exception as e:
         return {"vulnerable": False, "findings": [], "tested": 0, "url": url, "error": str(e)}
 
@@ -111,109 +113,132 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
             # Time-based blind SQLi — a consistent 3s+ delay with
             # a SLEEP/WAITFOR/pg_sleep payload is a strong signal.
             if p["type"] == "sqli_time" and _elapsed >= 2.5:
-                findings.append({
-                    "type": "sqli_time",
-                    "payload": p["payload"],
-                    "param": target_param,
-                    "evidence": f"Request took {_elapsed:.2f}s (payload injected SLEEP/WAITFOR)",
-                    "response_preview": r.text[:300],
-                    "control": {
-                        "baseline_status": baseline_status,
-                        "baseline_size": baseline_size,
-                        "payload_status": r.status,
-                        "payload_size": size,
-                        "baseline_preview": base_r.text[:180],
-                        "payload_preview": r.text[:180],
-                        "elapsed_seconds": round(_elapsed, 2),
-                    },
-                    "severity": "critical",
-                })
-                logger.info("time-based sqli: %s on %s (%.2fs)", p["payload"][:40], target_param, _elapsed)
-                return
-
-            # Track blind SQLi size differences
-            if p["type"] == "sqli_blind":
-                blind_sizes[p["payload"]] = size
-                control_evidence.append({
-                    "type": p["type"],
-                    "payload": p["payload"],
-                    "status": r.status,
-                    "size": size,
-                    "baseline_status": baseline_status,
-                    "baseline_size": baseline_size,
-                    "response_preview": r.text[:180],
-                })
-                return
-
-            # Check for error-based detection
-            for sig in p["detect"]:
-                if sig.lower() in body:
-                    severity = {
-                        "sqli": "critical", "sqli_time": "critical",
-                        "sqli_oob": "critical",
-                        "xss": "high", "ssti": "critical",
-                        "cmdi": "critical", "path_traversal": "high",
-                        "ssrf": "high", "nosql": "high",
-                        "crlf": "medium", "xxe": "critical", "ldap": "high",
-                    }.get(p["type"], "medium")
-
-                    findings.append({
-                        "type": p["type"],
+                findings.append(
+                    {
+                        "type": "sqli_time",
                         "payload": p["payload"],
                         "param": target_param,
-                        "evidence": f"Status {r.status}, matched '{sig}' in response",
+                        "evidence": f"Request took {_elapsed:.2f}s (payload injected SLEEP/WAITFOR)",
                         "response_preview": r.text[:300],
                         "control": {
                             "baseline_status": baseline_status,
                             "baseline_size": baseline_size,
                             "payload_status": r.status,
                             "payload_size": size,
-                            "matched_signal": sig,
                             "baseline_preview": base_r.text[:180],
                             "payload_preview": r.text[:180],
+                            "elapsed_seconds": round(_elapsed, 2),
                         },
-                        "severity": severity,
-                    })
-                    logger.info("injection found: %s on %s with %s", p["type"], target_param, p["payload"][:30])
+                        "severity": "critical",
+                    }
+                )
+                logger.info(
+                    "time-based sqli: %s on %s (%.2fs)", p["payload"][:40], target_param, _elapsed
+                )
+                return
+
+            # Track blind SQLi size differences
+            if p["type"] == "sqli_blind":
+                blind_sizes[p["payload"]] = size
+                control_evidence.append(
+                    {
+                        "type": p["type"],
+                        "payload": p["payload"],
+                        "status": r.status,
+                        "size": size,
+                        "baseline_status": baseline_status,
+                        "baseline_size": baseline_size,
+                        "response_preview": r.text[:180],
+                    }
+                )
+                return
+
+            # Check for error-based detection
+            for sig in p["detect"]:
+                if sig.lower() in body:
+                    severity = {
+                        "sqli": "critical",
+                        "sqli_time": "critical",
+                        "sqli_oob": "critical",
+                        "xss": "high",
+                        "ssti": "critical",
+                        "cmdi": "critical",
+                        "path_traversal": "high",
+                        "ssrf": "high",
+                        "nosql": "high",
+                        "crlf": "medium",
+                        "xxe": "critical",
+                        "ldap": "high",
+                    }.get(p["type"], "medium")
+
+                    findings.append(
+                        {
+                            "type": p["type"],
+                            "payload": p["payload"],
+                            "param": target_param,
+                            "evidence": f"Status {r.status}, matched '{sig}' in response",
+                            "response_preview": r.text[:300],
+                            "control": {
+                                "baseline_status": baseline_status,
+                                "baseline_size": baseline_size,
+                                "payload_status": r.status,
+                                "payload_size": size,
+                                "matched_signal": sig,
+                                "baseline_preview": base_r.text[:180],
+                                "payload_preview": r.text[:180],
+                            },
+                            "severity": severity,
+                        }
+                    )
+                    logger.info(
+                        "injection found: %s on %s with %s",
+                        p["type"],
+                        target_param,
+                        p["payload"][:30],
+                    )
                     return
 
             # Check for interesting status code changes
             if r.status == 500 and baseline_status != 500:
-                findings.append({
-                    "type": p["type"],
-                    "payload": p["payload"],
-                    "param": target_param,
-                    "evidence": f"Payload caused 500 error (baseline was {baseline_status})",
-                    "response_preview": r.text[:300],
-                    "control": {
-                        "baseline_status": baseline_status,
-                        "baseline_size": baseline_size,
-                        "payload_status": r.status,
-                        "payload_size": size,
-                        "baseline_preview": base_r.text[:180],
-                        "payload_preview": r.text[:180],
-                    },
-                    "severity": "medium",
-                })
+                findings.append(
+                    {
+                        "type": p["type"],
+                        "payload": p["payload"],
+                        "param": target_param,
+                        "evidence": f"Payload caused 500 error (baseline was {baseline_status})",
+                        "response_preview": r.text[:300],
+                        "control": {
+                            "baseline_status": baseline_status,
+                            "baseline_size": baseline_size,
+                            "payload_status": r.status,
+                            "payload_size": size,
+                            "baseline_preview": base_r.text[:180],
+                            "payload_preview": r.text[:180],
+                        },
+                        "severity": "medium",
+                    }
+                )
 
             # Check for XSS reflection
             if p["type"] == "xss" and p["payload"].lower() in body:
-                findings.append({
-                    "type": "xss_reflected",
-                    "payload": p["payload"],
-                    "param": target_param,
-                    "evidence": "Payload reflected in response body",
-                    "response_preview": r.text[:300],
-                    "control": {
-                        "baseline_status": baseline_status,
-                        "baseline_size": baseline_size,
-                        "payload_status": r.status,
-                        "payload_size": size,
-                        "baseline_preview": base_r.text[:180],
-                        "payload_preview": r.text[:180],
-                    },
-                    "severity": "high",
-                })
+                findings.append(
+                    {
+                        "type": "xss_reflected",
+                        "payload": p["payload"],
+                        "param": target_param,
+                        "evidence": "Payload reflected in response body",
+                        "response_preview": r.text[:300],
+                        "control": {
+                            "baseline_status": baseline_status,
+                            "baseline_size": baseline_size,
+                            "payload_status": r.status,
+                            "payload_size": size,
+                            "baseline_preview": base_r.text[:180],
+                            "payload_preview": r.text[:180],
+                        },
+                        "severity": "high",
+                    }
+                )
 
     await asyncio.gather(*[test_payload(p) for p in _payloads])
 
@@ -221,19 +246,21 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
     if len(blind_sizes) >= 2:
         sizes = list(blind_sizes.values())
         if max(sizes) - min(sizes) > 50:
-            findings.append({
-                "type": "sqli_blind",
-                "payload": "boolean-based blind",
-                "param": target_param,
-                "evidence": f"Response size delta: {dict(blind_sizes)}",
-                "control": {
-                    "baseline_status": baseline_status,
-                    "baseline_size": baseline_size,
-                    "blind_sizes": dict(blind_sizes),
-                    "baseline_preview": base_r.text[:180],
-                },
-                "severity": "critical",
-            })
+            findings.append(
+                {
+                    "type": "sqli_blind",
+                    "payload": "boolean-based blind",
+                    "param": target_param,
+                    "evidence": f"Response size delta: {dict(blind_sizes)}",
+                    "control": {
+                        "baseline_status": baseline_status,
+                        "baseline_size": baseline_size,
+                        "blind_sizes": dict(blind_sizes),
+                        "baseline_preview": base_r.text[:180],
+                    },
+                    "severity": "critical",
+                }
+            )
 
     # Deduplicate findings by type
     seen_types: set[str] = set()

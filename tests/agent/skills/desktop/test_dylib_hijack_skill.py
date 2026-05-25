@@ -28,11 +28,11 @@ command name `LC_LOAD_WEAK_DYLIB`.
 
 The helper `_fake_otool_L` and `_fake_otool_l` below reproduce these formats.
 """
+
 from __future__ import annotations
 
-import os
 from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -42,6 +42,7 @@ from vxis.agent.skills.desktop.test_dylib_hijack import execute
 # ---------------------------------------------------------------------------
 # Format helpers — reproduce the exact otool output the skill parses
 # ---------------------------------------------------------------------------
+
 
 def _fake_otool_L(dylibs: list[str]) -> str:
     """Return a `otool -L` stdout string containing the given dylib paths.
@@ -75,10 +76,7 @@ def _fake_otool_l(rpaths: list[str], weak_dylibs: list[str] | None = None) -> st
     sections: list[str] = []
     for i, rp in enumerate(rpaths):
         sections.append(
-            f"Load command {i}\n"
-            f"      cmd LC_RPATH\n"
-            f"  cmdsize 56\n"
-            f"     path {rp} (offset 12)\n"
+            f"Load command {i}\n      cmd LC_RPATH\n  cmdsize 56\n     path {rp} (offset 12)\n"
         )
     if weak_dylibs:
         for j, wd in enumerate(weak_dylibs, start=len(rpaths)):
@@ -95,6 +93,7 @@ def _fake_otool_l(rpaths: list[str], weak_dylibs: list[str] | None = None) -> st
 # Mock factory
 # ---------------------------------------------------------------------------
 
+
 def _make_proc(stdout: str = "", returncode: int = 0) -> MagicMock:
     m = MagicMock()
     m.returncode = returncode
@@ -106,6 +105,7 @@ def _make_proc(stdout: str = "", returncode: int = 0) -> MagicMock:
 # ---------------------------------------------------------------------------
 # Test fixtures / helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_binary(tmp_path: Any) -> str:
     """Create a dummy file that stands in for a Mach-O binary.
@@ -122,13 +122,14 @@ def _make_binary(tmp_path: Any) -> str:
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestWritableRpath:
     """DESK-DYL-001: @rpath dylib whose resolved dir is writable."""
 
     @pytest.mark.asyncio
     async def test_writable_rpath_emits_dyl_001(self, tmp_path: Any) -> None:
         """A binary with @rpath/foo.dylib + writable RPATH → DESK-DYL-001 finding."""
-        binary = _make_binary(tmp_path)
+        _make_binary(tmp_path)
         rpath = str(tmp_path)  # tmp_path is always writable by the test runner
 
         otool_L_out = _fake_otool_L(["@rpath/foo.dylib"])
@@ -149,7 +150,7 @@ class TestWritableRpath:
     @pytest.mark.asyncio
     async def test_system_only_rpath_no_findings(self, tmp_path: Any) -> None:
         """RPATH pointing to /usr/lib (not writable) → 0 findings."""
-        binary = _make_binary(tmp_path)
+        _make_binary(tmp_path)
         rpath = "/usr/lib"  # not writable by regular users
 
         otool_L_out = _fake_otool_L(["@rpath/foo.dylib"])
@@ -172,7 +173,7 @@ class TestMissingWeakDylib:
     @pytest.mark.asyncio
     async def test_missing_weak_dylib_emits_dyl_002(self, tmp_path: Any) -> None:
         """Weak-linked @rpath/missing.dylib with no resolved candidate on disk → DESK-DYL-002."""
-        binary = _make_binary(tmp_path)
+        _make_binary(tmp_path)
         rpath = str(tmp_path)  # writable but dylib won't exist there
 
         # The dylib path is @rpath/missing.dylib — resolved: tmp_path/missing.dylib
@@ -201,7 +202,7 @@ class TestMultipleRpaths:
     @pytest.mark.asyncio
     async def test_multiple_rpaths_with_writable_emits_dyl_003(self, tmp_path: Any) -> None:
         """2 RPATHs (one writable) + @rpath dylib → DESK-DYL-003 + DESK-DYL-001."""
-        binary = _make_binary(tmp_path)
+        _make_binary(tmp_path)
         writable_rpath = str(tmp_path)
         system_rpath = "/usr/lib"
 
@@ -228,7 +229,7 @@ class TestNoRpath:
     @pytest.mark.asyncio
     async def test_no_rpath_no_findings(self, tmp_path: Any) -> None:
         """Binary with only absolute dylib paths and no RPATH → 0 findings."""
-        binary = _make_binary(tmp_path)
+        _make_binary(tmp_path)
 
         otool_L_out = _fake_otool_L(["/usr/lib/libSystem.B.dylib"])
         otool_l_out = _fake_otool_l(rpaths=[])  # no RPATH entries
@@ -288,7 +289,7 @@ class TestErrorHandling:
     @pytest.mark.asyncio
     async def test_handles_otool_returning_nonzero(self, tmp_path: Any) -> None:
         """otool -L returncode != 0 → skip that binary, continue, return valid dict."""
-        binary = _make_binary(tmp_path)
+        _make_binary(tmp_path)
 
         # First binary: otool -L fails (non-zero).  otool -l is never called.
         def _side_effect(cmd: list[str], **kw: Any) -> MagicMock:
@@ -311,7 +312,7 @@ class TestBilingualFindings:
     @pytest.mark.asyncio
     async def test_finding_has_bilingual_description(self, tmp_path: Any) -> None:
         """All findings must contain '|||' in both title and description."""
-        binary = _make_binary(tmp_path)
+        _make_binary(tmp_path)
         rpath = str(tmp_path)
 
         otool_L_out = _fake_otool_L(["@rpath/foo.dylib"])

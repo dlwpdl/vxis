@@ -354,16 +354,20 @@ jobs:
           git push -u origin "$BRANCH"
 
           # PR 생성
-          PR_BODY="## Auto-Implementation
+          PLAN_BODY="$(cat implementation_plan.md 2>/dev/null || echo 'See commits for details')"
+          PR_BODY="$(cat <<EOF
+          ## Auto-Implementation
 
-Closes #${ISSUE_NUM}
+          Closes #${ISSUE_NUM}
 
-### Implementation Plan
-$(cat implementation_plan.md 2>/dev/null || echo 'See commits for details')
+          ### Implementation Plan
+          ${PLAN_BODY}
 
----
-*이 PR은 VXIS Auto-Implement가 자동 생성했습니다.*
-*반드시 코드 리뷰 후 머지하세요.*"
+          ---
+          *이 PR은 VXIS Auto-Implement가 자동 생성했습니다.*
+          *반드시 코드 리뷰 후 머지하세요.*
+          EOF
+          )"
 
           gh pr create \
             --title "Auto-implement: ${TITLE}" \

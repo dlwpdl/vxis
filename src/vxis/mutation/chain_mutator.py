@@ -14,8 +14,7 @@ Phase 2 (Tier 3): LLM으로 단계 대체 변이 생성
 from __future__ import annotations
 
 import logging
-from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import networkx as nx
@@ -29,7 +28,11 @@ logger = logging.getLogger(__name__)
 # ── Severity 순위 헬퍼 ──────────────────────────────────────────
 
 _SEV_RANK: dict[str, int] = {
-    "critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0,
+    "critical": 4,
+    "high": 3,
+    "medium": 2,
+    "low": 1,
+    "info": 0,
 }
 
 
@@ -38,6 +41,7 @@ def _rank(sev: str) -> int:
 
 
 # ── 결과 데이터 클래스 ───────────────────────────────────────────
+
 
 @dataclass
 class MutationResult:
@@ -69,6 +73,7 @@ class MutationResult:
 
 
 # ── 핵심 변이 엔진 ───────────────────────────────────────────────
+
 
 class ChainMutator:
     """공격 체인 변이 엔진.
@@ -159,9 +164,7 @@ class ChainMutator:
 
         # BFS로 대안 경로 탐색 (원본과 다른 경로만)
         try:
-            all_paths = list(nx.all_simple_paths(
-                graph, source_id, target_id, cutoff=8
-            ))
+            all_paths = list(nx.all_simple_paths(graph, source_id, target_id, cutoff=8))
         except (nx.NetworkXError, nx.NodeNotFound):
             return results
 
@@ -199,13 +202,9 @@ class ChainMutator:
         diff_nodes = [n for n in alt_node_data if n.id not in original_ids]
 
         replaced_title = (
-            alt_node_data[len(alt_node_data) // 2].title
-            if alt_node_data
-            else "중간 단계"
+            alt_node_data[len(alt_node_data) // 2].title if alt_node_data else "중간 단계"
         )
-        replacement_title = (
-            diff_nodes[0].title if diff_nodes else "대안 단계"
-        )
+        replacement_title = diff_nodes[0].title if diff_nodes else "대안 단계"
 
         # 난이도 계산: 대안 경로의 평균 severity vs 원본
         original_sev_avg = (
@@ -214,8 +213,7 @@ class ChainMutator:
             else 2.0
         )
         alt_sev_avg = (
-            sum(_rank(getattr(n, "severity", "medium")) for n in alt_node_data)
-            / len(alt_node_data)
+            sum(_rank(getattr(n, "severity", "medium")) for n in alt_node_data) / len(alt_node_data)
             if alt_node_data
             else 2.0
         )
@@ -248,8 +246,7 @@ class ChainMutator:
             replacement_step_title=replacement_title,
             difficulty_delta=difficulty_delta,
             difficulty_reason=(
-                f"대안 경로 평균 severity {alt_sev_avg:.1f} vs "
-                f"원본 {original_sev_avg:.1f}"
+                f"대안 경로 평균 severity {alt_sev_avg:.1f} vs 원본 {original_sev_avg:.1f}"
             ),
         )
 
@@ -268,7 +265,7 @@ class ChainMutator:
 
         # 체인 단계 요약
         steps_text = "\n".join(
-            f"  {i+1}. [{f.severity.value}] {f.title} (에이전트: {f.agent_id})"
+            f"  {i + 1}. [{f.severity.value}] {f.title} (에이전트: {f.agent_id})"
             for i, f in enumerate(chain.findings)
         )
 
@@ -306,6 +303,7 @@ JSON 배열로 응답:
 
         try:
             from vxis.llm.client import LLMClient
+
             client = LLMClient()
             response = await client.think(
                 system=(
@@ -357,15 +355,17 @@ JSON 배열로 응답:
                     escalation_reason=f"LLM 변이: {replaced} → {replacement[:40]}",
                 )
 
-                results.append(MutationResult(
-                    original_chain_id=chain.id,
-                    mutated_chain=mutated,
-                    mutation_type="llm_step_replacement",
-                    replaced_step_title=replaced,
-                    replacement_step_title=replacement,
-                    difficulty_delta=delta,
-                    difficulty_reason=item.get("difficulty_reason", ""),
-                ))
+                results.append(
+                    MutationResult(
+                        original_chain_id=chain.id,
+                        mutated_chain=mutated,
+                        mutation_type="llm_step_replacement",
+                        replaced_step_title=replaced,
+                        replacement_step_title=replacement,
+                        difficulty_delta=delta,
+                        difficulty_reason=item.get("difficulty_reason", ""),
+                    )
+                )
 
             return results
 
@@ -407,7 +407,7 @@ JSON 배열로 응답:
             "",
             "---",
             "",
-            f"### 핵심 결론",
+            "### 핵심 결론",
             f"**이 취약점을 패치해도 {len(mutations)}가지 대안 공격 경로가 존재합니다.**",
             "",
             f"- 그래프 대안 경로: {len(graph_alts)}개",
@@ -460,6 +460,7 @@ JSON 배열로 응답:
 
 
 # ── 헬퍼 ────────────────────────────────────────────────────────
+
 
 def original_id_prefix(chain: SynthesizedChain) -> str:
     """체인 ID의 앞 8자리를 반환한다."""

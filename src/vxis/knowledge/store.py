@@ -41,6 +41,7 @@ _COMPILE_THRESHOLD = 3  # 동일 패턴 3회 반복 시 컴파일
 
 # ── Data Models ──────────────────────────────────────────────────
 
+
 @dataclass
 class ExecutionRecord:
     """단일 도구 실행의 핵심 요약."""
@@ -52,9 +53,7 @@ class ExecutionRecord:
     findings_produced: int
     finding_types: list[str]  # ["sqli", "xss", ...]
     target_tech: list[str]  # 타겟의 기술 스택
-    timestamp: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExecutionRecord:
@@ -85,9 +84,7 @@ class CompiledPattern:
     confidence: float  # 0.0~1.0 (패턴 신뢰도)
     hit_count: int  # 이 패턴이 매칭된 횟수
     success_count: int  # 성공한 횟수
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     last_used: str = ""
 
     @property
@@ -163,6 +160,7 @@ class CapabilityProfile:
 
 # ── Knowledge Store ──────────────────────────────────────────────
 
+
 class KnowledgeStore:
     """능력별 지식 축적 + 컴파일된 패턴 관리 시스템.
 
@@ -212,12 +210,14 @@ class KnowledgeStore:
         self._update_profile(record)
 
         # 패턴 컴파일 후보 추가
-        self._pending_compilations[record.context_signature].append({
-            "tool": record.tool,
-            "args": record.args_summary,
-            "effectiveness": record.effectiveness,
-            "finding_types": record.finding_types,
-        })
+        self._pending_compilations[record.context_signature].append(
+            {
+                "tool": record.tool,
+                "args": record.args_summary,
+                "effectiveness": record.effectiveness,
+                "finding_types": record.finding_types,
+            }
+        )
 
         # 컴파일 조건 확인: 같은 맥락에서 3회 이상 동일 도구가 효과적
         self._try_compile(record.context_signature)
@@ -241,7 +241,8 @@ class KnowledgeStore:
             if tech_lower not in profile.worst_against:
                 # 3회 이상 실패해야 worst_against에 추가
                 fail_count = sum(
-                    1 for r in self._records
+                    1
+                    for r in self._records
                     if r.tool == record.tool
                     and tech_lower in [t.lower() for t in r.target_tech]
                     and r.effectiveness <= 0
@@ -276,10 +277,14 @@ class KnowledgeStore:
                     existing.last_used = datetime.now(timezone.utc).isoformat()
                 else:
                     # 새 패턴 컴파일
-                    most_common_args = max(
-                        set(tool_args[tool]),
-                        key=tool_args[tool].count,
-                    ) if tool_args[tool] else ""
+                    most_common_args = (
+                        max(
+                            set(tool_args[tool]),
+                            key=tool_args[tool].count,
+                        )
+                        if tool_args[tool]
+                        else ""
+                    )
 
                     pattern = CompiledPattern(
                         id=f"{context_sig}:{tool}:{len(self._patterns)}",
@@ -294,11 +299,16 @@ class KnowledgeStore:
                     self._patterns.append(pattern)
                     logger.info(
                         "패턴 컴파일: %s → %s (신뢰도 %.0f%%, %d회 관찰)",
-                        context_sig, tool, pattern.confidence * 100, len(scores),
+                        context_sig,
+                        tool,
+                        pattern.confidence * 100,
+                        len(scores),
                     )
 
     def _find_pattern(
-        self, context_sig: str, tool: str,
+        self,
+        context_sig: str,
+        tool: str,
     ) -> Optional[CompiledPattern]:
         for p in self._patterns:
             if p.context_signature == context_sig and p.action_tool == tool:
@@ -334,7 +344,9 @@ class KnowledgeStore:
         return matched
 
     def record_pattern_outcome(
-        self, pattern_id: str, success: bool,
+        self,
+        pattern_id: str,
+        success: bool,
     ) -> None:
         """패턴 실행 결과를 피드백하여 신뢰도를 조정한다."""
         for p in self._patterns:
@@ -369,13 +381,16 @@ class KnowledgeStore:
         ftype = getattr(finding, "finding_type", "vulnerability")
         severity = getattr(finding, "severity", None)
         sev_str = severity.value if hasattr(severity, "value") else str(severity or "")
-        target = getattr(finding, "target", "")
+        getattr(finding, "target", "")
         component = getattr(finding, "affected_component", "")
 
         # effectiveness: severity 기반 (critical=1.0, high=0.8, medium=0.5, low=0.3, info=0.1)
         sev_score = {
-            "critical": 1.0, "high": 0.8, "medium": 0.5,
-            "low": 0.3, "informational": 0.1,
+            "critical": 1.0,
+            "high": 0.8,
+            "medium": 0.5,
+            "low": 0.3,
+            "informational": 0.1,
         }.get(sev_str, 0.3)
 
         # context_signature: target의 tech_stack 또는 component 기반
@@ -404,17 +419,18 @@ class KnowledgeStore:
 
         # 모든 2-조합에 대해 상관관계 업데이트
         for i, tech_a in enumerate(tech_set):
-            for tech_b in tech_set[i + 1:]:
+            for tech_b in tech_set[i + 1 :]:
                 self._update_correlation([tech_a], [tech_b])
 
     def _update_correlation(
-        self, if_present: list[str], then_likely: list[str],
+        self,
+        if_present: list[str],
+        then_likely: list[str],
     ) -> None:
         """상관관계 규칙을 업데이트하거나 새로 생성한다."""
         for rule in self._correlations:
-            if (
-                set(rule.if_present) == set(if_present)
-                and set(rule.then_likely) == set(then_likely)
+            if set(rule.if_present) == set(if_present) and set(rule.then_likely) == set(
+                then_likely
             ):
                 rule.observed_count += 1
                 # 관찰 횟수에 따라 확률 점진적 조정
@@ -422,13 +438,15 @@ class KnowledgeStore:
                 return
 
         # 새 규칙 (초기 확률 낮게 시작)
-        self._correlations.append(CorrelationRule(
-            if_present=if_present,
-            then_likely=then_likely,
-            probability=0.3,
-            observed_count=1,
-            source="compiled",
-        ))
+        self._correlations.append(
+            CorrelationRule(
+                if_present=if_present,
+                then_likely=then_likely,
+                probability=0.3,
+                observed_count=1,
+                source="compiled",
+            )
+        )
 
     def get_correlations(self, tech_stack: list[str]) -> list[CorrelationRule]:
         """주어진 기술 스택에서 추론 가능한 상관관계를 반환한다."""
@@ -458,8 +476,7 @@ class KnowledgeStore:
         # 이동 평균으로 effectiveness 업데이트
         alpha = 0.3  # 최근 데이터에 더 많은 가중치
         profile.avg_effectiveness = (
-            alpha * record.effectiveness
-            + (1 - alpha) * profile.avg_effectiveness
+            alpha * record.effectiveness + (1 - alpha) * profile.avg_effectiveness
         )
 
         # best_against / worst_against 업데이트
@@ -545,10 +562,20 @@ class KnowledgeStore:
         if open_ports:
             # 대표 포트만 포함 (너무 상세하면 매칭이 안 됨)
             notable_ports = {
-                80: "http", 443: "https", 22: "ssh", 3306: "mysql",
-                5432: "postgres", 27017: "mongodb", 6379: "redis",
-                8080: "proxy", 8443: "alt-https", 3389: "rdp",
-                445: "smb", 21: "ftp", 25: "smtp", 53: "dns",
+                80: "http",
+                443: "https",
+                22: "ssh",
+                3306: "mysql",
+                5432: "postgres",
+                27017: "mongodb",
+                6379: "redis",
+                8080: "proxy",
+                8443: "alt-https",
+                3389: "rdp",
+                445: "smb",
+                21: "ftp",
+                25: "smtp",
+                53: "dns",
             }
             for port in open_ports:
                 if port in notable_ports:
@@ -571,9 +598,7 @@ class KnowledgeStore:
             "correlation_rules": len(self._correlations),
             "capability_profiles": len(self._profiles),
             "avg_pattern_confidence": (
-                round(
-                    sum(p.confidence for p in self._patterns) / len(self._patterns), 2
-                )
+                round(sum(p.confidence for p in self._patterns) / len(self._patterns), 2)
                 if self._patterns
                 else 0.0
             ),
@@ -603,10 +628,7 @@ class KnowledgeStore:
         if patterns:
             lines.append("## 컴파일된 지식")
             for p in patterns[:3]:
-                lines.append(
-                    f"- {p.action_tool}: {p.reasoning} "
-                    f"(신뢰도 {p.confidence:.0%})"
-                )
+                lines.append(f"- {p.action_tool}: {p.reasoning} (신뢰도 {p.confidence:.0%})")
 
         # 2. 추천 도구
         recommended = self.get_recommended_tools(tech_stack)
@@ -645,28 +667,23 @@ class KnowledgeStore:
             if not isinstance(data, dict):
                 return
 
-            self._records = [
-                ExecutionRecord.from_dict(r)
-                for r in data.get("records", [])
-            ]
-            self._patterns = [
-                CompiledPattern.from_dict(p)
-                for p in data.get("patterns", [])
-            ]
+            self._records = [ExecutionRecord.from_dict(r) for r in data.get("records", [])]
+            self._patterns = [CompiledPattern.from_dict(p) for p in data.get("patterns", [])]
             self._correlations = [
-                CorrelationRule.from_dict(c)
-                for c in data.get("correlations", [])
+                CorrelationRule.from_dict(c) for c in data.get("correlations", [])
             ]
             self._profiles = {
-                k: CapabilityProfile.from_dict(v)
-                for k, v in data.get("profiles", {}).items()
+                k: CapabilityProfile.from_dict(v) for k, v in data.get("profiles", {}).items()
             }
             self._pending_compilations = defaultdict(
-                list, data.get("pending_compilations", {}),
+                list,
+                data.get("pending_compilations", {}),
             )
             logger.debug(
                 "Knowledge Store 로드: %d records, %d patterns, %d correlations",
-                len(self._records), len(self._patterns), len(self._correlations),
+                len(self._records),
+                len(self._patterns),
+                len(self._correlations),
             )
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("Knowledge Store 로드 실패: %s", exc)
@@ -679,9 +696,7 @@ class KnowledgeStore:
                     "records": [asdict(r) for r in self._records],
                     "patterns": [asdict(p) for p in self._patterns],
                     "correlations": [asdict(c) for c in self._correlations],
-                    "profiles": {
-                        k: asdict(v) for k, v in self._profiles.items()
-                    },
+                    "profiles": {k: asdict(v) for k, v in self._profiles.items()},
                     "pending_compilations": dict(self._pending_compilations),
                 },
                 ensure_ascii=False,

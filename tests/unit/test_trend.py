@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 
 from vxis.core.trend import TrendPoint, _compute_risk_score
-from vxis.models.finding import Severity
 
 
 class TestComputeRiskScore:

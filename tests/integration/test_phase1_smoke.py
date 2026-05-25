@@ -2,10 +2,10 @@
 Phase 1 전체 통합 테스트.
 Director → Attack Graph → Evidence Engine → Hypothesis Queue 흐름 검증.
 """
+
 import pytest
 from vxis.mission.config import MissionConfig, Depth, Scope
 from vxis.graph.attack_graph import LivingAttackGraph
-from vxis.graph.hypothesis import HypothesisQueue
 from vxis.evidence.engine import EvidenceEngine
 from vxis.evidence.schema import Evidence, Severity, EvidenceType
 from vxis.agent.director import DirectorAgent

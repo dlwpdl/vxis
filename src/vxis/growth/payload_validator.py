@@ -4,9 +4,9 @@ Zero LLM cost: just sends HTTP requests and checks detect signatures.
 Used by growth-loop to validate auto-added payloads and isolate
 regressions to individual payloads instead of rolling back everything.
 """
+
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 from pathlib import Path
@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 # Benchmark targets (same as growth-loop Docker services)
 DEFAULT_TARGETS = [
-    "http://localhost:3000",   # Juice Shop
-    "http://localhost:8081",   # DVWA
-    "http://localhost:5001",   # VamPI
+    "http://localhost:3000",  # Juice Shop
+    "http://localhost:8081",  # DVWA
+    "http://localhost:5001",  # VamPI
 ]
 
 
@@ -81,22 +81,26 @@ async def validate_payload(
             # Also check for generic error indicators
             error_indicators = status == 500 or "error" in body[:200].lower()
 
-            results.append({
-                "target": target,
-                "url": test_url[:100],
-                "status": status,
-                "size": r.body_length,
-                "matched_signatures": matched,
-                "error_triggered": error_indicators,
-            })
+            results.append(
+                {
+                    "target": target,
+                    "url": test_url[:100],
+                    "status": status,
+                    "size": r.body_length,
+                    "matched_signatures": matched,
+                    "error_triggered": error_indicators,
+                }
+            )
 
         except Exception as e:
-            results.append({
-                "target": target,
-                "url": target,
-                "status": -1,
-                "error": str(e)[:100],
-            })
+            results.append(
+                {
+                    "target": target,
+                    "url": target,
+                    "status": -1,
+                    "error": str(e)[:100],
+                }
+            )
         finally:
             try:
                 await _mgr.close_all()
@@ -104,10 +108,7 @@ async def validate_payload(
                 pass
 
     # Valid if any target had a signature match or error trigger
-    valid = any(
-        r.get("matched_signatures") or r.get("error_triggered")
-        for r in results
-    )
+    valid = any(r.get("matched_signatures") or r.get("error_triggered") for r in results)
 
     return {"valid": valid, "results": results, "payload": payload[:60], "technique": technique}
 
@@ -179,10 +180,7 @@ async def isolate_regression(
         if not r["valid"]:
             # Payload didn't work on any target — not necessarily bad,
             # but if it's causing scan errors, flag it
-            all_errors = all(
-                res.get("status") in (-1, 500)
-                for res in r.get("results", [])
-            )
+            all_errors = all(res.get("status") in (-1, 500) for res in r.get("results", []))
             if all_errors:
                 bad_proposals.append(r["proposal_id"])
                 logger.info("Regression candidate: %s (%s)", r["proposal_id"], r["payload"])

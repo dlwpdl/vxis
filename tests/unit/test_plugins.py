@@ -5,7 +5,6 @@ from __future__ import annotations
 import textwrap
 from typing import Any
 
-import pytest
 
 from vxis.core.context import DAGContext, PluginOutput
 from vxis.plugins.recon.subfinder import SubfinderPlugin
@@ -384,11 +383,13 @@ class TestTestsslPlugin:
         assert "nmap" in self.plugin.meta.optional_depends
 
     def test_build_command_contains_port_443(self):
-        nmap_hosts = [{
-            "ip": "93.184.216.34",
-            "hostname": "example.com",
-            "ports": [{"port": 443, "state": "open", "service": "https", "scripts": []}],
-        }]
+        nmap_hosts = [
+            {
+                "ip": "93.184.216.34",
+                "hostname": "example.com",
+                "ports": [{"port": 443, "state": "open", "service": "https", "scripts": []}],
+            }
+        ]
         ctx = _make_ctx(nmap={"hosts": nmap_hosts})
         cmd = self.plugin.build_command(TARGET, "standard", ctx, TOOL_CONFIG)
         assert ":443" in cmd
@@ -407,7 +408,9 @@ class TestTestsslPlugin:
         assert finding["cve"] == "CVE-2014-3566"
 
     def test_parse_output_filters_ok(self):
-        ok_record = '[{"id":"cert_chain_of_trust","severity":"OK","finding":"OK","cwe":"","cve":""}]'
+        ok_record = (
+            '[{"id":"cert_chain_of_trust","severity":"OK","finding":"OK","cwe":"","cve":""}]'
+        )
         result = self.plugin.parse_output(ok_record, "")
         assert result.findings == []
 
@@ -530,9 +533,7 @@ class TestTrufflehogPlugin:
 
     def test_build_command_adds_token_when_provided(self):
         ctx = DAGContext(target=TARGET, scan_profile="standard")
-        cmd = self.plugin.build_command(
-            TARGET, "standard", ctx, {"github_token": "ghp_secret"}
-        )
+        cmd = self.plugin.build_command(TARGET, "standard", ctx, {"github_token": "ghp_secret"})
         assert "--token ghp_secret" in cmd
 
     def test_build_command_no_token_by_default(self):

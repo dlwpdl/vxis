@@ -30,14 +30,12 @@ Requirements:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -111,14 +109,14 @@ class ElementInfo:
 class DOMAnalysis:
     """DOM 분석 결과 — Brain이 이해하기 쉬운 형태로 요약."""
 
-    forms: list[dict[str, Any]]          # 폼 목록 (action, method, fields)
-    login_forms: list[dict[str, Any]]    # 로그인으로 추정되는 폼
-    file_uploads: list[dict[str, Any]]   # 파일 업로드 폼
-    api_endpoints: list[str]             # JS/XHR에서 발견된 API 엔드포인트
+    forms: list[dict[str, Any]]  # 폼 목록 (action, method, fields)
+    login_forms: list[dict[str, Any]]  # 로그인으로 추정되는 폼
+    file_uploads: list[dict[str, Any]]  # 파일 업로드 폼
+    api_endpoints: list[str]  # JS/XHR에서 발견된 API 엔드포인트
     hidden_inputs: list[dict[str, str]]  # hidden input 필드
-    comments: list[str]                  # HTML 주석
-    inline_scripts: list[str]            # <script> 태그 내용
-    meta_info: dict[str, str]            # <meta> 태그 정보
+    comments: list[str]  # HTML 주석
+    inline_scripts: list[str]  # <script> 태그 내용
+    meta_info: dict[str, str]  # <meta> 태그 정보
 
 
 # ── Browser Engine ───────────────────────────────────────────────
@@ -211,10 +209,14 @@ class BrowserEngine:
                 java_script_enabled=True,
             )
         else:
-            ctx = self._browser.contexts[0] if self._browser.contexts else (
-                await self._browser.new_context(
-                    user_agent=self._user_agent,
-                    ignore_https_errors=True,
+            ctx = (
+                self._browser.contexts[0]
+                if self._browser.contexts
+                else (
+                    await self._browser.new_context(
+                        user_agent=self._user_agent,
+                        ignore_https_errors=True,
+                    )
                 )
             )
 
@@ -409,9 +411,7 @@ class BrowserPage:
         """입력 필드에 값 입력."""
         await self._page.fill(selector, value)
 
-    async def fill_form(
-        self, form_selector: str, data: dict[str, str]
-    ) -> dict[str, Any]:
+    async def fill_form(self, form_selector: str, data: dict[str, str]) -> dict[str, Any]:
         """폼 필드 일괄 입력. Angular Material / a11y 셀렉터 폴백 포함.
 
         Returns:
@@ -594,12 +594,16 @@ class BrowserPage:
         return await self._context.cookies()
 
     async def set_cookie(self, name: str, value: str, domain: str, path: str = "/") -> None:
-        await self._context.add_cookies([{
-            "name": name,
-            "value": value,
-            "domain": domain,
-            "path": path,
-        }])
+        await self._context.add_cookies(
+            [
+                {
+                    "name": name,
+                    "value": value,
+                    "domain": domain,
+                    "path": path,
+                }
+            ]
+        )
 
     async def clear_cookies(self) -> None:
         await self._context.clear_cookies()
@@ -714,7 +718,8 @@ class DockerBrowserManager:
         try:
             proc = subprocess.run(
                 ["docker", "info"],
-                capture_output=True, timeout=10,
+                capture_output=True,
+                timeout=10,
             )
             return proc.returncode == 0
         except Exception:
@@ -724,9 +729,13 @@ class DockerBrowserManager:
         """Docker 안에서 Chromium 시작, CDP endpoint URL 반환."""
         # zenika/alpine-chrome 이미지는 chromium-browser가 ENTRYPOINT로 설정됨
         cmd = [
-            "docker", "run", "-d",
-            "--name", self._container_name,
-            "-p", f"{self._cdp_port}:9222",
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            self._container_name,
+            "-p",
+            f"{self._cdp_port}:9222",
             "--shm-size=2g",
             self._IMAGE,
             "--headless",
@@ -738,7 +747,9 @@ class DockerBrowserManager:
         ]
 
         proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, stderr = await proc.communicate()
 
@@ -757,8 +768,12 @@ class DockerBrowserManager:
     async def stop(self) -> None:
         if self._container_id:
             proc = await asyncio.create_subprocess_exec(
-                "docker", "rm", "-f", self._container_name,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                "docker",
+                "rm",
+                "-f",
+                self._container_name,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             await proc.communicate()
             logger.info("Docker browser stopped: %s", self._container_id)

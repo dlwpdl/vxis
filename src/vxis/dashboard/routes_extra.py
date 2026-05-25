@@ -11,13 +11,11 @@ import json
 import tempfile
 from datetime import date
 from pathlib import Path
-from typing import Any
 
 from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
-    JSONResponse,
     RedirectResponse,
     StreamingResponse,
 )
@@ -226,9 +224,7 @@ async def export_report(
     engine = _get_engine(request)
 
     async with get_session(engine) as session:
-        scan_result = await session.execute(
-            select(ScanRecord).where(ScanRecord.id == int(scan_id))
-        )
+        scan_result = await session.execute(select(ScanRecord).where(ScanRecord.id == int(scan_id)))
         scan: ScanRecord | None = scan_result.scalar_one_or_none()
 
         if scan is None:
@@ -396,9 +392,7 @@ async def export_report(
                 evidence=evidence,
                 remediation=rec.remediation,
                 references=references,
-                analyst_severity=Severity(rec.analyst_severity)
-                if rec.analyst_severity
-                else None,
+                analyst_severity=Severity(rec.analyst_severity) if rec.analyst_severity else None,
                 analyst_notes=rec.analyst_notes,
                 discovered_at=rec.discovered_at,
                 updated_at=rec.updated_at,

@@ -4,9 +4,9 @@ Uses subprocess mocking for otool/nm/codesign calls and a real system
 binary (/bin/ls) for the positive case. The weak-binary negative case
 is skipped when the clang build is unavailable.
 """
+
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -26,6 +26,7 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Mock factory helpers
 # ---------------------------------------------------------------------------
+
 
 def _mock_proc(returncode: int = 0, stdout: str = "", stderr: str = "") -> MagicMock:
     proc = MagicMock()
@@ -104,11 +105,15 @@ async def test_system_binary_with_pie_no_findings(tmp_path: Path) -> None:
             )
         return _mock_proc()
 
-    with patch("vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run):
+    with patch(
+        "vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run
+    ):
         result = await execute(target_url="/bin/ls")
 
     assert result["tested"] == 1
-    assert result["findings"] == [], f"expected 0 findings for fully-protected binary, got: {result['findings']}"
+    assert result["findings"] == [], (
+        f"expected 0 findings for fully-protected binary, got: {result['findings']}"
+    )
     assert result["pie"] is True
     assert result["stack_canary"] is True
     assert result["restrict_segment"] is True
@@ -132,7 +137,9 @@ async def test_no_pie_emits_desk_pie_001(tmp_path: Path) -> None:
             return _mock_proc(returncode=0, stderr="Authority=Developer ID Application: Foo\n")
         return _mock_proc()
 
-    with patch("vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run):
+    with patch(
+        "vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run
+    ):
         result = await execute(target_url="/tmp/nopie.bin")
 
     assert result["pie"] is False
@@ -161,7 +168,9 @@ async def test_no_canary_emits_desk_pie_002(tmp_path: Path) -> None:
             return _mock_proc(returncode=0, stderr="Authority=Developer ID Application: Foo\n")
         return _mock_proc()
 
-    with patch("vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run):
+    with patch(
+        "vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run
+    ):
         result = await execute(target_url="/tmp/nocanary.bin")
 
     assert result["stack_canary"] is False
@@ -189,7 +198,9 @@ async def test_no_restrict_emits_desk_pie_003(tmp_path: Path) -> None:
             return _mock_proc(returncode=0, stderr="Authority=Developer ID Application: Foo\n")
         return _mock_proc()
 
-    with patch("vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run):
+    with patch(
+        "vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run
+    ):
         result = await execute(target_url="/tmp/norestrict.bin")
 
     assert result["restrict_segment"] is False
@@ -226,7 +237,9 @@ async def test_return_schema_always_present(tmp_path: Path) -> None:
     def _fake_run(cmd: list[str], **kwargs: object) -> MagicMock:
         return _mock_proc(stdout=_OTOOL_PIE_OUTPUT)
 
-    with patch("vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run):
+    with patch(
+        "vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run
+    ):
         result = await execute(target_url="/tmp/schema_check.bin")
 
     for key in ("tested", "findings", "pie", "stack_canary", "restrict_segment"):
@@ -256,7 +269,9 @@ async def test_all_protections_missing_three_findings(tmp_path: Path) -> None:
             return _mock_proc(returncode=0, stderr="Authority=Developer ID Application: Foo\n")
         return _mock_proc()
 
-    with patch("vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run):
+    with patch(
+        "vxis.agent.skills.desktop.test_binary_protections.subprocess.run", side_effect=_fake_run
+    ):
         result = await execute(target_url="/tmp/weak.bin")
 
     vectors = [f["vector"] for f in result["findings"]]

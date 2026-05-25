@@ -31,8 +31,7 @@ _MEMORY_PATH = Path(__file__).parent.parent / "data" / "agent_memory.json"
 
 # MITRE ATT&CK Enterprise JSON
 _MITRE_URL = (
-    "https://raw.githubusercontent.com/mitre/cti/master/"
-    "enterprise-attack/enterprise-attack.json"
+    "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
 )
 
 # CISA Known Exploited Vulnerabilities
@@ -139,6 +138,7 @@ def _fetch_mitre_techniques(prev_modified: str) -> list[dict[str, Any]]:
 
     # MITRE JSON은 크기가 크므로 타임아웃을 넉넉하게
     import urllib.request
+
     req = urllib.request.Request(
         _MITRE_URL,
         headers={"User-Agent": "VXIS-ThreatWatch/1.0"},
@@ -183,16 +183,18 @@ def _fetch_mitre_techniques(prev_modified: str) -> list[dict[str, Any]]:
         platforms = obj.get("x_mitre_platforms", [])
         is_new = created == modified or (prev_modified and created > prev_modified)
 
-        techniques.append({
-            "attack_id": attack_id,
-            "name": name,
-            "description": description,
-            "modified": modified,
-            "created": created,
-            "platforms": platforms,
-            "is_new": is_new,
-            "is_subtechnique": is_subtechnique,
-        })
+        techniques.append(
+            {
+                "attack_id": attack_id,
+                "name": name,
+                "description": description,
+                "modified": modified,
+                "created": created,
+                "platforms": platforms,
+                "is_new": is_new,
+                "is_subtechnique": is_subtechnique,
+            }
+        )
 
     logger.info("[ThreatActor] MITRE 기법 %d개 변경 감지", len(techniques))
     return techniques
@@ -210,6 +212,7 @@ def _fetch_cisa_kev(seen_ids: set[str]) -> list[dict[str, Any]]:
     logger.info("[ThreatActor] CISA KEV 조회 중...")
 
     import urllib.request
+
     req = urllib.request.Request(
         _CISA_KEV_URL,
         headers={"User-Agent": "VXIS-ThreatWatch/1.0"},
@@ -249,6 +252,7 @@ def _fetch_otx_pulses(seen_pulse_ids: set[str]) -> list[dict[str, Any]]:
     logger.info("[ThreatActor] AlienVault OTX 조회 중...")
 
     import urllib.request
+
     req = urllib.request.Request(
         _OTX_API_URL,
         headers={
@@ -295,11 +299,14 @@ class ThreatActorWatcher(BaseWatcher):
     def _get_threat_state(self) -> dict[str, Any]:
         """위협 감시 전용 상태를 반환한다."""
         state = self._load_state()
-        return state.get("threat", {
-            "mitre_last_modified": "",
-            "cisa_seen_ids": [],
-            "otx_seen_pulse_ids": [],
-        })
+        return state.get(
+            "threat",
+            {
+                "mitre_last_modified": "",
+                "cisa_seen_ids": [],
+                "otx_seen_pulse_ids": [],
+            },
+        )
 
     def _save_threat_state(self, threat_state: dict[str, Any]) -> None:
         """위협 감시 상태를 저장한다."""
@@ -323,17 +330,19 @@ class ThreatActorWatcher(BaseWatcher):
         try:
             mitre_techs = _fetch_mitre_techniques(mitre_last_modified)
             for tech in mitre_techs:
-                items.append({
-                    "id": _make_id("mitre", tech["attack_id"]),
-                    "source": "mitre",
-                    "attack_id": tech["attack_id"],
-                    "name": tech["name"],
-                    "description": tech["description"],
-                    "modified": tech["modified"],
-                    "platforms": tech["platforms"],
-                    "is_new": tech["is_new"],
-                    "is_subtechnique": tech["is_subtechnique"],
-                })
+                items.append(
+                    {
+                        "id": _make_id("mitre", tech["attack_id"]),
+                        "source": "mitre",
+                        "attack_id": tech["attack_id"],
+                        "name": tech["name"],
+                        "description": tech["description"],
+                        "modified": tech["modified"],
+                        "platforms": tech["platforms"],
+                        "is_new": tech["is_new"],
+                        "is_subtechnique": tech["is_subtechnique"],
+                    }
+                )
         except Exception as exc:
             logger.warning("[ThreatActor] MITRE 처리 실패: %s", exc)
 
@@ -342,19 +351,21 @@ class ThreatActorWatcher(BaseWatcher):
             kev_entries = _fetch_cisa_kev(cisa_seen_ids)
             for entry in kev_entries:
                 cve_id = entry.get("cveID", "")
-                items.append({
-                    "id": _make_id("cisa_kev", cve_id),
-                    "source": "cisa_kev",
-                    "cve_id": cve_id,
-                    "vendor": entry.get("vendorProject", ""),
-                    "product": entry.get("product", ""),
-                    "vulnerability_name": entry.get("vulnerabilityName", ""),
-                    "date_added": entry.get("dateAdded", ""),
-                    "short_description": entry.get("shortDescription", ""),
-                    "required_action": entry.get("requiredAction", ""),
-                    "due_date": entry.get("dueDate", ""),
-                    "known_ransomware": entry.get("knownRansomwareCampaignUse", "Unknown"),
-                })
+                items.append(
+                    {
+                        "id": _make_id("cisa_kev", cve_id),
+                        "source": "cisa_kev",
+                        "cve_id": cve_id,
+                        "vendor": entry.get("vendorProject", ""),
+                        "product": entry.get("product", ""),
+                        "vulnerability_name": entry.get("vulnerabilityName", ""),
+                        "date_added": entry.get("dateAdded", ""),
+                        "short_description": entry.get("shortDescription", ""),
+                        "required_action": entry.get("requiredAction", ""),
+                        "due_date": entry.get("dueDate", ""),
+                        "known_ransomware": entry.get("knownRansomwareCampaignUse", "Unknown"),
+                    }
+                )
         except Exception as exc:
             logger.warning("[ThreatActor] CISA KEV 처리 실패: %s", exc)
 
@@ -366,22 +377,24 @@ class ThreatActorWatcher(BaseWatcher):
                 tags = pulse.get("tags", [])
                 industries = pulse.get("industries", [])
                 targeted_countries = pulse.get("targeted_countries", [])
-                items.append({
-                    "id": _make_id("otx", pulse_id),
-                    "source": "otx",
-                    "pulse_id": pulse_id,
-                    "name": pulse.get("name", ""),
-                    "description": (pulse.get("description", "") or "")[:500],
-                    "author": pulse.get("author_name", ""),
-                    "tags": tags,
-                    "industries": industries,
-                    "targeted_countries": targeted_countries,
-                    "tlp": pulse.get("tlp", "white"),
-                    "adversary": pulse.get("adversary", ""),
-                    "malware_families": pulse.get("malware_families", []),
-                    "created": pulse.get("created", ""),
-                    "indicator_count": pulse.get("indicator_count", 0),
-                })
+                items.append(
+                    {
+                        "id": _make_id("otx", pulse_id),
+                        "source": "otx",
+                        "pulse_id": pulse_id,
+                        "name": pulse.get("name", ""),
+                        "description": (pulse.get("description", "") or "")[:500],
+                        "author": pulse.get("author_name", ""),
+                        "tags": tags,
+                        "industries": industries,
+                        "targeted_countries": targeted_countries,
+                        "tlp": pulse.get("tlp", "white"),
+                        "adversary": pulse.get("adversary", ""),
+                        "malware_families": pulse.get("malware_families", []),
+                        "created": pulse.get("created", ""),
+                        "indicator_count": pulse.get("indicator_count", 0),
+                    }
+                )
         except Exception as exc:
             logger.warning("[ThreatActor] OTX 처리 실패: %s", exc)
 
@@ -430,7 +443,9 @@ class ThreatActorWatcher(BaseWatcher):
                 if matched_techs or platform_relevant:
                     severity = "medium" if is_new else "info"
                     action_type = "신규 추가" if is_new else "업데이트"
-                    mitre_url = f"https://attack.mitre.org/techniques/{attack_id.replace('.', '/')}/"
+                    mitre_url = (
+                        f"https://attack.mitre.org/techniques/{attack_id.replace('.', '/')}/"
+                    )
 
                     alert_description = (
                         f"MITRE ATT&CK 기법 {attack_id} '{name}'이 {action_type}되었습니다."
@@ -440,23 +455,25 @@ class ThreatActorWatcher(BaseWatcher):
                     if platforms:
                         alert_description += f" 대상 플랫폼: {', '.join(platforms[:3])}"
 
-                    alerts.append(WatcherAlert(
-                        watcher_name=self.name,
-                        severity=severity,
-                        title=f"MITRE ATT&CK {action_type}: [{attack_id}] {name}",
-                        description=alert_description,
-                        target="",
-                        source_url=mitre_url,
-                        data={
-                            "attack_id": attack_id,
-                            "name": name,
-                            "matched_technologies": matched_techs,
-                            "platforms": platforms,
-                            "is_new": is_new,
-                            "modified": modified,
-                        },
-                        actionable=False,
-                    ))
+                    alerts.append(
+                        WatcherAlert(
+                            watcher_name=self.name,
+                            severity=severity,
+                            title=f"MITRE ATT&CK {action_type}: [{attack_id}] {name}",
+                            description=alert_description,
+                            target="",
+                            source_url=mitre_url,
+                            data={
+                                "attack_id": attack_id,
+                                "name": name,
+                                "matched_technologies": matched_techs,
+                                "platforms": platforms,
+                                "is_new": is_new,
+                                "modified": modified,
+                            },
+                            actionable=False,
+                        )
+                    )
 
             # ── CISA KEV 매칭 ──────────────────────────────────────
             elif source == "cisa_kev":
@@ -475,8 +492,7 @@ class ThreatActorWatcher(BaseWatcher):
 
                 # 키워드 매칭
                 matched_keywords = [
-                    kw for kw in keywords
-                    if _normalize(kw) in _normalize(combined_text)
+                    kw for kw in keywords if _normalize(kw) in _normalize(combined_text)
                 ]
 
                 if matched_techs or matched_keywords:
@@ -492,53 +508,58 @@ class ThreatActorWatcher(BaseWatcher):
                     if matched_techs:
                         alert_description += f" 타겟 스택 매칭: {', '.join(matched_techs)}"
 
-                    alerts.append(WatcherAlert(
-                        watcher_name=self.name,
-                        severity="critical",
-                        title=f"CISA KEV 신규 등록 (타겟 스택 매칭): {cve_id}",
-                        description=alert_description,
-                        target="",
-                        source_url=_CISA_KEV_URL,
-                        data={
-                            "cve_id": cve_id,
-                            "vendor": vendor,
-                            "product": product,
-                            "vulnerability_name": vuln_name,
-                            "date_added": item.get("date_added", ""),
-                            "due_date": item.get("due_date", ""),
-                            "required_action": item.get("required_action", ""),
-                            "known_ransomware": known_ransomware,
-                            "matched_technologies": matched_techs,
-                            "matched_keywords": matched_keywords,
-                        },
-                        actionable=True,
-                    ))
-                    logger.warning(
-                        "[ThreatActor] CISA KEV 타겟 매칭: %s ↔ %s",
-                        cve_id, matched_techs or matched_keywords,
-                    )
-                else:
-                    # 매칭 없어도 랜섬웨어 악용 취약점은 medium으로 알림
-                    if known_ransomware and known_ransomware.lower() not in ("unknown", "no"):
-                        alerts.append(WatcherAlert(
+                    alerts.append(
+                        WatcherAlert(
                             watcher_name=self.name,
-                            severity="medium",
-                            title=f"CISA KEV 랜섬웨어 악용 취약점: {cve_id}",
-                            description=(
-                                f"랜섬웨어 캠페인에 악용 중인 취약점 {cve_id}가 CISA KEV에 등록되었습니다. "
-                                f"제품: {vendor} {product}. 캠페인: {known_ransomware}"
-                            ),
+                            severity="critical",
+                            title=f"CISA KEV 신규 등록 (타겟 스택 매칭): {cve_id}",
+                            description=alert_description,
                             target="",
                             source_url=_CISA_KEV_URL,
                             data={
                                 "cve_id": cve_id,
                                 "vendor": vendor,
                                 "product": product,
-                                "known_ransomware": known_ransomware,
+                                "vulnerability_name": vuln_name,
                                 "date_added": item.get("date_added", ""),
+                                "due_date": item.get("due_date", ""),
+                                "required_action": item.get("required_action", ""),
+                                "known_ransomware": known_ransomware,
+                                "matched_technologies": matched_techs,
+                                "matched_keywords": matched_keywords,
                             },
-                            actionable=False,
-                        ))
+                            actionable=True,
+                        )
+                    )
+                    logger.warning(
+                        "[ThreatActor] CISA KEV 타겟 매칭: %s ↔ %s",
+                        cve_id,
+                        matched_techs or matched_keywords,
+                    )
+                else:
+                    # 매칭 없어도 랜섬웨어 악용 취약점은 medium으로 알림
+                    if known_ransomware and known_ransomware.lower() not in ("unknown", "no"):
+                        alerts.append(
+                            WatcherAlert(
+                                watcher_name=self.name,
+                                severity="medium",
+                                title=f"CISA KEV 랜섬웨어 악용 취약점: {cve_id}",
+                                description=(
+                                    f"랜섬웨어 캠페인에 악용 중인 취약점 {cve_id}가 CISA KEV에 등록되었습니다. "
+                                    f"제품: {vendor} {product}. 캠페인: {known_ransomware}"
+                                ),
+                                target="",
+                                source_url=_CISA_KEV_URL,
+                                data={
+                                    "cve_id": cve_id,
+                                    "vendor": vendor,
+                                    "product": product,
+                                    "known_ransomware": known_ransomware,
+                                    "date_added": item.get("date_added", ""),
+                                },
+                                actionable=False,
+                            )
+                        )
 
             # ── OTX 매칭 ───────────────────────────────────────────
             elif source == "otx":
@@ -571,37 +592,41 @@ class ThreatActorWatcher(BaseWatcher):
                     if adversary:
                         alert_description += f" 위협 행위자: {adversary}."
                     if malware_families:
-                        fams = [m.get("display_name", "") if isinstance(m, dict) else str(m)
-                                for m in malware_families[:3]]
+                        fams = [
+                            m.get("display_name", "") if isinstance(m, dict) else str(m)
+                            for m in malware_families[:3]
+                        ]
                         alert_description += f" 악성코드: {', '.join(f for f in fams if f)}."
                     if industry_matched:
                         alert_description += f" 산업군 매칭: {industry}."
                     if matched_techs:
                         alert_description += f" 기술 스택 매칭: {', '.join(matched_techs)}."
 
-                    alerts.append(WatcherAlert(
-                        watcher_name=self.name,
-                        severity=severity,
-                        title=f"OTX 위협 인텔리전스: {pulse_name[:80]}",
-                        description=alert_description,
-                        target="",
-                        source_url=f"https://otx.alienvault.com/pulse/{pulse_id}",
-                        data={
-                            "pulse_id": pulse_id,
-                            "adversary": adversary,
-                            "malware_families": [
-                                m.get("display_name", "") if isinstance(m, dict) else str(m)
-                                for m in malware_families[:5]
-                            ],
-                            "tags": tags[:10],
-                            "industries": industries,
-                            "indicator_count": item.get("indicator_count", 0),
-                            "tlp": item.get("tlp", "white"),
-                            "matched_technologies": matched_techs,
-                            "industry_matched": industry_matched,
-                        },
-                        actionable=False,
-                    ))
+                    alerts.append(
+                        WatcherAlert(
+                            watcher_name=self.name,
+                            severity=severity,
+                            title=f"OTX 위협 인텔리전스: {pulse_name[:80]}",
+                            description=alert_description,
+                            target="",
+                            source_url=f"https://otx.alienvault.com/pulse/{pulse_id}",
+                            data={
+                                "pulse_id": pulse_id,
+                                "adversary": adversary,
+                                "malware_families": [
+                                    m.get("display_name", "") if isinstance(m, dict) else str(m)
+                                    for m in malware_families[:5]
+                                ],
+                                "tags": tags[:10],
+                                "industries": industries,
+                                "indicator_count": item.get("indicator_count", 0),
+                                "tlp": item.get("tlp", "white"),
+                                "matched_technologies": matched_techs,
+                                "industry_matched": industry_matched,
+                            },
+                            actionable=False,
+                        )
+                    )
 
         # ── 상태 업데이트 ────────────────────────────────────────
         threat_state = self._get_threat_state()
@@ -666,7 +691,6 @@ def _generate_defense_recommendations(alert: WatcherAlert) -> list[str]:
     """알림 데이터를 기반으로 방어 권고사항 목록을 생성한다."""
     recommendations: list[str] = []
     data = alert.data
-    source = ""
 
     if "cve_id" in data:
         # CISA KEV 기반 권고사항
@@ -677,13 +701,9 @@ def _generate_defense_recommendations(alert: WatcherAlert) -> list[str]:
         required_action = data.get("required_action", "")
         known_ransomware = data.get("known_ransomware", "")
 
-        recommendations.append(
-            f"즉시 {vendor} {product}의 패치 적용 여부를 확인하세요. ({cve_id})"
-        )
+        recommendations.append(f"즉시 {vendor} {product}의 패치 적용 여부를 확인하세요. ({cve_id})")
         if due_date:
-            recommendations.append(
-                f"CISA 권고 조치 기한: {due_date} 이내에 완료해야 합니다."
-            )
+            recommendations.append(f"CISA 권고 조치 기한: {due_date} 이내에 완료해야 합니다.")
         if required_action:
             recommendations.append(f"CISA 권고 조치: {required_action}")
         if known_ransomware and known_ransomware.lower() not in ("unknown", "no"):

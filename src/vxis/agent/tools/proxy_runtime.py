@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import fnmatch
+import json
 import logging
 import os
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-import httpx
-
+from vxis.interaction.hands import TargetSession
 from vxis.interaction.xray import CapturedFlow, FlowAnalyzer, MitmProxyManager
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,15 @@ def _match_scope_pattern(pattern: str, *, url: str, host: str, path: str) -> boo
     return fnmatch.fnmatch(host_l, pat_l) or fnmatch.fnmatch(url_l, f"*{pat_l}*")
 
 
+def _split_absolute_url(url: str) -> tuple[str, str]:
+    parsed = urlparse(url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}"
+    path = parsed.path or "/"
+    if parsed.query:
+        path += f"?{parsed.query}"
+    return base_url, path
+
+
 @dataclass
 class ProxyScope:
     allowlist: list[str] = field(default_factory=list)
@@ -53,14 +62,10 @@ class ProxyScope:
         host = parsed.netloc
         path = parsed.path or "/"
         if self.allowlist and not any(
-            _match_scope_pattern(p, url=url, host=host, path=path)
-            for p in self.allowlist
+            _match_scope_pattern(p, url=url, host=host, path=path) for p in self.allowlist
         ):
             return False
-        if any(
-            _match_scope_pattern(p, url=url, host=host, path=path)
-            for p in self.denylist
-        ):
+        if any(_match_scope_pattern(p, url=url, host=host, path=path) for p in self.denylist):
             return False
         return True
 
@@ -76,9 +81,7 @@ class CaidoProxyBackend:
 
     def __init__(self) -> None:
         raw_url = (
-            os.environ.get("VXIS_CAIDO_API_URL")
-            or os.environ.get("VXIS_CAIDO_URL")
-            or ""
+            os.environ.get("VXIS_CAIDO_API_URL") or os.environ.get("VXIS_CAIDO_URL") or ""
         ).strip()
         if raw_url and not raw_url.startswith("http"):
             raw_url = f"http://{raw_url}"
@@ -108,14 +111,18 @@ class CaidoProxyBackend:
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(
-                    self.api_url,
+            base_url, path = _split_absolute_url(self.api_url)
+            session = TargetSession(base_url, timeout=5.0)
+            try:
+                resp = await session.post(
+                    path,
                     headers=headers,
-                    json={"query": "query { __typename }"},
+                    json_data={"query": "query { __typename }"},
                 )
-            ok = resp.status_code in (200, 400)
-            return {"ok": ok, "status": resp.status_code}
+            finally:
+                await session.close()
+            ok = resp.status in (200, 400)
+            return {"ok": ok, "status": resp.status}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
@@ -123,14 +130,19 @@ class CaidoProxyBackend:
         headers = {}
         if self.auth_token:
             headers["Authorization"] = f"Bearer {self.auth_token}"
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                self.api_url,
+        base_url, path = _split_absolute_url(self.api_url)
+        session = TargetSession(base_url, timeout=15.0)
+        try:
+            resp = await session.post(
+                path,
                 headers=headers,
-                json={"query": query, "variables": variables},
+                json_data={"query": query, "variables": variables},
             )
-            resp.raise_for_status()
-            payload = resp.json()
+        finally:
+            await session.close()
+        if resp.status >= 400:
+            raise RuntimeError(f"caido graphql http {resp.status}: {_clip(resp.text, 500)}")
+        payload = json.loads(resp.text or "{}")
         if payload.get("errors"):
             raise RuntimeError(str(payload["errors"][0]))
         return payload.get("data", {}) or {}
@@ -312,7 +324,8 @@ class ProxyRuntime:
             if not _:
                 needle = clause.lower()
                 filtered = [
-                    f for f in filtered
+                    f
+                    for f in filtered
                     if needle in f.url.lower()
                     or needle in (f.request_body or "").lower()
                     or needle in (f.response_body or "").lower()
@@ -331,7 +344,9 @@ class ProxyRuntime:
             elif key == "host":
                 filtered = [f for f in filtered if value.lower() in urlparse(f.url).netloc.lower()]
             elif key == "path":
-                filtered = [f for f in filtered if value.lower() in (urlparse(f.url).path or "/").lower()]
+                filtered = [
+                    f for f in filtered if value.lower() in (urlparse(f.url).path or "/").lower()
+                ]
             elif key == "url":
                 filtered = [f for f in filtered if value.lower() in f.url.lower()]
             elif key == "has":
@@ -453,7 +468,7 @@ class ProxyRuntime:
         flows = self._filter_flows(self._analyzed_flows(), filter_expr)
         total = len(flows)
         start = max(page - 1, 0) * page_size
-        rows = [self._flow_to_request_row(f) for f in flows[start:start + page_size]]
+        rows = [self._flow_to_request_row(f) for f in flows[start : start + page_size]]
         return {
             "backend": "xray" if self.backend == "xray" else "disabled",
             "count": len(rows),
@@ -517,27 +532,24 @@ class ProxyRuntime:
             body = str(body).replace(str(old), str(new))
         json_payload = overrides.get("json")
         proxy_url = self.active_proxy_url()
-        client_kwargs: dict[str, Any] = {
-            "timeout": 20.0,
-            "follow_redirects": True,
-            "verify": False,
-        }
-        if proxy_url:
-            client_kwargs["proxy"] = proxy_url
-        async with httpx.AsyncClient(**client_kwargs) as client:
-            resp = await client.request(
-                method=method,
-                url=url,
+        base_url, path = _split_absolute_url(url)
+        session = TargetSession(base_url, timeout=20.0, proxy=proxy_url)
+        try:
+            resp = await session.request(
+                method,
+                path,
                 headers=headers,
-                content=None if json_payload is not None else body,
-                json=json_payload,
+                content=None if json_payload is not None else str(body),
+                json_data=json_payload,
             )
+        finally:
+            await session.close()
         return {
             "ok": True,
             "request_id": request_id,
             "replayed_method": method,
             "url": str(resp.url),
-            "status_code": resp.status_code,
+            "status_code": resp.status,
             "headers": dict(resp.headers),
             "body_preview": _clip(resp.text if hasattr(resp, "text") else "", 1200),
             "body_length": len(resp.text if hasattr(resp, "text") else ""),

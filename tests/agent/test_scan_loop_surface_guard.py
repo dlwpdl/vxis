@@ -12,6 +12,7 @@ guard at scan_loop.py L805 must:
 
 Symmetric: web targets must NOT be blocked from running web skills.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -67,11 +68,13 @@ async def test_surface_guard_blocks_web_skill_on_desktop_target() -> None:
         target_kind=TargetKind.DESKTOP,
     )
 
-    decisions = iter([
-        [("run_skill", {"skill": "test_infra", "target_url": "/Applications/Calculator.app"})],
-        [("run_skill", {"skill": "test_csrf", "target_url": "/Applications/Calculator.app"})],
-        [("finish_scan", {})],
-    ])
+    decisions = iter(
+        [
+            [("run_skill", {"skill": "test_infra", "target_url": "/Applications/Calculator.app"})],
+            [("run_skill", {"skill": "test_csrf", "target_url": "/Applications/Calculator.app"})],
+            [("finish_scan", {})],
+        ]
+    )
 
     async def _fake_decide(state):
         try:
@@ -87,7 +90,8 @@ async def test_surface_guard_blocks_web_skill_on_desktop_target() -> None:
 
     # Tool messages must record the block.
     blocks = [
-        m for m in loop.state.messages
+        m
+        for m in loop.state.messages
         if m.get("role") == "tool"
         and isinstance(m.get("content"), dict)
         and (m["content"].get("result") or {}).get("data", {}).get("surface_guard_blocked")
@@ -111,10 +115,17 @@ async def test_surface_guard_allows_desktop_skill_on_desktop_target() -> None:
         target_kind=TargetKind.DESKTOP,
     )
 
-    decisions = iter([
-        [("run_skill", {"skill": "test_signature_audit", "target_url": "/Applications/Calculator.app"})],
-        [("finish_scan", {})],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "run_skill",
+                    {"skill": "test_signature_audit", "target_url": "/Applications/Calculator.app"},
+                )
+            ],
+            [("finish_scan", {})],
+        ]
+    )
 
     async def _fake_decide(state):
         try:
@@ -145,10 +156,12 @@ async def test_surface_guard_inert_on_web_target() -> None:
         target_kind=TargetKind.WEB,
     )
 
-    decisions = iter([
-        [("run_skill", {"skill": "test_infra", "target_url": "http://localhost:3000"})],
-        [("finish_scan", {})],
-    ])
+    decisions = iter(
+        [
+            [("run_skill", {"skill": "test_infra", "target_url": "http://localhost:3000"})],
+            [("finish_scan", {})],
+        ]
+    )
 
     async def _fake_decide(state):
         try:
@@ -205,7 +218,8 @@ def test_phase_q2_promotion_block_includes_discriminator_logic() -> None:
     the dedup discriminator logic. If someone refactors the block away,
     this test catches it."""
     import pathlib
-    src = pathlib.Path("src/vxis/agent/scan_loop.py").read_text()
+
+    src = pathlib.Path("src/vxis/agent/scan_loop_run_skills.py").read_text()
     # Block exists.
     assert "Desktop skill auto-promotion" in src
     # Discriminator logic appends per-finding key.
@@ -215,7 +229,7 @@ def test_phase_q2_promotion_block_includes_discriminator_logic() -> None:
     assert 'finding.get("flag")' in src
     # Joins discriminator with '#' so finding_tools dedup treats each
     # combo as a distinct slot.
-    assert "_loc_with_disc = f\"{_loc}#{_disc}\"" in src
+    assert '_loc_with_disc = f"{_loc}#{_disc}"' in src
 
 
 def test_phase_q2_discriminator_separator_choice() -> None:
@@ -224,7 +238,8 @@ def test_phase_q2_discriminator_separator_choice() -> None:
     a normal POSIX path or .app bundle structure — making it a safe
     reversible delimiter for downstream report rendering."""
     import pathlib
-    src = pathlib.Path("src/vxis/agent/scan_loop.py").read_text()
+
+    src = pathlib.Path("src/vxis/agent/scan_loop_run_skills.py").read_text()
     # Make sure we aren't accidentally using a separator that collides
     # with path semantics.
-    assert "f\"{_loc}#{_disc}\"" in src
+    assert 'f"{_loc}#{_disc}"' in src

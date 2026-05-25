@@ -31,13 +31,12 @@ import logging
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +77,7 @@ class CapturedFlow:
     @property
     def host(self) -> str:
         from urllib.parse import urlparse
+
         return urlparse(self.url).netloc
 
 
@@ -163,10 +163,17 @@ _VULN_PATTERNS = [
 
 # 흥미로운 헤더
 _INTERESTING_HEADERS = [
-    "x-powered-by", "server", "x-aspnet-version", "x-debug",
-    "x-runtime", "x-request-id", "x-forwarded-for",
-    "access-control-allow-origin", "access-control-allow-credentials",
-    "content-security-policy", "x-frame-options",
+    "x-powered-by",
+    "server",
+    "x-aspnet-version",
+    "x-debug",
+    "x-runtime",
+    "x-request-id",
+    "x-forwarded-for",
+    "access-control-allow-origin",
+    "access-control-allow-credentials",
+    "content-security-policy",
+    "x-frame-options",
 ]
 
 
@@ -233,32 +240,44 @@ class FlowAnalyzer:
                 summary.api_endpoints.add(f"{flow.method} {flow.url}")
 
             for token in flow.detected_tokens:
-                summary.auth_tokens_found.append({
-                    "type": flow.auth_type,
-                    "value": token[:20] + "...",
-                    "url": flow.url,
-                })
+                summary.auth_tokens_found.append(
+                    {
+                        "type": flow.auth_type,
+                        "value": token[:20] + "...",
+                        "url": flow.url,
+                    }
+                )
 
             for secret in flow.detected_secrets:
-                summary.secrets_found.append({
-                    "value": secret[:10] + "...",
-                    "url": flow.url,
-                })
+                summary.secrets_found.append(
+                    {
+                        "value": secret[:10] + "...",
+                        "url": flow.url,
+                    }
+                )
 
             for vuln in flow.vulnerabilities:
-                summary.vulnerabilities.append({
-                    "type": vuln,
-                    "url": flow.url,
-                    "method": flow.method,
-                })
+                summary.vulnerabilities.append(
+                    {
+                        "type": vuln,
+                        "url": flow.url,
+                        "method": flow.method,
+                    }
+                )
 
             # Content-Type 집계
-            ct = flow.response_content_type.split(";")[0].strip() if flow.response_content_type else "unknown"
+            ct = (
+                flow.response_content_type.split(";")[0].strip()
+                if flow.response_content_type
+                else "unknown"
+            )
             summary.content_types[ct] = summary.content_types.get(ct, 0) + 1
 
             # Status code 집계
             if flow.status_code:
-                summary.status_codes[flow.status_code] = summary.status_codes.get(flow.status_code, 0) + 1
+                summary.status_codes[flow.status_code] = (
+                    summary.status_codes.get(flow.status_code, 0) + 1
+                )
 
             # 흥미로운 헤더
             for h in _INTERESTING_HEADERS:
@@ -362,14 +381,18 @@ class FlowAnalyzer:
             flow.is_api_call = True
 
         # 전체 텍스트
-        req_text = " ".join([
-            " ".join(f"{k}: {v}" for k, v in flow.request_headers.items()),
-            flow.request_body,
-        ])
-        resp_text = " ".join([
-            " ".join(f"{k}: {v}" for k, v in flow.response_headers.items()),
-            flow.response_body[:10000],
-        ])
+        req_text = " ".join(
+            [
+                " ".join(f"{k}: {v}" for k, v in flow.request_headers.items()),
+                flow.request_body,
+            ]
+        )
+        resp_text = " ".join(
+            [
+                " ".join(f"{k}: {v}" for k, v in flow.response_headers.items()),
+                flow.response_body[:10000],
+            ]
+        )
 
         # 인증 토큰 탐지
         for pattern, auth_type in _AUTH_PATTERNS:
@@ -378,14 +401,18 @@ class FlowAnalyzer:
                 if match:
                     flow.has_auth_token = True
                     flow.auth_type = auth_type
-                    flow.detected_tokens.append(match.group(1) if match.groups() else match.group(0))
+                    flow.detected_tokens.append(
+                        match.group(1) if match.groups() else match.group(0)
+                    )
 
         # 시크릿 탐지
         for pattern, _ in _SECRET_PATTERNS:
             for text in (req_text, resp_text):
                 match = re.search(pattern, text, re.IGNORECASE)
                 if match:
-                    flow.detected_secrets.append(match.group(1) if match.groups() else match.group(0))
+                    flow.detected_secrets.append(
+                        match.group(1) if match.groups() else match.group(0)
+                    )
 
         # 패시브 취약점 탐지
         for direction, pattern, vuln_name in _VULN_PATTERNS:
@@ -458,9 +485,12 @@ addons = [FlowLogger()]
         # mitmdump 시작
         cmd = [
             "mitmdump",
-            "--listen-port", str(self.port),
-            "--set", "ssl_insecure=true",
-            "-s", self._addon_file,
+            "--listen-port",
+            str(self.port),
+            "--set",
+            "ssl_insecure=true",
+            "-s",
+            self._addon_file,
             "--quiet",
         ]
 
@@ -499,11 +529,15 @@ addons = [FlowLogger()]
                         url=data.get("url", ""),
                         request_headers=data.get("request_headers", {}),
                         request_body=data.get("request_body", ""),
-                        request_content_type=data.get("request_headers", {}).get("content-type", ""),
+                        request_content_type=data.get("request_headers", {}).get(
+                            "content-type", ""
+                        ),
                         status_code=data.get("status_code", 0),
                         response_headers=data.get("response_headers", {}),
                         response_body=data.get("response_body", ""),
-                        response_content_type=data.get("response_headers", {}).get("content-type", ""),
+                        response_content_type=data.get("response_headers", {}).get(
+                            "content-type", ""
+                        ),
                     )
                     if analyzer:
                         analyzer.add_flow(flow)
@@ -537,13 +571,13 @@ addons = [FlowLogger()]
         flows = self.get_captured_flows()
 
         if not flows:
-            logger.warning("export_har: no captured flows (xray may not have run); writing empty HAR")
+            logger.warning(
+                "export_har: no captured flows (xray may not have run); writing empty HAR"
+            )
 
         entries: list[dict[str, Any]] = []
         for flow in flows:
-            started = datetime.fromtimestamp(
-                flow.timestamp or 0, tz=timezone.utc
-            ).isoformat()
+            started = datetime.fromtimestamp(flow.timestamp or 0, tz=timezone.utc).isoformat()
             req_headers = [{"name": k, "value": v} for k, v in flow.request_headers.items()]
             resp_headers = [{"name": k, "value": v} for k, v in flow.response_headers.items()]
             entry = {
@@ -615,7 +649,9 @@ addons = [FlowLogger()]
         flows = self.get_captured_flows()
 
         if not flows:
-            logger.warning("export_pcap: no captured flows; writing empty placeholder at %s", output_path)
+            logger.warning(
+                "export_pcap: no captured flows; writing empty placeholder at %s", output_path
+            )
             output_path.write_bytes(b"")
             return output_path
 

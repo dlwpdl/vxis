@@ -1,6 +1,5 @@
 from __future__ import annotations
 import sqlite3
-from pathlib import Path
 from .schema import Evidence, Severity
 
 
@@ -70,8 +69,6 @@ class EvidenceEngine:
 
     async def get_all(self) -> list[Evidence]:
         conn = sqlite3.connect(self.db_path)
-        rows = conn.execute(
-            "SELECT raw_json FROM evidence ORDER BY timestamp"
-        ).fetchall()
+        rows = conn.execute("SELECT raw_json FROM evidence ORDER BY timestamp").fetchall()
         conn.close()
         return [Evidence.model_validate_json(r[0]) for r in rows]

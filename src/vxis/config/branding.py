@@ -7,7 +7,7 @@ and logo without modifying core report-generation logic.
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 

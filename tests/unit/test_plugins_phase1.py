@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import pytest
 
-from vxis.core.context import DAGContext, PluginOutput
+from vxis.core.context import DAGContext
 from vxis.plugins.cloud.prowler_plugin import ProwlerPlugin
 from vxis.plugins.cloud.s3scanner_plugin import S3ScannerPlugin
 from vxis.plugins.osint.gitleaks_plugin import GitleaksPlugin
@@ -87,6 +86,7 @@ DNSTWIST_UNREGISTERED_SAMPLE = (
 # ProwlerPlugin
 # ===========================================================================
 
+
 class TestProwlerPlugin:
     def setup_method(self) -> None:
         self.plugin = ProwlerPlugin()
@@ -141,6 +141,7 @@ class TestProwlerPlugin:
 # S3ScannerPlugin
 # ===========================================================================
 
+
 class TestS3ScannerPlugin:
     def setup_method(self) -> None:
         self.plugin = S3ScannerPlugin()
@@ -187,6 +188,7 @@ class TestS3ScannerPlugin:
 # GitleaksPlugin
 # ===========================================================================
 
+
 class TestGitleaksPlugin:
     def setup_method(self) -> None:
         self.plugin = GitleaksPlugin()
@@ -199,7 +201,9 @@ class TestGitleaksPlugin:
         assert self.plugin.meta.depends_on == ()
 
     def test_build_command_contains_source(self) -> None:
-        cmd = self.plugin.build_command(TARGET, "standard", self.ctx, {"repo_url": "https://github.com/org/repo"})
+        cmd = self.plugin.build_command(
+            TARGET, "standard", self.ctx, {"repo_url": "https://github.com/org/repo"}
+        )
         assert "gitleaks detect" in cmd
         assert "--source=https://github.com/org/repo" in cmd
         assert "--report-format json" in cmd
@@ -241,6 +245,7 @@ class TestGitleaksPlugin:
 # ShodanPlugin
 # ===========================================================================
 
+
 class TestShodanPlugin:
     def setup_method(self) -> None:
         self.plugin = ShodanPlugin()
@@ -259,7 +264,9 @@ class TestShodanPlugin:
         assert TARGET in cmd
         assert "shodan host" in cmd
 
-    def test_parse_output_without_api_key_returns_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_parse_output_without_api_key_returns_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("SHODAN_API_KEY", raising=False)
         output = self.plugin.parse_output(SHODAN_SAMPLE, "")
         assert len(output.errors) == 1
@@ -287,6 +294,7 @@ class TestShodanPlugin:
 # ===========================================================================
 # TrivyPlugin
 # ===========================================================================
+
 
 class TestTrivyPlugin:
     def setup_method(self) -> None:
@@ -341,6 +349,7 @@ class TestTrivyPlugin:
 # ===========================================================================
 # DnstwistPlugin
 # ===========================================================================
+
 
 class TestDnstwistPlugin:
     def setup_method(self) -> None:

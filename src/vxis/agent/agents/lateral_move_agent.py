@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import shutil
-from typing import Any
 
 from ..base import AgentResult, BaseAgent
 from ..context import AgentContext
@@ -41,18 +40,20 @@ class LateralMoveAgent(BaseAgent):
         # Phase 1: Scan for lateral movement ports
         open_services = await self._scan_lateral_ports(target)
         if open_services:
-            findings.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Lateral movement services on {target}",
-                severity=Severity.INFO,
-                evidence_type=EvidenceType.NETWORK,
-                description=(
-                    f"Services available for lateral movement: "
-                    f"{', '.join(f'{svc}({port})' for port, svc in open_services.items())}"
-                ),
-                response=json.dumps(open_services, indent=2),
-                tags=["lateral-movement", "network", "enumeration"],
-            ))
+            findings.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Lateral movement services on {target}",
+                    severity=Severity.INFO,
+                    evidence_type=EvidenceType.NETWORK,
+                    description=(
+                        f"Services available for lateral movement: "
+                        f"{', '.join(f'{svc}({port})' for port, svc in open_services.items())}"
+                    ),
+                    response=json.dumps(open_services, indent=2),
+                    tags=["lateral-movement", "network", "enumeration"],
+                )
+            )
 
         # Phase 2: SMB enumeration via netexec
         smb_findings = await self._run_netexec_smb(target)
@@ -66,13 +67,15 @@ class LateralMoveAgent(BaseAgent):
         if 5985 in open_services or 5986 in open_services:
             winrm_findings = await self._check_winrm(target)
             findings.extend(winrm_findings)
-            hypotheses.append(Hypothesis(
-                title=f"Remote code execution via WinRM on {target}",
-                rationale="WinRM service is accessible",
-                probability=0.6,
-                impact=0.9,
-                suggested_agent="os_host",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Remote code execution via WinRM on {target}",
+                    rationale="WinRM service is accessible",
+                    probability=0.6,
+                    impact=0.9,
+                    suggested_agent="os_host",
+                )
+            )
 
         # Phase 5: Cloud IAM enumeration
         iam_findings = await self._check_cloud_iam(target)
@@ -89,29 +92,35 @@ class LateralMoveAgent(BaseAgent):
 
         # Generate chain hypotheses
         if 445 in open_services:
-            hypotheses.append(Hypothesis(
-                title=f"Pass-the-hash lateral movement via SMB on {target}",
-                rationale="SMB port 445 open — PtH attacks possible with NTLM hashes",
-                probability=0.6,
-                impact=0.9,
-                suggested_agent="lateral_move",
-                suggested_tool="netexec",
-            ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Pass-the-hash lateral movement via SMB on {target}",
+                    rationale="SMB port 445 open — PtH attacks possible with NTLM hashes",
+                    probability=0.6,
+                    impact=0.9,
+                    suggested_agent="lateral_move",
+                    suggested_tool="netexec",
+                )
+            )
         if 3389 in open_services:
-            hypotheses.append(Hypothesis(
-                title=f"RDP-based lateral movement on {target}",
-                rationale="RDP port 3389 open",
+            hypotheses.append(
+                Hypothesis(
+                    title=f"RDP-based lateral movement on {target}",
+                    rationale="RDP port 3389 open",
+                    probability=0.5,
+                    impact=0.8,
+                    suggested_agent="lateral_move",
+                )
+            )
+        hypotheses.append(
+            Hypothesis(
+                title=f"Privilege escalation after lateral movement to {target}",
+                rationale="Lateral movement vectors identified",
                 probability=0.5,
-                impact=0.8,
-                suggested_agent="lateral_move",
-            ))
-        hypotheses.append(Hypothesis(
-            title=f"Privilege escalation after lateral movement to {target}",
-            rationale="Lateral movement vectors identified",
-            probability=0.5,
-            impact=0.95,
-            suggested_agent="os_host",
-        ))
+                impact=0.95,
+                suggested_agent="os_host",
+            )
+        )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -134,8 +143,15 @@ class LateralMoveAgent(BaseAgent):
             return {}
         ports_str = ",".join(str(p) for p in self._LATERAL_PORTS)
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-Pn", "-sS", "-p", ports_str,
-            "--open", "-oG", "-", target,
+            "nmap",
+            "-Pn",
+            "-sS",
+            "-p",
+            ports_str,
+            "--open",
+            "-oG",
+            "-",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -163,70 +179,89 @@ class LateralMoveAgent(BaseAgent):
 
         # SMB enumeration (null session)
         proc = await asyncio.create_subprocess_exec(
-            nxc, "smb", target, "--shares", "-u", "", "-p", "",
+            nxc,
+            "smb",
+            target,
+            "--shares",
+            "-u",
+            "",
+            "-p",
+            "",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
         output = stdout.decode()
         if "READ" in output or "WRITE" in output:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"SMB shares accessible via null session on {target}",
-                severity=Severity.HIGH,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    "SMB shares are accessible without authentication (null session). "
-                    "This enables credential harvesting and data exfiltration."
-                ),
-                response=output[:2000],
-                tags=["lateral-movement", "smb", "null-session"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"SMB shares accessible via null session on {target}",
+                    severity=Severity.HIGH,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        "SMB shares are accessible without authentication (null session). "
+                        "This enables credential harvesting and data exfiltration."
+                    ),
+                    response=output[:2000],
+                    tags=["lateral-movement", "smb", "null-session"],
+                )
+            )
 
         # SMB signing check
         proc2 = await asyncio.create_subprocess_exec(
-            nxc, "smb", target, "--gen-relay-list", "/dev/stdout",
+            nxc,
+            "smb",
+            target,
+            "--gen-relay-list",
+            "/dev/stdout",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
         stdout2, _ = await asyncio.wait_for(proc2.communicate(), timeout=30)
         relay_output = stdout2.decode()
         if target in relay_output:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"SMB signing not required on {target}",
-                severity=Severity.HIGH,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    "SMB signing is not required, enabling NTLM relay attacks. "
-                    "An attacker can relay authentication to this host."
-                ),
-                response=relay_output[:1000],
-                cvss_score=7.5,
-                tags=["lateral-movement", "smb", "ntlm-relay", "smb-signing"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"SMB signing not required on {target}",
+                    severity=Severity.HIGH,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        "SMB signing is not required, enabling NTLM relay attacks. "
+                        "An attacker can relay authentication to this host."
+                    ),
+                    response=relay_output[:1000],
+                    cvss_score=7.5,
+                    tags=["lateral-movement", "smb", "ntlm-relay", "smb-signing"],
+                )
+            )
         return results
 
     async def _check_credential_reuse(
-        self, target: str, services: dict[int, str],
+        self,
+        target: str,
+        services: dict[int, str],
     ) -> list[Evidence]:
         results: list[Evidence] = []
         if not services:
             return results
         # Document credential reuse attack surface
-        results.append(Evidence(
-            agent_id=self.agent_id,
-            title=f"Credential reuse attack surface on {target}",
-            severity=Severity.INFO,
-            evidence_type=EvidenceType.OTHER,
-            description=(
-                f"Available services for credential testing: "
-                f"{', '.join(f'{svc}' for svc in services.values())}. "
-                "Credentials from other compromised systems should be tested "
-                "against all accessible services."
-            ),
-            tags=["lateral-movement", "credential-reuse"],
-        ))
+        results.append(
+            Evidence(
+                agent_id=self.agent_id,
+                title=f"Credential reuse attack surface on {target}",
+                severity=Severity.INFO,
+                evidence_type=EvidenceType.OTHER,
+                description=(
+                    f"Available services for credential testing: "
+                    f"{', '.join(f'{svc}' for svc in services.values())}. "
+                    "Credentials from other compromised systems should be tested "
+                    "against all accessible services."
+                ),
+                tags=["lateral-movement", "credential-reuse"],
+            )
+        )
         return results
 
     async def _check_winrm(self, target: str) -> list[Evidence]:
@@ -234,8 +269,14 @@ class LateralMoveAgent(BaseAgent):
         if not shutil.which("curl"):
             return results
         proc = await asyncio.create_subprocess_exec(
-            "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}",
-            "--max-time", "5",
+            "curl",
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "--max-time",
+            "5",
             f"http://{target}:5985/wsman",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -243,18 +284,20 @@ class LateralMoveAgent(BaseAgent):
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
         code = stdout.decode().strip()
         if code and code != "000":
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"WinRM endpoint accessible on {target}",
-                severity=Severity.MEDIUM,
-                evidence_type=EvidenceType.NETWORK,
-                description=(
-                    f"WinRM (HTTP {code}) is accessible on port 5985. "
-                    "With valid credentials, this allows remote PowerShell execution."
-                ),
-                response=f"HTTP {code} on /wsman",
-                tags=["lateral-movement", "winrm", "remote-execution"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"WinRM endpoint accessible on {target}",
+                    severity=Severity.MEDIUM,
+                    evidence_type=EvidenceType.NETWORK,
+                    description=(
+                        f"WinRM (HTTP {code}) is accessible on port 5985. "
+                        "With valid credentials, this allows remote PowerShell execution."
+                    ),
+                    response=f"HTTP {code} on /wsman",
+                    tags=["lateral-movement", "winrm", "remote-execution"],
+                )
+            )
         return results
 
     async def _check_cloud_iam(self, target: str) -> list[Evidence]:
@@ -265,8 +308,12 @@ class LateralMoveAgent(BaseAgent):
 
         # AWS IMDS check
         proc = await asyncio.create_subprocess_exec(
-            "curl", "-s", "--max-time", "3",
-            "-H", "X-Forwarded-For: 169.254.169.254",
+            "curl",
+            "-s",
+            "--max-time",
+            "3",
+            "-H",
+            "X-Forwarded-For: 169.254.169.254",
             f"http://{target}/latest/meta-data/iam/security-credentials/",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
@@ -274,18 +321,20 @@ class LateralMoveAgent(BaseAgent):
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
         output = stdout.decode().strip()
         if output and "404" not in output and "<" not in output[:5]:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"AWS IAM role accessible via SSRF on {target}",
-                severity=Severity.CRITICAL,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    "AWS IMDS metadata endpoint accessible through the target. "
-                    "IAM role credentials may be extractable for privilege escalation."
-                ),
-                response=output[:1000],
-                tags=["lateral-movement", "cloud", "aws", "iam", "ssrf"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"AWS IAM role accessible via SSRF on {target}",
+                    severity=Severity.CRITICAL,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        "AWS IMDS metadata endpoint accessible through the target. "
+                        "IAM role credentials may be extractable for privilege escalation."
+                    ),
+                    response=output[:1000],
+                    tags=["lateral-movement", "cloud", "aws", "iam", "ssrf"],
+                )
+            )
         return results
 
     async def _check_ssh_config(self, target: str) -> list[Evidence]:
@@ -293,7 +342,9 @@ class LateralMoveAgent(BaseAgent):
         if not shutil.which("ssh-audit"):
             return results
         proc = await asyncio.create_subprocess_exec(
-            "ssh-audit", "-j", target,
+            "ssh-audit",
+            "-j",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -308,15 +359,17 @@ class LateralMoveAgent(BaseAgent):
                         if isinstance(item, dict) and item.get("warn"):
                             weak.append(item.get("algorithm", "unknown"))
                 if weak:
-                    results.append(Evidence(
-                        agent_id=self.agent_id,
-                        title=f"Weak SSH algorithms on {target}",
-                        severity=Severity.MEDIUM,
-                        evidence_type=EvidenceType.MISCONFIGURATION,
-                        description=f"Weak SSH algorithms: {', '.join(weak[:10])}",
-                        response=stdout.decode()[:2000],
-                        tags=["lateral-movement", "ssh", "weak-crypto"],
-                    ))
+                    results.append(
+                        Evidence(
+                            agent_id=self.agent_id,
+                            title=f"Weak SSH algorithms on {target}",
+                            severity=Severity.MEDIUM,
+                            evidence_type=EvidenceType.MISCONFIGURATION,
+                            description=f"Weak SSH algorithms: {', '.join(weak[:10])}",
+                            response=stdout.decode()[:2000],
+                            tags=["lateral-movement", "ssh", "weak-crypto"],
+                        )
+                    )
         except json.JSONDecodeError:
             pass
         return results
@@ -329,23 +382,26 @@ class LateralMoveAgent(BaseAgent):
         rpcdump = shutil.which("rpcdump.py") or shutil.which("impacket-rpcdump")
         if rpcdump:
             proc = await asyncio.create_subprocess_exec(
-                rpcdump, target,
+                rpcdump,
+                target,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
             output = stdout.decode()
             if "IRemoteWbemLevel" in output or "IWbemServices" in output:
-                results.append(Evidence(
-                    agent_id=self.agent_id,
-                    title=f"WMI accessible on {target} (DCOM)",
-                    severity=Severity.MEDIUM,
-                    evidence_type=EvidenceType.NETWORK,
-                    description=(
-                        "WMI/DCOM interfaces exposed. With valid credentials, "
-                        "remote command execution is possible via WMI."
-                    ),
-                    response=output[:2000],
-                    tags=["lateral-movement", "wmi", "dcom", "impacket"],
-                ))
+                results.append(
+                    Evidence(
+                        agent_id=self.agent_id,
+                        title=f"WMI accessible on {target} (DCOM)",
+                        severity=Severity.MEDIUM,
+                        evidence_type=EvidenceType.NETWORK,
+                        description=(
+                            "WMI/DCOM interfaces exposed. With valid credentials, "
+                            "remote command execution is possible via WMI."
+                        ),
+                        response=output[:2000],
+                        tags=["lateral-movement", "wmi", "dcom", "impacket"],
+                    )
+                )
         return results

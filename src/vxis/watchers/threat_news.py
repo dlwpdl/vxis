@@ -29,7 +29,6 @@ import re
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,57 +40,135 @@ _MEMORY_PATH = Path(__file__).parent.parent / "data" / "agent_memory.json"
 
 # 감시 대상 보안 뉴스 RSS 피드
 _NEWS_FEEDS: dict[str, str] = {
-    "securityaffairs":   "https://securityaffairs.com/feed",
-    "bleepingcomputer":  "https://www.bleepingcomputer.com/feed/",
-    "thehackernews":     "https://feeds.feedburner.com/TheHackersNews",
-    "krebsonsecurity":   "https://krebsonsecurity.com/feed/",
-    "darkreading":       "https://www.darkreading.com/rss.xml",
-    "therecord":         "https://therecord.media/feed/",
-    "schneier":          "https://www.schneier.com/feed/atom/",
-    "threatpost":        "https://threatpost.com/feed/",
-    "securityweek":      "https://www.securityweek.com/feed",
+    "securityaffairs": "https://securityaffairs.com/feed",
+    "bleepingcomputer": "https://www.bleepingcomputer.com/feed/",
+    "thehackernews": "https://feeds.feedburner.com/TheHackersNews",
+    "krebsonsecurity": "https://krebsonsecurity.com/feed/",
+    "darkreading": "https://www.darkreading.com/rss.xml",
+    "therecord": "https://therecord.media/feed/",
+    "schneier": "https://www.schneier.com/feed/atom/",
+    "threatpost": "https://threatpost.com/feed/",
+    "securityweek": "https://www.securityweek.com/feed",
 }
 
 # 위협 행위자 키워드 (APT, ransomware 그룹 등)
 _THREAT_ACTORS = [
     # Nation-state APT
-    "apt28", "apt29", "apt33", "apt34", "apt38", "apt40", "apt41",
-    "lazarus", "kimsuky", "konni", "scarcruft", "andariel", "bluenoroff",
-    "fancy bear", "cozy bear", "sandworm", "fin7", "fin8",
-    "mustang panda", "silent chollima", "hidden cobra",
+    "apt28",
+    "apt29",
+    "apt33",
+    "apt34",
+    "apt38",
+    "apt40",
+    "apt41",
+    "lazarus",
+    "kimsuky",
+    "konni",
+    "scarcruft",
+    "andariel",
+    "bluenoroff",
+    "fancy bear",
+    "cozy bear",
+    "sandworm",
+    "fin7",
+    "fin8",
+    "mustang panda",
+    "silent chollima",
+    "hidden cobra",
     # Ransomware groups
-    "lockbit", "alphv", "blackcat", "cl0p", "clop", "conti",
-    "ryuk", "revil", "darkside", "blackbyte", "royal", "play",
-    "qilin", "medusa", "rhysida", "akira", "scattered spider",
+    "lockbit",
+    "alphv",
+    "blackcat",
+    "cl0p",
+    "clop",
+    "conti",
+    "ryuk",
+    "revil",
+    "darkside",
+    "blackbyte",
+    "royal",
+    "play",
+    "qilin",
+    "medusa",
+    "rhysida",
+    "akira",
+    "scattered spider",
     # Other threat actors
-    "dprk", "chinese apt", "russian apt", "iranian apt",
+    "dprk",
+    "chinese apt",
+    "russian apt",
+    "iranian apt",
 ]
 
 # 공격 기법 / TTP 키워드
 _ATTACK_TECHNIQUES = [
-    "zero-day", "0-day", "supply chain", "supply-chain",
-    "ransomware", "phishing", "spear-phishing", "spear phishing",
-    "lnk file", "powershell", "living off the land", "lolbin",
-    "github c2", "c2 infrastructure", "command and control",
-    "initial access", "lateral movement", "privilege escalation",
-    "rce", "remote code execution", "deserialization",
-    "prototype pollution", "xxe", "ssrf", "sql injection",
-    "bypass", "authentication bypass", "auth bypass",
-    "exploitation", "exploit chain", "in-the-wild",
-    "data breach", "data leak", "credential dump",
-    "backdoor", "rat", "trojan", "infostealer",
-    "deepfake", "bec", "business email compromise",
+    "zero-day",
+    "0-day",
+    "supply chain",
+    "supply-chain",
+    "ransomware",
+    "phishing",
+    "spear-phishing",
+    "spear phishing",
+    "lnk file",
+    "powershell",
+    "living off the land",
+    "lolbin",
+    "github c2",
+    "c2 infrastructure",
+    "command and control",
+    "initial access",
+    "lateral movement",
+    "privilege escalation",
+    "rce",
+    "remote code execution",
+    "deserialization",
+    "prototype pollution",
+    "xxe",
+    "ssrf",
+    "sql injection",
+    "bypass",
+    "authentication bypass",
+    "auth bypass",
+    "exploitation",
+    "exploit chain",
+    "in-the-wild",
+    "data breach",
+    "data leak",
+    "credential dump",
+    "backdoor",
+    "rat",
+    "trojan",
+    "infostealer",
+    "deepfake",
+    "bec",
+    "business email compromise",
 ]
 
 # 관심 산업군 키워드
 _INDUSTRIES = [
-    "fintech", "banking", "financial", "payment",
-    "healthcare", "medical", "pharma",
-    "government", "public sector", "defense",
-    "critical infrastructure", "energy", "utility",
-    "telecom", "isp", "cloud provider",
-    "e-commerce", "retail", "logistics",
-    "saas", "tech company", "software vendor",
+    "fintech",
+    "banking",
+    "financial",
+    "payment",
+    "healthcare",
+    "medical",
+    "pharma",
+    "government",
+    "public sector",
+    "defense",
+    "critical infrastructure",
+    "energy",
+    "utility",
+    "telecom",
+    "isp",
+    "cloud provider",
+    "e-commerce",
+    "retail",
+    "logistics",
+    "saas",
+    "tech company",
+    "software vendor",
 ]
 
 
@@ -160,14 +237,16 @@ def _parse_rss_items(xml_text: str, source: str) -> list[dict[str, Any]]:
         description = re.sub(r"<[^>]+>", " ", description)
         description = re.sub(r"\s+", " ", description).strip()
 
-        items.append({
-            "id": _make_id(source, guid),
-            "source": source,
-            "title": title,
-            "link": link,
-            "description": description[:800],
-            "pub_date": pub_date,
-        })
+        items.append(
+            {
+                "id": _make_id(source, guid),
+                "source": source,
+                "title": title,
+                "link": link,
+                "description": description[:800],
+                "pub_date": pub_date,
+            }
+        )
 
     # Atom 1.0
     ns = {"atom": "http://www.w3.org/2005/Atom"}
@@ -188,14 +267,16 @@ def _parse_rss_items(xml_text: str, source: str) -> list[dict[str, Any]]:
         description = re.sub(r"<[^>]+>", " ", description)
         description = re.sub(r"\s+", " ", description).strip()
 
-        items.append({
-            "id": _make_id(source, guid),
-            "source": source,
-            "title": title,
-            "link": link,
-            "description": description[:800],
-            "pub_date": pub_date,
-        })
+        items.append(
+            {
+                "id": _make_id(source, guid),
+                "source": source,
+                "title": title,
+                "link": link,
+                "description": description[:800],
+                "pub_date": pub_date,
+            }
+        )
 
     return items
 
@@ -236,7 +317,7 @@ class ThreatNewsWatcher(BaseWatcher):
     """
 
     name = "threat_news"
-    icon = "\U0001F4F0"  # 📰
+    icon = "\U0001f4f0"  # 📰
     poll_interval = 1800  # 30분
 
     async def fetch(self) -> list[dict[str, Any]]:
@@ -245,7 +326,10 @@ class ThreatNewsWatcher(BaseWatcher):
         for source, feed_url in _NEWS_FEEDS.items():
             try:
                 items = await asyncio.get_event_loop().run_in_executor(
-                    None, self._fetch_feed, source, feed_url,
+                    None,
+                    self._fetch_feed,
+                    source,
+                    feed_url,
                 )
                 all_items.extend(items)
                 logger.info("[ThreatNews] %s: %d개 수집", source, len(items))
@@ -291,7 +375,9 @@ class ThreatNewsWatcher(BaseWatcher):
             has_tech_match = bool(matched_techs)
             has_actor = bool(actors)
             has_technique = bool(techniques)
-            industry_match = industry.lower() in [i.lower() for i in industries] if industry else False
+            industry_match = (
+                industry.lower() in [i.lower() for i in industries] if industry else False
+            )
 
             # 심각도 판정
             severity = "info"
@@ -329,25 +415,27 @@ class ThreatNewsWatcher(BaseWatcher):
             if tags:
                 alert_desc_parts.append(" | ".join(tags))
 
-            alerts.append(WatcherAlert(
-                watcher_name=self.name,
-                severity=severity,
-                title=f"[{item['source']}] {alert_title}",
-                description="\n".join(alert_desc_parts),
-                target=", ".join(matched_techs[:3]) if matched_techs else "",
-                source_url=item["link"],
-                data={
-                    "id": item["id"],
-                    "source": item["source"],
-                    "pub_date": item["pub_date"],
-                    "cves": cves,
-                    "threat_actors": actors,
-                    "techniques": techniques,
-                    "industries": industries,
-                    "matched_technologies": matched_techs,
-                },
-                actionable=bool(cves and matched_techs),
-            ))
+            alerts.append(
+                WatcherAlert(
+                    watcher_name=self.name,
+                    severity=severity,
+                    title=f"[{item['source']}] {alert_title}",
+                    description="\n".join(alert_desc_parts),
+                    target=", ".join(matched_techs[:3]) if matched_techs else "",
+                    source_url=item["link"],
+                    data={
+                        "id": item["id"],
+                        "source": item["source"],
+                        "pub_date": item["pub_date"],
+                        "cves": cves,
+                        "threat_actors": actors,
+                        "techniques": techniques,
+                        "industries": industries,
+                        "matched_technologies": matched_techs,
+                    },
+                    actionable=bool(cves and matched_techs),
+                )
+            )
 
         return alerts
 

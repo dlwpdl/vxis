@@ -1,6 +1,15 @@
 """GhostLayer 유닛 테스트."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import httpx
 import pytest
+
 from vxis.ghost.layer import GhostLayer, GhostTiming
+from vxis.ghost.transport import GhostTransport
+from vxis.ghost.trigger import detect_ghost_keyword, parse_ghost_trigger
+from vxis.ghost.verifier import GhostVerifier
+from vxis.mission.config import MissionConfig
 from vxis.ghost.ua_pool import UA_POOL
 
 
@@ -90,10 +99,6 @@ def test_ua_pool_all_strings():
 
 # ── Transport 테스트 ──────────────────────────────────────────────
 
-import httpx
-from unittest.mock import AsyncMock, MagicMock, patch
-from vxis.ghost.transport import GhostTransport
-
 
 @pytest.mark.asyncio
 async def test_ghost_transport_overrides_ua():
@@ -102,9 +107,7 @@ async def test_ghost_transport_overrides_ua():
     layer.activate([])
 
     mock_inner = AsyncMock()
-    mock_inner.handle_async_request = AsyncMock(
-        return_value=httpx.Response(200, content=b"ok")
-    )
+    mock_inner.handle_async_request = AsyncMock(return_value=httpx.Response(200, content=b"ok"))
 
     transport = GhostTransport(layer, inner=mock_inner)
     request = httpx.Request("GET", "https://example.com")
@@ -123,9 +126,7 @@ async def test_ghost_transport_applies_proxy():
 
     with patch("vxis.ghost.transport._make_transport") as mock_make:
         mock_inner = AsyncMock()
-        mock_inner.handle_async_request = AsyncMock(
-            return_value=httpx.Response(200, content=b"ok")
-        )
+        mock_inner.handle_async_request = AsyncMock(return_value=httpx.Response(200, content=b"ok"))
         mock_make.return_value = mock_inner
 
         transport = GhostTransport(layer)
@@ -142,9 +143,7 @@ async def test_ghost_transport_no_proxy_direct_connect():
     layer.activate([])
 
     mock_inner = AsyncMock()
-    mock_inner.handle_async_request = AsyncMock(
-        return_value=httpx.Response(200, content=b"ok")
-    )
+    mock_inner.handle_async_request = AsyncMock(return_value=httpx.Response(200, content=b"ok"))
 
     transport = GhostTransport(layer, inner=mock_inner)
     request = httpx.Request("GET", "https://example.com")
@@ -154,9 +153,6 @@ async def test_ghost_transport_no_proxy_direct_connect():
 
 
 # ── Trigger 테스트 ────────────────────────────────────────────────
-
-from vxis.ghost.trigger import parse_ghost_trigger, detect_ghost_keyword
-from vxis.mission.config import MissionConfig
 
 
 def test_trigger_ghost_url_prefix():
@@ -218,8 +214,6 @@ def test_detect_ghost_keyword_no_match():
 
 # ── Verifier 테스트 ───────────────────────────────────────────────
 
-from vxis.ghost.verifier import GhostVerifier
-
 
 @pytest.mark.asyncio
 async def test_ghost_verifier_reports_active_ip():
@@ -233,7 +227,7 @@ async def test_ghost_verifier_reports_active_ip():
     mock_session.get = AsyncMock(return_value=mock_resp)
     mock_session.close = AsyncMock()
 
-    with patch("vxis.ghost.verifier.TargetSession", return_value=mock_session):
+    with patch("vxis.interaction.hands.TargetSession", return_value=mock_session):
         result = await verifier.check()
 
     assert result["detected_ip"] == "182.23.45.67"
@@ -249,7 +243,7 @@ async def test_ghost_verifier_handles_failure():
     mock_session.get = AsyncMock(side_effect=Exception("network error"))
     mock_session.close = AsyncMock()
 
-    with patch("vxis.ghost.verifier.TargetSession", return_value=mock_session):
+    with patch("vxis.interaction.hands.TargetSession", return_value=mock_session):
         result = await verifier.check()
 
     assert result["detected_ip"] is None

@@ -1,5 +1,4 @@
 import pytest
-from datetime import datetime
 from vxis.evidence.engine import EvidenceEngine
 from vxis.evidence.schema import Evidence, Severity, EvidenceType
 

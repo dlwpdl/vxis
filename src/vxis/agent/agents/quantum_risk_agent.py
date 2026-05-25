@@ -6,7 +6,6 @@ import asyncio
 import json
 import re
 import shutil
-from typing import Any
 
 from ..base import AgentResult, BaseAgent
 from ..context import AgentContext
@@ -26,8 +25,16 @@ _ALGO_QUANTUM_STATUS = {
     "DSA": {"vulnerable": True, "type": "asymmetric", "attack": "Shor's algorithm"},
     # Symmetric — reduced security (Grover's algorithm halves effective key length)
     "AES-128": {"vulnerable": False, "type": "symmetric", "note": "Grover reduces to 64-bit"},
-    "AES-256": {"vulnerable": False, "type": "symmetric", "note": "Grover reduces to 128-bit (safe)"},
-    "ChaCha20": {"vulnerable": False, "type": "symmetric", "note": "256-bit key, post-quantum safe"},
+    "AES-256": {
+        "vulnerable": False,
+        "type": "symmetric",
+        "note": "Grover reduces to 128-bit (safe)",
+    },
+    "ChaCha20": {
+        "vulnerable": False,
+        "type": "symmetric",
+        "note": "256-bit key, post-quantum safe",
+    },
     # Post-quantum candidates (NIST PQC)
     "ML-KEM": {"vulnerable": False, "type": "pqc", "note": "NIST FIPS 203 (Kyber)"},
     "ML-DSA": {"vulnerable": False, "type": "pqc", "note": "NIST FIPS 204 (Dilithium)"},
@@ -69,54 +76,61 @@ class QuantumRiskAgent(BaseAgent):
         findings.append(hndl_risk)
 
         # Phase 6: Quantum timeline assessment
-        findings.append(Evidence(
-            agent_id=self.agent_id,
-            title="Quantum threat timeline assessment",
-            severity=Severity.INFO,
-            evidence_type=EvidenceType.OTHER,
-            description=(
-                "Quantum Computing Threat Timeline:\n"
-                "- 2025-2028: NIST PQC standards finalized and adopted\n"
-                "- 2028-2032: Early cryptographically-relevant quantum computers\n"
-                "- 2030-2035: Estimated RSA-2048 break timeline (optimistic)\n"
-                "- NOW: Harvest-now-decrypt-later attacks already occurring\n\n"
-                "Recommended Actions:\n"
-                "1. Inventory all cryptographic assets\n"
-                "2. Prioritize hybrid key exchange (classical + PQC)\n"
-                "3. Migrate to ML-KEM (Kyber) for key encapsulation\n"
-                "4. Migrate to ML-DSA (Dilithium) for digital signatures\n"
-                "5. Increase symmetric key sizes to 256-bit minimum"
-            ),
-            tags=["quantum", "timeline", "assessment"],
-        ))
+        findings.append(
+            Evidence(
+                agent_id=self.agent_id,
+                title="Quantum threat timeline assessment",
+                severity=Severity.INFO,
+                evidence_type=EvidenceType.OTHER,
+                description=(
+                    "Quantum Computing Threat Timeline:\n"
+                    "- 2025-2028: NIST PQC standards finalized and adopted\n"
+                    "- 2028-2032: Early cryptographically-relevant quantum computers\n"
+                    "- 2030-2035: Estimated RSA-2048 break timeline (optimistic)\n"
+                    "- NOW: Harvest-now-decrypt-later attacks already occurring\n\n"
+                    "Recommended Actions:\n"
+                    "1. Inventory all cryptographic assets\n"
+                    "2. Prioritize hybrid key exchange (classical + PQC)\n"
+                    "3. Migrate to ML-KEM (Kyber) for key encapsulation\n"
+                    "4. Migrate to ML-DSA (Dilithium) for digital signatures\n"
+                    "5. Increase symmetric key sizes to 256-bit minimum"
+                ),
+                tags=["quantum", "timeline", "assessment"],
+            )
+        )
 
         # Generate hypotheses
         vulnerable_algos = [
-            f.title for f in findings
-            if f.severity in (Severity.HIGH, Severity.CRITICAL)
+            f.title for f in findings if f.severity in (Severity.HIGH, Severity.CRITICAL)
         ]
         if vulnerable_algos:
-            hypotheses.append(Hypothesis(
-                title=f"Harvest-now-decrypt-later attack on {target} data",
-                rationale="Quantum-vulnerable cryptography in use",
-                probability=0.6,
-                impact=0.9,
-                suggested_agent="crypto_tls",
-            ))
-            hypotheses.append(Hypothesis(
-                title=f"Long-term data confidentiality risk for {target}",
-                rationale="RSA/ECC will be broken by quantum computers",
-                probability=0.7,
-                impact=0.85,
-                suggested_agent="quantum_risk",
-            ))
-        hypotheses.append(Hypothesis(
-            title=f"PQC migration planning needed for {target}",
-            rationale="All organizations need quantum-safe crypto migration",
-            probability=0.9,
-            impact=0.7,
-            suggested_agent="compliance",
-        ))
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Harvest-now-decrypt-later attack on {target} data",
+                    rationale="Quantum-vulnerable cryptography in use",
+                    probability=0.6,
+                    impact=0.9,
+                    suggested_agent="crypto_tls",
+                )
+            )
+            hypotheses.append(
+                Hypothesis(
+                    title=f"Long-term data confidentiality risk for {target}",
+                    rationale="RSA/ECC will be broken by quantum computers",
+                    probability=0.7,
+                    impact=0.85,
+                    suggested_agent="quantum_risk",
+                )
+            )
+        hypotheses.append(
+            Hypothesis(
+                title=f"PQC migration planning needed for {target}",
+                rationale="All organizations need quantum-safe crypto migration",
+                probability=0.9,
+                impact=0.7,
+                suggested_agent="compliance",
+            )
+        )
 
         return AgentResult(
             agent_id=self.agent_id,
@@ -125,9 +139,9 @@ class QuantumRiskAgent(BaseAgent):
             status="completed",
             metadata={
                 "quantum_vulnerable_services": sum(
-                    1 for f in findings
-                    if f.severity in (Severity.HIGH, Severity.CRITICAL)
-                    and "quantum" in f.tags
+                    1
+                    for f in findings
+                    if f.severity in (Severity.HIGH, Severity.CRITICAL) and "quantum" in f.tags
                 ),
                 "pqc_ready": any("pqc-detected" in f.tags for f in findings),
             },
@@ -143,7 +157,13 @@ class QuantumRiskAgent(BaseAgent):
             return results
 
         proc = await asyncio.create_subprocess_exec(
-            "nmap", "-Pn", "--script", "ssl-enum-ciphers", "-p", "443", target,
+            "nmap",
+            "-Pn",
+            "--script",
+            "ssl-enum-ciphers",
+            "-p",
+            "443",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -167,34 +187,41 @@ class QuantumRiskAgent(BaseAgent):
                     safe_ciphers.append(cipher)
 
         if vulnerable_ciphers:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Quantum-vulnerable TLS ciphers on {target}",
-                severity=Severity.HIGH,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    f"{len(vulnerable_ciphers)} TLS cipher suites use RSA/ECC "
-                    "key exchange, which will be broken by quantum computers "
-                    "using Shor's algorithm. Captured TLS sessions can be "
-                    "decrypted retroactively."
-                ),
-                response=json.dumps({
-                    "vulnerable": vulnerable_ciphers[:15],
-                    "safe": safe_ciphers[:10],
-                    "pqc": pqc_ciphers,
-                }, indent=2),
-                tags=["quantum", "tls", "cipher-suite", "shor-algorithm"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Quantum-vulnerable TLS ciphers on {target}",
+                    severity=Severity.HIGH,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        f"{len(vulnerable_ciphers)} TLS cipher suites use RSA/ECC "
+                        "key exchange, which will be broken by quantum computers "
+                        "using Shor's algorithm. Captured TLS sessions can be "
+                        "decrypted retroactively."
+                    ),
+                    response=json.dumps(
+                        {
+                            "vulnerable": vulnerable_ciphers[:15],
+                            "safe": safe_ciphers[:10],
+                            "pqc": pqc_ciphers,
+                        },
+                        indent=2,
+                    ),
+                    tags=["quantum", "tls", "cipher-suite", "shor-algorithm"],
+                )
+            )
 
         if pqc_ciphers:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Post-quantum cipher suites detected on {target}",
-                severity=Severity.INFO,
-                evidence_type=EvidenceType.NETWORK,
-                description=f"PQC cipher suites: {', '.join(pqc_ciphers)}",
-                tags=["quantum", "pqc-detected", "tls"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Post-quantum cipher suites detected on {target}",
+                    severity=Severity.INFO,
+                    evidence_type=EvidenceType.NETWORK,
+                    description=f"PQC cipher suites: {', '.join(pqc_ciphers)}",
+                    tags=["quantum", "pqc-detected", "tls"],
+                )
+            )
 
         return results
 
@@ -204,14 +231,19 @@ class QuantumRiskAgent(BaseAgent):
             return results
 
         proc = await asyncio.create_subprocess_exec(
-            "openssl", "s_client", "-connect", f"{target}:443",
-            "-servername", target,
+            "openssl",
+            "s_client",
+            "-connect",
+            f"{target}:443",
+            "-servername",
+            target,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
         stdout, _ = await asyncio.wait_for(
-            proc.communicate(input=b"Q\n"), timeout=15,
+            proc.communicate(input=b"Q\n"),
+            timeout=15,
         )
         output = stdout.decode()
 
@@ -234,20 +266,24 @@ class QuantumRiskAgent(BaseAgent):
             algo = key_info["algorithm"]
             algo_status = _ALGO_QUANTUM_STATUS.get(algo, {})
             severity = Severity.HIGH if algo_status.get("vulnerable") else Severity.INFO
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Certificate uses {algo} ({key_info.get('bits', '?')}-bit) on {target}",
-                severity=severity,
-                evidence_type=EvidenceType.MISCONFIGURATION if severity == Severity.HIGH else EvidenceType.NETWORK,
-                description=(
-                    f"Certificate algorithm: {algo} ({key_info.get('bits', 'unknown')}-bit)\n"
-                    f"Quantum vulnerable: {'YES' if algo_status.get('vulnerable') else 'No'}\n"
-                    f"Attack: {algo_status.get('attack', 'N/A')}\n"
-                    f"Recommendation: Migrate to ML-DSA (Dilithium) or hybrid certificates"
-                ),
-                response=json.dumps(key_info, indent=2),
-                tags=["quantum", "certificate", algo.lower()],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Certificate uses {algo} ({key_info.get('bits', '?')}-bit) on {target}",
+                    severity=severity,
+                    evidence_type=EvidenceType.MISCONFIGURATION
+                    if severity == Severity.HIGH
+                    else EvidenceType.NETWORK,
+                    description=(
+                        f"Certificate algorithm: {algo} ({key_info.get('bits', 'unknown')}-bit)\n"
+                        f"Quantum vulnerable: {'YES' if algo_status.get('vulnerable') else 'No'}\n"
+                        f"Attack: {algo_status.get('attack', 'N/A')}\n"
+                        f"Recommendation: Migrate to ML-DSA (Dilithium) or hybrid certificates"
+                    ),
+                    response=json.dumps(key_info, indent=2),
+                    tags=["quantum", "certificate", algo.lower()],
+                )
+            )
         return results
 
     async def _analyze_ssh_quantum_risk(self, target: str) -> list[Evidence]:
@@ -256,7 +292,10 @@ class QuantumRiskAgent(BaseAgent):
             return results
 
         proc = await asyncio.create_subprocess_exec(
-            "ssh-keyscan", "-T", "5", target,
+            "ssh-keyscan",
+            "-T",
+            "5",
+            target,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -274,19 +313,21 @@ class QuantumRiskAgent(BaseAgent):
                     vulnerable_types.append(key_type)
 
         if vulnerable_types:
-            results.append(Evidence(
-                agent_id=self.agent_id,
-                title=f"Quantum-vulnerable SSH host keys on {target}",
-                severity=Severity.MEDIUM,
-                evidence_type=EvidenceType.MISCONFIGURATION,
-                description=(
-                    f"SSH host key types: {', '.join(vulnerable_types)}. "
-                    "All current SSH key types (RSA, ECDSA, Ed25519) are vulnerable "
-                    "to quantum attack. OpenSSH 9.0+ supports hybrid sntrup761x25519."
-                ),
-                response="\n".join(key_types),
-                tags=["quantum", "ssh", "host-key"],
-            ))
+            results.append(
+                Evidence(
+                    agent_id=self.agent_id,
+                    title=f"Quantum-vulnerable SSH host keys on {target}",
+                    severity=Severity.MEDIUM,
+                    evidence_type=EvidenceType.MISCONFIGURATION,
+                    description=(
+                        f"SSH host key types: {', '.join(vulnerable_types)}. "
+                        "All current SSH key types (RSA, ECDSA, Ed25519) are vulnerable "
+                        "to quantum attack. OpenSSH 9.0+ supports hybrid sntrup761x25519."
+                    ),
+                    response="\n".join(key_types),
+                    tags=["quantum", "ssh", "host-key"],
+                )
+            )
         return results
 
     def _assess_pqc_readiness(self, findings: list[Evidence]) -> Evidence:
@@ -325,7 +366,8 @@ class QuantumRiskAgent(BaseAgent):
     def _assess_hndl_risk(self, target: str, findings: list[Evidence]) -> Evidence:
         """Assess Harvest Now, Decrypt Later risk."""
         quantum_vulns = [
-            f for f in findings
+            f
+            for f in findings
             if "quantum" in f.tags and f.severity in (Severity.HIGH, Severity.CRITICAL)
         ]
         if quantum_vulns:

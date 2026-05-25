@@ -34,7 +34,6 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
@@ -43,16 +42,12 @@ from typing import Any
 from vxis.interaction.hands import (
     AnalyzedResponse,
     AuthState,
-    FormData,
     SessionManager,
     TargetSession,
 )
 from vxis.interaction.surface import Surface, Target, TargetKind
 from vxis.interaction.xray import (
-    CapturedFlow,
     FlowAnalyzer,
-    FlowDirection,
-    InterceptRule,
     MitmProxyManager,
     TrafficSummary,
 )
@@ -65,8 +60,6 @@ try:
         BrowserEngine,
         BrowserPage,
         DOMAnalysis,
-        DockerBrowserManager,
-        PageSnapshot,
         is_available as eyes_available,
     )
 
@@ -81,27 +74,27 @@ except ImportError:
 class InteractionMode(Enum):
     """인터랙션 모드 — Brain이 상황에 따라 선택."""
 
-    HANDS_ONLY = "hands"              # httpx만 (가볍고 빠름)
-    EYES_ONLY = "eyes"                # 브라우저만 (JS 필수)
-    HANDS_XRAY = "hands+xray"        # httpx + 프록시 (토큰 분석)
-    EYES_XRAY = "eyes+xray"          # 브라우저 + 프록시 (풀 스택)
-    FULL = "full"                     # 전부 활성화
+    HANDS_ONLY = "hands"  # httpx만 (가볍고 빠름)
+    EYES_ONLY = "eyes"  # 브라우저만 (JS 필수)
+    HANDS_XRAY = "hands+xray"  # httpx + 프록시 (토큰 분석)
+    EYES_XRAY = "eyes+xray"  # 브라우저 + 프록시 (풀 스택)
+    FULL = "full"  # 전부 활성화
 
 
 class InteractionIntent(Enum):
     """Brain이 요청하는 인터랙션 의도."""
 
-    EXPLORE = "explore"               # 사이트 탐색 (링크/폼 발견)
-    LOGIN = "login"                   # 로그인 시도
-    FORM_SUBMIT = "form_submit"       # 폼 제출 (payload 주입)
-    API_CALL = "api_call"             # API 직접 호출
-    FILE_UPLOAD = "file_upload"       # 파일 업로드
-    CRAWL = "crawl"                   # 딥 크롤링
-    FUZZ = "fuzz"                     # 퍼징 (파라미터 변조)
-    EXPLOIT_CHAIN = "exploit_chain"   # 멀티스텝 익스플로잇
-    TOKEN_ANALYSIS = "token_analysis" # 토큰/세션 분석
-    JS_ANALYSIS = "js_analysis"       # JS 코드 분석
-    SCREENSHOT = "screenshot"         # 스크린샷 캡처
+    EXPLORE = "explore"  # 사이트 탐색 (링크/폼 발견)
+    LOGIN = "login"  # 로그인 시도
+    FORM_SUBMIT = "form_submit"  # 폼 제출 (payload 주입)
+    API_CALL = "api_call"  # API 직접 호출
+    FILE_UPLOAD = "file_upload"  # 파일 업로드
+    CRAWL = "crawl"  # 딥 크롤링
+    FUZZ = "fuzz"  # 퍼징 (파라미터 변조)
+    EXPLOIT_CHAIN = "exploit_chain"  # 멀티스텝 익스플로잇
+    TOKEN_ANALYSIS = "token_analysis"  # 토큰/세션 분석
+    JS_ANALYSIS = "js_analysis"  # JS 코드 분석
+    SCREENSHOT = "screenshot"  # 스크린샷 캡처
 
 
 # ── Interaction Action (Brain → Controller) ──────────────────────
@@ -237,19 +230,41 @@ _INTENT_MODE_MAP: dict[InteractionIntent, InteractionMode] = {
 # Raw HTTP only sees a tiny loader page (<1KB) for these — useless to the Brain.
 _SPA_INDICATORS = [
     # Classic SPAs
-    "react", "angular", "vue", "next.js", "nuxt", "svelte", "ember",
-    "backbone", "polymer", "__NEXT_DATA__", "ng-app", "v-app",
+    "react",
+    "angular",
+    "vue",
+    "next.js",
+    "nuxt",
+    "svelte",
+    "ember",
+    "backbone",
+    "polymer",
+    "__NEXT_DATA__",
+    "ng-app",
+    "v-app",
     # Python data-app frameworks (Streamlit/Gradio/Dash/Panel/Solara)
-    "streamlit", "stApp", "gradio", "/gradio_api/", "dash-renderer",
-    "panel", "bokeh", "solara",
+    "streamlit",
+    "stApp",
+    "gradio",
+    "/gradio_api/",
+    "dash-renderer",
+    "panel",
+    "bokeh",
+    "solara",
     # Interactive notebooks
-    "jupyter", "voila",
+    "jupyter",
+    "voila",
     # Server-side frameworks that often serve JS-heavy UIs
     "tornadoserver",  # Streamlit/Bokeh/Jupyter all use Tornado
     # Modern meta-frameworks
-    "remix", "solidjs", "qwik", "astro", "fresh",
+    "remix",
+    "solidjs",
+    "qwik",
+    "astro",
+    "fresh",
     # Mobile-first web (PWA hints)
-    "service-worker", "workbox",
+    "service-worker",
+    "workbox",
 ]
 
 
@@ -266,14 +281,11 @@ def _select_mode(
     tech_stack = target_profile.get("tech_stack", [])
     server_hdr = (target_profile.get("server", "") or "").lower()
     body_sample = (target_profile.get("body_sample", "") or "").lower()
-    framework_hints = [
-        h.lower() for h in target_profile.get("framework_hints", []) or []
-    ]
+    framework_hints = [h.lower() for h in target_profile.get("framework_hints", []) or []]
 
     haystack = " ".join(tech_stack).lower() + " " + server_hdr + " " + body_sample
-    is_spa = (
-        any(ind in haystack for ind in _SPA_INDICATORS)
-        or any(ind in " ".join(framework_hints) for ind in _SPA_INDICATORS)
+    is_spa = any(ind in haystack for ind in _SPA_INDICATORS) or any(
+        ind in " ".join(framework_hints) for ind in _SPA_INDICATORS
     )
 
     if is_spa and eyes_available:
@@ -379,6 +391,7 @@ class InteractionController:
         # auth state stay coherent between surface-routed and direct calls.
         if self._surface is None:
             from vxis.interaction.factory import SurfaceFactory
+
             self._surface = SurfaceFactory.build(
                 Target(kind=TargetKind.WEB, entry=self._target),
                 session_mgr=self._session_mgr,
@@ -538,9 +551,7 @@ class InteractionController:
                 findings=[
                     InteractionFinding(
                         severity="informational",
-                        title=(
-                            f"surface_unsupported|||서피스 미지원 ({kind})"
-                        ),
+                        title=(f"surface_unsupported|||서피스 미지원 ({kind})"),
                         description=str(exc),
                         surface=kind,
                     )
@@ -571,9 +582,7 @@ class InteractionController:
                 for f in resp.forms
             ],
             links_found=resp.links[:100],
-            vulnerabilities=[
-                {"type": p, "url": str(resp.url)} for p in resp.error_patterns
-            ],
+            vulnerabilities=[{"type": p, "url": str(resp.url)} for p in resp.error_patterns],
         )
 
         # Eyes 보강 (SPA 앱일 때)
@@ -616,8 +625,7 @@ class InteractionController:
             status_code=resp.status,
             response_body=resp.text[:3000],
             forms_found=[
-                {"action": f.action, "method": f.method, "fields": f.fields}
-                for f in resp.forms
+                {"action": f.action, "method": f.method, "fields": f.fields} for f in resp.forms
             ],
         )
 
@@ -680,8 +688,7 @@ class InteractionController:
                 status_code=resp.status,
                 response_body=resp.text[:5000],
                 forms_found=[
-                    {"action": f.action, "method": f.method, "fields": f.fields}
-                    for f in resp.forms
+                    {"action": f.action, "method": f.method, "fields": f.fields} for f in resp.forms
                 ],
             )
 
@@ -743,7 +750,7 @@ class InteractionController:
             return
 
         try:
-            resp = await self._session.get("/")
+            await self._session.get("/")
             self._target_profile = self._session.get_fingerprint()
             logger.info(
                 "Target profile: tech=%s, waf=%s, csrf=%s, endpoints=%d",

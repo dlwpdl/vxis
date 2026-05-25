@@ -70,7 +70,7 @@ class _ScanPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        return f"httpx -l targets.txt"
+        return "httpx -l targets.txt"
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         return PluginOutput(

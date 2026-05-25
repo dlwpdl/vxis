@@ -1,6 +1,6 @@
 import pytest
 
-from vxis.agent.tool_registry import BrainTool, ToolRegistry, ToolResult
+from vxis.agent.tool_registry import BrainTool
 from vxis.agent.tools import build_default_registry
 from vxis.agent.tools.control_tools import FinishScanTool, ThinkTool, WaitTool
 
@@ -37,6 +37,7 @@ async def test_think_tool_logs_and_returns_ok():
 @pytest.mark.asyncio
 async def test_wait_tool_sleeps_and_clamps():
     import time
+
     tool = WaitTool()
     assert isinstance(tool, BrainTool)
     assert tool.name == "wait"
@@ -50,6 +51,7 @@ async def test_wait_tool_sleeps_and_clamps():
 @pytest.mark.asyncio
 async def test_wait_tool_clamps_oversized_request():
     import time
+
     tool = WaitTool()
     t0 = time.monotonic()
     result = await tool.run(seconds=100)
