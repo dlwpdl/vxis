@@ -13,6 +13,11 @@ from vxis.cli.main import app
 runner = CliRunner()
 
 
+def invoke_scan_help():
+    """Render scan help with deterministic width so Rich does not truncate flags."""
+    return runner.invoke(app, ["scan", "--help"], env={"COLUMNS": "120"})
+
+
 # ---------------------------------------------------------------------------
 # version command
 # ---------------------------------------------------------------------------
@@ -125,29 +130,30 @@ class TestPluginsCommand:
 class TestScanCommandHelp:
     def test_scan_help_exits_zero(self):
         """scan --help exits with code 0."""
-        result = runner.invoke(app, ["scan", "--help"])
+        result = invoke_scan_help()
         assert result.exit_code == 0
 
     def test_scan_help_shows_target_argument(self):
         """scan --help output mentions the target argument."""
-        result = runner.invoke(app, ["scan", "--help"])
+        result = invoke_scan_help()
         assert "target" in result.output.lower()
 
     def test_scan_help_shows_profile_option(self):
         """scan --help output mentions the --profile option."""
-        result = runner.invoke(app, ["scan", "--help"])
+        result = invoke_scan_help()
         assert "--profile" in result.output or "profile" in result.output.lower()
 
     def test_scan_help_shows_plugins_option(self):
         """scan --help output mentions the --plugins option."""
         import re
-        result = runner.invoke(app, ["scan", "--help"])
+
+        result = invoke_scan_help()
         clean = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
         assert "--plugins" in clean or "plugins" in clean.lower()
 
     def test_scan_help_shows_no_report_option(self):
         """scan --help output mentions the --no-report flag."""
-        result = runner.invoke(app, ["scan", "--help"])
+        result = invoke_scan_help()
         assert "--no-report" in result.output
 
 
@@ -214,9 +220,7 @@ class TestScanCommand:
         mock_result = self._make_mock_result("scanme.example.com")
 
         with self._patch_scan_runtime(mock_result):
-            result = runner.invoke(
-                app, ["scan", "scanme.example.com", "--no-report"]
-            )
+            result = runner.invoke(app, ["scan", "scanme.example.com", "--no-report"])
 
         assert result.exit_code == 0
         assert "scanme.example.com" in result.output
@@ -224,9 +228,7 @@ class TestScanCommand:
     def test_scan_exits_one_on_invalid_profile(self):
         """scan returns exit code 1 when an invalid profile is provided."""
         with self._patch_scan_runtime(side_effect=ValueError("Profile 'badprofile' not found.")):
-            result = runner.invoke(
-                app, ["scan", "example.com", "--profile", "badprofile"]
-            )
+            result = runner.invoke(app, ["scan", "example.com", "--profile", "badprofile"])
 
         assert result.exit_code == 1
 
@@ -255,6 +257,7 @@ class TestReportCommand:
 
     def test_report_cmd_exits_zero(self):
         """report command exits with code 0 when report generates successfully."""
+
         def close_coroutine(coro):
             coro.close()
             return None
