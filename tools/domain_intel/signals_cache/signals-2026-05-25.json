@@ -1,0 +1,945 @@
+[
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] How my minimal, memory-safe Go rsync steers clear of vulnerabilities",
+    "url": "https://michael.stapelberg.ch/posts/2026-05-24-minimal-memory-safe-go-rsync-vulns/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 60.0,
+    "timestamp": "2026-05-24T09:38:34.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 60,
+      "comments": 2
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Megalodon: Mass GitHub Repo Backdooring via CI Workflows",
+    "url": "https://safedep.io/megalodon-mass-github-repo-backdooring-ci-workflows",
+    "description": "",
+    "relevance_tags": [],
+    "score": 33.0,
+    "timestamp": "2026-05-22T04:05:54.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 33,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] How to open calc.exe from S&Box",
+    "url": "https://slugcat.systems/post/26-05-21-how-to-open-calc-exe-from-sbox/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 24.0,
+    "timestamp": "2026-05-21T15:00:59.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 24,
+      "comments": 9
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] CVE-2026-46529: 10-year-old RCE in Linux PDF Viewer (XReader/Evince/Atril)",
+    "url": "https://medeiros.zip/posts/CVE-2026-46529-evince",
+    "description": "",
+    "relevance_tags": [
+      "rce"
+    ],
+    "score": 21.0,
+    "timestamp": "2026-05-22T17:14:59.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 21,
+      "comments": 1
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Secure Boot and CA Rollover - a heads-up for distributions",
+    "url": "https://blog.einval.com/2026/05/22#secure_boot_ca_rollover",
+    "description": "",
+    "relevance_tags": [],
+    "score": 21.0,
+    "timestamp": "2026-05-22T04:48:59.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 21,
+      "comments": 3
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Dependency cooldowns are unfair; we should use phased rollouts instead",
+    "url": "https://illegalcode.net/rfcs/phased_rollouts.html",
+    "description": "",
+    "relevance_tags": [],
+    "score": 18.0,
+    "timestamp": "2026-05-21T14:14:04.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 18,
+      "comments": 33
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Google API keys keep working after you delete them long enough to be exploited",
+    "url": "https://www.aikido.dev/blog/google-api-keys-deletion",
+    "description": "",
+    "relevance_tags": [
+      "api"
+    ],
+    "score": 17.0,
+    "timestamp": "2026-05-21T23:13:19.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 17,
+      "comments": 4
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] A Private pkg Repo Behind Mutual TLS",
+    "url": "https://oshogbo.com/blog/88/",
+    "description": "",
+    "relevance_tags": [
+      "tls"
+    ],
+    "score": 11.0,
+    "timestamp": "2026-05-21T12:47:22.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 11,
+      "comments": 4
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] FatGid - FreeBSD 14.x kernel LPE",
+    "url": "https://fatgid.io/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 11.0,
+    "timestamp": "2026-05-21T08:42:03.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 11,
+      "comments": 0
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-9082 — Drupal Core",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-9082",
+    "description": "Drupal Core contains a SQL injection vulnerability that could allow for privilege escalation and remote code execution via specially crafted requests sent with the database abstraction API.",
+    "relevance_tags": [
+      "cve-2026-9082",
+      "drupal",
+      "core",
+      "drupal core sql injection vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-22",
+    "metadata": {
+      "cve_id": "CVE-2026-9082",
+      "vendor": "Drupal",
+      "product": "Core",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-05-27",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2025-34291 — Langflow Langflow",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-34291",
+    "description": "Langflow contains an origin validation error vulnerability in which an overly permissive CORS configuration combined with a refresh token cookie configured as SameSite=None allows a malicious webpage to perform cross-origin requests that include credentials and successfully call the refresh endpoint. This could allow the attacker to execute arbitrary code and achieve full system compromise via obtained tokens that permit access to authenticated endpoints.",
+    "relevance_tags": [
+      "cve-2025-34291",
+      "langflow",
+      "langflow",
+      "langflow origin validation error vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-21",
+    "metadata": {
+      "cve_id": "CVE-2025-34291",
+      "vendor": "Langflow",
+      "product": "Langflow",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-04",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-34926 — Trend Micro Apex One",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-34926",
+    "description": "Trend Micro Apex One (on-premise) contains a directory traversal vulnerability that could allow a pre-authenticated local attacker to modify a key table on the server to inject malicious code to deploy to agents on affected installations.",
+    "relevance_tags": [
+      "cve-2026-34926",
+      "trend micro",
+      "apex one",
+      "trend micro apex one (on-premise) directory traversal vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-21",
+    "metadata": {
+      "cve_id": "CVE-2026-34926",
+      "vendor": "Trend Micro",
+      "product": "Apex One",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-04",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2008-4250 — Microsoft Windows",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2008-4250",
+    "description": "Microsoft Windows contains a buffer overflow vulnerability in the Windows Server Service that allows remote attackers to execute arbitrary code via a crafted RPC request that triggers an overflow during path canonicalization.",
+    "relevance_tags": [
+      "cve-2008-4250",
+      "microsoft",
+      "windows",
+      "microsoft windows buffer overflow vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-20",
+    "metadata": {
+      "cve_id": "CVE-2008-4250",
+      "vendor": "Microsoft",
+      "product": "Windows",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2009-1537 — Microsoft DirectX",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2009-1537",
+    "description": "Microsoft DirectX contains a NULL byte overwrite vulnerability in the QuickTime Movie Parser Filter in quartz.dll in DirectShow which could allow remote attackers to execute arbitrary code via a crafted QuickTime media file.",
+    "relevance_tags": [
+      "cve-2009-1537",
+      "microsoft",
+      "directx",
+      "microsoft directx null byte overwrite vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-20",
+    "metadata": {
+      "cve_id": "CVE-2009-1537",
+      "vendor": "Microsoft",
+      "product": "DirectX",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2009-3459 — Adobe Acrobat and Reader",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2009-3459",
+    "description": "Adobe Acrobat and Reader contain a heap-based buffer overflow vulnerability which could allow remote attackers to execute arbitrary code via a crafted PDF file that triggers memory corruption.",
+    "relevance_tags": [
+      "cve-2009-3459",
+      "adobe",
+      "acrobat and reader",
+      "adobe acrobat and reader heap-based buffer overflow vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-20",
+    "metadata": {
+      "cve_id": "CVE-2009-3459",
+      "vendor": "Adobe",
+      "product": "Acrobat and Reader",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2010-0249 — Microsoft Internet Explorer",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2010-0249",
+    "description": "Microsoft Internet Explorer contains an use-after-free vulnerability that could allow remote attackers to execute arbitrary code by accessing a pointer associated with a deleted object. The impacted product could be end-of-life (EoL) and/or end-of-service (EoS). Users should discontinue product utilization.",
+    "relevance_tags": [
+      "cve-2010-0249",
+      "microsoft",
+      "internet explorer",
+      "microsoft internet explorer use-after-free vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-20",
+    "metadata": {
+      "cve_id": "CVE-2010-0249",
+      "vendor": "Microsoft",
+      "product": "Internet Explorer",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2010-0806 — Microsoft Internet Explorer",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2010-0806",
+    "description": "Microsoft Internet Explorer contains an use-after-free vulnerability that could allow remote attackers to execute arbitrary code via vectors involving access to an invalid pointer after the deletion of an object. The impacted product could be end-of-life (EoL) and/or end-of-service (EoS). Users should discontinue product utilization.",
+    "relevance_tags": [
+      "cve-2010-0806",
+      "microsoft",
+      "internet explorer",
+      "microsoft internet explorer use-after-free vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-20",
+    "metadata": {
+      "cve_id": "CVE-2010-0806",
+      "vendor": "Microsoft",
+      "product": "Internet Explorer",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-41091 — Microsoft Defender",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-41091",
+    "description": "Microsoft Defender contains a link following vulnerability that allows an authorized attacker to elevate privileges locally.",
+    "relevance_tags": [
+      "cve-2026-41091",
+      "microsoft",
+      "defender",
+      "microsoft defender link following vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-20",
+    "metadata": {
+      "cve_id": "CVE-2026-41091",
+      "vendor": "Microsoft",
+      "product": "Defender",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-45498 — Microsoft Defender",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-45498",
+    "description": "Microsoft Defender contains an unspecified vulnerability that allows for denial of service.",
+    "relevance_tags": [
+      "cve-2026-45498",
+      "microsoft",
+      "defender",
+      "microsoft defender denial of service vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-05-20",
+    "metadata": {
+      "cve_id": "CVE-2026-45498",
+      "vendor": "Microsoft",
+      "product": "Defender",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-03",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Debian SE Linux and PinTheft",
+    "url": "https://etbe.coker.com.au/2026/05/24/debian-selinux-pintheft/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 8.0,
+    "timestamp": "2026-05-24T06:37:11.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 8,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Pardon MIE?",
+    "url": "https://ironpeak.be/blog/bypassing-apple-mie/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 7.0,
+    "timestamp": "2026-05-23T19:10:25.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 7,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Staged publishing and new install-time controls for NPM",
+    "url": "https://github.blog/changelog/2026-05-22-staged-publishing-and-new-install-time-controls-for-npm/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 6.0,
+    "timestamp": "2026-05-23T01:06:49.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 6,
+      "comments": 3
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] OCaml Infrastructure: How the opam-repository Works",
+    "url": "https://ocaml.org/backstage/2025-11-05-how-the-opam-repository-works",
+    "description": "<blockquote>\n<p>The opam package repository is a commons rather than a publishing platform: it is manually curated, so not all packages submitted for publication are accepted; it is maintained communally, so anyone can suggest changes to any package.</p>\n</blockquote>\n",
+    "relevance_tags": [],
+    "score": 5.0,
+    "timestamp": "2026-05-21T17:46:37.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 5,
+      "comments": 0
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Are Frontier LLMs Ready for Cybersecurity? Evidence for Vertical Foundation Models from Dual-Mode Vulnerability Benchmarks",
+    "url": "http://arxiv.org/abs/2605.23243v1",
+    "description": "We evaluate whether frontier LLMs are ready for cybersecurity through a dual-mode benchmark: white-box function-level vulnerability detection (VulnLLM-R, across C/Java/Python) and black-box web application security testing (five production-style applications with 118 ground-truth vulnerabilities across 20+ CWE families, which we will open-source). We test six frontier models (GPT-5.4, Codex~5.3, Claude Opus~4.6, Sonnet~4.6, Gemini~3.1~Pro and Gemini~3~Flash) and two domain-specialized models acr",
+    "relevance_tags": [
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-22T05:24:43Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Security of LLM-generated Code: A Comparative Analysis",
+    "url": "http://arxiv.org/abs/2605.23091v1",
+    "description": "The majority of software developers use or are planning to use Artificial Intelligence (AI) tools in their development processes. Their top reasons include improving productivity and faster learning. In fact, Large Language Model (LLM)-generated code is currently in production, including in major tech companies. However, concerns were raised about the risks associated with the use of AI tools to generate code. In this paper, we focus our attention on the risks to software security. We empiricall",
+    "relevance_tags": [
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-21T22:53:40Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Benchmarking Autonomous Agents against Temporal, Spatial, and Semantic Evasions",
+    "url": "http://arxiv.org/abs/2605.22321v1",
+    "description": "As autonomous agents (e.g., OpenClaw) increasingly operate with deep system-level privileges to execute complex tasks, they introduce severe, unmitigated security risks. Current vulnerability analyses overwhelmingly focus on single-turn, stateless behaviors, overlooking the expanded attack surface inherent in stateful, multi-turn interactions and dynamic tool invocations. In this paper, we propose a novel, multi-dimensional evasion framework targeting LLM-based agent systems. We introduce three",
+    "relevance_tags": [
+      "agent",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-21T11:07:51Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Automated Repair of TEE Partitioning Issues via DSL-Guided and LLM-Assisted Patching",
+    "url": "http://arxiv.org/abs/2605.22087v1",
+    "description": "Trusted Execution Environments (TEEs) provide hardware-based isolation to protect sensitive data and computations from potentially compromised operating systems (OS). However, TEE applications inevitably interact with the untrusted OS through SDK interfaces, and improper partitioning can introduce severe vulnerabilities such as data leakage and code injection. While prior work has proposed static analysis tools to detect such issues, automated repair remains largely unexplored. This problem is p",
+    "relevance_tags": [
+      "injection"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-21T07:27:28Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Finding Missing Input Validation in TEEs via LLM-Assisted Symbolic Execution",
+    "url": "http://arxiv.org/abs/2605.22058v1",
+    "description": "Trusted Execution Environments (TEEs) provide hardware-enforced isolation that protects sensitive code and data from untrusted software. Despite their strong security guarantees, analyzing TEE applications remains challenging due to the high cost and complexity of configuring complete TEE build and runtime environments, as well as the limited observability imposed by hardware isolation. This paper presents SymTEE, a novel large language model (LLM)-assisted symbolic execution framework for detec",
+    "relevance_tags": [
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-21T06:47:36Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Trace: Unmasking AI Attack Agents Through Terminal Behavior Fingerprinting",
+    "url": "http://arxiv.org/abs/2605.01186v1",
+    "description": "AI-driven penetration testing agents are now capable of autonomously executing attacks within compromised networks. Identifying the model family that controls the active sessions of such agents provides valuable information towards understanding the intent of the attack and further developing attack countermeasures. In this paper, we introduce Trace, a novel multi-stage attribution and forensic framework for AI attack agents using terminal command sequences. Once Trace identifies a model family",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-05-02T01:27:20Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] AWE: Adaptive Agents for Dynamic Web Penetration Testing",
+    "url": "http://arxiv.org/abs/2603.00960v1",
+    "description": "Modern web applications are increasingly produced through AI-assisted development and rapid no-code deployment pipelines, widening the gap between accelerating software velocity and the limited adaptability of existing security tooling. Pattern-driven scanners fail to reason about novel contexts, while emerging LLM-based penetration testers rely on unconstrained exploration, yielding high cost, unstable behavior, and poor reproducibility.   We introduce AWE, a memory-augmented multi-agent framew",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-03-01T07:32:42Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Can AI Lower the Barrier to Cybersecurity? A Human-Centered Mixed-Methods Study of Novice CTF Learning",
+    "url": "http://arxiv.org/abs/2602.18172v1",
+    "description": "Capture-the-Flag (CTF) competitions serve as gateways into offensive cybersecurity, yet they often present steep barriers for novices due to complex toolchains and opaque workflows. Recently, agentic AI frameworks for cybersecurity promise to lower these barriers by automating and coordinating penetration testing tasks. However, their role in shaping novice learning remains underexplored.   We present a human-centered, mixed-methods case study examining how agentic AI frameworks -- here Cybersec",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-02-20T12:20:36Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Towards Cybersecurity Superintelligence: from AI-guided humans to human-guided AI",
+    "url": "http://arxiv.org/abs/2601.14614v3",
+    "description": "Cybersecurity superintelligence -- artificial intelligence exceeding the best human capability in both speed and strategic reasoning -- represents the next frontier in security. This paper documents the emergence of such capability through three major contributions that have pioneered the field of AI Security. First, PentestGPT (2023) established LLM-guided penetration testing, achieving 228.6% improvement over baseline models through an architecture that externalizes security expertise into nat",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-01-21T03:12:48Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Cybersecurity AI: A Game-Theoretic AI for Guiding Attack and Defense",
+    "url": "http://arxiv.org/abs/2601.05887v1",
+    "description": "AI-driven penetration testing now executes thousands of actions per hour but still lacks the strategic intuition humans apply in competitive security. To build cybersecurity superintelligence --Cybersecurity AI exceeding best human capability-such strategic intuition must be embedded into agentic reasoning processes. We present Generative Cut-the-Rope (G-CTR), a game-theoretic guidance layer that extracts attack graphs from agent's context, computes Nash equilibria with effort-aware scoring, and",
+    "relevance_tags": [
+      "agent"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-01-09T16:06:10Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] STRIKE: A Structured Taxonomy of Cybercrime for Risk, Impact, Knowledge, and Evolution",
+    "url": "http://arxiv.org/abs/2605.16589v1",
+    "description": "Cybercrime has grown exponentially in both scale and sophistication, posing significant threats. As attack methods evolve rapidly, traditional classification schemes often fail to capture the complexity and diversity of modern threats. To address this gap, we introduce STRIKE,a Structured Taxonomy for Risk, Impact, Knowledge, and Emerging Threats, which provides a unified, multi-dimensional framework for categorizing cybercrimes. STRIKE spans both conventional and emerging domains, including ran",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-05-15T19:48:16Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] FedEDAuth -- Federated Embedding Distribution Authentication for Counterfeit IC Detection",
+    "url": "http://arxiv.org/abs/2605.15885v1",
+    "description": "The widespread of counterfeit integrated circuits (ICs) poses severe risks to the security, reliability, and trustworthiness of modern electronic systems. Federated learning (FL) offers a privacy-preserving paradigm for collaborative counterfeit detection across the semiconductor supply chain, but its vulnerability to byzantine data poisoning attacks limits practical deployment. This paper presents Federated Embedding Distribution Authentication (FedEDAuth), a lightweight, embedding level client",
+    "relevance_tags": [
+      "authentication",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-15T12:08:01Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Exploiting LLM Agent Supply Chains via Payload-less Skills",
+    "url": "http://arxiv.org/abs/2605.14460v1",
+    "description": "Autonomous agents powered by Large Language Models (LLMs) acquire external functionalities through third-party skills available in open marketplaces. Adopting these integrations broadens the potential attack surface, prompting a need for systematic security evaluation. Current auditing mechanisms are effective at identifying explicit code payloads and predefined threat contents through security scanning. These detection mechanisms are bypassed if malicious behaviors lack direct injection and are",
+    "relevance_tags": [
+      "agent",
+      "injection",
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-14T06:55:47Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] CoT-Guard: Small Models for Strong Monitoring",
+    "url": "http://arxiv.org/abs/2605.12746v1",
+    "description": "Monitoring the chain-of-thought (CoT) of reasoning models is a promising approach for detecting covert misbehavior (i.e., hidden objectives) in code generation tasks. While large models (GPT-5, Gemini-3-Flash) can serve as effective CoT monitors, they are expensive to deploy due to the lengthy reasoning traces and high API cost, emphasizing the need for smaller, cheaper alternatives. Nevertheless, we find that current small models (4B--8B) struggle to detect hidden objectives despite access to t",
+    "relevance_tags": [
+      "api"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-12T20:49:30Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Trust Me, Import This: Dependency Steering Attacks via Malicious Agent Skills",
+    "url": "http://arxiv.org/abs/2605.09594v1",
+    "description": "LLM-powered coding agents increasingly make software supply chain decisions. They generate imports, recommend packages, and write installation commands. Prior work showed that these systems can hallucinate non-existent package names, which attackers may register as malicious packages. In this paper, we show that this risk is not only a passive model failure. It can be actively induced through the persistent Skill artifact. We introduce Dependency Steering, an attack paradigm in which a malicious",
+    "relevance_tags": [
+      "agent"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-10T15:13:38Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] FuzzingBrain V2: A Multi-Agent LLM System for Automated Vulnerability Discovery and Reproduction",
+    "url": "http://arxiv.org/abs/2605.21779v1",
+    "description": "Software vulnerabilities pose critical security threats, with nearly 50,000 CVEs reported in 2025. While Large Language Models (LLMs) show promise for automated vulnerability detection, three key challenges remain. First, LLM-generated vulnerability reports suffer from high false positive rates and lack   reproducible verification. Second, existing LLM-based approaches use suboptimal granularities for vulnerability localization: function-level analysis overlooks bugs when context becomes extensi",
+    "relevance_tags": [
+      "llm",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-20T22:17:14Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Capturing Monetarily Exploitable Vulnerability in Smart Contracts via Auditor Knowledge-Learning Fuzzing",
+    "url": "http://arxiv.org/abs/2604.18395v1",
+    "description": "Smart contracts extended blockchain functionality beyond simple transactions, powering complex applications like decentralized finance (DeFi). However, this complexity introduces serious security challenges, including price manipulation and inflation attacks. Despite the development of various security tools, the rapid rise in financially motivated exploits continues to pose a significant threat to the blockchain ecosystem. These financially motivated exploits often stem from Monetarily Exploita",
+    "relevance_tags": [
+      "fuzzing",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-20T15:17:45Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Contextualizing Sink Knowledge for Java Vulnerability Discovery",
+    "url": "http://arxiv.org/abs/2604.01645v3",
+    "description": "Java applications are prone to vulnerabilities stemming from the insecure use of security-sensitive APIs, such as file operations enabling path traversal or deserialization routines allowing remote code execution. These sink APIs encode critical information for vulnerability discovery: the program-specific constraints required to reach them and the exploitation conditions necessary to trigger security flaws. Despite this, existing fuzzers largely overlook such vulnerability-specific knowledge, l",
+    "relevance_tags": [
+      "deserialization",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-02T05:43:25Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] MulCovFuzz: A Multi-Component Coverage-Guided Greybox Fuzzer for 5G Protocol Testing",
+    "url": "http://arxiv.org/abs/2602.21794v1",
+    "description": "As mobile networks transition to 5G infrastructure, ensuring robust security becomes more important due to the complex architecture and expanded attack surface. Traditional security testing approaches for 5G networks rely on black-box fuzzing techniques, which are limited by their inability to observe internal program state and coverage information. This paper presents MulCovFuzz, a novel coverage-guided greybox fuzzing tool for 5G network testing. Unlike existing tools that depend solely on sys",
+    "relevance_tags": [
+      "fuzzing"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-02-25T11:17:42Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] TÄMU: Emulating Trusted Applications at the (GlobalPlatform)-API Layer",
+    "url": "http://arxiv.org/abs/2601.20507v1",
+    "description": "Mobile devices rely on Trusted Execution Environments (TEEs) to execute security-critical code and protect sensitive assets. This security-critical code is modularized in components known as Trusted Applications (TAs). Vulnerabilities in TAs can compromise the TEE and, thus, the entire system. However, the closed-source nature and fragmentation of mobile TEEs severely hinder dynamic analysis of TAs, limiting testing efforts to mostly static analyses. This paper presents TÄMU, a rehosting platfor",
+    "relevance_tags": [
+      "api"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-01-28T11:34:06Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] uGen: An Agentic Framework for Generating Microarchitectural Attack PoCs",
+    "url": "http://arxiv.org/abs/2605.15503v1",
+    "description": "Microarchitectural attacks continue to evolve, uncovering new exploitation vectors in modern processors. From a defensive perspective, assessing a system's susceptibility to such attacks remains challenging. Developing functional attack implementations is labor-intensive, requires deep microarchitectural expertise, and is highly sensitive to execution environments. Consequently, existing attacks often lack portability, limiting systematic and scalable vulnerability assessment. Recent advances in",
+    "relevance_tags": [
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-15T00:50:49Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Do Androids Dream of Breaking the Game? Systematically Auditing AI Agent Benchmarks with BenchJack",
+    "url": "http://arxiv.org/abs/2605.12673v1",
+    "description": "Agent benchmarks have become the de facto measure of frontier AI competence, guiding model selection, investment, and deployment. However, reward hacking, where agents maximize a score without performing the intended task, emerges spontaneously in frontier models without overfitting. We argue that benchmarks must be secure by design. From past incidents of reward hacks, we derive a taxonomy of eight recurring flaw patterns and compile them into the Agent-Eval Checklist for benchmark designers. W",
+    "relevance_tags": [
+      "agent"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-12T19:22:45Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Context-Aware Spear Phishing: Generative AI-Enabled Attacks Against Individuals via Public Social Media Data",
+    "url": "http://arxiv.org/abs/2605.11268v1",
+    "description": "We demonstrate how publicly available social-media data and generative AI (GenAI) can be misused to automate and scale highly personalized, context-aware spear-phishing campaigns. With minimal attacker effort, a small amount of public activity per target is sufficient for GenAI models to extract interests and contextual cues, producing persuasive messages that mirror a target's style while bypassing generic content-moderation safeguards. We introduce a modular framework that combines multimodal",
+    "relevance_tags": [
+      "phishing"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-11T21:46:52Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Comment and Control: Hijacking Agentic Workflows via Context-Grounded Evolution",
+    "url": "http://arxiv.org/abs/2605.11229v1",
+    "description": "Automation platforms such as GitHub Actions and n8n are increasingly adopting so-called agentic workflows, which integrate Large Language Model (LLM) agents for tasks such as code review and data synchronization. While bringing convenience for developers, this integration exposes a new risk: An adversary may control and craft certain inputs, such as GitHub issue comments, to manipulate the LLM agent for unwanted actions, such as credential exfiltration and arbitrary command execution. To our kno",
+    "relevance_tags": [
+      "agent",
+      "automation",
+      "credential",
+      "exfiltration",
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-11T20:45:31Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Usability as a Weapon: Attacking the Safety of LLM-Based Code Generation via Usability Requirements",
+    "url": "http://arxiv.org/abs/2605.10133v1",
+    "description": "Large Language Models (LLMs) are increasingly used for automated software development, making their ability to preserve secure coding practices critical. In practice, however, many security requirements are implicit or underspecified, whereas usability requirements are explicit and high-signal. This asymmetry motivates our investigation of usability pressure as a practical attack surface: realistic usability-oriented requirements (e.g., new features, performance constraints, or simplicity demand",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-05-11T07:44:37Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Ghost CMS SQL injection flaw exploited in large-scale ClickFix campaign",
+    "url": "https://www.bleepingcomputer.com/news/security/ghost-cms-sql-injection-flaw-exploited-in-large-scale-clickfix-campaign/",
+    "description": "A large-scale campaign is exploiting a critical SQL injection vulnerability (CVE-2026-26980) in Ghost CMS to inject malicious JavaScript code that triggers ClickFix attack flows. [...]",
+    "relevance_tags": [
+      "injection"
+    ],
+    "score": 0.0,
+    "timestamp": "Sun, 24 May 2026 10:12:32 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Laravel Lang packages hijacked to deploy credential-stealing malware",
+    "url": "https://www.bleepingcomputer.com/news/security/laravel-lang-packages-hijacked-to-deploy-credential-stealing-malware/",
+    "description": "A supply chain attack targeting the Laravel Lang localization packages has exposed developers to a sophisticated credential-stealing malware campaign after attackers abused GitHub version tags to distribute malicious code through Composer packages. [...]",
+    "relevance_tags": [
+      "malware"
+    ],
+    "score": 0.0,
+    "timestamp": "Sat, 23 May 2026 16:48:23 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Italy disrupts CINEMAGOAL piracy app that stole streaming auth codes",
+    "url": "https://www.bleepingcomputer.com/news/legal/italy-disrupts-cinemagoal-piracy-app-that-stole-streaming-auth-codes/",
+    "description": "Italian authorities have dismantled a piracy ecosystem centered around the CINEMAGOAL app that provided access to various streaming platforms, including Netflix, Disney+, and Spotify. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Sat, 23 May 2026 10:23:44 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Netherlands seizes 800 servers of hosting firm enabling cyberattacks",
+    "url": "https://www.bleepingcomputer.com/news/security/netherlands-seizes-800-servers-of-hosting-firm-enabling-cyberattacks/",
+    "description": "Financial crime investigators in the Netherlands (FIOD) arrested two men and seized 800 servers linked to a web hosting company that enabled cyberattacks, interference operations, and disinformation campaigns. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 22 May 2026 13:24:52 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Former US execs plead guilty to aiding tech support scammers",
+    "url": "https://www.bleepingcomputer.com/news/security/former-us-execs-plead-guilty-to-aiding-tech-support-scammers/",
+    "description": "Two former executives of a call-tracking and analytics company pleaded guilty to concealing a years-long tech support fraud scheme that victimized individuals worldwide. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 22 May 2026 11:32:18 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Trend Micro warns of Apex One zero-day exploited in the wild",
+    "url": "https://www.bleepingcomputer.com/news/security/trend-micro-warns-of-apex-one-zero-day-exploited-in-attacks/",
+    "description": "Japanese cybersecurity software company Trend Micro has addressed an Apex One zero-day vulnerability exploited in attacks targeting Windows systems. [...]",
+    "relevance_tags": [
+      "zero-day"
+    ],
+    "score": 0.0,
+    "timestamp": "Fri, 22 May 2026 09:39:19 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Drupal: Critical SQL injection flaw now targeted in attacks",
+    "url": "https://www.bleepingcomputer.com/news/security/drupal-critical-sql-injection-flaw-now-targeted-in-attacks/",
+    "description": "Drupal is warning that hackers are attempting to exploit a \"highly critical\" SQL injection vulnerability announced earlier this week. [...]",
+    "relevance_tags": [
+      "injection"
+    ],
+    "score": 0.0,
+    "timestamp": "Fri, 22 May 2026 09:14:40 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Why Chargebacks are Just One Piece of the Fraud Puzzle",
+    "url": "https://www.bleepingcomputer.com/news/security/why-chargebacks-are-just-one-piece-of-the-fraud-puzzle/",
+    "description": "Fraud losses don't stop at chargebacks. False declines, account takeovers, and abuse also damage revenue and trust. IPQS breaks down why fraud teams need broader visibility into risk and customer impact. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 22 May 2026 09:09:18 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Ubiquiti patches three max severity UniFi OS vulnerabilities",
+    "url": "https://www.bleepingcomputer.com/news/security/ubiquiti-patches-three-max-severity-unifi-os-vulnerabilities/",
+    "description": "Ubiquiti has released security updates to patch three maximum severity vulnerabilities in UniFi OS that can be exploited by remote attackers without privileges. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 22 May 2026 08:00:42 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] US and Canada arrest and charge suspected Kimwolf botnet admin",
+    "url": "https://www.bleepingcomputer.com/news/security/us-and-canada-arrest-and-charge-suspected-kimwolf-botnet-admin/",
+    "description": "U.S. and Canadian authorities arrested and charged a Canadian man with operating the KimWolf distributed denial-of-service (DDoS) botnet, which infected nearly two million devices worldwide. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 22 May 2026 05:01:20 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  }
+]
