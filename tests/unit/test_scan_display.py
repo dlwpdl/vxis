@@ -133,6 +133,18 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                         "reason": "Link auth foothold to post-auth access before finish",
                     },
                 ],
+                "delegated_workers": [
+                    {
+                        "id": "agent:agent-0001",
+                        "role": "exploit_worker",
+                        "phase": "delegated_task",
+                        "status": "active",
+                        "objective": "Validate SQL injection on /api/search and collect control evidence",
+                        "next_step": "Finish the worker or open a crown-chain task",
+                        "escalation_status": "positive_needs_pivot",
+                        "escalation_reason": "positive result needs chain/pivot decision from director",
+                    }
+                ],
             },
             "memory_directives": [
                 "memory strategy: first revalidate auth footholds, then explore unexplored surface",
@@ -163,6 +175,28 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                     "task": "Validate SQL injection on /api/search and collect control evidence",
                     "status": "waiting",
                     "skills": ["test_injection"],
+                    "task_envelope": {
+                        "objective": "Validate SQL injection on /api/search and collect control evidence",
+                        "target_surface": "web",
+                        "allowed_tools": ["run_skill", "http_request", "browser_navigate", "browser_analyze_dom", "skills:test_injection"],
+                        "expected_artifact": "raw proof artifact via test_injection: request/response transcript, control pair, or exploit delta",
+                        "stop_condition": "stop after one bounded proof attempt yields concrete evidence or a blocker",
+                        "escalation_trigger": "escalate after repeated blocked/clean runs or when a positive result needs a sharper next task",
+                    },
+                    "result_package": {
+                        "attempted_tool": "run_skill",
+                        "attempt_summary": "status delta observed on /api/search",
+                        "raw_evidence_summary": "status delta observed on /api/search",
+                        "control_result": "baseline 200 vs payload 500",
+                        "observed_delta": "SQL error signature present",
+                        "verdict_guess": "candidate_positive",
+                        "recommended_next_step": "Escalate to director for chain/pivot planning, then finish with concrete impact",
+                    },
+                    "escalation": {
+                        "status": "needs_director",
+                        "reason": "positive result needs chain/pivot decision from director",
+                        "recommended_owner": "director",
+                    },
                     "result": "",
                     "message_count": 2,
                     "execution_count": 1,
@@ -318,6 +352,11 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "test_injection" in agent_text
     assert "finish agent-0001" in agent_text
     assert "status delta observed" in agent_text
+    assert "contract" in agent_text
+    assert "raw proof artifact via test_injection" in agent_text
+    assert "worker guess:" in agent_text
+    assert "candidate_positive" in agent_text
+    assert "escalation" in agent_text
     assert 'action: run_skill(skill="test_injection"' in agent_text
 
     chain_panel = display._render_chains()
@@ -330,3 +369,5 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "Linked chains" in chain_text
     assert "Recent branch activity" in chain_text
     assert "authenticated data exfiltration" in chain_text
+    assert "delegated workers" in chain_text
+    assert "positive_needs_pivot" in chain_text

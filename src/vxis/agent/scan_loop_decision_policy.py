@@ -459,9 +459,27 @@ class ScanLoopDecisionPolicyMixin:
                     "severity": finding.get("severity", ""),
                     "affected_component": str(finding.get("affected_component") or "")[:88],
                 })
+        delegated_workers: list[dict[str, Any]] = []
+        for branch in self.state.active_branches():
+            if branch.owner != "agent_graph":
+                continue
+            branch_family = self._branch_family(branch)
+            if family and branch_family != family:
+                continue
+            delegated_workers.append({
+                "id": branch.id,
+                "role": branch.role,
+                "phase": branch.phase,
+                "status": branch.status,
+                "objective": str(branch.objective or "")[:88],
+                "next_step": str(branch.next_step or "")[:88],
+                "escalation_status": str(branch.escalation_status or ""),
+                "escalation_reason": str(branch.escalation_reason or "")[:120],
+            })
         detail = dict(selected)
         detail["reviews"] = reviews[:3]
         detail["findings"] = findings[-3:]
+        detail["delegated_workers"] = delegated_workers[:3]
         return detail
 
     def _has_stronger_foothold_than_disclosure(self) -> bool:
@@ -908,6 +926,27 @@ class ScanLoopDecisionPolicyMixin:
 
     def _judge_replan_hint(self) -> str:
         focus = self._focus_branch()
+        if focus and focus.owner == "agent_graph" and focus.escalation_status:
+            if focus.escalation_status == "positive_needs_pivot":
+                return (
+                    f"Delegated worker {focus.id} produced a positive result. Director must now pivot: "
+                    "finish the worker with concrete impact, open a post-exploit/crown-chain task, or link the finding."
+                )
+            if focus.escalation_status == "ambiguous":
+                return (
+                    f"Delegated worker {focus.id} is ambiguous after repeated failed turns. "
+                    "Send a narrower instruction or create a sharper bounded worker instead of repeating the same probe."
+                )
+            if focus.escalation_status == "run_limit":
+                return (
+                    f"Delegated worker {focus.id} hit the child-run limit. "
+                    "Do not rerun it blindly; finish it as blocked/clean or spawn a new bounded worker with a narrower objective."
+                )
+            if focus.escalation_status == "blocked":
+                return (
+                    f"Delegated worker {focus.id} is blocked. "
+                    "Either rescope the task, route around the blocker, or close the worker explicitly before finish_scan."
+                )
         if focus and focus.status not in {"proven", "exhausted", "dead", "blocked"}:
             return (
                 f"Focus on branch {focus.id} [{focus.role}/{focus.phase}] and advance it with a concrete "

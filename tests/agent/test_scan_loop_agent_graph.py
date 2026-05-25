@@ -47,6 +47,22 @@ def test_agent_graph_action_has_ui_details():
     assert "Map unauthenticated surface" in summary
 
 
+def test_scan_loop_normalizes_agent_graph_create_into_bounded_envelope():
+    normalized = ScanAgentLoop._normalize_tool_args(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Validate SQL injection on /search",
+            "skills": ["test_injection"],
+        },
+    )
+    assert normalized["objective"] == "Validate SQL injection on /search"
+    assert "raw proof artifact via test_injection" in normalized["expected_artifact"]
+    assert "bounded proof step" in normalized["stop_condition"]
+    assert "pivot planning" in normalized["escalation_trigger"]
+
+
 def test_scan_dashboard_includes_agent_graph_snapshot():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
     loop.brain = SimpleNamespace(_provider="openai", _model="gpt-5.5")
@@ -64,6 +80,14 @@ def test_scan_dashboard_includes_agent_graph_snapshot():
                     "status": "running",
                     "parent_id": None,
                     "skills": ["enumerate_endpoints"],
+                    "task_envelope": {
+                        "objective": "Map auth and API surface",
+                        "target_surface": "web",
+                        "allowed_tools": ["run_skill", "http_request", "browser_navigate", "skills:enumerate_endpoints"],
+                        "expected_artifact": "surface map with concrete endpoints or auth boundaries",
+                        "stop_condition": "stop after mapping the relevant surface and naming the next proof step",
+                        "escalation_trigger": "escalate after repeated blocked/clean runs or when a positive result needs a sharper next task",
+                    },
                     "result": "",
                     "created_at": "2026-05-22T00:00:00+00:00",
                     "updated_at": "2026-05-22T00:00:00+00:00",
@@ -116,6 +140,23 @@ def test_scan_dashboard_surfaces_director_worker_exchange():
                         "action: run_skill(skill=\"test_injection\", target_url=<target>, params={...})\n"
                         "validate: require baseline/control/payload delta"
                     ),
+                    "task_envelope": {
+                        "objective": "Validate SQL injection on /api/search",
+                        "target_surface": "web",
+                        "allowed_tools": ["run_skill", "http_request", "browser_navigate", "browser_analyze_dom", "skills:test_injection"],
+                        "expected_artifact": "raw proof artifact via test_injection: request/response transcript, control pair, or exploit delta",
+                        "stop_condition": "stop after one bounded proof attempt yields concrete evidence or a blocker",
+                        "escalation_trigger": "escalate after repeated blocked/clean runs or when a positive result needs a sharper next task",
+                    },
+                    "result_package": {
+                        "attempted_tool": "run_skill",
+                        "attempt_summary": "status delta observed on /api/search",
+                        "raw_evidence_summary": "status delta observed on /api/search",
+                        "control_result": "baseline 200 vs payload 500",
+                        "observed_delta": "SQL error signature present",
+                        "verdict_guess": "candidate_positive",
+                        "recommended_next_step": "Escalate to director for chain/pivot planning, then finish with concrete impact",
+                    },
                     "result": "",
                     "created_at": "2026-05-22T00:00:00+00:00",
                     "updated_at": "2026-05-22T00:00:30+00:00",
@@ -144,7 +185,206 @@ def test_scan_dashboard_surfaces_director_worker_exchange():
     assert "Director-worker exchange:" in dashboard
     assert "agent-0001 waiting exploit_worker skills=test_injection" in dashboard
     assert "director_next=finish or send sharper instruction to agent-0001" in dashboard
+    assert "contract: expect raw proof artifact" in dashboard
+    assert "worker_verdict: candidate_positive" in dashboard
     assert "worker_card: action: run_skill" in dashboard
+
+
+def test_agent_graph_positive_waiting_result_projects_director_followup_branch_state():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=30)
+    result = ToolResult(
+        ok=True,
+        summary="agent_graph: ran agent-0001 -> run_skill: status delta observed",
+        data={
+            "agent": {
+                "id": "agent-0001",
+                "role": "exploit_worker",
+                "task": "Validate SQL injection on /api/search",
+                "status": "waiting",
+                "skills": ["test_injection"],
+                "task_envelope": {
+                    "objective": "Validate SQL injection on /api/search",
+                    "target_surface": "web",
+                    "allowed_tools": ["run_skill", "http_request", "browser_navigate", "browser_analyze_dom", "skills:test_injection"],
+                    "expected_artifact": "raw proof artifact via test_injection: request/response transcript, control pair, or exploit delta",
+                    "stop_condition": "stop after one bounded proof step yields concrete evidence or a blocker",
+                    "escalation_trigger": "escalate after ambiguous evidence, blocked execution, or a positive result that needs pivot planning",
+                },
+                "result_package": {
+                    "attempted_tool": "run_skill",
+                    "attempt_summary": "status delta observed on /api/search",
+                    "raw_evidence_summary": "status delta observed on /api/search",
+                    "control_result": "baseline 200 vs payload 500",
+                    "observed_delta": "SQL error signature present",
+                    "verdict_guess": "candidate_positive",
+                    "recommended_next_step": "Escalate to director for chain/pivot planning, then finish with concrete impact",
+                },
+                "result": "",
+                "created_at": "2026-05-22T00:00:00+00:00",
+                "updated_at": "2026-05-22T00:00:30+00:00",
+                "message_count": 2,
+                "execution_count": 1,
+                "executions": [
+                    {
+                        "id": "exec-0001",
+                        "tool": "run_skill",
+                        "args": {"skill": "test_injection"},
+                        "ok": True,
+                        "summary": "status delta observed on /api/search",
+                        "data": {},
+                        "error": None,
+                        "created_at": "2026-05-22T00:00:30+00:00",
+                    }
+                ],
+            }
+        },
+    )
+
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "run", "agent_id": "agent-0001"},
+        result=result,
+    )
+
+    branch = loop.state.branches["agent:agent-0001"]
+    assert "Director follow-up:" in branch.next_step
+    assert branch.blocker == "positive delegated worker result requires director pivot/finish"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_create_and_run_capture_contract_and_artifact():
+    graph = AgentGraphTool()
+
+    async def _executor(agent: dict[str, object], instruction: str) -> ToolResult:
+        assert agent["task_envelope"]["objective"] == "Validate SQL injection on /search"
+        return ToolResult(
+            ok=True,
+            summary="confirmed sql injection with status delta",
+            data={
+                "tool": "run_skill",
+                "args": {"skill": "test_injection", "target_url": "http://localhost:3000"},
+                "result": {
+                    "ok": True,
+                    "summary": "confirmed sql injection with status delta",
+                    "evidence": "payload caused SQL error signature",
+                    "control": "baseline stayed 200",
+                },
+            },
+        )
+
+    graph.set_executor(_executor)
+    created = await graph.run(
+        action="create",
+        role="exploit_worker",
+        task="Validate SQL injection on /search",
+        skills=["test_injection"],
+    )
+    assert created.ok is True
+    agent = created.data["agent"]
+    assert agent["task_envelope"]["objective"] == "Validate SQL injection on /search"
+    assert "expected_artifact" in agent["task_envelope"]
+    assert "stop_condition" in agent["task_envelope"]
+    assert "escalation_trigger" in agent["task_envelope"]
+
+    ran = await graph.run(action="run", agent_id=agent["id"])
+    assert ran.ok is True
+    result_agent = ran.data["agent"]
+    assert result_agent["result_package"]["attempted_tool"] == "run_skill"
+    assert "payload caused SQL error signature" in str(result_agent["result_package"]["observed_delta"])
+    assert result_agent["result_package"]["verdict_guess"] == "candidate_positive"
+    assert "recommended_next_step" in result_agent["result_package"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_create_accepts_explicit_director_envelope():
+    graph = AgentGraphTool()
+    created = await graph.run(
+        action="create",
+        role="exploit_worker",
+        task="Validate SQL injection on /search",
+        objective="Confirm SQL injection on /search using one bounded proof step",
+        expected_artifact="raw request/response transcript with baseline vs payload delta",
+        stop_condition="stop after one bounded proof attempt yields concrete evidence or blocker",
+        escalation_trigger="escalate after ambiguous evidence or positive proof needing pivot planning",
+        skills=["test_injection"],
+    )
+    agent = created.data["agent"]
+    envelope = agent["task_envelope"]
+    assert envelope["objective"].startswith("Confirm SQL injection")
+    assert "baseline vs payload delta" in envelope["expected_artifact"]
+    assert "one bounded proof attempt" in envelope["stop_condition"]
+    assert "positive proof needing pivot planning" in envelope["escalation_trigger"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_failed_runs_raise_director_escalation_state():
+    graph = AgentGraphTool()
+
+    async def _executor(agent: dict[str, object], instruction: str) -> ToolResult:
+        return ToolResult(ok=False, summary="blocked by anti-automation", error="blocked")
+
+    graph.set_executor(_executor)
+    created = await graph.run(
+        action="create",
+        role="exploit_worker",
+        task="Probe IDOR on /api/orders/{id}",
+        skills=["test_idor"],
+    )
+    agent_id = created.data["agent"]["id"]
+    first = await graph.run(action="run", agent_id=agent_id)
+    second = await graph.run(action="run", agent_id=agent_id)
+    assert first.ok is False
+    assert second.ok is False
+    escalated = second.data["agent"]["escalation"]
+    assert escalated["status"] == "ambiguous"
+    assert "repeated blocked or failed child turns" in escalated["reason"]
+
+
+def test_judge_replan_hint_uses_agent_graph_escalation_status():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=10)
+    branch = loop.state.ensure_branch(
+        "agent:agent-0001",
+        "agent_graph:exploit_worker",
+        "exploit_worker: Validate SQL injection",
+        priority=95,
+        role="exploit_worker",
+        owner="agent_graph",
+        objective="Validate SQL injection with control pair",
+        next_step="Finish the worker or open a crown-chain task",
+        escalation_status="positive_needs_pivot",
+        escalation_reason="positive result needs chain/pivot decision from director",
+    )
+    branch.status = "active"
+    hint = loop._judge_replan_hint()
+    assert "positive result" in hint.lower()
+    assert "crown-chain" in hint.lower() or "post-exploit" in hint.lower()
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_envelope_restricts_child_tools():
+    reg = ToolRegistry()
+
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs):
+            return ToolResult(ok=True, summary="ok")
+
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=10)
+    agent = {
+        "id": "agent-0001",
+        "role": "exploit_worker",
+        "task": "Validate SQL injection on /search",
+        "skills": ["test_injection"],
+        "task_envelope": {"allowed_tools": ["http_request"]},
+        "result_package": {},
+    }
+    blocked = await loop._run_agent_graph_child_turn(agent, "")
+    assert blocked.ok is False
+    assert blocked.error == "child_tool_not_allowed"
 
 
 def test_agent_graph_result_creates_finish_blocking_branch():
@@ -379,8 +619,8 @@ async def test_agent_graph_unsupported_positive_finish_reforces_child_run():
         "agent_graph",
         {
             "action": "create",
-            "role": "exploit_worker",
-            "task": "Validate SQL injection on /search",
+            "role": "recon_worker",
+            "task": "Map API surface around /search",
             "skills": ["enumerate_endpoints"],
         },
     )

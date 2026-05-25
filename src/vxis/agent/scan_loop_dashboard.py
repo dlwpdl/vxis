@@ -151,6 +151,13 @@ def build_scan_dashboard(loop: Any) -> str:
                     f"  {status} {agent_id} role={role} msgs={message_count} "
                     f"runs={execution_count}: {task}"
                 )
+                envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+                expected_artifact = str(envelope.get("expected_artifact") or "").strip()
+                stop_condition = str(envelope.get("stop_condition") or "").strip()
+                if expected_artifact:
+                    lines.append(f"     contract: {expected_artifact[:80 if local_strict else 120]}")
+                if stop_condition and not local_strict:
+                    lines.append(f"     stop: {stop_condition[:80 if local_strict else 120]}")
                 executions = agent.get("executions")
                 has_successful_execution = False
                 if isinstance(executions, list) and executions:
@@ -171,6 +178,14 @@ def build_scan_dashboard(loop: Any) -> str:
                         )
                     else:
                         lines.append(f"     next: agent_graph(action=\"run\", agent_id=\"{agent_id}\")")
+                result_package = agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+                verdict_guess = str(result_package.get("verdict_guess") or "").strip()
+                if verdict_guess:
+                    lines.append(f"     worker_verdict: {verdict_guess[:30]}")
+                escalation = agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
+                escalation_reason = str(escalation.get("reason") or "").strip()
+                if escalation_reason:
+                    lines.append(f"     escalate: {escalation_reason[:80 if local_strict else 120]}")
                 result = str(agent.get("result") or "").strip()
                 if result:
                     lines.append(f"     result: {result[:80 if local_strict else 120]}")
@@ -421,4 +436,3 @@ def build_scan_dashboard(loop: Any) -> str:
 
         lines.append("═══ Use ALL your knowledge. Every finding matters. Keep digging. ═══")
         return "\n".join(lines)
-

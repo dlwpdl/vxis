@@ -469,16 +469,70 @@ class ScanLiveDisplay:
         lines: list[str] = []
         task = self._short(agent.get("task"), 82)
         result = self._short(agent.get("result"), 82)
+        envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        result_package = agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        escalation = agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
         if task:
             lines.append(f"[bold]task[/bold] {task}")
+        if envelope:
+            objective = self._short(envelope.get("objective"), 84)
+            target_surface = self._short(envelope.get("target_surface"), 24)
+            allowed_tools = ",".join(str(item) for item in list(envelope.get("allowed_tools") or [])[:4])
+            expected_artifact = self._short(envelope.get("expected_artifact"), 88)
+            stop_condition = self._short(envelope.get("stop_condition"), 88)
+            escalation_trigger = self._short(envelope.get("escalation_trigger"), 88)
+            lines.append("[bold cyan]contract[/bold cyan]")
+            if objective:
+                lines.append(f"[dim]objective:[/dim] {objective}")
+            if target_surface:
+                lines.append(f"[dim]surface:[/dim] {target_surface}")
+            if allowed_tools:
+                lines.append(f"[dim]tools:[/dim] {allowed_tools}")
+            if expected_artifact:
+                lines.append(f"[dim]expect:[/dim] {expected_artifact}")
+            if stop_condition:
+                lines.append(f"[dim]stop:[/dim] {stop_condition}")
+            if escalation_trigger:
+                lines.append(f"[dim]escalate on:[/dim] {escalation_trigger}")
         latest = self._latest_agent_execution(agent)
         if latest:
             verdict = "ok" if latest.get("ok") else "fail"
             tool = self._short(latest.get("tool") or "child", 18)
             summary = self._short(latest.get("summary"), 86)
             lines.append(f"[bold]last[/bold] {tool} {verdict}: {summary}")
+        if result_package:
+            attempted_tool = self._short(result_package.get("attempted_tool"), 18)
+            raw_evidence = self._short(result_package.get("raw_evidence_summary"), 86)
+            control_result = self._short(result_package.get("control_result"), 86)
+            delta = self._short(result_package.get("observed_delta"), 86)
+            verdict_guess = self._short(result_package.get("verdict_guess"), 42)
+            recommended = self._short(result_package.get("recommended_next_step"), 92)
+            lines.append("[bold green]artifact[/bold green]")
+            if attempted_tool:
+                lines.append(f"[dim]tool:[/dim] {attempted_tool}")
+            if raw_evidence:
+                lines.append(f"[dim]evidence:[/dim] {raw_evidence}")
+            if control_result:
+                lines.append(f"[dim]control:[/dim] {control_result}")
+            if delta:
+                lines.append(f"[dim]delta:[/dim] {delta}")
+            if verdict_guess:
+                lines.append(f"[dim]worker guess:[/dim] {verdict_guess}")
+            if recommended:
+                lines.append(f"[dim]next artifact step:[/dim] {recommended}")
         if result:
             lines.append(f"[bold]result[/bold] {result}")
+        if escalation:
+            status = self._short(escalation.get("status"), 22)
+            reason = self._short(escalation.get("reason"), 92)
+            owner = self._short(escalation.get("recommended_owner"), 24)
+            lines.append("[bold red]escalation[/bold red]")
+            if status:
+                lines.append(f"[dim]state:[/dim] {status}")
+            if reason:
+                lines.append(f"[dim]reason:[/dim] {reason}")
+            if owner:
+                lines.append(f"[dim]owner:[/dim] {owner}")
         next_step = self._agent_next_action_hint(agent)
         if next_step:
             lines.append(f"[bold cyan]next[/bold cyan] {next_step}")
@@ -723,6 +777,23 @@ class ScanLiveDisplay:
                         f"{review.get('stage', '?')} {review.get('status', '?')} "
                         f"{str(review.get('title') or '')[:52]}"
                     )
+            delegated = list(self.focus_campaign.get("delegated_workers") or [])
+            if delegated:
+                lines.append("[bold magenta]delegated workers[/bold magenta]")
+                for worker in delegated[:2]:
+                    lines.append(
+                        f"{worker.get('id', '?')} [{worker.get('role', '?')}/{worker.get('phase', '?')}] "
+                        f"{worker.get('status', '?')}"
+                    )
+                    escalation_status = str(worker.get("escalation_status") or "")
+                    escalation_reason = str(worker.get("escalation_reason") or "")[:72]
+                    next_step = str(worker.get("next_step") or "")[:72]
+                    if escalation_status:
+                        lines.append(f"[dim]escalation:[/dim] {escalation_status}")
+                    if escalation_reason:
+                        lines.append(f"[dim]why:[/dim] {escalation_reason}")
+                    if next_step:
+                        lines.append(f"[dim]next:[/dim] {next_step}")
 
         if self.blocking_branches:
             if lines:

@@ -47,6 +47,36 @@ Bookkeeping: `report_finding`, `query_findings`, `link_chain`, `think`,
 `finish_scan`. Link chains as soon as 2+ findings compose a path — chain
 intelligence drops to zero if you forget.
 
+## Delegation contract
+
+When you use `agent_graph(action="create", ...)`, create a bounded worker task.
+Always provide:
+- `role`
+- `task`
+- `objective`
+- `expected_artifact`
+- `stop_condition`
+- `escalation_trigger`
+- `skills` when you already know the likely bounded skill path
+
+Good delegated tasks are narrow proofs such as:
+- "Validate SQL injection on /search with baseline/control/payload comparison"
+- "Probe authenticated IDOR on /api/orders/{id} using the current session"
+- "Replay the authenticated session against /me and /admin, then prove or refute privilege gain"
+
+Bad delegated tasks are open-ended strategy such as:
+- "Find bugs"
+- "Own the app"
+- "Do more recon everywhere"
+
+Workers must bring back proof artifacts, not strategy prose. Use the director
+to decide pivots, chain closure, and finish conditions.
+
+If you create a worker, make the envelope concrete:
+- `expected_artifact` should name the transcript/control pair you need
+- `stop_condition` should describe exactly when the worker is done
+- `escalation_trigger` should describe when the worker must come back to you
+
 ## Evidence-driven principles
 
 - Authentication is the biggest multiplier. When a login surface exists, probe

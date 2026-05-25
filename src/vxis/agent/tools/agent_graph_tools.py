@@ -106,6 +106,9 @@ class AgentGraphNode:
     parent_id: str | None = None
     skills: list[str] = field(default_factory=list)
     skill_context: str = ""
+    task_envelope: dict[str, Any] = field(default_factory=dict)
+    result_package: dict[str, Any] = field(default_factory=dict)
+    escalation: dict[str, Any] = field(default_factory=dict)
     result: str = ""
     messages: list[AgentGraphMessage] = field(default_factory=list)
     executions: list[AgentGraphExecution] = field(default_factory=list)
@@ -197,6 +200,10 @@ def _has_supporting_successful_execution(node: AgentGraphNode, result: str) -> b
     return any(_execution_supports_result(execution, result) for execution in node.executions)
 
 
+def _join_nonempty(parts: list[str], *, sep: str = " ") -> str:
+    return sep.join(part for part in parts if str(part or "").strip()).strip()
+
+
 class AgentGraphTool:
     name = "agent_graph"
     description = (
@@ -250,6 +257,22 @@ class AgentGraphTool:
                 "type": "array",
                 "items": {"type": "string"},
                 "description": "Optional skill names expected for the worker task.",
+            },
+            "objective": {
+                "type": "string",
+                "description": "Explicit bounded objective for the worker task.",
+            },
+            "expected_artifact": {
+                "type": "string",
+                "description": "Exact proof artifact the worker must bring back.",
+            },
+            "stop_condition": {
+                "type": "string",
+                "description": "Condition that should stop the bounded worker task.",
+            },
+            "escalation_trigger": {
+                "type": "string",
+                "description": "Condition that should escalate the task back to the director.",
             },
             "include_messages": {
                 "type": "boolean",
@@ -360,6 +383,13 @@ class AgentGraphTool:
             parent_id=parent_id,
             skills=skills,
             skill_context=skill_context,
+            task_envelope=self._build_task_envelope(
+                role=role,
+                task=task,
+                message=message,
+                skills=skills,
+                explicit=self._explicit_envelope_from_kwargs(kwargs),
+            ),
         )
         self._append_message(node, sender="root", recipient=agent_id, body=message)
         self._nodes[agent_id] = node
@@ -398,6 +428,13 @@ class AgentGraphTool:
             task=node.task,
             message=message,
             skills=node.skills,
+        )
+        node.task_envelope = self._build_task_envelope(
+            role=node.role,
+            task=node.task,
+            message=message,
+            skills=node.skills,
+            explicit=self._explicit_envelope_from_kwargs(kwargs),
         )
         node.status = "running"
         node.updated_at = _now_iso()
@@ -476,6 +513,8 @@ class AgentGraphTool:
         )
         execution = self._append_execution(node, executor_result)
         node.status = "waiting"
+        node.result_package = self._build_result_package(node, execution=execution)
+        node.escalation = self._build_escalation_state(node)
         node.updated_at = _now_iso()
         self._append_message(
             node,
@@ -535,6 +574,8 @@ class AgentGraphTool:
 
         node.status = status
         node.result = result
+        node.result_package = self._finalize_result_package(node, result=result, status=status)
+        node.escalation = self._build_escalation_state(node)
         node.updated_at = _now_iso()
         self._append_message(node, sender=agent_id, recipient="root", body=result)
         return ToolResult(
@@ -657,6 +698,9 @@ class AgentGraphTool:
             "parent_id": node.parent_id,
             "skills": list(node.skills),
             "skill_context": trim_text_chars(node.skill_context, budget.max_skill_chars),
+            "task_envelope": compact_context_value(node.task_envelope, max_chars=budget.max_execution_chars),
+            "result_package": compact_context_value(node.result_package, max_chars=budget.max_execution_chars),
+            "escalation": compact_context_value(node.escalation, max_chars=budget.max_execution_chars),
             "result": trim_text_chars(node.result, budget.max_message_chars),
             "created_at": node.created_at,
             "updated_at": node.updated_at,
@@ -759,6 +803,179 @@ class AgentGraphTool:
             max_chars=self._worker_budget.max_skill_chars,
             include_defaults=bool(skills),
         )
+
+    def _build_task_envelope(
+        self,
+        *,
+        role: str,
+        task: str,
+        message: str,
+        skills: list[str],
+        explicit: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        explicit = dict(explicit or {})
+        surface = "desktop" if self._target_kind == "desktop" else "web"
+        allowed_tools = self._allowed_tools_for_role(role=role, skills=skills)
+        expected_artifact = explicit.get("expected_artifact") or self._expected_artifact_for_role(role, skills)
+        stop_condition = explicit.get("stop_condition") or self._stop_condition_for_role(role)
+        escalation_trigger = explicit.get("escalation_trigger") or self._escalation_trigger_for_role(role)
+        return {
+            "objective": trim_text_chars(explicit.get("objective") or task or message, 160),
+            "target_surface": surface,
+            "allowed_tools": allowed_tools,
+            "expected_artifact": expected_artifact,
+            "stop_condition": stop_condition,
+            "escalation_trigger": escalation_trigger,
+        }
+
+    @staticmethod
+    def _explicit_envelope_from_kwargs(kwargs: dict[str, Any]) -> dict[str, str]:
+        return {
+            "objective": trim_text_chars(kwargs.get("objective") or "", 160),
+            "expected_artifact": trim_text_chars(kwargs.get("expected_artifact") or "", 160),
+            "stop_condition": trim_text_chars(kwargs.get("stop_condition") or "", 160),
+            "escalation_trigger": trim_text_chars(kwargs.get("escalation_trigger") or "", 160),
+        }
+
+    @staticmethod
+    def _allowed_tools_for_role(*, role: str, skills: list[str]) -> list[str]:
+        tools = ["run_skill", "http_request"]
+        if role in {"recon_worker", "exploit_worker"}:
+            tools.append("browser_navigate")
+        if role in {"exploit_worker", "post_exploit_worker"}:
+            tools.append("browser_analyze_dom")
+        if skills:
+            tools.append(f"skills:{','.join(skills[:3])}")
+        return tools
+
+    @staticmethod
+    def _expected_artifact_for_role(role: str, skills: list[str]) -> str:
+        if role == "recon_worker":
+            return "surface map with concrete endpoints or auth boundaries"
+        if role == "review_worker":
+            return "adjudication note with blocker/clean/proven recommendation"
+        if role == "post_exploit_worker":
+            return "session, privilege, or data-access transcript tied to crown-jewel impact"
+        skill_hint = f" via {skills[0]}" if skills else ""
+        return f"raw proof artifact{skill_hint}: request/response transcript, control pair, or exploit delta"
+
+    @staticmethod
+    def _stop_condition_for_role(role: str) -> str:
+        if role == "recon_worker":
+            return "stop after mapping the relevant surface and naming the next proof step"
+        if role == "review_worker":
+            return "stop after classifying the evidence as proven, blocked, or clean"
+        if role == "post_exploit_worker":
+            return "stop after proving session reuse, privilege, data access, or chain closure"
+        return "stop after one bounded proof attempt yields concrete evidence or a blocker"
+
+    @staticmethod
+    def _escalation_trigger_for_role(role: str) -> str:
+        if role == "review_worker":
+            return "escalate when evidence is ambiguous or conflicts with a positive claim"
+        if role == "post_exploit_worker":
+            return "escalate after blocked pivot, ambiguous privilege boundary, or crown-jewel planning"
+        return "escalate after repeated blocked/clean runs or when a positive result needs a sharper next task"
+
+    def _build_result_package(
+        self,
+        node: AgentGraphNode,
+        *,
+        execution: AgentGraphExecution,
+    ) -> dict[str, Any]:
+        result_data = execution.data.get("result") if isinstance(execution.data.get("result"), dict) else {}
+        result_summary = str(result_data.get("summary") or execution.summary or "").strip()
+        control_text = _join_nonempty(
+            [
+                str(result_data.get("control") or ""),
+                str(result_data.get("control_payload") or ""),
+                str(result_data.get("baseline") or ""),
+            ],
+            sep=" | ",
+        )
+        delta_text = _join_nonempty(
+            [
+                str(result_data.get("evidence") or ""),
+                str(result_data.get("delta") or ""),
+                str(result_data.get("observed") or ""),
+            ],
+            sep=" | ",
+        )
+        verdict_guess = "candidate_positive" if execution.ok and _looks_like_positive_security_result(result_summary) else (
+            "blocked" if not execution.ok else "inconclusive"
+        )
+        return {
+            "attempted_tool": execution.tool,
+            "attempt_summary": trim_text_chars(execution.summary, 160),
+            "raw_evidence_summary": trim_text_chars(result_summary or execution.summary, 180),
+            "control_result": trim_text_chars(control_text, 140),
+            "observed_delta": trim_text_chars(delta_text, 160),
+            "verdict_guess": verdict_guess,
+            "recommended_next_step": trim_text_chars(self._recommended_next_step(node, execution), 180),
+        }
+
+    def _finalize_result_package(
+        self,
+        node: AgentGraphNode,
+        *,
+        result: str,
+        status: str,
+    ) -> dict[str, Any]:
+        package = dict(node.result_package or {})
+        package.update(
+            {
+                "final_status": status,
+                "final_result": trim_text_chars(result, 180),
+                "verdict_guess": "proven" if status == "finished" and _looks_like_positive_security_result(result) else (
+                    "blocked" if status == "blocked" else package.get("verdict_guess", "clean")
+                ),
+            }
+        )
+        if not package.get("recommended_next_step"):
+            package["recommended_next_step"] = trim_text_chars(self._result_next_step(result, status), 180)
+        return package
+
+    def _build_escalation_state(self, node: AgentGraphNode) -> dict[str, Any]:
+        failed_runs = sum(1 for execution in node.executions if not execution.ok)
+        reason = ""
+        status = "clear"
+        if node.status == "blocked":
+            status = "blocked"
+            reason = node.result or "worker blocked"
+        elif len(node.executions) >= self._max_child_runs:
+            status = "run_limit"
+            reason = f"worker hit child-run limit ({self._max_child_runs})"
+        elif failed_runs >= 2:
+            status = "ambiguous"
+            reason = "repeated blocked or failed child turns"
+        elif node.executions and node.executions[-1].ok and _looks_like_positive_security_result(node.result or node.executions[-1].summary):
+            status = "positive_needs_pivot"
+            reason = "positive result needs chain/pivot decision from director"
+        if status == "clear":
+            return {}
+        return {
+            "status": status,
+            "reason": trim_text_chars(reason, 160),
+            "recommended_owner": "director",
+        }
+
+    def _recommended_next_step(self, node: AgentGraphNode, execution: AgentGraphExecution) -> str:
+        if not execution.ok:
+            return "Escalate to director with blocker details or rerun a sharper bounded task"
+        summary = execution.summary.lower()
+        if _looks_like_positive_security_result(summary):
+            return "Escalate to director for chain/pivot planning, then finish with concrete impact"
+        if "clean" in summary or "no issue" in summary:
+            return "Finish as clean or redirect worker to a new surface"
+        return "Send a sharper instruction or vary the proof surface before finish"
+
+    @staticmethod
+    def _result_next_step(result: str, status: str) -> str:
+        if status == "blocked":
+            return "Director should re-scope or close this task based on the blocker"
+        if _looks_like_positive_security_result(result):
+            return "Open a post-exploit or review task before allowing finish"
+        return "Record the result and close or redirect this worker"
 
     @staticmethod
     def _merge_skill_names(*groups: list[str]) -> list[str]:

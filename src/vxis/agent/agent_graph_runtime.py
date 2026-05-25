@@ -63,6 +63,12 @@ def agent_graph_director_brief(
             latest_tool = str(latest.get("tool") or "child")
             latest_ok = "ok" if latest.get("ok") else "fail"
             latest_summary = f"{latest_tool} {latest_ok}: {str(latest.get('summary') or '')}"
+        envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        expected = str(envelope.get("expected_artifact") or "").strip()
+        result_package = agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        verdict_guess = str(result_package.get("verdict_guess") or "").strip()
+        escalation = agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
+        escalation_reason = str(escalation.get("reason") or "").strip()
         result = str(agent.get("result") or "").strip()
         next_step = agent_graph_director_next_step(agent)
         skill_hint = f" skills={','.join(skills[:3])}" if skills else ""
@@ -71,6 +77,12 @@ def agent_graph_director_brief(
             f"  {agent_id} {status} {role}{skill_hint}: "
             f"{task[:70]} | evidence={evidence[:70]} | director_next={next_step}"
         )
+        if expected:
+            lines.append(f"     contract: expect {expected[:width]}")
+        if verdict_guess:
+            lines.append(f"     worker_verdict: {verdict_guess[:width]}")
+        if escalation_reason:
+            lines.append(f"     escalate: {escalation_reason[:width]}")
         skill_context = str(agent.get("skill_context") or "").strip()
         if skill_context and not local_strict:
             first_action = next(

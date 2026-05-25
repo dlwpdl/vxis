@@ -150,6 +150,36 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
         normalized = dict(args)
         if name == "shell_exec" and not normalized.get("command") and normalized.get("cmd"):
             normalized["command"] = normalized["cmd"]
+        if name == "agent_graph" and str(normalized.get("action") or "").strip().lower() == "create":
+            role = str(normalized.get("role") or "recon_worker").strip().lower() or "recon_worker"
+            task = str(normalized.get("task") or normalized.get("message") or "").strip()
+            declared_skills = normalized.get("skills")
+            skills = (
+                [str(item).strip() for item in declared_skills if str(item).strip()]
+                if isinstance(declared_skills, list)
+                else []
+            )
+            if task:
+                normalized.setdefault("objective", task[:160])
+            if not normalized.get("expected_artifact"):
+                if role == "recon_worker":
+                    normalized["expected_artifact"] = "surface map with concrete routes, auth boundaries, or parameter shapes"
+                elif role == "post_exploit_worker":
+                    normalized["expected_artifact"] = "session, privilege, or data-access transcript tied to crown-jewel impact"
+                elif skills:
+                    normalized["expected_artifact"] = (
+                        f"raw proof artifact via {skills[0]}: request/response transcript, control pair, or exploit delta"
+                    )
+                else:
+                    normalized["expected_artifact"] = "raw proof artifact: transcript, control pair, or concrete blocker"
+            normalized.setdefault(
+                "stop_condition",
+                "stop after one bounded proof step yields concrete evidence or a blocker",
+            )
+            normalized.setdefault(
+                "escalation_trigger",
+                "escalate after ambiguous evidence, blocked execution, or a positive result that needs pivot planning",
+            )
         return normalized
 
     @classmethod
@@ -303,4 +333,3 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
         except Exception:
             logger.debug("director: failed to parse response: %s", response[:200])
         return None
-

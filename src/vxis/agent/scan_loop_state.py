@@ -260,6 +260,9 @@ class BranchState:
     objective: str = ""
     next_step: str = ""
     blocker: str = ""
+    escalation_status: str = ""
+    escalation_reason: str = ""
+    escalation_owner: str = ""
     crown_jewel: str = ""
     evidence: str = ""
     status: str = "open"
@@ -286,6 +289,9 @@ class BranchState:
             "objective": self.objective,
             "next_step": self.next_step,
             "blocker": self.blocker,
+            "escalation_status": self.escalation_status,
+            "escalation_reason": self.escalation_reason,
+            "escalation_owner": self.escalation_owner,
             "crown_jewel": self.crown_jewel,
             "evidence": self.evidence,
             "status": self.status,
@@ -533,6 +539,9 @@ class ScanLoopState:
         objective: str = "",
         next_step: str = "",
         blocker: str = "",
+        escalation_status: str = "",
+        escalation_reason: str = "",
+        escalation_owner: str = "",
         crown_jewel: str = "",
         evidence: str = "",
         watch_terms: list[str] | None = None,
@@ -560,6 +569,9 @@ class ScanLoopState:
                 objective=objective,
                 next_step=next_step,
                 blocker=blocker,
+                escalation_status=escalation_status,
+                escalation_reason=escalation_reason,
+                escalation_owner=escalation_owner,
                 crown_jewel=crown_jewel,
                 evidence=evidence,
                 watch_terms=list(watch_terms or []),
@@ -595,6 +607,12 @@ class ScanLoopState:
             branch.next_step = next_step
         if blocker:
             branch.blocker = blocker
+        if escalation_status:
+            branch.escalation_status = escalation_status
+        if escalation_reason:
+            branch.escalation_reason = escalation_reason
+        if escalation_owner:
+            branch.escalation_owner = escalation_owner
         if crown_jewel:
             branch.crown_jewel = crown_jewel
         if evidence and evidence not in branch.evidence:
