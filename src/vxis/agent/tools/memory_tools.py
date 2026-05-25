@@ -56,6 +56,29 @@ def _finding_memory_key(finding_type: str, affected_component: str) -> str:
     return f"{_canonical_finding_type(finding_type)}::{_base_component(affected_component)}"
 
 
+def _is_soft_refutation_reason(reasoning: str) -> bool:
+    blob = str(reasoning or "").lower()
+    soft_markers = (
+        "thin_evidence",
+        "incomplete high-severity report contract",
+        "poc lacks attempt/result transcript",
+        "gather raw request/response transcript",
+        "missing structured poc",
+    )
+    return any(marker in blob for marker in soft_markers)
+
+
+def _filtered_refuted_patterns(items: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for item in list(items or []):
+        if not isinstance(item, dict):
+            continue
+        if _is_soft_refutation_reason(str(item.get("reasoning", ""))):
+            continue
+        filtered.append(item)
+    return filtered
+
+
 def _severity_rank(severity: str) -> int:
     return {
         "critical": 5,
@@ -383,6 +406,8 @@ def record_scan_result(
         if isinstance(item, dict)
     }
     for item in refuted_findings or []:
+        if _is_soft_refutation_reason(str(item.get("reasoning", ""))):
+            continue
         pair = (
             str(item.get("finding_type", "")),
             str(item.get("affected_component", "")),
@@ -464,7 +489,7 @@ def load_target_memory_profile(target: str) -> dict[str, Any]:
         "prior_scan_count": len(scans),
         "known_findings": list(entry.get("known_findings") or [])[:30],
         "aggregated_findings": list(entry.get("aggregated_findings") or [])[:50],
-        "refuted_patterns": list(entry.get("refuted_patterns") or [])[:20],
+        "refuted_patterns": _filtered_refuted_patterns(list(entry.get("refuted_patterns") or []))[:20],
         "successful_tactics": list(entry.get("successful_tactics") or [])[:20],
         "branch_leads": list(entry.get("branch_leads") or [])[:12],
         "last_scan": scans[-1] if scans else None,
@@ -541,7 +566,7 @@ class QueryScanMemoryTool:
             prior_scans = len(entry.get("scans", []))
             exact_findings = entry.get("known_findings", [])
             aggregated_findings = entry.get("aggregated_findings", [])
-            refuted_patterns = entry.get("refuted_patterns", [])
+            refuted_patterns = _filtered_refuted_patterns(entry.get("refuted_patterns", []))
             successful_tactics = entry.get("successful_tactics", [])
             branch_leads = entry.get("branch_leads", [])
 

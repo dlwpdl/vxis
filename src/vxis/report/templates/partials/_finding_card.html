@@ -87,6 +87,12 @@
     <div>{{ finding.technical_analysis | bilingual | safe }}</div>
     {% endif %}
 
+    {% set doctrine = finding.technical_analysis | doctrine_excerpt or finding.poc_description | doctrine_excerpt %}
+    {% if doctrine %}
+    <div class="finding-section-title"><span class="en">Attack Surface Rationale</span><span class="ko">공격 표면 근거</span></div>
+    <div>{{ doctrine | bilingual | safe }}</div>
+    {% endif %}
+
     {% if finding.poc_description or finding.poc_script_code %}
     <div class="finding-section-title"><span class="en">Proof of Concept</span><span class="ko">개념 증명</span></div>
     {% if finding.poc_description %}

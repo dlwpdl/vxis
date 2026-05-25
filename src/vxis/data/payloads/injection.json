@@ -2,6 +2,42 @@
   "schema_version": 1,
   "skill": "test_injection",
   "description": "SQLi/XSS/SSTI/CMDi payloads with round rotation. Round 1=classic, 2=blind+time, 3=WAF bypass+polyglot.",
+  "datasets": {
+    "reflective_params": [
+      "q", "query", "search", "term", "keyword", "s", "message", "msg",
+      "comment", "bio", "name", "title", "return", "returnurl", "redirect",
+      "next", "continue", "callback"
+    ],
+    "auth_params": [
+      "username", "user", "email", "login", "account", "password", "pass", "token"
+    ],
+    "query_params": [
+      "filter", "where", "sort", "order", "search", "query", "graphql", "selector"
+    ],
+    "doctrine": [
+      {
+        "family": "nosql",
+        "attack_surface": "JSON filters, bracket notation, login/search/filter/graphql variables, raw ODM passthrough",
+        "high_value_targets": "Authentication, password reset, admin search, GraphQL filter inputs",
+        "validation": "Prefer status/body/redirect differentials or auth bypass over generic 500s. Look for operator pass-through and boolean deltas.",
+        "fingerprint": "MongoError, CastError, ValidationError, $ne/$regex behavior, GraphQL variable objects"
+      },
+      {
+        "family": "ssti",
+        "attack_surface": "Template preview/render endpoints, email/report generation, server-side HTML customization",
+        "high_value_targets": "Template editors, report generators, server-rendered previews, notification templates",
+        "validation": "Use engine fingerprint probes first. Prefer 49-style arithmetic or explicit runtime gadgets over generic reflection.",
+        "fingerprint": "{{7*7}} Jinja/Twig/Nunjucks, ${7*7} SpEL/Freemarker/Velocity, <%=7*7%> ERB/EJS"
+      },
+      {
+        "family": "header_injection",
+        "attack_surface": "Location, Set-Cookie, Refresh, Content-Disposition, Host/X-Forwarded-* trust boundaries",
+        "high_value_targets": "Password reset, redirects, cache layers, response headers influenced by query or forwarded headers",
+        "validation": "Look for injected response headers or redirect/cookie poisoning; a bare 500 is weak evidence.",
+        "fingerprint": "CRLF, response splitting, cache poisoning, host-header confusion"
+      }
+    ]
+  },
   "rounds": {
     "1": [
       {

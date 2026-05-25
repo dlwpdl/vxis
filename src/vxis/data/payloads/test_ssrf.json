@@ -3,6 +3,15 @@
   "skill": "test_ssrf",
   "description": "ADR-007 Phase 3-9: externalized datasets from test_ssrf.py",
   "datasets": {
+    "doctrine": [
+      {
+        "family": "ssrf",
+        "attack_surface": "URL fetchers, redirects, callbacks, webhooks, import/proxy/image loaders, file readers",
+        "high_value_targets": "Cloud metadata, internal admin panels, redis/smtp/gopher services, local file reads",
+        "validation": "Prefer explicit metadata/internal-file markers or authenticated internal reachability. Pure size diffs are weaker and should stay tentative.",
+        "fingerprint": "metadata hosts, file://, gopher://, dict://, localhost/private-address bypass forms"
+      }
+    ],
     "ssrf_payloads": [
       {
         "payload": "http://127.0.0.1/",
@@ -117,6 +126,16 @@
       "file",
       "page",
       "callback"
+    ],
+    "high_signal_params": [
+      "url",
+      "uri",
+      "src",
+      "href",
+      "redirect",
+      "next",
+      "callback",
+      "webhook"
     ]
   }
 }

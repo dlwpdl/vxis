@@ -68,6 +68,55 @@ def test_record_scan_result_persists_target_memory_profile(tmp_path, monkeypatch
     assert target_entry["scans"][0]["review_history_tail"][0]["stage"] == "verifier"
 
 
+def test_record_scan_result_skips_soft_refutation_reasons(tmp_path, monkeypatch) -> None:
+    kb_path = tmp_path / "scan_kb.json"
+    monkeypatch.setattr(memory_tools, "_KB_PATH", kb_path)
+
+    memory_tools.record_scan_result(
+        target="http://localhost:3000",
+        findings=[],
+        refuted_findings=[
+            {
+                "finding_type": "sql_injection",
+                "affected_component": "/rest/user/login",
+                "title": "SQLi on login",
+                "reasoning": "verify_finding: REFUTED (high) — incomplete high-severity report contract",
+            }
+        ],
+    )
+
+    profile = memory_tools.load_target_memory_profile("http://localhost:3000")
+    assert profile["refuted_patterns"] == []
+
+
+def test_load_target_memory_profile_filters_legacy_soft_refutations(tmp_path, monkeypatch) -> None:
+    kb_path = tmp_path / "scan_kb.json"
+    monkeypatch.setattr(memory_tools, "_KB_PATH", kb_path)
+    kb_path.write_text(json.dumps({
+        "targets": {
+            "http://localhost:3000": {
+                "refuted_patterns": [
+                    {
+                        "finding_type": "sql_injection",
+                        "affected_component": "/rest/user/login",
+                        "reasoning": "verify_finding: REFUTED (high) — incomplete high-severity report contract",
+                    },
+                    {
+                        "finding_type": "error_oracle",
+                        "affected_component": "/api/foo",
+                        "reasoning": "Generic 500 page only.",
+                    },
+                ],
+                "scans": [],
+            }
+        }
+    }), encoding="utf-8")
+
+    profile = memory_tools.load_target_memory_profile("http://localhost:3000")
+    assert len(profile["refuted_patterns"]) == 1
+    assert profile["refuted_patterns"][0]["finding_type"] == "error_oracle"
+
+
 def test_record_scan_result_aggregates_same_target_findings_across_runs(tmp_path, monkeypatch) -> None:
     kb_path = tmp_path / "scan_kb.json"
     monkeypatch.setattr(memory_tools, "_KB_PATH", kb_path)

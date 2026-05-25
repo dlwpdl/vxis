@@ -6,10 +6,10 @@ from typing import Any
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 logger = logging.getLogger(__name__)
-_REFLECTIVE_PARAM_HINTS = (
-    "q", "query", "search", "term", "keyword", "s", "message", "msg",
-    "return", "returnurl", "redirect", "next", "continue", "callback",
-)
+from ._payload_loader import load_skill_dataset as _load_ds
+
+_REFLECTIVE_PARAM_HINTS = tuple(_load_ds("xss", "reflective_params"))
+_XSS_DOCTRINE = list(_load_ds("xss", "doctrine"))
 
 
 def _fallback_params_for_url(url: str) -> list[str]:
@@ -60,6 +60,29 @@ def _select_target_params(
 
     synthetic_order = _fallback_params_for_url(url)
     return synthetic_order[:limit], {}, parsed
+
+
+def _doctrine_rows_for_param(url: str, param_name: str) -> list[dict[str, str]]:
+    lower = f"{url} {param_name}".lower()
+    if any(token in lower for token in _REFLECTIVE_PARAM_HINTS) or any(
+        token in lower for token in ("hash", "fragment", "comment", "bio", "displayname", "preview", "render")
+    ):
+        return list(_XSS_DOCTRINE)
+    return []
+
+
+def _xss_validation_hint(context: str, payload: str) -> str:
+    if context in {"href", "proto", "data_url", "srcdoc", "formaction", "xlink"}:
+        return "Executable URL-like context; stronger than plain reflection."
+    if context in {"attribute_break", "event", "svg", "svg_script", "svg_animate"}:
+        return "HTML/event context with likely executable sink."
+    if context in {"dom_hash", "dom_hash_img", "dom_js_proto"}:
+        return "Likely DOM-driven sink; confirm in browser/JS context if available."
+    if context in {"js_string", "template_literal"}:
+        return "JavaScript string/literal context; verify quote-breaking/execution path."
+    if payload.lower().startswith("javascript:") or "onerror=" in payload.lower() or "onload=" in payload.lower():
+        return "Executable event/protocol payload reflected."
+    return "Reflection observed; confirm execution context before escalating."
 
 
 async def execute(url: str, param_name: str | None = None, round: int = 1,
@@ -123,12 +146,16 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
                     continue
 
                 body = r.text
+                doctrine_rows = _doctrine_rows_for_param(url, target_param)
                 if p["payload"].lower() in body.lower():
                     findings.append({
                         "type": f"xss_{p['context']}",
                         "payload": p["payload"],
                         "param": target_param,
-                        "evidence": f"Payload reflected unescaped in response (status {r.status})",
+                        "evidence": (
+                            f"Payload reflected unescaped in response (status {r.status}). "
+                            f"{_xss_validation_hint(p['context'], p['payload'])}"
+                        ),
                         "response_preview": body[:300],
                         "control": {
                             "baseline_status": baseline_status,
@@ -139,6 +166,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
                             "payload_preview": body[:180],
                         },
                         "severity": "high",
+                        "doctrine": doctrine_rows,
                     })
                     logger.info("XSS found: %s on param %s", p["context"], target_param)
                     return
@@ -151,6 +179,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
                     "baseline_status": baseline_status,
                     "baseline_size": baseline_size,
                     "response_preview": body[:180],
+                    "doctrine_families": [row.get("family", "") for row in doctrine_rows],
                 })
 
     await asyncio.gather(*[test_payload(p) for p in _payloads])
@@ -167,6 +196,13 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
     return {
         "vulnerable": len(unique) > 0,
         "findings": unique,
+        "surface_hints": [
+            {
+                "param": param,
+                "doctrine": _doctrine_rows_for_param(url, param),
+            }
+            for param in target_params
+        ],
         "baseline": {
             "status": baseline_status,
             "size": baseline_size,

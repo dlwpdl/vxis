@@ -562,6 +562,19 @@ class TestFindingCardEvidence:
         html = make_generator().render_html(make_report_data(findings=[finding]))
         assert "<!DOCTYPE html>" in html
 
+    def test_doctrine_excerpt_renders_in_finding_card(self):
+        finding = make_finding(
+            id="f-doctrine",
+            technical_analysis=(
+                "The payload changed response semantics. "
+                "Surface doctrine: login and filter params are high signal for auth and NoSQL-style boundary shifts."
+            ),
+            poc_description="Preferred validation: compare baseline and auth-boundary changes.",
+        )
+        html = make_generator().render_html(make_report_data(findings=[finding]))
+        assert "Attack Surface Rationale" in html
+        assert "login and filter params are high signal" in html
+
 
 # ---------------------------------------------------------------------------
 # Template: attestation has severity counts

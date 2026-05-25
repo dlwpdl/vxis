@@ -54,6 +54,24 @@ _CONTROL_MARKERS = (
     "after:",
 )
 
+_STRONG_XSS_MARKERS = (
+    "<script",
+    "onerror=",
+    "onload=",
+    "javascript:",
+    "svg/onload",
+    "alert(",
+)
+
+_STRONG_SSRF_MARKERS = (
+    "169.254.169.254",
+    "metadata.google.internal",
+    "ami-id",
+    "instance-id",
+    "latest/meta-data",
+    "internal_response",
+)
+
 
 _REFUTER_SYSTEM_PROMPT = """\
 You are a senior pentester adjudicating a claimed vulnerability finding.
@@ -174,12 +192,73 @@ def _finding_type_needs_control(finding_type: str) -> bool:
     )
 
 
+def _has_doctrine_text(blob: str) -> bool:
+    lower = str(blob or "").lower()
+    return "surface doctrine:" in lower or "preferred validation:" in lower
+
+
+def _doctrine_flags(blob: str) -> set[str]:
+    lower = str(blob or "").lower()
+    flags: set[str] = set()
+    if "size-only delta" in lower or "size-only deltas" in lower:
+        flags.add("size_only_delta")
+    if "plain echo" in lower:
+        flags.add("plain_echo")
+    if "auth boundary change" in lower:
+        flags.add("auth_boundary_change")
+    if "internal markers" in lower or "metadata content" in lower:
+        flags.add("prefer_internal_markers")
+    if "executable reflection" in lower:
+        flags.add("prefer_executable_reflection")
+    return flags
+
+
+def _has_executable_xss_signal(blob: str) -> bool:
+    lower = str(blob or "").lower()
+    return any(marker in lower for marker in _STRONG_XSS_MARKERS)
+
+
+def _has_strong_ssrf_signal(blob: str) -> bool:
+    lower = str(blob or "").lower()
+    return any(marker in lower for marker in _STRONG_SSRF_MARKERS)
+
+
 def _normalize_poc_blob(text: str) -> str:
     blob = str(text or "").strip()
     if not blob:
         return ""
     blob = re.sub(r"\r\n?", "\n", blob)
     return blob[:4000]
+
+
+def _looks_like_thin_claim_only(evidence: str, technical_analysis: str, poc_description: str, poc_script_code: str) -> bool:
+    evidence_blob = str(evidence or "").strip()
+    combined = "\n".join(
+        str(part or "")
+        for part in (technical_analysis, poc_description, poc_script_code)
+        if str(part or "").strip()
+    ).strip()
+    if not evidence_blob:
+        return True
+    if _looks_like_http_exchange(evidence_blob) or _has_observed_result(evidence_blob) or _has_control_signal(evidence_blob):
+        return False
+    if combined and (
+        _looks_like_http_exchange(combined)
+        or _has_observed_result(combined)
+        or _has_control_signal(combined)
+    ):
+        return False
+    short_evidence = len(evidence_blob) < 280
+    generic_markers = (
+        "authentication bypass",
+        "response 200",
+        "admin access",
+        "valid user token",
+        "sensitive file exposed",
+        "sql injection",
+        "idor",
+    )
+    return short_evidence and any(marker in evidence_blob.lower() for marker in generic_markers)
 
 
 def _looks_like_binary_only_evidence(blob: str) -> bool:
@@ -277,6 +356,18 @@ class VerifyFindingTool:
                 error="missing_fields",
             )
 
+        if _looks_like_thin_claim_only(evidence, technical_analysis, poc_description, poc_script_code):
+            return ToolResult(
+                ok=False,
+                summary="verify_finding BLOCKED — gather raw request/response transcript or control evidence first",
+                error="thin_evidence",
+                data={
+                    "blocked": True,
+                    "reason": "thin_evidence",
+                    "hint": "Provide HTTP transcript, payload/control pair, or observed response bytes before calling verify_finding.",
+                },
+            )
+
         if finding_type.lower() in {"misconfiguration", "information_disclosure"} and _looks_like_binary_only_evidence(
             "\n".join(part for part in (evidence, technical_analysis, poc_script_code) if part)
         ):
@@ -327,6 +418,100 @@ class VerifyFindingTool:
                     summary="verify_finding: REFUTED (high) — PoC lacks attempt/result transcript",
                 )
             combined = "\n".join([technical_analysis, poc_description, poc_script_code])
+            doctrine_flags = _doctrine_flags(combined)
+            if "plain_echo" in doctrine_flags and "xss" in finding_type.lower() and not _has_executable_xss_signal(
+                "\n".join([combined, evidence])
+            ):
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "verdict": "UNCONFIRMED",
+                        "confidence": "medium",
+                        "reasoning": "Doctrine for this XSS surface requires executable reflection, but the current evidence only shows plain reflected content.",
+                        "finding_type": finding_type,
+                        "affected_component": component,
+                        "used_stronger_model": False,
+                        "preflight_blocked": True,
+                    },
+                    summary="verify_finding: UNCONFIRMED (medium) — reflection without executable XSS proof",
+                )
+            if (
+                {"size_only_delta", "prefer_internal_markers"} & doctrine_flags
+                and "ssrf" in finding_type.lower()
+                and not _has_strong_ssrf_signal("\n".join([combined, evidence]))
+            ):
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "verdict": "UNCONFIRMED",
+                        "confidence": "medium",
+                        "reasoning": "Doctrine for this SSRF surface says size-only deltas are weak without internal markers or metadata content, and that stronger proof is not present here.",
+                        "finding_type": finding_type,
+                        "affected_component": component,
+                        "used_stronger_model": False,
+                        "preflight_blocked": True,
+                    },
+                    summary="verify_finding: UNCONFIRMED (medium) — SSRF lacks strong internal marker",
+                )
+            if (
+                "auth_boundary_change" in doctrine_flags
+                and any(token in finding_type.lower() for token in ("nosql", "auth", "injection"))
+                and not _has_control_signal(combined)
+            ):
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "verdict": "UNCONFIRMED",
+                        "confidence": "medium",
+                        "reasoning": "Doctrine for this auth-oriented injection requires a clear baseline-to-auth-boundary change, but no explicit control comparison is recorded.",
+                        "finding_type": finding_type,
+                        "affected_component": component,
+                        "used_stronger_model": False,
+                        "preflight_blocked": True,
+                    },
+                    summary="verify_finding: UNCONFIRMED (medium) — doctrine expects auth-boundary control evidence",
+                )
+            if (
+                "header" in finding_type.lower()
+                and _has_doctrine_text(combined)
+                and "set-cookie:" not in "\n".join([combined, evidence]).lower()
+                and "location:" not in "\n".join([combined, evidence]).lower()
+                and "refresh:" not in "\n".join([combined, evidence]).lower()
+            ):
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "verdict": "UNCONFIRMED",
+                        "confidence": "medium",
+                        "reasoning": "Header-injection doctrine expects a concrete poisoned response header such as Set-Cookie, Location, or Refresh, but the current evidence does not show one.",
+                        "finding_type": finding_type,
+                        "affected_component": component,
+                        "used_stronger_model": False,
+                        "preflight_blocked": True,
+                    },
+                    summary="verify_finding: UNCONFIRMED (medium) — no poisoned response header shown",
+                )
+            if (
+                "ssti" in finding_type.lower()
+                and _has_doctrine_text(combined)
+                and not any(
+                    token in "\n".join([poc_script_code, evidence]).lower()
+                    for token in ("49", "jinja", "twig", "freemarker", "${7*7}", "{{7*7}}")
+                )
+            ):
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "verdict": "UNCONFIRMED",
+                        "confidence": "medium",
+                        "reasoning": "SSTI doctrine expects an engine- or evaluation-specific rendering signal, but the current evidence does not show one.",
+                        "finding_type": finding_type,
+                        "affected_component": component,
+                        "used_stronger_model": False,
+                        "preflight_blocked": True,
+                    },
+                    summary="verify_finding: UNCONFIRMED (medium) — no template evaluation signal shown",
+                )
             if _finding_type_needs_control(finding_type) and not _has_control_signal(combined):
                 return ToolResult(
                     ok=True,

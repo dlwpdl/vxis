@@ -2,6 +2,22 @@
   "schema_version": 1,
   "skill": "test_xss",
   "description": "XSS payloads with round rotation. Round 1=classic/reflected, 2=filter bypass (case/whitespace/encoding), 3=polyglot+DOM+mXSS+CSS+data-URL.",
+  "datasets": {
+    "doctrine": [
+      {
+        "family": "xss",
+        "attack_surface": "Search/query surfaces, reflected messages, redirect parameters, DOM sinks, rich text/profile/comment fields",
+        "high_value_targets": "Search results, preview panes, redirect/return flows, DOM hash/query sinks, profile/comment renderers",
+        "validation": "Plain reflection is a starting point, not full proof. Prefer context-aware reflection, executable event handlers, javascript:/data: contexts, or DOM sink evidence.",
+        "fingerprint": "attribute/html/js-string/template-literal/proto/css/dom-hash contexts"
+      }
+    ],
+    "reflective_params": [
+      "q", "query", "search", "term", "keyword", "s", "message", "msg",
+      "return", "returnurl", "redirect", "next", "continue", "callback",
+      "comment", "bio", "displayname"
+    ]
+  },
   "rounds": {
     "1": [
       {

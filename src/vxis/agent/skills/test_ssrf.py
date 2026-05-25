@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 SSRF_PAYLOADS = _load_ds("test_ssrf", "ssrf_payloads")  # ADR-007 Phase 3-9 — data in data/payloads/test_ssrf.json
 
 URL_PARAMS = _load_ds("test_ssrf", "url_params")  # ADR-007 Phase 3-9 — data in data/payloads/test_ssrf.json
+HIGH_SIGNAL_PARAMS = tuple(_load_ds("test_ssrf", "high_signal_params"))
+_SSRF_DOCTRINE = list(_load_ds("test_ssrf", "doctrine"))
 
 _SSRF_FALLBACK_PARAMS = ("url", "uri", "dest", "redirect", "next", "return", "callback")
 
@@ -60,7 +62,7 @@ def _select_target_params(
         fallback: list[str] = []
         for key in params.keys():
             lower = key.lower()
-            if any(token in lower for token in _SSRF_FALLBACK_PARAMS):
+            if any(token in lower for token in HIGH_SIGNAL_PARAMS):
                 hinted.append(key)
             else:
                 fallback.append(key)
@@ -68,6 +70,13 @@ def _select_target_params(
         return ordered[:limit], params, parsed
 
     return _fallback_params_for_url(url)[:limit], {}, parsed
+
+
+def _doctrine_rows_for_param(url: str, param_name: str) -> list[dict[str, str]]:
+    lower = f"{url} {param_name}".lower()
+    if any(token in lower for token in ("url", "uri", "src", "redirect", "next", "callback", "webhook", "proxy", "fetch", "load", "import", "file")):
+        return list(_SSRF_DOCTRINE)
+    return []
 
 
 async def execute(url: str, param_name: str | None = None, round: int = 1, **kwargs: Any) -> dict[str, Any]:
@@ -118,6 +127,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
                 new_params[target_param] = [p["payload"]]
                 query = urlencode({k: v[0] for k, v in new_params.items()})
                 test_url = urlunparse(parsed._replace(query=query))
+                doctrine_rows = _doctrine_rows_for_param(url, target_param)
 
                 try:
                     r = await _session.request("GET", test_url)
@@ -145,6 +155,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
                             "payload_preview": r.text[:180],
                         },
                         "severity": "critical",
+                        "doctrine": doctrine_rows,
                     })
                     logger.info("SSRF found: %s via %s", p["desc"], target_param)
                     return
@@ -166,6 +177,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
                             "payload_preview": r.text[:180],
                         },
                         "severity": "high",
+                        "doctrine": doctrine_rows,
                     })
                 control_evidence.append({
                     "payload": p["payload"],
@@ -176,6 +188,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
                     "baseline_status": baseline_status,
                     "baseline_size": baseline_size,
                     "response_preview": r.text[:180],
+                    "doctrine_families": [row.get("family", "") for row in doctrine_rows],
                 })
 
     await asyncio.gather(*[test_payload(p) for p in payloads])
@@ -192,6 +205,13 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
     return {
         "vulnerable": len(unique) > 0,
         "findings": unique,
+        "surface_hints": [
+            {
+                "param": param,
+                "doctrine": _doctrine_rows_for_param(url, param),
+            }
+            for param in target_params
+        ],
         "baseline": {
             "status": baseline_status,
             "size": baseline_size,

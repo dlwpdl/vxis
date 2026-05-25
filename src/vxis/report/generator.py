@@ -246,6 +246,25 @@ def _filter_severity_badge(severity: str) -> str:
     return f'<span class="severity-badge" style="background-color:{colour};">{label}</span>'
 
 
+def _filter_doctrine_excerpt(*parts: str) -> str:
+    """Extract compact doctrine rationale from technical/PoC text.
+
+    The scan loop stores Strix-style doctrine hints inline as
+    `Surface doctrine:` and `Preferred validation:` sentences. Reports and TUI
+    can surface that guidance without adding a new model field by extracting
+    the first matching excerpt from the passed strings.
+    """
+    for raw in parts:
+        text = str(raw or "")
+        for marker in ("Surface doctrine:", "Preferred validation:"):
+            idx = text.find(marker)
+            if idx >= 0:
+                excerpt = text[idx + len(marker):].strip()
+                if excerpt:
+                    return excerpt[:240]
+    return ""
+
+
 class ReportGenerator:
     """Jinja2-based HTML report generator for VXIS security assessments.
 
@@ -268,6 +287,7 @@ class ReportGenerator:
         self._env.filters["severity_color"] = _filter_severity_color
         self._env.filters["severity_badge"] = _filter_severity_badge
         self._env.filters["bilingual"] = _filter_bilingual
+        self._env.filters["doctrine_excerpt"] = _filter_doctrine_excerpt
 
         # Register chart helpers as global functions accessible from templates
         self._env.globals["severity_donut_svg"] = severity_donut_svg

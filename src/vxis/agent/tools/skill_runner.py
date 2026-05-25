@@ -36,11 +36,30 @@ _skill_cache: dict[str, dict[str, Any]] = {}
 # we care about skill diversity, not args identity.
 _skills_ever_called: set[str] = set()
 
+_SKILL_ALIASES: dict[str, str] = {
+    "auth_bypass": "attempt_auth",
+    "sqli_bypass": "attempt_auth",
+    "sqli_test": "test_injection",
+    "exploit_sqli": "test_injection",
+    "test_sqli": "test_injection",
+    "exploit_xss": "test_xss",
+    "exploit_ssrf": "test_ssrf",
+    "exploit_idor": "test_idor",
+    "exploit_auth": "attempt_auth",
+    "enumerate_auth_surface": "enumerate_endpoints",
+}
+
 
 def _reset_cache_for_tests() -> None:
     """Clear the skill cache — production code should not call this."""
     _skill_cache.clear()
     _skills_ever_called.clear()
+
+
+def _normalize_skill_name(skill_name: str) -> str:
+    """Map common LLM-improvised aliases onto registered VXIS skills."""
+    normalized = str(skill_name or "").strip().lower()
+    return _SKILL_ALIASES.get(normalized, normalized)
 
 
 class RunSkillTool:
@@ -91,8 +110,9 @@ class RunSkillTool:
     }
 
     async def run(self, **kwargs: Any) -> ToolResult:
-        skill_name = str(kwargs.get("skill", "")).strip()
-        target_url = str(kwargs.get("target_url", "")).strip()
+        requested_skill = str(kwargs.get("skill", "")).strip()
+        skill_name = _normalize_skill_name(requested_skill)
+        target_url = str(kwargs.get("target_url", kwargs.get("target", "")) or "").strip()
         params = kwargs.get("params", {}) or {}
 
         if not skill_name or not target_url:
@@ -111,7 +131,7 @@ class RunSkillTool:
             available = ", ".join(SKILL_REGISTRY.keys())
             return ToolResult(
                 ok=False,
-                summary=f"run_skill: unknown skill '{skill_name}'. Available: {available}",
+                summary=f"run_skill: unknown skill '{requested_skill}'. Available: {available}",
                 error="unknown_skill",
             )
 
