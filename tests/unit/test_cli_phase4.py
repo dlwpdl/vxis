@@ -7,11 +7,24 @@ or scan execution is performed.
 
 from __future__ import annotations
 
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from vxis.cli.main import app
 
 runner = CliRunner()
+
+
+def command_option_names(*path: str) -> set[str]:
+    """Return registered option aliases without depending on Rich ANSI output."""
+    command = get_command(app)
+    for part in path:
+        command = command.commands[part]
+    names: set[str] = set()
+    for param in command.params:
+        names.update(getattr(param, "opts", ()) or ())
+        names.update(getattr(param, "secondary_opts", ()) or ())
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -46,9 +59,7 @@ class TestClientGroupHelp:
 class TestClientAddHelp:
     def test_add_exits_zero(self) -> None:
         result = runner.invoke(app, ["client", "add", "--help"])
-        assert result.exit_code == 0, (
-            f"Expected exit code 0.\nOutput:\n{result.output}"
-        )
+        assert result.exit_code == 0, f"Expected exit code 0.\nOutput:\n{result.output}"
 
     def test_add_shows_name_argument(self) -> None:
         result = runner.invoke(app, ["client", "add", "--help"])
@@ -65,25 +76,15 @@ class TestClientAddHelp:
         )
 
     def test_add_shows_industry_option(self) -> None:
-        result = runner.invoke(app, ["client", "add", "--help"])
-        assert result.exit_code == 0
-        assert "--industry" in result.output or "-i" in result.output, (
-            f"--industry option not found in help output:\n{result.output}"
-        )
+        names = command_option_names("client", "add")
+        assert "--industry" in names
+        assert "-i" in names
 
     def test_add_shows_contact_option(self) -> None:
-        result = runner.invoke(app, ["client", "add", "--help"])
-        assert result.exit_code == 0
-        assert "--contact" in result.output, (
-            f"--contact option not found in help output:\n{result.output}"
-        )
+        assert "--contact" in command_option_names("client", "add")
 
     def test_add_shows_email_option(self) -> None:
-        result = runner.invoke(app, ["client", "add", "--help"])
-        assert result.exit_code == 0
-        assert "--email" in result.output, (
-            f"--email option not found in help output:\n{result.output}"
-        )
+        assert "--email" in command_option_names("client", "add")
 
 
 # ---------------------------------------------------------------------------
@@ -94,9 +95,7 @@ class TestClientAddHelp:
 class TestClientListHelp:
     def test_list_exits_zero(self) -> None:
         result = runner.invoke(app, ["client", "list", "--help"])
-        assert result.exit_code == 0, (
-            f"Expected exit code 0.\nOutput:\n{result.output}"
-        )
+        assert result.exit_code == 0, f"Expected exit code 0.\nOutput:\n{result.output}"
 
     def test_list_help_contains_description(self) -> None:
         result = runner.invoke(app, ["client", "list", "--help"])
@@ -115,9 +114,7 @@ class TestClientListHelp:
 class TestClientShowHelp:
     def test_show_exits_zero(self) -> None:
         result = runner.invoke(app, ["client", "show", "--help"])
-        assert result.exit_code == 0, (
-            f"Expected exit code 0.\nOutput:\n{result.output}"
-        )
+        assert result.exit_code == 0, f"Expected exit code 0.\nOutput:\n{result.output}"
 
     def test_show_mentions_client_id_argument(self) -> None:
         result = runner.invoke(app, ["client", "show", "--help"])
@@ -135,9 +132,7 @@ class TestClientShowHelp:
 class TestClientRemoveHelp:
     def test_remove_exits_zero(self) -> None:
         result = runner.invoke(app, ["client", "remove", "--help"])
-        assert result.exit_code == 0, (
-            f"Expected exit code 0.\nOutput:\n{result.output}"
-        )
+        assert result.exit_code == 0, f"Expected exit code 0.\nOutput:\n{result.output}"
 
     def test_remove_mentions_client_id(self) -> None:
         result = runner.invoke(app, ["client", "remove", "--help"])
@@ -155,16 +150,12 @@ class TestClientRemoveHelp:
 class TestClientScanHelp:
     def test_scan_exits_zero(self) -> None:
         result = runner.invoke(app, ["client", "scan", "--help"])
-        assert result.exit_code == 0, (
-            f"Expected exit code 0.\nOutput:\n{result.output}"
-        )
+        assert result.exit_code == 0, f"Expected exit code 0.\nOutput:\n{result.output}"
 
     def test_scan_shows_profile_option(self) -> None:
-        result = runner.invoke(app, ["client", "scan", "--help"])
-        assert result.exit_code == 0
-        assert "--profile" in result.output or "-p" in result.output, (
-            f"--profile option not found in client scan --help:\n{result.output}"
-        )
+        names = command_option_names("client", "scan")
+        assert "--profile" in names
+        assert "-p" in names
 
     def test_scan_mentions_client_id_argument(self) -> None:
         result = runner.invoke(app, ["client", "scan", "--help"])
@@ -182,8 +173,4 @@ class TestClientScanHelp:
 class TestScanCommandClientOption:
     def test_scan_help_shows_client_option(self) -> None:
         """vxis scan --help must document the --client flag added in Phase 4."""
-        result = runner.invoke(app, ["scan", "--help"])
-        assert result.exit_code == 0
-        assert "--client" in result.output, (
-            f"--client option not found in scan --help:\n{result.output}"
-        )
+        assert "--client" in command_option_names("scan")
