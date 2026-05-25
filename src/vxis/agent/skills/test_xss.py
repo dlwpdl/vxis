@@ -1,12 +1,14 @@
 """Skill: test_xss — reflected, stored, and DOM-based XSS testing."""
+
 from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
-logger = logging.getLogger(__name__)
 from ._payload_loader import load_skill_dataset as _load_ds
+
+logger = logging.getLogger(__name__)
 
 _REFLECTIVE_PARAM_HINTS = tuple(_load_ds("xss", "reflective_params"))
 _XSS_DOCTRINE = list(_load_ds("xss", "doctrine"))
@@ -29,6 +31,7 @@ def _xss_payloads_for_round(r: int) -> list[dict[str, str]]:
     Payloads live in ``src/vxis/data/payloads/xss.json`` (ADR-007).
     """
     from ._payload_loader import load_skill_payloads
+
     return load_skill_payloads("xss", r)
 
 
@@ -65,7 +68,8 @@ def _select_target_params(
 def _doctrine_rows_for_param(url: str, param_name: str) -> list[dict[str, str]]:
     lower = f"{url} {param_name}".lower()
     if any(token in lower for token in _REFLECTIVE_PARAM_HINTS) or any(
-        token in lower for token in ("hash", "fragment", "comment", "bio", "displayname", "preview", "render")
+        token in lower
+        for token in ("hash", "fragment", "comment", "bio", "displayname", "preview", "render")
     ):
         return list(_XSS_DOCTRINE)
     return []
@@ -80,13 +84,18 @@ def _xss_validation_hint(context: str, payload: str) -> str:
         return "Likely DOM-driven sink; confirm in browser/JS context if available."
     if context in {"js_string", "template_literal"}:
         return "JavaScript string/literal context; verify quote-breaking/execution path."
-    if payload.lower().startswith("javascript:") or "onerror=" in payload.lower() or "onload=" in payload.lower():
+    if (
+        payload.lower().startswith("javascript:")
+        or "onerror=" in payload.lower()
+        or "onload=" in payload.lower()
+    ):
         return "Executable event/protocol payload reflected."
     return "Reflection observed; confirm execution context before escalating."
 
 
-async def execute(url: str, param_name: str | None = None, round: int = 1,
-                  **kwargs: Any) -> dict[str, Any]:
+async def execute(
+    url: str, param_name: str | None = None, round: int = 1, **kwargs: Any
+) -> dict[str, Any]:
     """Test XSS on a URL with query parameter.
 
     `round` (1|2|3) selects the payload set — scan_loop passes
@@ -107,6 +116,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
     """
     from vxis.interaction.hands import SessionManager
     from urllib.parse import urlparse as _urlparse
+
     _base = _urlparse(url)
     _base_url = f"{_base.scheme}://{_base.netloc}"
 
@@ -148,39 +158,43 @@ async def execute(url: str, param_name: str | None = None, round: int = 1,
                 body = r.text
                 doctrine_rows = _doctrine_rows_for_param(url, target_param)
                 if p["payload"].lower() in body.lower():
-                    findings.append({
-                        "type": f"xss_{p['context']}",
-                        "payload": p["payload"],
-                        "param": target_param,
-                        "evidence": (
-                            f"Payload reflected unescaped in response (status {r.status}). "
-                            f"{_xss_validation_hint(p['context'], p['payload'])}"
-                        ),
-                        "response_preview": body[:300],
-                        "control": {
-                            "baseline_status": baseline_status,
-                            "baseline_size": baseline_size,
-                            "payload_status": r.status,
-                            "payload_size": r.body_length,
-                            "baseline_preview": base_r.text[:180],
-                            "payload_preview": body[:180],
-                        },
-                        "severity": "high",
-                        "doctrine": doctrine_rows,
-                    })
+                    findings.append(
+                        {
+                            "type": f"xss_{p['context']}",
+                            "payload": p["payload"],
+                            "param": target_param,
+                            "evidence": (
+                                f"Payload reflected unescaped in response (status {r.status}). "
+                                f"{_xss_validation_hint(p['context'], p['payload'])}"
+                            ),
+                            "response_preview": body[:300],
+                            "control": {
+                                "baseline_status": baseline_status,
+                                "baseline_size": baseline_size,
+                                "payload_status": r.status,
+                                "payload_size": r.body_length,
+                                "baseline_preview": base_r.text[:180],
+                                "payload_preview": body[:180],
+                            },
+                            "severity": "high",
+                            "doctrine": doctrine_rows,
+                        }
+                    )
                     logger.info("XSS found: %s on param %s", p["context"], target_param)
                     return
-                control_evidence.append({
-                    "payload": p["payload"],
-                    "context": p["context"],
-                    "param": target_param,
-                    "status": r.status,
-                    "size": r.body_length,
-                    "baseline_status": baseline_status,
-                    "baseline_size": baseline_size,
-                    "response_preview": body[:180],
-                    "doctrine_families": [row.get("family", "") for row in doctrine_rows],
-                })
+                control_evidence.append(
+                    {
+                        "payload": p["payload"],
+                        "context": p["context"],
+                        "param": target_param,
+                        "status": r.status,
+                        "size": r.body_length,
+                        "baseline_status": baseline_status,
+                        "baseline_size": baseline_size,
+                        "response_preview": body[:180],
+                        "doctrine_families": [row.get("family", "") for row in doctrine_rows],
+                    }
+                )
 
     await asyncio.gather(*[test_payload(p) for p in _payloads])
 
