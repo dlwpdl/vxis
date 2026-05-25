@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from typer.testing import CliRunner
+from typer.main import get_command
 
 from vxis.cli.main import app
 
@@ -16,6 +17,17 @@ runner = CliRunner()
 def invoke_scan_help():
     """Render scan help with deterministic width so Rich does not truncate flags."""
     return runner.invoke(app, ["scan", "--help"], env={"COLUMNS": "120"})
+
+
+def scan_option_names() -> set[str]:
+    """Return registered scan option aliases without depending on Rich rendering."""
+    root = get_command(app)
+    scan_command = root.commands["scan"]
+    names: set[str] = set()
+    for param in scan_command.params:
+        names.update(getattr(param, "opts", ()) or ())
+        names.update(getattr(param, "secondary_opts", ()) or ())
+    return names
 
 
 # ---------------------------------------------------------------------------
@@ -139,22 +151,16 @@ class TestScanCommandHelp:
         assert "target" in result.output.lower()
 
     def test_scan_help_shows_profile_option(self):
-        """scan --help output mentions the --profile option."""
-        result = invoke_scan_help()
-        assert "--profile" in result.output or "profile" in result.output.lower()
+        """scan registers the --profile option."""
+        assert "--profile" in scan_option_names()
 
     def test_scan_help_shows_plugins_option(self):
-        """scan --help output mentions the --plugins option."""
-        import re
-
-        result = invoke_scan_help()
-        clean = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
-        assert "--plugins" in clean or "plugins" in clean.lower()
+        """scan registers the --plugins option."""
+        assert "--plugins" in scan_option_names()
 
     def test_scan_help_shows_no_report_option(self):
-        """scan --help output mentions the --no-report flag."""
-        result = invoke_scan_help()
-        assert "--no-report" in result.output
+        """scan registers the --no-report flag."""
+        assert "--no-report" in scan_option_names()
 
 
 # ---------------------------------------------------------------------------
