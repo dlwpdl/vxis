@@ -48,8 +48,8 @@ class ScanLiveDisplay:
         self.loop_max_iters = 0
         self.loop_status = ""
         self.waiting_reason = ""
-        self.current_objective: str = ""       # Phase guide objective_ko
-        self.current_crown_hint: str = ""      # Phase guide crown_hint_ko
+        self.current_objective: str = ""  # Phase guide objective_ko
+        self.current_crown_hint: str = ""  # Phase guide crown_hint_ko
         self.attack_feed: deque = deque(maxlen=6)
         self.hit_feed: deque = deque(maxlen=4)
         self.chains: dict[str, dict] = {}  # chain_id → {origin, steps, current_level}
@@ -83,14 +83,16 @@ class ScanLiveDisplay:
     def init_phases(self, phase_list: list):
         """Registry에서 Phase 목록 초기화."""
         for p in phase_list:
-            self.phases.append({
-                "id": p.id,
-                "name": p.name,
-                "status": "pending",   # pending | running | done | failed | skipped
-                "duration": 0.0,
-                "findings": 0,
-                "error": "",
-            })
+            self.phases.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "status": "pending",  # pending | running | done | failed | skipped
+                    "duration": 0.0,
+                    "findings": 0,
+                    "error": "",
+                }
+            )
 
     def handle_event(self, event_type: str, data: dict) -> None:
         """Pipeline이 emit한 event 처리."""
@@ -98,14 +100,16 @@ class ScanLiveDisplay:
             if data.get("phase") == "scan_loop" or data.get("name") == "ScanAgentLoop":
                 self.loop_mode = True
                 self.current_phase = "Scan Loop"
-                self.phases = [{
-                    "id": "SL",
-                    "name": "Scan Loop",
-                    "status": "running",
-                    "duration": 0.0,
-                    "findings": 0,
-                    "error": "",
-                }]
+                self.phases = [
+                    {
+                        "id": "SL",
+                        "name": "Scan Loop",
+                        "status": "running",
+                        "duration": 0.0,
+                        "findings": 0,
+                        "error": "",
+                    }
+                ]
                 return
             self.current_phase = data["name"]
             # Store guide info for TUI display
@@ -156,14 +160,18 @@ class ScanLiveDisplay:
             method = data.get("method", "?")
             endpoint = data.get("endpoint", "?")
             _ep = endpoint[-38:] if len(endpoint) > 38 else endpoint
-            self.attack_feed.append(f"[dim]▶[/dim] [cyan]{vector:<18}[/cyan] [yellow]{method:<5}[/yellow] {_ep}")
+            self.attack_feed.append(
+                f"[dim]▶[/dim] [cyan]{vector:<18}[/cyan] [yellow]{method:<5}[/yellow] {_ep}"
+            )
             self.total_attacks += 1
             self.current_vector = vector
             self.loop_status = f"{method} {endpoint}"[:100]
 
         elif event_type == "hit":
             severity = str(data.get("severity", "")).lower()
-            vector = data.get("vector_id") or data.get("title") or data.get("finding_id") or "finding"
+            vector = (
+                data.get("vector_id") or data.get("title") or data.get("finding_id") or "finding"
+            )
             level = data.get("level")
             if not level:
                 level = {
@@ -267,7 +275,9 @@ class ScanLiveDisplay:
         table = Table.grid(padding=(0, 2))
         table.add_column(style="bold", no_wrap=True)
         table.add_column()
-        _pstyle = {"stealth": "yellow", "standard": "green", "aggressive": "red"}.get(self.profile, "white")
+        _pstyle = {"stealth": "yellow", "standard": "green", "aggressive": "red"}.get(
+            self.profile, "white"
+        )
         table.add_row("Target:", f"[cyan]{self.target}[/cyan]")
         table.add_row("Profile:", f"[{_pstyle}]{self.profile}[/{_pstyle}]")
         table.add_row("Brain:", f"[green]{self.brain}[/green]")
@@ -303,14 +313,22 @@ class ScanLiveDisplay:
             if self.waiting_reason:
                 table.add_row("Block", self.waiting_reason[:96])
             if self.todo_counts:
-                open_todos = sum(v for k, v in self.todo_counts.items() if k not in ("done", "blocked"))
-                table.add_row("Todos", f"{open_todos} open / {sum(self.todo_counts.values())} total")
+                open_todos = sum(
+                    v for k, v in self.todo_counts.items() if k not in ("done", "blocked")
+                )
+                table.add_row(
+                    "Todos", f"{open_todos} open / {sum(self.todo_counts.values())} total"
+                )
             if self.branch_counts:
                 active_branches = sum(
-                    v for k, v in self.branch_counts.items()
+                    v
+                    for k, v in self.branch_counts.items()
                     if k not in ("proven", "exhausted", "dead", "blocked")
                 )
-                table.add_row("Branches", f"{active_branches} active / {sum(self.branch_counts.values())} total")
+                table.add_row(
+                    "Branches",
+                    f"{active_branches} active / {sum(self.branch_counts.values())} total",
+                )
             table.add_row("Findings", str(self.total_findings))
             table.add_row("Chains", str(self.total_chains))
             return Panel(
@@ -322,7 +340,7 @@ class ScanLiveDisplay:
         table = Table(show_header=False, box=None, padding=(0, 1))
         table.add_column(width=3)  # status icon
         table.add_column(width=6)  # phase ID
-        table.add_column()         # name
+        table.add_column()  # name
         table.add_column(justify="right", width=8)  # duration
         table.add_column(justify="right", width=8)  # findings
 
@@ -330,14 +348,14 @@ class ScanLiveDisplay:
             icon = {
                 "pending": "[dim]○[/dim]",
                 "running": "[bold yellow]◉[/bold yellow]",
-                "done":    "[bold green]✓[/bold green]",
-                "failed":  "[bold red]✗[/bold red]",
+                "done": "[bold green]✓[/bold green]",
+                "failed": "[bold red]✗[/bold red]",
                 "skipped": "[dim]↷[/dim]",
             }.get(p["status"], "?")
             name_style = {
                 "running": "bold yellow",
-                "done":    "green",
-                "failed":  "red",
+                "done": "green",
+                "failed": "red",
                 "skipped": "dim",
                 "pending": "dim",
             }.get(p["status"], "")
@@ -369,15 +387,21 @@ class ScanLiveDisplay:
 
         # Phase Guide 정보 (새로 통합됨)
         if self.current_objective:
-            content_parts.append(f"[bold yellow]🎯 목표:[/bold yellow] [italic]{self.current_objective}[/italic]")
+            content_parts.append(
+                f"[bold yellow]🎯 목표:[/bold yellow] [italic]{self.current_objective}[/italic]"
+            )
         if self.current_crown_hint:
-            content_parts.append(f"[bold red]👑 크라운:[/bold red] [dim italic]{self.current_crown_hint}[/dim italic]")
+            content_parts.append(
+                f"[bold red]👑 크라운:[/bold red] [dim italic]{self.current_crown_hint}[/dim italic]"
+            )
 
         # Brain runtime 정보
         if self.current_vector:
             content_parts.append(f"[bold cyan]Vector:[/bold cyan] {self.current_vector}")
         if self.current_reasoning:
-            content_parts.append(f"[bold]Reasoning:[/bold] [italic]{self.current_reasoning}[/italic]")
+            content_parts.append(
+                f"[bold]Reasoning:[/bold] [italic]{self.current_reasoning}[/italic]"
+            )
 
         if not content_parts:
             content = "[dim]Brain analyzing target...[/dim]"
@@ -405,7 +429,9 @@ class ScanLiveDisplay:
         return runtime
 
     def _render_attack_feed(self) -> Panel:
-        lines = list(self.attack_feed) if self.attack_feed else ["[dim]waiting for attacks...[/dim]"]
+        lines = (
+            list(self.attack_feed) if self.attack_feed else ["[dim]waiting for attacks...[/dim]"]
+        )
         content = "\n".join(lines)
         return Panel(
             content,
@@ -430,7 +456,9 @@ class ScanLiveDisplay:
                 str(item.get("id") or ""),
             ),
         )
-        active = sum(1 for item in agents if str(item.get("status") or "") in {"running", "waiting"})
+        active = sum(
+            1 for item in agents if str(item.get("status") or "") in {"running", "waiting"}
+        )
         selected = self._selected_agent(agents)
         lines: list[str] = []
         for agent in agents[:5]:
@@ -447,7 +475,9 @@ class ScanLiveDisplay:
                 "blocked": "red",
             }.get(status, "white")
             skill_text = f" [{skills}]" if skills else ""
-            lines.append(f"{marker} [{style}]{agent_id}[/{style}] {status:<8} {role} r{runs}{skill_text}")
+            lines.append(
+                f"{marker} [{style}]{agent_id}[/{style}] {status:<8} {role} r{runs}{skill_text}"
+            )
 
         if selected:
             lines.append("")
@@ -469,15 +499,21 @@ class ScanLiveDisplay:
         lines: list[str] = []
         task = self._short(agent.get("task"), 82)
         result = self._short(agent.get("result"), 82)
-        envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
-        result_package = agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        envelope = (
+            agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        )
+        result_package = (
+            agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        )
         escalation = agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
         if task:
             lines.append(f"[bold]task[/bold] {task}")
         if envelope:
             objective = self._short(envelope.get("objective"), 84)
             target_surface = self._short(envelope.get("target_surface"), 24)
-            allowed_tools = ",".join(str(item) for item in list(envelope.get("allowed_tools") or [])[:4])
+            allowed_tools = ",".join(
+                str(item) for item in list(envelope.get("allowed_tools") or [])[:4]
+            )
             expected_artifact = self._short(envelope.get("expected_artifact"), 88)
             stop_condition = self._short(envelope.get("stop_condition"), 88)
             escalation_trigger = self._short(envelope.get("escalation_trigger"), 88)
@@ -545,7 +581,11 @@ class ScanLiveDisplay:
                 lines.append(f"[dim]{sender}:[/dim] {body}")
         skill_context = str(agent.get("skill_context") or "")
         action_line = next(
-            (line.strip() for line in skill_context.splitlines() if line.strip().startswith("action:")),
+            (
+                line.strip()
+                for line in skill_context.splitlines()
+                if line.strip().startswith("action:")
+            ),
             "",
         )
         if action_line:
@@ -559,11 +599,16 @@ class ScanLiveDisplay:
         result = str(agent.get("result") or "")
         if status in {"running", "waiting"}:
             if latest and latest.get("ok"):
-                return f'finish {agent_id} with concrete result, or send narrower instruction'
+                return f"finish {agent_id} with concrete result, or send narrower instruction"
             return f"run {agent_id} or send narrower instruction"
         lowered = result.lower()
-        positive = any(token in lowered for token in ("confirmed", "vulnerable", "token", "admin", "sqli", "idor"))
-        clean = any(token in lowered for token in ("clean", "not vulnerable", "no issue", "blocked"))
+        positive = any(
+            token in lowered
+            for token in ("confirmed", "vulnerable", "token", "admin", "sqli", "idor")
+        )
+        clean = any(
+            token in lowered for token in ("clean", "not vulnerable", "no issue", "blocked")
+        )
         if positive and not clean:
             return "crown-chain: create/run post_exploit_worker; verify impact before finish"
         return "use result to update branch/report, or mark exhausted"
@@ -601,13 +646,17 @@ class ScanLiveDisplay:
             cost_prefix = "est. " if self.telemetry.get("cost_estimated") else ""
             lines.append(f"[bold cyan]LLM:[/bold cyan] {provider}/{model}")
             lines.append(f"[dim]discipline {profile}[/dim]")
-            lines.append(f"[dim]{llm_calls} calls · {brain_decisions} decisions · {token_prefix}{total_tokens:,} tok[/dim]")
+            lines.append(
+                f"[dim]{llm_calls} calls · {brain_decisions} decisions · {token_prefix}{total_tokens:,} tok[/dim]"
+            )
             lines.append(f"[dim]Cost {cost_prefix}${cost_usd:.4f}[/dim]")
             memory_compression = self.telemetry.get("memory_compression") or {}
             compress_triggered = int(memory_compression.get("triggered") or 0)
             tokens_saved = int(memory_compression.get("total_tokens_saved") or 0)
             if compress_triggered > 0 or tokens_saved > 0:
-                lines.append(f"[dim]compress {compress_triggered}x · save ~{tokens_saved:,} tok[/dim]")
+                lines.append(
+                    f"[dim]compress {compress_triggered}x · save ~{tokens_saved:,} tok[/dim]"
+                )
 
         if self.proxy:
             backend = self.proxy.get("backend") or "disabled"
@@ -867,7 +916,9 @@ class ScanLiveDisplay:
                     lines.append(f"  [dim]why:[/dim] {rationale}")
                 for i, step in enumerate(chain["steps"][:3]):
                     prefix = "└─" if i == len(chain["steps"]) - 1 else "├─"
-                    lvl_c = {4: "bold red", 3: "red", 2: "yellow", 1: "white"}.get(step["level"], "dim")
+                    lvl_c = {4: "bold red", 3: "red", 2: "yellow", 1: "white"}.get(
+                        step["level"], "dim"
+                    )
                     title = str(step.get("title") or step.get("reasoning") or "")[:52]
                     lines.append(
                         f"  {prefix} [{lvl_c}]L{step['level']}[/{lvl_c}] "
@@ -903,8 +954,20 @@ class ScanLiveDisplay:
         sev_table.add_column(style="bold")
         sev_table.add_column(justify="right")
 
-        styles = {"critical": "bold red", "high": "red", "medium": "yellow", "low": "blue", "informational": "dim"}
-        labels = {"critical": "Critical", "high": "High", "medium": "Medium", "low": "Low", "informational": "Info"}
+        styles = {
+            "critical": "bold red",
+            "high": "red",
+            "medium": "yellow",
+            "low": "blue",
+            "informational": "dim",
+        }
+        labels = {
+            "critical": "Critical",
+            "high": "High",
+            "medium": "Medium",
+            "low": "Low",
+            "informational": "Info",
+        }
 
         for sev in ["critical", "high", "medium", "low", "informational"]:
             count = self.findings_count.get(sev, 0)
@@ -929,7 +992,9 @@ class ScanLiveDisplay:
         if self.current_phase:
             parts.append(f"[bold]Current:[/bold] [yellow]{self.current_phase[:50]}[/yellow]")
         if self.score:
-            parts.append(f"[bold]Score:[/bold] [cyan]{self.score['total']:.0f}/1000[/cyan] [{self.score['grade']}]")
+            parts.append(
+                f"[bold]Score:[/bold] [cyan]{self.score['total']:.0f}/1000[/cyan] [{self.score['grade']}]"
+            )
         if self.last_error:
             parts.append(f"[bold red]Error:[/bold red] [dim]{self.last_error[:60]}[/dim]")
         if self.telemetry:

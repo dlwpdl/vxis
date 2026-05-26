@@ -5,6 +5,7 @@ delegated tasks, messages, statuses, and final results inside one scan runtime.
 It does not execute child agents yet; later phases can attach real workers to
 the same protocol without changing the Brain-facing tool contract.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -46,6 +47,36 @@ _POSITIVE_SECURITY_RESULT_TOKENS = (
     "ssrf",
     "auth bypass",
     "privilege escalation",
+)
+_PROOF_ARTIFACT_TOKENS = (
+    "baseline",
+    "control",
+    "negative control",
+    "payload",
+    "request",
+    "response",
+    "transcript",
+    "status",
+    "http/",
+    "http ",
+    "header",
+    "body",
+    "cookie",
+    "session",
+    "token",
+    "screenshot",
+    "dom",
+    "sql error",
+    "stack trace",
+    "delta",
+    "diff",
+    "observed",
+    "row",
+    "database",
+    "admin",
+    "role",
+    "poc",
+    "proof",
 )
 _RESULT_FAMILY_TOKENS = {
     "injection": ("sql injection", "sqli", "sql", "nosql", "ssti", "injection"),
@@ -176,6 +207,24 @@ def _execution_blob(execution: AgentGraphExecution) -> str:
     ).lower()
 
 
+def _execution_evidence_blob(execution: AgentGraphExecution) -> str:
+    result = execution.data.get("result") if isinstance(execution.data.get("result"), dict) else {}
+    result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    return " ".join(
+        str(value or "")
+        for value in (
+            execution.summary,
+            result.get("summary"),
+            result.get("evidence"),
+            result.get("control"),
+            result.get("baseline"),
+            result.get("delta"),
+            result.get("observed"),
+            result_data,
+        )
+    ).lower()
+
+
 def _execution_skill(execution: AgentGraphExecution) -> str:
     skill = str(execution.args.get("skill") or "").strip().lower()
     if skill:
@@ -198,6 +247,29 @@ def _execution_supports_result(execution: AgentGraphExecution, result: str) -> b
 
 def _has_supporting_successful_execution(node: AgentGraphNode, result: str) -> bool:
     return any(_execution_supports_result(execution, result) for execution in node.executions)
+
+
+def _has_proof_artifact_text(value: str) -> bool:
+    text = str(value or "").lower()
+    if not text:
+        return False
+    matched = {token for token in _PROOF_ARTIFACT_TOKENS if token in text}
+    if len(matched) >= 2:
+        return True
+    has_status_code = any(code in text for code in (" 200", " 401", " 403", " 404", " 500"))
+    has_comparison = any(token in text for token in ("baseline", "control", "delta", "diff"))
+    return has_status_code and has_comparison
+
+
+def _execution_has_proof_artifact(execution: AgentGraphExecution) -> bool:
+    return _has_proof_artifact_text(_execution_evidence_blob(execution))
+
+
+def _has_sufficient_proof_artifact(node: AgentGraphNode, result: str) -> bool:
+    return any(
+        _execution_supports_result(execution, result) and _execution_has_proof_artifact(execution)
+        for execution in node.executions
+    )
 
 
 def _join_nonempty(parts: list[str], *, sep: str = " ") -> str:
@@ -331,7 +403,9 @@ class AgentGraphTool:
     def _create(self, kwargs: dict[str, Any]) -> ToolResult:
         task = _clean_text(kwargs.get("task"))
         if not task:
-            return ToolResult(ok=False, summary="agent_graph create: task is required", error="missing_task")
+            return ToolResult(
+                ok=False, summary="agent_graph create: task is required", error="missing_task"
+            )
 
         role = _clean_text(kwargs.get("role") or "recon_worker").lower()
         if role not in _VALID_ROLES:
@@ -351,8 +425,12 @@ class AgentGraphTool:
 
         message = _clean_text(kwargs.get("message")) or task
         declared_skills = _clean_skills(kwargs.get("skills"))
-        skills = self._select_node_skills(role=role, task=task, message=message, declared=declared_skills)
-        skill_context = self._render_node_skill_context(role=role, task=task, message=message, skills=skills)
+        skills = self._select_node_skills(
+            role=role, task=task, message=message, declared=declared_skills
+        )
+        skill_context = self._render_node_skill_context(
+            role=role, task=task, message=message, skills=skills
+        )
         duplicate = self._find_active_duplicate(role=role, task=task, parent_id=parent_id)
         if duplicate is not None:
             if message and not self._has_recent_message(duplicate, message):
@@ -404,7 +482,9 @@ class AgentGraphTool:
         agent_id = _clean_text(kwargs.get("agent_id"))
         node = self._nodes.get(agent_id)
         if node is None:
-            return ToolResult(ok=False, summary="agent_graph send: unknown agent_id", error="unknown_agent")
+            return ToolResult(
+                ok=False, summary="agent_graph send: unknown agent_id", error="unknown_agent"
+            )
         if node.status not in _ACTIVE_STATUSES:
             return ToolResult(
                 ok=False,
@@ -413,7 +493,9 @@ class AgentGraphTool:
             )
         message = _clean_text(kwargs.get("message"))
         if not message:
-            return ToolResult(ok=False, summary="agent_graph send: message is required", error="missing_message")
+            return ToolResult(
+                ok=False, summary="agent_graph send: message is required", error="missing_message"
+            )
 
         self._append_message(node, sender="root", recipient=agent_id, body=message)
         skills = self._select_node_skills(
@@ -450,7 +532,9 @@ class AgentGraphTool:
         if agent_id:
             node = self._nodes.get(agent_id)
             if node is None:
-                return ToolResult(ok=False, summary="agent_graph wait: unknown agent_id", error="unknown_agent")
+                return ToolResult(
+                    ok=False, summary="agent_graph wait: unknown agent_id", error="unknown_agent"
+                )
             return ToolResult(
                 ok=True,
                 data={
@@ -476,7 +560,9 @@ class AgentGraphTool:
         agent_id = _clean_text(kwargs.get("agent_id"))
         node = self._nodes.get(agent_id)
         if node is None:
-            return ToolResult(ok=False, summary="agent_graph run: unknown agent_id", error="unknown_agent")
+            return ToolResult(
+                ok=False, summary="agent_graph run: unknown agent_id", error="unknown_agent"
+            )
         if node.status not in _ACTIVE_STATUSES:
             return ToolResult(
                 ok=False,
@@ -537,7 +623,9 @@ class AgentGraphTool:
         agent_id = _clean_text(kwargs.get("agent_id"))
         node = self._nodes.get(agent_id)
         if node is None:
-            return ToolResult(ok=False, summary="agent_graph finish: unknown agent_id", error="unknown_agent")
+            return ToolResult(
+                ok=False, summary="agent_graph finish: unknown agent_id", error="unknown_agent"
+            )
 
         status = _clean_text(kwargs.get("status") or "finished").lower()
         if status not in _FINAL_STATUSES:
@@ -549,7 +637,9 @@ class AgentGraphTool:
 
         result = _clean_text(kwargs.get("result"))
         if not result:
-            return ToolResult(ok=False, summary="agent_graph finish: result is required", error="missing_result")
+            return ToolResult(
+                ok=False, summary="agent_graph finish: result is required", error="missing_result"
+            )
         if status == "finished" and _looks_like_positive_security_result(result):
             if not any(execution.ok for execution in node.executions):
                 return ToolResult(
@@ -571,6 +661,16 @@ class AgentGraphTool:
                     ),
                     error="unsupported_execution_evidence",
                 )
+            if not _has_sufficient_proof_artifact(node, result):
+                return ToolResult(
+                    ok=False,
+                    data={"agent": self._node_to_dict(node), "active_agents": self._active_count()},
+                    summary=(
+                        f"agent_graph finish: positive vulnerability result for {agent_id} "
+                        "requires a concrete PoC/control artifact, not only a positive summary"
+                    ),
+                    error="insufficient_proof_artifact",
+                )
 
         node.status = status
         node.result = result
@@ -590,7 +690,9 @@ class AgentGraphTool:
         if agent_id:
             node = self._nodes.get(agent_id)
             if node is None:
-                return ToolResult(ok=False, summary="agent_graph view: unknown agent_id", error="unknown_agent")
+                return ToolResult(
+                    ok=False, summary="agent_graph view: unknown agent_id", error="unknown_agent"
+                )
             return ToolResult(
                 ok=True,
                 data={"agent": self._node_to_dict(node, include_messages=include_messages)},
@@ -600,7 +702,11 @@ class AgentGraphTool:
         agents = self._limited_nodes(kwargs, active_only=False, include_messages=include_messages)
         return ToolResult(
             ok=True,
-            data={"agents": agents, "active_count": self._active_count(), "total_agents": len(self._nodes)},
+            data={
+                "agents": agents,
+                "active_count": self._active_count(),
+                "total_agents": len(self._nodes),
+            },
             summary=f"agent_graph view: {len(agents)} agent(s)",
         )
 
@@ -651,7 +757,9 @@ class AgentGraphTool:
 
     def _append_execution(self, node: AgentGraphNode, result: ToolResult) -> AgentGraphExecution:
         data = result.data if isinstance(result.data, dict) else {}
-        tool_name = str(data.get("tool") or data.get("name") or "child_turn").strip() or "child_turn"
+        tool_name = (
+            str(data.get("tool") or data.get("name") or "child_turn").strip() or "child_turn"
+        )
         args = data.get("args") if isinstance(data.get("args"), dict) else {}
         execution = AgentGraphExecution(
             id=self._next_execution_id(),
@@ -686,9 +794,13 @@ class AgentGraphTool:
         if active_only:
             nodes = [node for node in nodes if node.status in _ACTIVE_STATUSES]
         nodes.sort(key=lambda node: node.created_at)
-        return [self._node_to_dict(node, include_messages=include_messages) for node in nodes[:limit]]
+        return [
+            self._node_to_dict(node, include_messages=include_messages) for node in nodes[:limit]
+        ]
 
-    def _node_to_dict(self, node: AgentGraphNode, *, include_messages: bool = True) -> dict[str, Any]:
+    def _node_to_dict(
+        self, node: AgentGraphNode, *, include_messages: bool = True
+    ) -> dict[str, Any]:
         budget = self._worker_budget
         data: dict[str, Any] = {
             "id": node.id,
@@ -698,9 +810,15 @@ class AgentGraphTool:
             "parent_id": node.parent_id,
             "skills": list(node.skills),
             "skill_context": trim_text_chars(node.skill_context, budget.max_skill_chars),
-            "task_envelope": compact_context_value(node.task_envelope, max_chars=budget.max_execution_chars),
-            "result_package": compact_context_value(node.result_package, max_chars=budget.max_execution_chars),
-            "escalation": compact_context_value(node.escalation, max_chars=budget.max_execution_chars),
+            "task_envelope": compact_context_value(
+                node.task_envelope, max_chars=budget.max_execution_chars
+            ),
+            "result_package": compact_context_value(
+                node.result_package, max_chars=budget.max_execution_chars
+            ),
+            "escalation": compact_context_value(
+                node.escalation, max_chars=budget.max_execution_chars
+            ),
             "result": trim_text_chars(node.result, budget.max_message_chars),
             "created_at": node.created_at,
             "updated_at": node.updated_at,
@@ -708,8 +826,8 @@ class AgentGraphTool:
             "execution_count": len(node.executions),
         }
         if include_messages:
-            recent_messages = node.messages[-budget.max_agent_messages:]
-            recent_executions = node.executions[-budget.max_agent_executions:]
+            recent_messages = node.messages[-budget.max_agent_messages :]
+            recent_executions = node.executions[-budget.max_agent_executions :]
             data["messages"] = [
                 {
                     "id": msg.id,
@@ -816,9 +934,13 @@ class AgentGraphTool:
         explicit = dict(explicit or {})
         surface = "desktop" if self._target_kind == "desktop" else "web"
         allowed_tools = self._allowed_tools_for_role(role=role, skills=skills)
-        expected_artifact = explicit.get("expected_artifact") or self._expected_artifact_for_role(role, skills)
+        expected_artifact = explicit.get("expected_artifact") or self._expected_artifact_for_role(
+            role, skills
+        )
         stop_condition = explicit.get("stop_condition") or self._stop_condition_for_role(role)
-        escalation_trigger = explicit.get("escalation_trigger") or self._escalation_trigger_for_role(role)
+        escalation_trigger = explicit.get(
+            "escalation_trigger"
+        ) or self._escalation_trigger_for_role(role)
         return {
             "objective": trim_text_chars(explicit.get("objective") or task or message, 160),
             "target_surface": surface,
@@ -883,7 +1005,9 @@ class AgentGraphTool:
         *,
         execution: AgentGraphExecution,
     ) -> dict[str, Any]:
-        result_data = execution.data.get("result") if isinstance(execution.data.get("result"), dict) else {}
+        result_data = (
+            execution.data.get("result") if isinstance(execution.data.get("result"), dict) else {}
+        )
         result_summary = str(result_data.get("summary") or execution.summary or "").strip()
         control_text = _join_nonempty(
             [
@@ -901,17 +1025,27 @@ class AgentGraphTool:
             ],
             sep=" | ",
         )
-        verdict_guess = "candidate_positive" if execution.ok and _looks_like_positive_security_result(result_summary) else (
-            "blocked" if not execution.ok else "inconclusive"
-        )
+        has_positive_signal = execution.ok and _looks_like_positive_security_result(result_summary)
+        has_proof_artifact = _execution_has_proof_artifact(execution)
+        if has_positive_signal and has_proof_artifact:
+            verdict_guess = "candidate_positive"
+        elif has_positive_signal:
+            verdict_guess = "needs_proof"
+        elif not execution.ok:
+            verdict_guess = "blocked"
+        else:
+            verdict_guess = "inconclusive"
         return {
             "attempted_tool": execution.tool,
             "attempt_summary": trim_text_chars(execution.summary, 160),
             "raw_evidence_summary": trim_text_chars(result_summary or execution.summary, 180),
             "control_result": trim_text_chars(control_text, 140),
             "observed_delta": trim_text_chars(delta_text, 160),
+            "proof_quality": "strong" if has_proof_artifact else "weak",
             "verdict_guess": verdict_guess,
-            "recommended_next_step": trim_text_chars(self._recommended_next_step(node, execution), 180),
+            "recommended_next_step": trim_text_chars(
+                self._recommended_next_step(node, execution), 180
+            ),
         }
 
     def _finalize_result_package(
@@ -926,13 +1060,15 @@ class AgentGraphTool:
             {
                 "final_status": status,
                 "final_result": trim_text_chars(result, 180),
-                "verdict_guess": "proven" if status == "finished" and _looks_like_positive_security_result(result) else (
-                    "blocked" if status == "blocked" else package.get("verdict_guess", "clean")
-                ),
+                "verdict_guess": "proven"
+                if status == "finished" and _looks_like_positive_security_result(result)
+                else ("blocked" if status == "blocked" else package.get("verdict_guess", "clean")),
             }
         )
         if not package.get("recommended_next_step"):
-            package["recommended_next_step"] = trim_text_chars(self._result_next_step(result, status), 180)
+            package["recommended_next_step"] = trim_text_chars(
+                self._result_next_step(result, status), 180
+            )
         return package
 
     def _build_escalation_state(self, node: AgentGraphNode) -> dict[str, Any]:
@@ -948,7 +1084,19 @@ class AgentGraphTool:
         elif failed_runs >= 2:
             status = "ambiguous"
             reason = "repeated blocked or failed child turns"
-        elif node.executions and node.executions[-1].ok and _looks_like_positive_security_result(node.result or node.executions[-1].summary):
+        elif (
+            node.executions
+            and node.executions[-1].ok
+            and _looks_like_positive_security_result(node.executions[-1].summary)
+            and not _execution_has_proof_artifact(node.executions[-1])
+        ):
+            status = "needs_proof"
+            reason = "positive-looking child output lacks PoC/control artifact"
+        elif (
+            node.executions
+            and node.executions[-1].ok
+            and _looks_like_positive_security_result(node.result or node.executions[-1].summary)
+        ):
             status = "positive_needs_pivot"
             reason = "positive result needs chain/pivot decision from director"
         if status == "clear":
@@ -964,6 +1112,8 @@ class AgentGraphTool:
             return "Escalate to director with blocker details or rerun a sharper bounded task"
         summary = execution.summary.lower()
         if _looks_like_positive_security_result(summary):
+            if not _execution_has_proof_artifact(execution):
+                return "Rerun with concrete PoC/control evidence before finish; positive summary alone is insufficient"
             return "Escalate to director for chain/pivot planning, then finish with concrete impact"
         if "clean" in summary or "no issue" in summary:
             return "Finish as clean or redirect worker to a new surface"

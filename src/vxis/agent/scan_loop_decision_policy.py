@@ -95,7 +95,10 @@ class ScanLoopDecisionPolicyMixin:
 
     def _hydrate_verify_finding_args(self, args: dict[str, Any]) -> dict[str, Any]:
         merged = dict(args or {})
-        if all(str(merged.get(key, "")).strip() for key in ("finding_type", "affected_component", "evidence")):
+        if all(
+            str(merged.get(key, "")).strip()
+            for key in ("finding_type", "affected_component", "evidence")
+        ):
             return merged
         source: dict[str, Any] | None = None
         latest = self._latest_report_finding_args()
@@ -103,6 +106,7 @@ class ScanLoopDecisionPolicyMixin:
             source = latest
         try:
             from vxis.agent.tools.finding_tools import _get_findings
+
             findings = list(_get_findings() or [])
         except Exception:
             findings = []
@@ -145,7 +149,10 @@ class ScanLoopDecisionPolicyMixin:
             "evidence": "evidence",
         }
         for target_key, source_key in field_map.items():
-            if not str(merged.get(target_key, "")).strip() and str(source.get(source_key, "")).strip():
+            if (
+                not str(merged.get(target_key, "")).strip()
+                and str(source.get(source_key, "")).strip()
+            ):
                 merged[target_key] = source.get(source_key, "")
         return merged
 
@@ -170,8 +177,10 @@ class ScanLoopDecisionPolicyMixin:
             try:
                 from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
             except Exception:
+
                 def _canon_ft(value: object) -> str:
                     return str(value or "").strip().lower()
+
             related_types = self._family_related_types(family)
             found_types = {
                 _canon_ft(str(item.get("finding_type", "")))
@@ -186,8 +195,10 @@ class ScanLoopDecisionPolicyMixin:
         try:
             from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
         except Exception:
+
             def _canon_ft(value: object) -> str:
                 return str(value or "").strip().lower()
+
         score = int(branch.priority)
         if branch.source_finding_id:
             score += 10
@@ -226,7 +237,9 @@ class ScanLoopDecisionPolicyMixin:
                     score -= 12
             elif branch.status == "blocked" and not branch.source_finding_id:
                 score -= 24
-        if related_skills and all(self._recent_blocked_skill_count(skill) >= 3 for skill in related_skills):
+        if related_skills and all(
+            self._recent_blocked_skill_count(skill) >= 3 for skill in related_skills
+        ):
             score -= 18
             if is_memory_branch:
                 score -= 14
@@ -273,12 +286,10 @@ class ScanLoopDecisionPolicyMixin:
             return True
         if branch.attempts < 2:
             return False
-        children = [
-            self.state.branches.get(child_id)
-            for child_id in branch.child_ids
-        ]
+        children = [self.state.branches.get(child_id) for child_id in branch.child_ids]
         live_children = [
-            child for child in children
+            child
+            for child in children
             if child is not None and child.status not in {"proven", "exhausted", "dead", "blocked"}
         ]
         if not live_children:
@@ -292,7 +303,11 @@ class ScanLoopDecisionPolicyMixin:
         return sibling_or_child_coverage
 
     def _branch_is_redundant_memory_revalidation(self, branch: BranchState) -> bool:
-        if not (branch.owner == "memory" or branch.id.startswith("carry:") or branch.id.startswith("memory:")):
+        if not (
+            branch.owner == "memory"
+            or branch.id.startswith("carry:")
+            or branch.id.startswith("memory:")
+        ):
             return False
         family = self._branch_family(branch)
         if family == "generic":
@@ -300,8 +315,10 @@ class ScanLoopDecisionPolicyMixin:
         try:
             from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
         except Exception:
+
             def _canon_ft(value: object) -> str:
                 return str(value or "").strip().lower()
+
         related_types = self._family_related_types(family)
         found_types = {
             _canon_ft(str(item.get("finding_type", "")))
@@ -326,9 +343,7 @@ class ScanLoopDecisionPolicyMixin:
             and other.owner != "memory"
             and not other.id.startswith(("carry:", "memory:"))
             and (
-                other.source_finding_id
-                or other.role == "post_exploit_worker"
-                or other.attempts > 0
+                other.source_finding_id or other.role == "post_exploit_worker" or other.attempts > 0
             )
             for other in self.state.branches.values()
         )
@@ -341,9 +356,15 @@ class ScanLoopDecisionPolicyMixin:
             return score >= 82
         if branch.source_finding_id:
             return score >= 65
-        if self._branch_family(branch) == "disclosure" and self._has_stronger_foothold_than_disclosure():
+        if (
+            self._branch_family(branch) == "disclosure"
+            and self._has_stronger_foothold_than_disclosure()
+        ):
             return score >= 78
-        if self._branch_family(branch) == "disclosure" and self._disclosure_campaign_lacks_reusable_material():
+        if (
+            self._branch_family(branch) == "disclosure"
+            and self._disclosure_campaign_lacks_reusable_material()
+        ):
             return score >= 82
         return branch.attempts < 2 or score >= 78
 
@@ -395,20 +416,22 @@ class ScanLoopDecisionPolicyMixin:
         )
         out: list[dict[str, Any]] = []
         for item in scored[:limit]:
-            out.append({
-                "campaign_id": item["campaign_id"],
-                "headline": str(item["headline"])[:84],
-                "source_finding_id": item["source_finding_id"],
-                "crown_jewel": str(item["crown_jewel"])[:72],
-                "family": item["family"],
-                "roles": sorted(str(role) for role in item["roles"]),
-                "phases": sorted(str(phase) for phase in item["phases"]),
-                "branch_count": len(item["branch_ids"]),
-                "blocking_count": int(item["blockers"]),
-                "max_priority": int(item["max_priority"]),
-                "objective": str(item["objective"])[:96],
-                "next_step": str(item["next_step"])[:96],
-            })
+            out.append(
+                {
+                    "campaign_id": item["campaign_id"],
+                    "headline": str(item["headline"])[:84],
+                    "source_finding_id": item["source_finding_id"],
+                    "crown_jewel": str(item["crown_jewel"])[:72],
+                    "family": item["family"],
+                    "roles": sorted(str(role) for role in item["roles"]),
+                    "phases": sorted(str(phase) for phase in item["phases"]),
+                    "branch_count": len(item["branch_ids"]),
+                    "blocking_count": int(item["blockers"]),
+                    "max_priority": int(item["max_priority"]),
+                    "objective": str(item["objective"])[:96],
+                    "next_step": str(item["next_step"])[:96],
+                }
+            )
         return out
 
     def _focus_campaign_for_ui(self) -> dict[str, Any] | None:
@@ -424,7 +447,9 @@ class ScanLoopDecisionPolicyMixin:
                 if focus.source_finding_id and campaign_id == focus.source_finding_id:
                     selected = group
                     break
-                if not focus.source_finding_id and campaign_id == (focus.parent_branch_id or focus.id):
+                if not focus.source_finding_id and campaign_id == (
+                    focus.parent_branch_id or focus.id
+                ):
                     selected = group
                     break
                 if str(group.get("family") or "") == focus_family:
@@ -437,12 +462,14 @@ class ScanLoopDecisionPolicyMixin:
             reason = str(item.get("reason") or "").lower()
             affected = str(item.get("affected_component") or "").lower()
             if family and (family in source_type or family in reason or family in affected):
-                reviews.append({
-                    "stage": item.get("stage", ""),
-                    "status": item.get("status", ""),
-                    "title": str(item.get("title") or "")[:72],
-                    "reason": str(item.get("reason") or "")[:120],
-                })
+                reviews.append(
+                    {
+                        "stage": item.get("stage", ""),
+                        "status": item.get("status", ""),
+                        "title": str(item.get("title") or "")[:72],
+                        "reason": str(item.get("reason") or "")[:120],
+                    }
+                )
         findings: list[dict[str, Any]] = []
         for finding in self.state.findings[-12:]:
             if not isinstance(finding, dict):
@@ -452,13 +479,15 @@ class ScanLoopDecisionPolicyMixin:
                 for key in ("finding_type", "title", "affected_component", "impact")
             ).lower()
             if family and family in blob:
-                findings.append({
-                    "id": finding.get("id", ""),
-                    "title": str(finding.get("title") or "")[:88],
-                    "finding_type": finding.get("finding_type", ""),
-                    "severity": finding.get("severity", ""),
-                    "affected_component": str(finding.get("affected_component") or "")[:88],
-                })
+                findings.append(
+                    {
+                        "id": finding.get("id", ""),
+                        "title": str(finding.get("title") or "")[:88],
+                        "finding_type": finding.get("finding_type", ""),
+                        "severity": finding.get("severity", ""),
+                        "affected_component": str(finding.get("affected_component") or "")[:88],
+                    }
+                )
         delegated_workers: list[dict[str, Any]] = []
         for branch in self.state.active_branches():
             if branch.owner != "agent_graph":
@@ -466,16 +495,18 @@ class ScanLoopDecisionPolicyMixin:
             branch_family = self._branch_family(branch)
             if family and branch_family != family:
                 continue
-            delegated_workers.append({
-                "id": branch.id,
-                "role": branch.role,
-                "phase": branch.phase,
-                "status": branch.status,
-                "objective": str(branch.objective or "")[:88],
-                "next_step": str(branch.next_step or "")[:88],
-                "escalation_status": str(branch.escalation_status or ""),
-                "escalation_reason": str(branch.escalation_reason or "")[:120],
-            })
+            delegated_workers.append(
+                {
+                    "id": branch.id,
+                    "role": branch.role,
+                    "phase": branch.phase,
+                    "status": branch.status,
+                    "objective": str(branch.objective or "")[:88],
+                    "next_step": str(branch.next_step or "")[:88],
+                    "escalation_status": str(branch.escalation_status or ""),
+                    "escalation_reason": str(branch.escalation_reason or "")[:120],
+                }
+            )
         detail = dict(selected)
         detail["reviews"] = reviews[:3]
         detail["findings"] = findings[-3:]
@@ -487,23 +518,48 @@ class ScanLoopDecisionPolicyMixin:
         for finding in self.state.findings:
             if not isinstance(finding, dict):
                 continue
-            blobs.append(" ".join(
-                str(finding.get(key, ""))
-                for key in ("finding_type", "title", "impact", "technical_analysis", "poc_description")
-            ).lower())
+            blobs.append(
+                " ".join(
+                    str(finding.get(key, ""))
+                    for key in (
+                        "finding_type",
+                        "title",
+                        "impact",
+                        "technical_analysis",
+                        "poc_description",
+                    )
+                ).lower()
+            )
         return any(
-            any(token in blob for token in ("authentication bypass", "authenticated foothold", "session takeover", "token acquired"))
-            or ("sql_injection" in blob and any(token in blob for token in ("authenticated", "login", "token", "session")))
+            any(
+                token in blob
+                for token in (
+                    "authentication bypass",
+                    "authenticated foothold",
+                    "session takeover",
+                    "token acquired",
+                )
+            )
+            or (
+                "sql_injection" in blob
+                and any(token in blob for token in ("authenticated", "login", "token", "session"))
+            )
             for blob in blobs
         )
 
     def _disclosure_campaign_lacks_reusable_material(self) -> bool:
         reasons: list[str] = []
         for item in self.state.review_queue.values():
-            if str(item.source_finding_type or "").lower() in {"information_disclosure", "misconfiguration"}:
+            if str(item.source_finding_type or "").lower() in {
+                "information_disclosure",
+                "misconfiguration",
+            }:
                 reasons.append(str(item.reason or "").lower())
         for item in self.state.review_history:
-            if str(item.source_finding_type or "").lower() in {"information_disclosure", "misconfiguration"}:
+            if str(item.source_finding_type or "").lower() in {
+                "information_disclosure",
+                "misconfiguration",
+            }:
                 reasons.append(str(item.reason or "").lower())
         binary_only_hits = sum(
             1
@@ -515,30 +571,60 @@ class ScanLoopDecisionPolicyMixin:
         finding_blob = " ".join(
             " ".join(
                 str(finding.get(key, ""))
-                for key in ("title", "impact", "technical_analysis", "poc_description", "poc_script_code")
+                for key in (
+                    "title",
+                    "impact",
+                    "technical_analysis",
+                    "poc_description",
+                    "poc_script_code",
+                )
             ).lower()
             for finding in self.state.findings
             if isinstance(finding, dict)
-            and str(finding.get("finding_type", "")).lower() in {"information_disclosure", "misconfiguration"}
+            and str(finding.get("finding_type", "")).lower()
+            in {"information_disclosure", "misconfiguration"}
         )
         reusable_markers = (
-            "password", "token", "jwt", "apikey", "api key", "secret", "credential",
-            "session", "bearer", "admin", "login", "cookie",
+            "password",
+            "token",
+            "jwt",
+            "apikey",
+            "api key",
+            "secret",
+            "credential",
+            "session",
+            "bearer",
+            "admin",
+            "login",
+            "cookie",
         )
         return not any(marker in finding_blob for marker in reusable_markers)
 
     def _branch_lacks_meaningful_db_impact(self, branch: BranchState) -> bool:
-        if "db" not in " ".join((branch.id, branch.title, branch.crown_jewel, branch.objective)).lower():
+        if (
+            "db"
+            not in " ".join((branch.id, branch.title, branch.crown_jewel, branch.objective)).lower()
+        ):
             return False
         if branch.attempts < 2:
             return False
-        blob = " ".join((
-            branch.last_summary,
-            branch.last_report,
-            branch.evidence,
-        )).lower()
+        blob = " ".join(
+            (
+                branch.last_summary,
+                branch.last_report,
+                branch.evidence,
+            )
+        ).lower()
         strong_markers = (
-            "table", "schema", "database", "dump", "union select", "sqlmap", "credential", "admin", "user"
+            "table",
+            "schema",
+            "database",
+            "dump",
+            "union select",
+            "sqlmap",
+            "credential",
+            "admin",
+            "user",
         )
         if any(marker in blob for marker in strong_markers):
             return False
@@ -549,7 +635,13 @@ class ScanLoopDecisionPolicyMixin:
                 continue
             finding_blob = " ".join(
                 str(finding.get(key, ""))
-                for key in ("finding_type", "title", "impact", "technical_analysis", "poc_script_code")
+                for key in (
+                    "finding_type",
+                    "title",
+                    "impact",
+                    "technical_analysis",
+                    "poc_script_code",
+                )
             ).lower()
             if any(marker in finding_blob for marker in strong_markers):
                 return False
@@ -573,12 +665,16 @@ class ScanLoopDecisionPolicyMixin:
                 return token
         return ""
 
-    def _candidate_expected_yield_score(self, candidate: VectorCandidate, findings: list[dict[str, Any]]) -> int:
+    def _candidate_expected_yield_score(
+        self, candidate: VectorCandidate, findings: list[dict[str, Any]]
+    ) -> int:
         try:
             from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
         except Exception:
+
             def _canon_ft(value: object) -> str:
                 return str(value or "").strip().lower()
+
         score = int(candidate.priority)
         if candidate.attempts > 0:
             score -= candidate.attempts * 12
@@ -598,7 +694,9 @@ class ScanLoopDecisionPolicyMixin:
             score -= 32
             if is_memory_candidate:
                 score -= 28
-        if related_skills and all(self._recent_blocked_skill_count(skill) >= 3 for skill in related_skills):
+        if related_skills and all(
+            self._recent_blocked_skill_count(skill) >= 3 for skill in related_skills
+        ):
             score -= 28
             if is_memory_candidate:
                 score -= 14
@@ -614,21 +712,25 @@ class ScanLoopDecisionPolicyMixin:
         return self._family_from_blobs(vector_blob, blob)
 
     def _branch_family(self, branch: BranchState) -> str:
-        vector_blob = " ".join((
-            branch.id,
-            branch.vector_id,
-            branch.source_candidate_id,
-            branch.source_finding_id,
-        )).lower()
-        blob = " ".join((
-            branch.vector_id,
-            branch.title,
-            branch.objective,
-            branch.next_step,
-            branch.evidence,
-            branch.blocker,
-            branch.crown_jewel,
-        )).lower()
+        vector_blob = " ".join(
+            (
+                branch.id,
+                branch.vector_id,
+                branch.source_candidate_id,
+                branch.source_finding_id,
+            )
+        ).lower()
+        blob = " ".join(
+            (
+                branch.vector_id,
+                branch.title,
+                branch.objective,
+                branch.next_step,
+                branch.evidence,
+                branch.blocker,
+                branch.crown_jewel,
+            )
+        ).lower()
         return self._family_from_blobs(vector_blob, blob)
 
     def _family_from_blobs(self, vector_blob: str, blob: str) -> str:
@@ -679,15 +781,20 @@ class ScanLoopDecisionPolicyMixin:
             return {"test_infra"}
         return set()
 
-    def _candidate_has_finish_blocking_yield(self, candidate: VectorCandidate, findings: list[dict[str, Any]]) -> bool:
+    def _candidate_has_finish_blocking_yield(
+        self, candidate: VectorCandidate, findings: list[dict[str, Any]]
+    ) -> bool:
         if candidate.priority < 75 or candidate.attempts > 0:
             return False
         threshold = 78 if str(candidate.id).startswith("memory:") else 72
         return self._candidate_expected_yield_score(candidate, findings) >= threshold
 
-    def _remaining_high_yield_family_candidates(self, findings: list[dict[str, Any]]) -> list[VectorCandidate]:
+    def _remaining_high_yield_family_candidates(
+        self, findings: list[dict[str, Any]]
+    ) -> list[VectorCandidate]:
         open_candidates = [
-            c for c in self.state.open_vector_candidates()
+            c
+            for c in self.state.open_vector_candidates()
             if self._candidate_has_finish_blocking_yield(c, findings)
         ]
         deduped: list[VectorCandidate] = []
@@ -702,7 +809,8 @@ class ScanLoopDecisionPolicyMixin:
 
     def _retryable_family_candidates(self, findings: list[dict[str, Any]]) -> list[VectorCandidate]:
         retryable = [
-            c for c in self.state.open_vector_candidates()
+            c
+            for c in self.state.open_vector_candidates()
             if c.status == "retryable" and self._candidate_expected_yield_score(c, findings) >= 48
         ]
         deduped: list[VectorCandidate] = []
@@ -715,7 +823,9 @@ class ScanLoopDecisionPolicyMixin:
             deduped.append(candidate)
         return deduped
 
-    def _next_retry_round(self, skill_name: str, candidate: VectorCandidate | None = None) -> int | None:
+    def _next_retry_round(
+        self, skill_name: str, candidate: VectorCandidate | None = None
+    ) -> int | None:
         skill = str(skill_name).strip().lower()
         if skill not in {"test_injection", "test_xss", "test_ssrf"}:
             return None
@@ -751,6 +861,7 @@ class ScanLoopDecisionPolicyMixin:
             return True
         try:
             from vxis.agent.tools.finding_tools import _get_chains, _get_findings
+
             findings = list(_get_findings() or [])
             chains = list(_get_chains() or [])
         except Exception:
@@ -786,12 +897,15 @@ class ScanLoopDecisionPolicyMixin:
                 "premature_finish",
             }:
                 item.status = "closed"
-        self.state.add_message("system", {
-            "hint": (
-                "SYSTEM HINT: scan budget exhausted with no meaningful blockers remaining. "
-                "Accepting completion and finalizing the current report set."
-            ),
-        })
+        self.state.add_message(
+            "system",
+            {
+                "hint": (
+                    "SYSTEM HINT: scan budget exhausted with no meaningful blockers remaining. "
+                    "Accepting completion and finalizing the current report set."
+                ),
+            },
+        )
         return True
 
     @staticmethod
@@ -875,7 +989,8 @@ class ScanLoopDecisionPolicyMixin:
             stage=stage,
             verdict=verdict,
             title=title,
-            reason=(f"[{confidence}] " if confidence else "") + (reasoning or f"Verifier returned {verdict}."),
+            reason=(f"[{confidence}] " if confidence else "")
+            + (reasoning or f"Verifier returned {verdict}."),
             action_hint=action_hint,
             blocked_action="report_finding" if verdict == "REFUTED" else "",
             affected_component=component,
@@ -908,18 +1023,23 @@ class ScanLoopDecisionPolicyMixin:
             blocked_action="finish_scan",
             affected_component=component,
         )
-        self.state.add_message("tool", {
-            "name": "finish_scan", "args": {},
-            "result": {
-                "ok": False,
-                "summary": summary,
-                "data": data,
+        self.state.add_message(
+            "tool",
+            {
+                "name": "finish_scan",
+                "args": {},
+                "result": {
+                    "ok": False,
+                    "summary": summary,
+                    "data": data,
+                },
             },
-        })
+        )
 
     def _recent_finish_rejections(self, *, limit: int = 3) -> list[ReviewDecision]:
         items = [
-            item for item in self.state.review_history
+            item
+            for item in self.state.review_history
             if item.stage == "judge" and item.blocked_action == "finish_scan"
         ]
         return items[-limit:]
@@ -956,7 +1076,10 @@ class ScanLoopDecisionPolicyMixin:
         auth_titles = " ".join(str(f.get("title", "")).lower() for f in findings)
         finding_types = {str(f.get("finding_type", "")).lower() for f in findings}
         if (
-            any(token in auth_titles for token in ("authentication bypass", "authenticated", "token acquired"))
+            any(
+                token in auth_titles
+                for token in ("authentication bypass", "authenticated", "token acquired")
+            )
             or "weak_auth" in finding_types
             or "broken_access_control" in finding_types
         ):
@@ -977,7 +1100,9 @@ class ScanLoopDecisionPolicyMixin:
                 return "Exercise at least one unresolved high-priority vector candidate with a concrete payload."
         return "Perform one concrete high-signal action before attempting finish_scan again."
 
-    def _forced_candidate_action(self, candidate: VectorCandidate) -> tuple[str, dict[str, Any]] | None:
+    def _forced_candidate_action(
+        self, candidate: VectorCandidate
+    ) -> tuple[str, dict[str, Any]] | None:
         allowed = self._platform_allowed_skills()
         if "run_skill" not in self.registry.list_tools() or not allowed:
             return None
@@ -998,7 +1123,9 @@ class ScanLoopDecisionPolicyMixin:
                 skill = self._pivoted_skill_name("test_signature_audit")
                 if skill:
                     return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
-            skill = self._pivoted_skill_name("test_ipc_injection") or self._pivoted_skill_name("test_binary_protections")
+            skill = self._pivoted_skill_name("test_ipc_injection") or self._pivoted_skill_name(
+                "test_binary_protections"
+            )
             if skill:
                 return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
             return None
@@ -1033,7 +1160,9 @@ class ScanLoopDecisionPolicyMixin:
                     params = {}
                 return ("run_skill", {"skill": skill, "target_url": target, "params": params})
             return None
-        if any(token in blob for token in ("idor", "access_control", "broken_access_control", "object")):
+        if any(
+            token in blob for token in ("idor", "access_control", "broken_access_control", "object")
+        ):
             skill = self._pivoted_skill_name("test_idor")
             if skill:
                 params = self._best_skill_params(skill, hint_blob=blob)
@@ -1048,14 +1177,31 @@ class ScanLoopDecisionPolicyMixin:
         if any(token in blob for token in ("xss",)):
             skill = self._pivoted_skill_name("test_xss")
             if skill:
-                return ("run_skill", {"skill": skill, "target_url": target, "params": self._best_skill_params(skill, hint_blob=blob)})
+                return (
+                    "run_skill",
+                    {
+                        "skill": skill,
+                        "target_url": target,
+                        "params": self._best_skill_params(skill, hint_blob=blob),
+                    },
+                )
             return None
         if any(token in blob for token in ("ssrf",)):
             skill = self._pivoted_skill_name("test_ssrf")
             if skill:
-                return ("run_skill", {"skill": skill, "target_url": target, "params": self._best_skill_params(skill, hint_blob=blob)})
+                return (
+                    "run_skill",
+                    {
+                        "skill": skill,
+                        "target_url": target,
+                        "params": self._best_skill_params(skill, hint_blob=blob),
+                    },
+                )
             return None
-        if any(token in blob for token in ("secret", "file", "git", "debug", "config", "exposed", "disclosure")):
+        if any(
+            token in blob
+            for token in ("secret", "file", "git", "debug", "config", "exposed", "disclosure")
+        ):
             skill = self._pivoted_skill_name("test_sensitive_files")
             if skill:
                 return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
@@ -1082,21 +1228,26 @@ class ScanLoopDecisionPolicyMixin:
                 str(branch.crown_jewel or ""),
             ]
         ).lower()
-        shell_exec_failed = branch.last_tool == "shell_exec" and "exit=" in str(branch.last_summary).lower()
+        shell_exec_failed = (
+            branch.last_tool == "shell_exec" and "exit=" in str(branch.last_summary).lower()
+        )
         if branch.owner == "agent_graph":
             if self._agent_graph_branch_has_successful_child_evidence(branch):
                 return None
-            if any(token in str(branch.blocker or branch.last_summary).lower() for token in (
-                "run_limit_reached",
-                "child-run limit",
-                "executor_unavailable",
-                "child_tool_unavailable",
-                "child_tool_not_allowed",
-                "no executable child step",
-                "no executable step",
-                "not registered",
-                "not allowed for bounded child execution",
-            )):
+            if any(
+                token in str(branch.blocker or branch.last_summary).lower()
+                for token in (
+                    "run_limit_reached",
+                    "child-run limit",
+                    "executor_unavailable",
+                    "child_tool_unavailable",
+                    "child_tool_not_allowed",
+                    "no executable child step",
+                    "no executable step",
+                    "not registered",
+                    "not allowed for bounded child execution",
+                )
+            ):
                 return None
             agent_id = branch.id.removeprefix("agent:")
             if agent_id and self.registry.has_tool("agent_graph"):
@@ -1113,24 +1264,38 @@ class ScanLoopDecisionPolicyMixin:
                 if skill:
                     return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
             if any(token in blob for token in ("ipc", "deeplink", "url scheme")):
-                skill = self._pivoted_skill_name("test_ipc_injection") or self._pivoted_skill_name("test_deeplink_abuse")
+                skill = self._pivoted_skill_name("test_ipc_injection") or self._pivoted_skill_name(
+                    "test_deeplink_abuse"
+                )
                 if skill:
                     return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
-            skill = self._pivoted_skill_name("test_signature_audit") or self._pivoted_skill_name("test_binary_protections")
+            skill = self._pivoted_skill_name("test_signature_audit") or self._pivoted_skill_name(
+                "test_binary_protections"
+            )
             if skill:
                 return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
             return None
         if kind != "web":
             return None
-        if role == "post_exploit_worker" or any(token in phase for token in ("privilege_probe", "data_access", "chain_closure")):
-            if shell_exec_failed and any(token in blob for token in ("admin", "token", "session", "credential", "role", "export")):
-                return ("http_request", {"method": "GET", "url": target.rstrip("/") + "/rest/user/whoami"})
+        if role == "post_exploit_worker" or any(
+            token in phase for token in ("privilege_probe", "data_access", "chain_closure")
+        ):
+            if shell_exec_failed and any(
+                token in blob
+                for token in ("admin", "token", "session", "credential", "role", "export")
+            ):
+                return (
+                    "http_request",
+                    {"method": "GET", "url": target.rstrip("/") + "/rest/user/whoami"},
+                )
             skill = self._pivoted_skill_name("post_auth_enum")
             if skill:
                 params = self._best_skill_params(skill, hint_blob=blob)
                 return ("run_skill", {"skill": skill, "target_url": target, "params": params})
             return None
-        if any(token in blob for token in ("idor", "access_control", "broken access control", "object")):
+        if any(
+            token in blob for token in ("idor", "access_control", "broken access control", "object")
+        ):
             skill = self._pivoted_skill_name("test_idor")
             if skill:
                 params = self._best_skill_params(skill, hint_blob=blob)
@@ -1163,8 +1328,7 @@ class ScanLoopDecisionPolicyMixin:
         if branch.owner != "agent_graph":
             return False
         text = " ".join(
-            str(value or "")
-            for value in (branch.next_step, branch.evidence, branch.last_report)
+            str(value or "") for value in (branch.next_step, branch.evidence, branch.last_report)
         ).lower()
         return "successful child execution is available" in text
 
@@ -1174,7 +1338,12 @@ class ScanLoopDecisionPolicyMixin:
         allowed = self._platform_allowed_skills()
         declared: list[str] = []
         seen: set[str] = set()
-        for raw in [*list(branch.watch_terms or []), branch.next_step, branch.objective, branch.title]:
+        for raw in [
+            *list(branch.watch_terms or []),
+            branch.next_step,
+            branch.objective,
+            branch.title,
+        ]:
             text = str(raw or "").strip().lower()
             if not text:
                 continue
@@ -1195,7 +1364,10 @@ class ScanLoopDecisionPolicyMixin:
         for item in self.state.attempt_outcomes[-window:]:
             if item.tool != "run_skill" or item.status != "blocked":
                 continue
-            if f"\"skill\": \"{skill}\"" in item.args_preview or f"'skill': '{skill}'" in item.args_preview:
+            if (
+                f'"skill": "{skill}"' in item.args_preview
+                or f"'skill': '{skill}'" in item.args_preview
+            ):
                 total += 1
         return max(total, counted)
 
@@ -1258,7 +1430,9 @@ class ScanLoopDecisionPolicyMixin:
                 return alt
         return ""
 
-    def _normalize_skill_params(self, skill_name: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _normalize_skill_params(
+        self, skill_name: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         skill = str(skill_name).strip().lower()
         normalized = dict(params or {})
         target = str(self.state.target)
@@ -1364,19 +1538,53 @@ class ScanLoopDecisionPolicyMixin:
         def _matches(url: str) -> bool:
             lower = url.lower()
             if skill == "test_injection":
-                return "?" in lower and any(token in lower for token in ("search", "login", "q=", "query", "filter"))
+                return "?" in lower and any(
+                    token in lower for token in ("search", "login", "q=", "query", "filter")
+                )
             if skill == "test_xss":
-                return "?" in lower and any(token in lower for token in ("search", "q=", "query", "return", "redirect", "next", "message", "comment"))
+                return "?" in lower and any(
+                    token in lower
+                    for token in (
+                        "search",
+                        "q=",
+                        "query",
+                        "return",
+                        "redirect",
+                        "next",
+                        "message",
+                        "comment",
+                    )
+                )
             if skill == "test_ssrf":
-                return any(token in lower for token in ("url=", "uri=", "dest=", "redirect", "next=", "callback", "return", "proxy", "fetch"))
+                return any(
+                    token in lower
+                    for token in (
+                        "url=",
+                        "uri=",
+                        "dest=",
+                        "redirect",
+                        "next=",
+                        "callback",
+                        "return",
+                        "proxy",
+                        "fetch",
+                    )
+                )
             if skill in {"test_api_security", "test_business_logic"}:
-                return any(token in lower for token in ("/api/", "order", "cart", "checkout", "profile", "account"))
+                return any(
+                    token in lower
+                    for token in ("/api/", "order", "cart", "checkout", "profile", "account")
+                )
             return False
 
         if blob:
             for url in urls:
                 lower = url.lower()
-                if any(token and token in lower for token in re.split(r"[^a-z0-9_/.-]+", blob) if len(token) >= 4):
+                if any(
+                    token and token in lower
+                    for token in re.split(r"[^a-z0-9_/.-]+", blob)
+                    if len(token) >= 4
+                ):
                     _push(url)
 
         for url in urls:
@@ -1438,21 +1646,49 @@ class ScanLoopDecisionPolicyMixin:
 
         if skill == "test_injection":
             picked = _pick_untried(self._surface_candidates_for_skill(skill, hint_blob=blob)) or (
-                _pick(lambda u: "?" in u and any(token in u for token in ("search", "login", "q=", "query", "filter")))
+                _pick(
+                    lambda u: (
+                        "?" in u
+                        and any(
+                            token in u for token in ("search", "login", "q=", "query", "filter")
+                        )
+                    )
+                )
                 or _pick(lambda u: "?" in u)
                 or f"{target}/search?q=test"
             )
             return {"url": picked}
         if skill == "test_xss":
             picked = _pick_untried(self._surface_candidates_for_skill(skill, hint_blob=blob)) or (
-                _pick(lambda u: "?" in u and any(token in u for token in ("search", "q=", "query", "return", "redirect", "next")))
+                _pick(
+                    lambda u: (
+                        "?" in u
+                        and any(
+                            token in u
+                            for token in ("search", "q=", "query", "return", "redirect", "next")
+                        )
+                    )
+                )
                 or _pick(lambda u: "?" in u)
                 or f"{target}/search?q=test"
             )
             return {"url": picked}
         if skill == "test_ssrf":
             picked = _pick_untried(self._surface_candidates_for_skill(skill, hint_blob=blob)) or (
-                _pick(lambda u: any(token in u for token in ("url=", "uri=", "dest=", "redirect", "next=", "callback", "return")))
+                _pick(
+                    lambda u: any(
+                        token in u
+                        for token in (
+                            "url=",
+                            "uri=",
+                            "dest=",
+                            "redirect",
+                            "next=",
+                            "callback",
+                            "return",
+                        )
+                    )
+                )
                 or f"{target}/redirect?url=http://example.com"
             )
             return {"url": picked}
@@ -1473,7 +1709,12 @@ class ScanLoopDecisionPolicyMixin:
             return params
         if skill in {"test_api_security", "test_business_logic"}:
             picked = (
-                _pick(lambda u: any(token in u for token in ("/api/", "order", "cart", "checkout", "profile", "account")))
+                _pick(
+                    lambda u: any(
+                        token in u
+                        for token in ("/api/", "order", "cart", "checkout", "profile", "account")
+                    )
+                )
                 or target
             )
             return {"url": picked}
@@ -1542,8 +1783,12 @@ class ScanLoopDecisionPolicyMixin:
         skill = str(requested_skill).strip().lower()
         if not skill:
             return "", dict(params or {})
-        if self._recent_blocked_skill_count(skill) >= 3 and self._should_retry_skill_on_fresh_surface(skill, params):
-            return skill, self._normalize_skill_params(skill, self._alternate_surface_params(skill, params))
+        if self._recent_blocked_skill_count(
+            skill
+        ) >= 3 and self._should_retry_skill_on_fresh_surface(skill, params):
+            return skill, self._normalize_skill_params(
+                skill, self._alternate_surface_params(skill, params)
+            )
         rerouted = self._pivoted_skill_name(skill)
         if not rerouted:
             if self._recent_blocked_skill_count(skill) >= 3:
@@ -1577,6 +1822,7 @@ class ScanLoopDecisionPolicyMixin:
                     return forced[0], forced[1], f"forcing branch advancement on {focus.id}"
             try:
                 from vxis.agent.tools.finding_tools import _get_findings
+
                 findings = list(_get_findings() or [])
             except Exception:
                 findings = []
@@ -1585,16 +1831,25 @@ class ScanLoopDecisionPolicyMixin:
                 forced = self._forced_candidate_action(retryable_candidates[0])
                 if forced is not None:
                     family = self._candidate_family(retryable_candidates[0])
-                    return forced[0], forced[1], f"forcing deeper retry on {family} family via {retryable_candidates[0].id}"
+                    return (
+                        forced[0],
+                        forced[1],
+                        f"forcing deeper retry on {family} family via {retryable_candidates[0].id}",
+                    )
             family_candidates = self._remaining_high_yield_family_candidates(findings)
             if family_candidates:
                 forced = self._forced_candidate_action(family_candidates[0])
                 if forced is not None:
                     family = self._candidate_family(family_candidates[0])
-                    return forced[0], forced[1], f"forcing remaining {family} family exploration via {family_candidates[0].id}"
+                    return (
+                        forced[0],
+                        forced[1],
+                        f"forcing remaining {family} family exploration via {family_candidates[0].id}",
+                    )
         if title == "unattempted_candidates":
             try:
                 from vxis.agent.tools.finding_tools import _get_findings
+
                 findings = list(_get_findings() or [])
             except Exception:
                 findings = []
@@ -1602,7 +1857,11 @@ class ScanLoopDecisionPolicyMixin:
             if retryable_candidates:
                 forced = self._forced_candidate_action(retryable_candidates[0])
                 if forced is not None:
-                    return forced[0], forced[1], f"forcing retryable candidate {retryable_candidates[0].id}"
+                    return (
+                        forced[0],
+                        forced[1],
+                        f"forcing retryable candidate {retryable_candidates[0].id}",
+                    )
             open_candidates = self._remaining_high_yield_family_candidates(findings)
             if open_candidates:
                 forced = self._forced_candidate_action(open_candidates[0])
@@ -1616,6 +1875,7 @@ class ScanLoopDecisionPolicyMixin:
         try:
             from vxis.agent.tools.finding_tools import _canonical_finding_type
         except Exception:
+
             def _canonical_finding_type(value: str) -> str:
                 return str(value or "").lower().strip()
 
@@ -1663,13 +1923,19 @@ class ScanLoopDecisionPolicyMixin:
         model = str(getattr(self.brain, "_model", "") or "").lower()
         if provider in {"llamacpp", "ollama"}:
             return "local_strict"
-        if (
-            provider in {"openai", "anthropic", "gemini", "google"}
-            and (
-                any(token in model for token in ("gpt-5.5", "gpt-5.4", "claude-opus", "claude-sonnet", "gemini-2.5-pro"))
-                or "opus" in model
-                or "sonnet" in model
+        if provider in {"openai", "anthropic", "gemini", "google"} and (
+            any(
+                token in model
+                for token in (
+                    "gpt-5.5",
+                    "gpt-5.4",
+                    "claude-opus",
+                    "claude-sonnet",
+                    "gemini-2.5-pro",
+                )
             )
+            or "opus" in model
+            or "sonnet" in model
         ):
             return "frontier_loose"
         if provider:
@@ -1737,12 +2003,16 @@ class ScanLoopDecisionPolicyMixin:
             return True
         findings_count = len(self.state.findings)
         cap_score = self._action_capability_score(name, args)
-        grace_threshold, free_threshold, uncovered_family_floor = self._off_branch_capability_thresholds()
+        grace_threshold, free_threshold, uncovered_family_floor = (
+            self._off_branch_capability_thresholds()
+        )
         if self.state.iteration <= self._focus_grace_iterations() and findings_count == 0:
             return cap_score >= grace_threshold
         if cap_score >= free_threshold:
             return True
-        if matched_branch_ids and any(self._branch_same_campaign(branch, branch_id) for branch_id in matched_branch_ids):
+        if matched_branch_ids and any(
+            self._branch_same_campaign(branch, branch_id) for branch_id in matched_branch_ids
+        ):
             return True
         if self._is_high_value_cross_campaign_exception(
             branch,
@@ -1769,7 +2039,9 @@ class ScanLoopDecisionPolicyMixin:
                         if uncovered_family_floor and cap_score < uncovered_family_floor:
                             continue
                         return True
-        if matched_branch_ids and any(str(branch_id).startswith(("memory:", "carry:")) for branch_id in matched_branch_ids):
+        if matched_branch_ids and any(
+            str(branch_id).startswith(("memory:", "carry:")) for branch_id in matched_branch_ids
+        ):
             return True
         return False
 
@@ -1786,7 +2058,11 @@ class ScanLoopDecisionPolicyMixin:
         focus_family = self._branch_family(branch)
         if focus_family not in {"auth", "injection"}:
             return False
-        if branch.role != "post_exploit_worker" and branch.phase not in {"session_reuse", "privilege_probe", "data_access"}:
+        if branch.role != "post_exploit_worker" and branch.phase not in {
+            "session_reuse",
+            "privilege_probe",
+            "data_access",
+        }:
             return False
         target_families: set[str] = set()
         for branch_id in matched_branch_ids:
@@ -1808,8 +2084,10 @@ class ScanLoopDecisionPolicyMixin:
         try:
             from vxis.agent.tools.finding_tools import _canonical_finding_type as _canon_ft
         except Exception:
+
             def _canon_ft(value: object) -> str:
                 return str(value or "").strip().lower()
+
         found_types = {
             _canon_ft(str(item.get("finding_type", "")))
             for item in self.state.findings
@@ -1835,11 +2113,23 @@ class ScanLoopDecisionPolicyMixin:
         other = self.state.branches.get(branch_id)
         if other is None:
             return False
-        if branch.source_finding_id and other.source_finding_id and branch.source_finding_id == other.source_finding_id:
+        if (
+            branch.source_finding_id
+            and other.source_finding_id
+            and branch.source_finding_id == other.source_finding_id
+        ):
             return True
-        if branch.parent_branch_id and other.parent_branch_id and branch.parent_branch_id == other.parent_branch_id:
+        if (
+            branch.parent_branch_id
+            and other.parent_branch_id
+            and branch.parent_branch_id == other.parent_branch_id
+        ):
             return True
-        if branch.source_candidate_id and other.source_candidate_id and branch.source_candidate_id == other.source_candidate_id:
+        if (
+            branch.source_candidate_id
+            and other.source_candidate_id
+            and branch.source_candidate_id == other.source_candidate_id
+        ):
             return True
         return False
 
@@ -1859,8 +2149,10 @@ class ScanLoopDecisionPolicyMixin:
             if blob:
                 terms.append(blob)
                 terms.extend(
-                    token for token in re.findall(r"[a-z0-9_./:-]{4,}", blob)
-                    if token not in {
+                    token
+                    for token in re.findall(r"[a-z0-9_./:-]{4,}", blob)
+                    if token
+                    not in {
                         "http",
                         "https",
                         "with",
@@ -1899,7 +2191,9 @@ class ScanLoopDecisionPolicyMixin:
         if not self._phase_allows_action(branch, name, args):
             return False
         if name == "report_finding":
-            return bool(matched_branch_ids) or bool(branch.source_candidate_id or branch.source_finding_id)
+            return bool(matched_branch_ids) or bool(
+                branch.source_candidate_id or branch.source_finding_id
+            )
         if any(self._branch_lineage_match(branch, branch_id) for branch_id in matched_branch_ids):
             return True
         blob = f"{name} {self._preview_args(args)}".lower()
@@ -1980,7 +2274,9 @@ class ScanLoopDecisionPolicyMixin:
         }
         return list(skill_map.get(skill, []))
 
-    def _matches_refuted_memory_action(self, name: str, args: dict[str, Any] | Any) -> dict[str, Any] | None:
+    def _matches_refuted_memory_action(
+        self, name: str, args: dict[str, Any] | Any
+    ) -> dict[str, Any] | None:
         profile = self._memory_profile()
         refuted = list(profile.get("refuted_patterns") or [])
         if not refuted:
@@ -1996,11 +2292,16 @@ class ScanLoopDecisionPolicyMixin:
             mem_component = str(item.get("affected_component", "")).strip().lower()
             if not mem_type or not mem_component or mem_type not in action_types:
                 continue
-            if any(mem_component in component or component in mem_component for component in action_components):
+            if any(
+                mem_component in component or component in mem_component
+                for component in action_components
+            ):
                 return item
         return None
 
-    def _matching_successful_memory_tactic(self, name: str, args: dict[str, Any] | Any) -> dict[str, Any] | None:
+    def _matching_successful_memory_tactic(
+        self, name: str, args: dict[str, Any] | Any
+    ) -> dict[str, Any] | None:
         profile = self._memory_profile()
         tactics = list(profile.get("successful_tactics") or [])
         if not tactics:
@@ -2017,7 +2318,10 @@ class ScanLoopDecisionPolicyMixin:
             if action_types and mem_type and mem_type not in action_types:
                 continue
             if action_components and mem_component:
-                if not any(mem_component in component or component in mem_component for component in action_components):
+                if not any(
+                    mem_component in component or component in mem_component
+                    for component in action_components
+                ):
                     continue
             return item
         return None
@@ -2035,7 +2339,10 @@ class ScanLoopDecisionPolicyMixin:
             return False
         if not (profile.get("known_findings") or profile.get("branch_leads")):
             return False
-        if any(str(branch_id).startswith("carry:") or str(branch_id).startswith("memory:") for branch_id in matched_branch_ids):
+        if any(
+            str(branch_id).startswith("carry:") or str(branch_id).startswith("memory:")
+            for branch_id in matched_branch_ids
+        ):
             return False
         if name in {"finish_scan", "link_chain", "query_scan_memory"}:
             return False

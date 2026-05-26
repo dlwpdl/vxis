@@ -119,20 +119,27 @@ Pick ONE action grounded in the evidence above and output the JSON tool call."""
 # `test_csrf`, etc. → wasted iterations + false-positive cloud_metadata
 # reports against a file:// path. The guard is the hard floor: refuse the
 # dispatch and inject a HINT so Brain re-plans on the next iter.
-_DESKTOP_SKILLS: frozenset[str] = frozenset({
-    "test_local_storage_secrets",
-    "test_electron_misconfig",
-    "test_signature_audit",
-    "test_entitlement_audit",
-    "test_dylib_hijack",
-    "test_deeplink_abuse",
-    "test_ipc_injection",
-    "test_binary_protections",
-})
+_DESKTOP_SKILLS: frozenset[str] = frozenset(
+    {
+        "test_local_storage_secrets",
+        "test_electron_misconfig",
+        "test_signature_audit",
+        "test_entitlement_audit",
+        "test_dylib_hijack",
+        "test_deeplink_abuse",
+        "test_ipc_injection",
+        "test_binary_protections",
+    }
+)
 
 _WEB_PIVOT_SKILL_GRAPH: dict[str, tuple[str, ...]] = {
     "attempt_auth": ("post_auth_enum", "test_idor", "test_api_security", "test_business_logic"),
-    "post_auth_enum": ("test_idor", "test_api_security", "test_business_logic", "test_sensitive_files"),
+    "post_auth_enum": (
+        "test_idor",
+        "test_api_security",
+        "test_business_logic",
+        "test_sensitive_files",
+    ),
     "test_idor": ("test_api_security", "test_business_logic", "test_injection"),
     "test_injection": ("test_sensitive_files", "test_misconfig", "test_xss", "test_ssrf"),
     "test_sensitive_files": ("test_infra", "test_misconfig", "test_business_logic"),
@@ -140,18 +147,42 @@ _WEB_PIVOT_SKILL_GRAPH: dict[str, tuple[str, ...]] = {
 }
 
 _DESKTOP_PIVOT_SKILL_GRAPH: dict[str, tuple[str, ...]] = {
-    "test_local_storage_secrets": ("test_deeplink_abuse", "test_ipc_injection", "test_signature_audit"),
+    "test_local_storage_secrets": (
+        "test_deeplink_abuse",
+        "test_ipc_injection",
+        "test_signature_audit",
+    ),
     "test_deeplink_abuse": ("test_ipc_injection", "test_electron_misconfig", "test_dylib_hijack"),
-    "test_signature_audit": ("test_entitlement_audit", "test_dylib_hijack", "test_binary_protections"),
-    "test_electron_misconfig": ("test_local_storage_secrets", "test_deeplink_abuse", "test_ipc_injection"),
+    "test_signature_audit": (
+        "test_entitlement_audit",
+        "test_dylib_hijack",
+        "test_binary_protections",
+    ),
+    "test_electron_misconfig": (
+        "test_local_storage_secrets",
+        "test_deeplink_abuse",
+        "test_ipc_injection",
+    ),
 }
 
 _WEB_VECTOR_FAMILY_RULES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ...] = (
-    ("auth", ("auth", "login", "credential", "session"), ("weak_auth", "broken_access_control", "sql_injection")),
+    (
+        "auth",
+        ("auth", "login", "credential", "session"),
+        ("weak_auth", "broken_access_control", "sql_injection"),
+    ),
     ("injection", ("sqli", "sql", "injection", "nosql", "ssti"), ("sql_injection",)),
     ("idor", ("idor", "object", "access_control"), ("idor", "broken_access_control")),
-    ("disclosure", ("secret", "file", "git", "debug", "config", "disclosure"), ("information_disclosure", "misconfiguration")),
+    (
+        "disclosure",
+        ("secret", "file", "git", "debug", "config", "disclosure"),
+        ("information_disclosure", "misconfiguration"),
+    ),
     ("xss", ("xss",), ("xss", "xss_reflected", "xss_stored", "xss_dom")),
     ("ssrf", ("ssrf",), ("ssrf",)),
-    ("infra", ("route", "directory", "cve", "template", "infra"), ("misconfiguration", "information_disclosure")),
+    (
+        "infra",
+        ("route", "directory", "cve", "template", "infra"),
+        ("misconfiguration", "information_disclosure"),
+    ),
 )

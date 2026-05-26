@@ -58,8 +58,7 @@ class ScanLoopAgentGraphMixin:
         task = str(agent.get("task") or "delegated worker result").strip()
         title = f"Crown-chain follow-up for {agent_id}"
         objective = (
-            f"Turn delegated result into crown-jewel impact: {task}. "
-            f"Worker result: {result[:220]}"
+            f"Turn delegated result into crown-jewel impact: {task}. Worker result: {result[:220]}"
         )
         next_step = (
             "Create or run a post_exploit_worker. Test session reuse, privilege boundaries, "
@@ -162,24 +161,34 @@ class ScanLoopAgentGraphMixin:
             role = str(agent.get("role") or "recon_worker").strip() or "recon_worker"
             task = str(agent.get("task") or "").strip()
             result_text = str(agent.get("result") or "").strip()
-            envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
-            result_package = agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
-            escalation = agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
+            envelope = (
+                agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+            )
+            result_package = (
+                agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+            )
+            escalation = (
+                agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
+            )
             parent_agent_id = str(agent.get("parent_id") or "").strip()
             parent_branch_id = self._agent_graph_branch_id(parent_agent_id)
             if parent_branch_id and parent_branch_id not in self.state.branches:
                 parent_branch_id = ""
-            skills = [
-                str(skill).strip()
-                for skill in list(agent.get("skills") or [])
-                if str(skill).strip()
-            ] if isinstance(agent.get("skills"), list) else []
+            skills = (
+                [
+                    str(skill).strip()
+                    for skill in list(agent.get("skills") or [])
+                    if str(skill).strip()
+                ]
+                if isinstance(agent.get("skills"), list)
+                else []
+            )
             executions = agent.get("executions")
-            successful_executions = [
-                item
-                for item in executions
-                if isinstance(item, dict) and item.get("ok")
-            ] if isinstance(executions, list) else []
+            successful_executions = (
+                [item for item in executions if isinstance(item, dict) and item.get("ok")]
+                if isinstance(executions, list)
+                else []
+            )
             latest_success = successful_executions[-1] if successful_executions else {}
             latest_success_summary = str(latest_success.get("summary") or "").strip()
             latest_success_tool = str(latest_success.get("tool") or "child").strip()
@@ -199,7 +208,11 @@ class ScanLoopAgentGraphMixin:
             if skills:
                 next_step = f"Use skill/tool path: {', '.join(skills[:4])}; then finish this delegated agent with a concrete result."
             if latest_success:
-                evidence_hint = f"{latest_success_tool}: {latest_success_summary}" if latest_success_summary else latest_success_tool
+                evidence_hint = (
+                    f"{latest_success_tool}: {latest_success_summary}"
+                    if latest_success_summary
+                    else latest_success_tool
+                )
                 next_step = (
                     "Successful child execution is available. Finish this delegated agent with "
                     f"agent_graph(action='finish', agent_id='{agent_id}', result='<concrete evidence and impact>') "
@@ -246,7 +259,11 @@ class ScanLoopAgentGraphMixin:
                 or result.summary
             )[:160]
             branch.last_iter = self.state.iteration
-            if branch.status == "active" and verdict_guess == "candidate_positive" and not branch.blocker:
+            if (
+                branch.status == "active"
+                and verdict_guess == "candidate_positive"
+                and not branch.blocker
+            ):
                 branch.blocker = "positive delegated worker result requires director pivot/finish"
             if result.error in {
                 "run_limit_reached",
@@ -256,12 +273,17 @@ class ScanLoopAgentGraphMixin:
                 "child_tool_not_allowed",
             }:
                 branch.blocker = result.summary[:180]
-            if result.error == "unsupported_execution_evidence":
+            if result.error in {"unsupported_execution_evidence", "insufficient_proof_artifact"}:
                 branch.blocker = result.summary[:180]
+                proof_note = (
+                    "The previous successful execution did not include concrete PoC/control evidence."
+                    if result.error == "insufficient_proof_artifact"
+                    else "The previous successful execution did not support the claimed vulnerability family."
+                )
                 branch.next_step = (
-                    "Run child evidence that matches the positive claim with "
+                    "Run child evidence that matches the positive claim with concrete proof using "
                     f"agent_graph(action='run', agent_id='{agent_id}'), or finish this agent as blocked/clean. "
-                    "The previous successful execution did not support the claimed vulnerability family."
+                    f"{proof_note}"
                 )
             if branch.status == "blocked" and result_text:
                 branch.blocker = str(escalation.get("reason") or result_text)[:180]
@@ -300,7 +322,9 @@ class ScanLoopAgentGraphMixin:
                         f"chain follow-up {agent_id}: {followup.id} -> {followup.crown_jewel}"
                     )
 
-    async def _run_agent_graph_child_turn(self, agent: dict[str, Any], instruction: str) -> ToolResult:
+    async def _run_agent_graph_child_turn(
+        self, agent: dict[str, Any], instruction: str
+    ) -> ToolResult:
         agent_id = str(agent.get("id") or "").strip()
         branch = self.state.branches.get(self._agent_graph_branch_id(agent_id))
         action = (
@@ -319,7 +343,12 @@ class ScanLoopAgentGraphMixin:
             )
 
         tool_name, tool_args = action
-        allowed_child_tools = {"run_skill", "http_request", "browser_navigate", "browser_analyze_dom"}
+        allowed_child_tools = {
+            "run_skill",
+            "http_request",
+            "browser_navigate",
+            "browser_analyze_dom",
+        }
         envelope_allowed = self._agent_graph_envelope_allowed_tools(agent)
         if envelope_allowed:
             allowed_child_tools = allowed_child_tools & envelope_allowed
@@ -362,7 +391,9 @@ class ScanLoopAgentGraphMixin:
         agent: dict[str, Any],
         instruction: str,
     ) -> tuple[str, dict[str, Any]] | None:
-        envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        envelope = (
+            agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        )
         if "run_skill" in self.registry.list_tools():
             blob = " ".join(
                 str(value or "")
@@ -418,7 +449,9 @@ class ScanLoopAgentGraphMixin:
 
     @staticmethod
     def _agent_graph_envelope_allowed_tools(agent: dict[str, Any]) -> set[str]:
-        envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        envelope = (
+            agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        )
         raw_items = list(envelope.get("allowed_tools") or [])
         allowed: set[str] = set()
         for item in raw_items:
@@ -429,9 +462,15 @@ class ScanLoopAgentGraphMixin:
         return allowed
 
     @staticmethod
-    def _agent_graph_worker_instruction(agent: dict[str, Any], instruction: str, tool_name: str) -> str:
-        envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
-        result_package = agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+    def _agent_graph_worker_instruction(
+        agent: dict[str, Any], instruction: str, tool_name: str
+    ) -> str:
+        envelope = (
+            agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        )
+        result_package = (
+            agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        )
         parts = [
             f"objective={str(envelope.get('objective') or agent.get('task') or '').strip()}",
             f"tool={tool_name}",
@@ -506,7 +545,9 @@ class ScanLoopAgentGraphMixin:
         tool_name = str(execution.get("tool") or data.get("tool") or "").strip()
         if not tool_name:
             return None
-        args_raw = execution.get("args") if isinstance(execution.get("args"), dict) else data.get("args")
+        args_raw = (
+            execution.get("args") if isinstance(execution.get("args"), dict) else data.get("args")
+        )
         child_args = dict(args_raw) if isinstance(args_raw, dict) else {}
         raw_result = data.get("result") if isinstance(data.get("result"), dict) else {}
         child_result = ToolResult(

@@ -25,28 +25,76 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["DIRECTOR_PROMPT_TEMPLATE", "ScanAgentLoop", "VectorCandidate", "_DESKTOP_SKILLS"]
 
-class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAgentGraphMixin, ScanLoopRunMixin):
+
+class ScanAgentLoop(
+    ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAgentGraphMixin, ScanLoopRunMixin
+):
     _ROLE_ALLOWED_CAPABILITIES: dict[str, set[str]] = {
         "recon_worker": {
-            "recon", "browse", "probe", "memory", "plan", "control",
-            "report", "review", "chain",
+            "recon",
+            "browse",
+            "probe",
+            "memory",
+            "plan",
+            "control",
+            "report",
+            "review",
+            "chain",
         },
         "exploit_worker": {
-            "browse", "probe", "exploit", "report", "review", "chain",
-            "plan", "control",
+            "browse",
+            "probe",
+            "exploit",
+            "report",
+            "review",
+            "chain",
+            "plan",
+            "control",
         },
         "post_exploit_worker": {
-            "probe", "exploit", "retrieve", "report", "review", "chain",
-            "memory", "plan", "control",
+            "probe",
+            "exploit",
+            "retrieve",
+            "report",
+            "review",
+            "chain",
+            "memory",
+            "plan",
+            "control",
         },
         "review_worker": {
-            "review", "report", "chain", "memory", "plan", "control",
+            "review",
+            "report",
+            "chain",
+            "memory",
+            "plan",
+            "control",
         },
     }
     _POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES: dict[str, set[str]] = {
         "session_reuse": {"browse", "probe", "retrieve", "report", "review", "plan", "control"},
-        "privilege_probe": {"browse", "probe", "exploit", "retrieve", "report", "review", "chain", "plan", "control"},
-        "data_access": {"probe", "exploit", "retrieve", "report", "review", "chain", "memory", "plan", "control"},
+        "privilege_probe": {
+            "browse",
+            "probe",
+            "exploit",
+            "retrieve",
+            "report",
+            "review",
+            "chain",
+            "plan",
+            "control",
+        },
+        "data_access": {
+            "probe",
+            "exploit",
+            "retrieve",
+            "report",
+            "review",
+            "chain",
+            "memory",
+            "plan",
+            "control",
+        },
         "chain_closure": {"report", "review", "chain", "memory", "plan", "control", "probe"},
     }
 
@@ -79,6 +127,7 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
         # a non-HTTP target. Kept as Any for back-compat with callers that
         # don't pass it (default = web behaviour).
         from vxis.interaction.surface import TargetKind as _TK
+
         self._target_kind = target_kind or _TK.WEB
         self._seed_vector_candidates()
         self._install_agent_graph_executor()
@@ -150,7 +199,10 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
         normalized = dict(args)
         if name == "shell_exec" and not normalized.get("command") and normalized.get("cmd"):
             normalized["command"] = normalized["cmd"]
-        if name == "agent_graph" and str(normalized.get("action") or "").strip().lower() == "create":
+        if (
+            name == "agent_graph"
+            and str(normalized.get("action") or "").strip().lower() == "create"
+        ):
             role = str(normalized.get("role") or "recon_worker").strip().lower() or "recon_worker"
             task = str(normalized.get("task") or normalized.get("message") or "").strip()
             declared_skills = normalized.get("skills")
@@ -163,15 +215,21 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
                 normalized.setdefault("objective", task[:160])
             if not normalized.get("expected_artifact"):
                 if role == "recon_worker":
-                    normalized["expected_artifact"] = "surface map with concrete routes, auth boundaries, or parameter shapes"
+                    normalized["expected_artifact"] = (
+                        "surface map with concrete routes, auth boundaries, or parameter shapes"
+                    )
                 elif role == "post_exploit_worker":
-                    normalized["expected_artifact"] = "session, privilege, or data-access transcript tied to crown-jewel impact"
+                    normalized["expected_artifact"] = (
+                        "session, privilege, or data-access transcript tied to crown-jewel impact"
+                    )
                 elif skills:
                     normalized["expected_artifact"] = (
                         f"raw proof artifact via {skills[0]}: request/response transcript, control pair, or exploit delta"
                     )
                 else:
-                    normalized["expected_artifact"] = "raw proof artifact: transcript, control pair, or concrete blocker"
+                    normalized["expected_artifact"] = (
+                        "raw proof artifact: transcript, control pair, or concrete blocker"
+                    )
             normalized.setdefault(
                 "stop_condition",
                 "stop after one bounded proof step yields concrete evidence or a blocker",
@@ -190,10 +248,14 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
         return cls._action_capability(name, args) in allowed
 
     @classmethod
-    def _phase_allows_action(cls, branch: BranchState, name: str, args: dict[str, Any] | Any) -> bool:
+    def _phase_allows_action(
+        cls, branch: BranchState, name: str, args: dict[str, Any] | Any
+    ) -> bool:
         if branch.role != "post_exploit_worker":
             return True
-        allowed = cls._POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES.get(branch.phase or "chain_closure", set())
+        allowed = cls._POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES.get(
+            branch.phase or "chain_closure", set()
+        )
         if not allowed:
             return True
         return cls._action_capability(name, args) in allowed
@@ -233,10 +295,8 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
                 evidence="seeded from target surface",
             )
 
-
     def _build_scan_dashboard(self) -> str:
         return build_scan_dashboard(self)
-
 
     async def _director_decide(self) -> tuple[str, dict[str, Any]] | None:
         """Strategic Director: stronger model decides the EXACT next tool call.
@@ -250,10 +310,12 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
         """
         import asyncio
         import json as _jd
+
         if self.brain is None or not hasattr(self.brain, "_call_llm_with_fallback"):
             return None
         try:
             from vxis.agent.tools.finding_tools import _get_findings
+
             current_findings = _get_findings()
         except Exception:
             current_findings = []
@@ -267,10 +329,13 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
                 summary = (c.get("result") or {}).get("summary", "")[:100]
                 recent.append(f"  {name}: {summary}")
 
-        findings_summary = "\n".join(
-            f"  [{f['severity']}] {f['finding_type']}: {f.get('title','')[:80]}"
-            for f in current_findings[:10]
-        ) or "  (none yet)"
+        findings_summary = (
+            "\n".join(
+                f"  [{f['severity']}] {f['finding_type']}: {f.get('title', '')[:80]}"
+                for f in current_findings[:10]
+            )
+            or "  (none yet)"
+        )
 
         # Build vector status from dashboard
         vector_status = self._build_scan_dashboard()
@@ -287,6 +352,7 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
 
         # Use gpt-5.4 full for strategic decision
         import os
+
         orig_model = getattr(self.brain, "_model", None)
         use_stronger = False
         if (
@@ -301,7 +367,7 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
         try:
             response = await asyncio.to_thread(
                 self.brain._call_llm_with_fallback,
-                "Output ONLY a JSON object: {\"tool\": \"...\", \"args\": {...}}. No prose.",
+                'Output ONLY a JSON object: {"tool": "...", "args": {...}}. No prose.',
                 prompt,
             )
         except Exception as e:
@@ -321,6 +387,7 @@ class ScanAgentLoop(ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAg
             # Handle markdown fences
             if "```" in text:
                 import re
+
                 m = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
                 if m:
                     text = m.group(1)

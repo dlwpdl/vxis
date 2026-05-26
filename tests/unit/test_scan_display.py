@@ -53,7 +53,12 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
             "todo_counts": {"pending": 2, "done": 1},
             "branch_counts": {"active": 1, "proven": 1},
             "todos": [
-                {"id": "web:auth-bypass", "title": "Authentication bypass or weak login", "priority": 95, "status": "pending"},
+                {
+                    "id": "web:auth-bypass",
+                    "title": "Authentication bypass or weak login",
+                    "priority": 95,
+                    "status": "pending",
+                },
             ],
             "branches": [
                 {
@@ -178,7 +183,13 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                     "task_envelope": {
                         "objective": "Validate SQL injection on /api/search and collect control evidence",
                         "target_surface": "web",
-                        "allowed_tools": ["run_skill", "http_request", "browser_navigate", "browser_analyze_dom", "skills:test_injection"],
+                        "allowed_tools": [
+                            "run_skill",
+                            "http_request",
+                            "browser_navigate",
+                            "browser_analyze_dom",
+                            "skills:test_injection",
+                        ],
                         "expected_artifact": "raw proof artifact via test_injection: request/response transcript, control pair, or exploit delta",
                         "stop_condition": "stop after one bounded proof attempt yields concrete evidence or a blocker",
                         "escalation_trigger": "escalate after repeated blocked/clean runs or when a positive result needs a sharper next task",
@@ -227,7 +238,7 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                     ],
                     "skill_context": (
                         "### test_injection\n"
-                        "action: run_skill(skill=\"test_injection\", target_url=<target>, params={...})"
+                        'action: run_skill(skill="test_injection", target_url=<target>, params={...})'
                     ),
                 },
                 {

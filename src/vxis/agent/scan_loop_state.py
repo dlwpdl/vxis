@@ -47,11 +47,23 @@ def infer_branch_role(
         for token in ("admin", "db", "dump", "key theft", "data exfil", "credential", "pivot")
     ):
         return "post_exploit_worker"
-    if any(token in blob for token in ("review", "verify", "judge", "attestation", "chain analysis")):
+    if any(
+        token in blob for token in ("review", "verify", "judge", "attestation", "chain analysis")
+    ):
         return "review_worker"
     if any(
         token in blob
-        for token in ("auth", "sqli", "sqli", "xss", "ssrf", "idor", "csrf", "business", "injection")
+        for token in (
+            "auth",
+            "sqli",
+            "sqli",
+            "xss",
+            "ssrf",
+            "idor",
+            "csrf",
+            "business",
+            "injection",
+        )
     ):
         return "exploit_worker"
     return "recon_worker"
@@ -68,11 +80,18 @@ def infer_branch_phase(
 ) -> str:
     blob = " ".join((vector_id, title, objective, next_step, crown_jewel)).lower()
     if role == "post_exploit_worker":
-        if any(token in blob for token in ("cookie", "token", "session", "login", "post_auth_enum")):
+        if any(
+            token in blob for token in ("cookie", "token", "session", "login", "post_auth_enum")
+        ):
             return "session_reuse"
-        if any(token in blob for token in ("/admin", "role", "privilege", "export", "state-changing")):
+        if any(
+            token in blob for token in ("/admin", "role", "privilege", "export", "state-changing")
+        ):
             return "privilege_probe"
-        if any(token in blob for token in ("dump", "data", "rows", "table", "exfil", "download", "enumerate")):
+        if any(
+            token in blob
+            for token in ("dump", "data", "rows", "table", "exfil", "download", "enumerate")
+        ):
             return "data_access"
         return "chain_closure"
     if role == "exploit_worker":
@@ -155,7 +174,16 @@ def advance_post_exploit_phase(
         blob = f"{name} {args}".lower()
         if any(
             token in blob
-            for token in ("dump", "table", "users", "download", "export", "orders", "profile", "sqlmap")
+            for token in (
+                "dump",
+                "table",
+                "users",
+                "download",
+                "export",
+                "orders",
+                "profile",
+                "sqlmap",
+            )
         ):
             return "data_access"
     if phase == "data_access" and capability in {"report", "chain", "review"}:
@@ -418,7 +446,9 @@ class ScanLoopState:
     # Surfaced by ScanPipelineV2 into ctx.peak_context_bytes for the Task 14 benchmark.
     peak_context_bytes: int = 0
     # Phase C belief state: per-verdict counts from auto-verify interception
-    verdict_counts: dict[str, int] = field(default_factory=lambda: {"CONFIRMED": 0, "UNCONFIRMED": 0, "REFUTED": 0})
+    verdict_counts: dict[str, int] = field(
+        default_factory=lambda: {"CONFIRMED": 0, "UNCONFIRMED": 0, "REFUTED": 0}
+    )
     refuted_findings: list[dict[str, Any]] = field(default_factory=list)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     vector_candidates: dict[str, VectorCandidate] = field(default_factory=dict)
@@ -554,7 +584,8 @@ class ScanLoopState:
                 title=title,
                 priority=priority,
                 role=role,
-                phase=phase or infer_branch_phase(
+                phase=phase
+                or infer_branch_phase(
                     role=role,
                     vector_id=vector_id,
                     title=title,
@@ -586,13 +617,17 @@ class ScanLoopState:
         branch.title = title
         branch.priority = max(branch.priority, priority)
         branch.role = role or branch.role
-        branch.phase = phase or branch.phase or infer_branch_phase(
-            role=branch.role,
-            vector_id=vector_id,
-            title=title,
-            objective=objective or branch.objective,
-            next_step=next_step or branch.next_step,
-            crown_jewel=crown_jewel or branch.crown_jewel,
+        branch.phase = (
+            phase
+            or branch.phase
+            or infer_branch_phase(
+                role=branch.role,
+                vector_id=vector_id,
+                title=title,
+                objective=objective or branch.objective,
+                next_step=next_step or branch.next_step,
+                crown_jewel=crown_jewel or branch.crown_jewel,
+            )
         )
         branch.owner = owner or branch.owner
         if parent_branch_id:
@@ -807,7 +842,9 @@ class ScanLoopState:
             source_candidate_id=candidate.id,
         )
         todo.status = self._todo_status_for_candidate(candidate.status)
-        todo.detail = candidate.last_summary[:120] if candidate.last_summary else candidate.evidence[:120]
+        todo.detail = (
+            candidate.last_summary[:120] if candidate.last_summary else candidate.evidence[:120]
+        )
         todo.last_iter = self.iteration
 
         branch = self.ensure_branch(
@@ -886,10 +923,7 @@ class ScanLoopState:
 
     def active_branches(self) -> list[BranchState]:
         return sorted(
-            [
-                b for b in self.branches.values()
-                if b.status not in _TERMINAL_BRANCH_STATUSES
-            ],
+            [b for b in self.branches.values() if b.status not in _TERMINAL_BRANCH_STATUSES],
             key=lambda b: (-b.priority, b.attempts, b.last_iter, b.id),
         )
 
@@ -948,7 +982,8 @@ class ScanLoopState:
         """Return candidates that still need proof, retry, or a clear dead-end."""
         return sorted(
             [
-                c for c in self.vector_candidates.values()
+                c
+                for c in self.vector_candidates.values()
                 if c.status not in _TERMINAL_VECTOR_STATUSES
             ],
             key=lambda c: (-c.priority, c.attempts, c.created_iter, c.id),

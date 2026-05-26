@@ -52,9 +52,7 @@ def agent_graph_director_brief(
         status = str(agent.get("status") or "unknown").lower()
         task = str(agent.get("task") or "").strip()
         skills = [
-            str(skill).strip()
-            for skill in list(agent.get("skills") or [])
-            if str(skill).strip()
+            str(skill).strip() for skill in list(agent.get("skills") or []) if str(skill).strip()
         ]
         latest_summary = ""
         executions = agent.get("executions")
@@ -63,9 +61,13 @@ def agent_graph_director_brief(
             latest_tool = str(latest.get("tool") or "child")
             latest_ok = "ok" if latest.get("ok") else "fail"
             latest_summary = f"{latest_tool} {latest_ok}: {str(latest.get('summary') or '')}"
-        envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        envelope = (
+            agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        )
         expected = str(envelope.get("expected_artifact") or "").strip()
-        result_package = agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        result_package = (
+            agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        )
         verdict_guess = str(result_package.get("verdict_guess") or "").strip()
         escalation = agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
         escalation_reason = str(escalation.get("reason") or "").strip()
@@ -86,7 +88,11 @@ def agent_graph_director_brief(
         skill_context = str(agent.get("skill_context") or "").strip()
         if skill_context and not local_strict:
             first_action = next(
-                (line.strip() for line in skill_context.splitlines() if line.strip().startswith("action:")),
+                (
+                    line.strip()
+                    for line in skill_context.splitlines()
+                    if line.strip().startswith("action:")
+                ),
                 "",
             )
             if first_action:
@@ -98,9 +104,8 @@ def agent_graph_director_next_step(agent: dict[str, Any]) -> str:
     agent_id = str(agent.get("id") or "").strip()
     status = str(agent.get("status") or "").lower()
     executions = agent.get("executions")
-    has_success = (
-        isinstance(executions, list)
-        and any(isinstance(item, dict) and item.get("ok") for item in executions)
+    has_success = isinstance(executions, list) and any(
+        isinstance(item, dict) and item.get("ok") for item in executions
     )
     if status in {"running", "waiting"}:
         if has_success:
@@ -179,10 +184,7 @@ def agent_graph_branch_priority(agent: dict[str, Any]) -> int:
         "reporting_worker": 78,
         "fix_worker": 80,
     }.get(role, 82)
-    blob = " ".join(
-        str(agent.get(key) or "")
-        for key in ("task", "result", "role")
-    ).lower()
+    blob = " ".join(str(agent.get(key) or "") for key in ("task", "result", "role")).lower()
     if any(token in blob for token in ("admin", "credential", "token", "db dump", "rce", "exfil")):
         base += 4
     if any(token in blob for token in ("sql", "xss", "idor", "ssrf", "auth", "privilege")):
@@ -197,19 +199,25 @@ def agent_graph_terminal_branch_status(agent: dict[str, Any]) -> str:
     if status != "finished":
         return "active"
     result = str(agent.get("result") or "").strip().lower()
-    if any(token in result for token in ("not vulnerable", "nothing found", "no issue", "no route found", "clean")):
+    if any(
+        token in result
+        for token in ("not vulnerable", "nothing found", "no issue", "no route found", "clean")
+    ):
         return "exhausted"
-    if any(token in result for token in (
-        "confirmed",
-        "vulnerable",
-        "exploited",
-        "admin access",
-        "admin takeover",
-        "session token",
-        "db dump",
-        "data exfil",
-        "rce",
-    )):
+    if any(
+        token in result
+        for token in (
+            "confirmed",
+            "vulnerable",
+            "exploited",
+            "admin access",
+            "admin takeover",
+            "session token",
+            "db dump",
+            "data exfil",
+            "rce",
+        )
+    ):
         return "proven"
     return "exhausted"
 
