@@ -11,6 +11,9 @@ from vxis.agent.agent_graph_runtime import (
     agent_graph_crown_jewel_for_result,
     agent_graph_director_brief,
     agent_graph_director_next_step,
+    agent_graph_evidence_artifact_brief,
+    agent_graph_has_valid_evidence_artifact,
+    agent_graph_needs_evidence_artifact,
     agent_graph_result_needs_crown_chain,
     agent_graph_terminal_branch_status,
 )
@@ -201,6 +204,9 @@ class ScanLoopAgentGraphMixin:
             stop_condition = str(envelope.get("stop_condition") or "").strip()
             verdict_guess = str(result_package.get("verdict_guess") or "").strip()
             recommended_next = str(result_package.get("recommended_next_step") or "").strip()
+            needs_artifact = agent_graph_needs_evidence_artifact(agent)
+            has_valid_artifact = agent_graph_has_valid_evidence_artifact(agent)
+            artifact_brief = agent_graph_evidence_artifact_brief(agent, width=140)
             next_step = (
                 "Finish this delegated agent with agent_graph(action='finish', agent_id=..., result=...) "
                 "after concrete evidence is gathered."
@@ -213,11 +219,24 @@ class ScanLoopAgentGraphMixin:
                     if latest_success_summary
                     else latest_success_tool
                 )
-                next_step = (
-                    "Successful child execution is available. Finish this delegated agent with "
-                    f"agent_graph(action='finish', agent_id='{agent_id}', result='<concrete evidence and impact>') "
-                    f"unless the evidence is inconclusive. Evidence: {evidence_hint[:120]}"
-                )
+                if needs_artifact:
+                    next_step = (
+                        "Successful child execution is available but proof is incomplete. "
+                        f"Run agent_graph(action='run', agent_id='{agent_id}') until the worker returns "
+                        f"a valid EvidenceArtifact. Evidence: {evidence_hint[:100]}"
+                    )
+                elif has_valid_artifact:
+                    next_step = (
+                        "Valid EvidenceArtifact is available. Finish this delegated agent with "
+                        f"agent_graph(action='finish', agent_id='{agent_id}', result='<concrete evidence and impact>') "
+                        f"or open the required chain/pivot. Evidence: {evidence_hint[:100]}"
+                    )
+                else:
+                    next_step = (
+                        "Successful child execution is available. Finish this delegated agent with "
+                        f"agent_graph(action='finish', agent_id='{agent_id}', result='<concrete evidence and impact>') "
+                        f"unless the evidence is inconclusive. Evidence: {evidence_hint[:120]}"
+                    )
             if verdict_guess == "candidate_positive" and recommended_next:
                 next_step = f"{next_step} Director follow-up: {recommended_next[:120]}"
             if stop_condition:
@@ -265,6 +284,11 @@ class ScanLoopAgentGraphMixin:
                 and not branch.blocker
             ):
                 branch.blocker = "positive delegated worker result requires director pivot/finish"
+            if branch.status == "active" and needs_artifact:
+                branch.blocker = str(
+                    escalation.get("reason")
+                    or "positive delegated worker result requires valid EvidenceArtifact"
+                )[:180]
             if result.error in {
                 "run_limit_reached",
                 "executor_unavailable",
@@ -291,6 +315,8 @@ class ScanLoopAgentGraphMixin:
                 branch.blocker = ""
             if expected_artifact and branch.status == "active":
                 branch.evidence = f"{branch.evidence[:180]} | expect: {expected_artifact[:90]}"
+            if artifact_brief and branch.status == "active":
+                branch.evidence = f"{branch.evidence[:180]} | {artifact_brief[:100]}"
 
             todo = self.state.ensure_scan_todo(
                 branch.id,
@@ -489,6 +515,9 @@ class ScanLoopAgentGraphMixin:
             parts.append(f"prior={prior}")
         if instruction:
             parts.append(f"director_note={instruction.strip()}")
+        parts.append(
+            "artifact_schema=EvidenceArtifact{claim,target,control,payload,observed_delta,repro_steps}; positive finish requires valid artifact"
+        )
         return " | ".join(part for part in parts if part)
 
     async def _credit_agent_graph_child_execution(

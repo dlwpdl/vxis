@@ -201,6 +201,24 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                         "control_result": "baseline 200 vs payload 500",
                         "observed_delta": "SQL error signature present",
                         "verdict_guess": "candidate_positive",
+                        "evidence_artifact": {
+                            "schema": "vxis.agent_graph.evidence_artifact.v1",
+                            "claim": "SQL injection on /api/search",
+                            "target": "http://localhost:3000/api/search",
+                            "control": {
+                                "request": "GET /api/search?q=test",
+                                "response_status": 200,
+                            },
+                            "payload": {
+                                "request": "GET /api/search?q='",
+                                "response_status": 500,
+                            },
+                            "observed_delta": "baseline 200 vs payload 500 with SQL error",
+                            "repro_steps": ["send control", "send payload", "compare"],
+                            "missing_fields": [],
+                            "valid": True,
+                            "source": "structured",
+                        },
                         "recommended_next_step": "Escalate to director for chain/pivot planning, then finish with concrete impact",
                     },
                     "escalation": {
@@ -367,6 +385,9 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "raw proof artifact via test_injection" in agent_text
     assert "worker guess:" in agent_text
     assert "candidate_positive" in agent_text
+    assert "proof:" in agent_text
+    assert "valid (structured)" in agent_text
+    assert "http://localhost:3000/api/search" in agent_text
     assert "escalation" in agent_text
     assert 'action: run_skill(skill="test_injection"' in agent_text
 

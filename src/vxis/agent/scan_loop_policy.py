@@ -71,6 +71,10 @@ Bad delegated tasks are open-ended strategy such as:
 
 Workers must bring back proof artifacts, not strategy prose. Use the director
 to decide pivots, chain closure, and finish conditions.
+For positive security claims, the worker proof must normalize to
+EvidenceArtifact with: `claim`, `target`, `control`, `payload`,
+`observed_delta`, and `repro_steps`. If the dashboard says `needs_proof` or
+`proof: invalid`, rerun or narrow the worker before finish.
 
 If you create a worker, make the envelope concrete:
 - `expected_artifact` should name the transcript/control pair you need

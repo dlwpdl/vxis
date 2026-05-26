@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from vxis.agent.agent_graph_runtime import (
+    agent_graph_evidence_artifact_brief,
+    agent_graph_has_valid_evidence_artifact,
+    agent_graph_needs_evidence_artifact,
+)
 from vxis.agent.scan_loop_state import _TERMINAL_VECTOR_STATUSES
 
 
@@ -179,6 +184,8 @@ def build_scan_dashboard(loop: Any) -> str:
                 lines.append(f"     stop: {stop_condition[: 80 if local_strict else 120]}")
             executions = agent.get("executions")
             has_successful_execution = False
+            needs_artifact = agent_graph_needs_evidence_artifact(agent)
+            has_valid_artifact = agent_graph_has_valid_evidence_artifact(agent)
             if isinstance(executions, list) and executions:
                 has_successful_execution = any(
                     isinstance(execution, dict) and execution.get("ok") for execution in executions
@@ -190,7 +197,9 @@ def build_scan_dashboard(loop: Any) -> str:
                 if summary:
                     lines.append(f"     last_run: {tool_name} {verdict}: {summary}")
             if status in {"RUNNING", "WAITING"}:
-                if has_successful_execution:
+                if needs_artifact:
+                    lines.append(f'     next: agent_graph(action="run", agent_id="{agent_id}")')
+                elif has_successful_execution or has_valid_artifact:
                     lines.append(
                         f'     next: agent_graph(action="finish", agent_id="{agent_id}", result="...")'
                     )
@@ -202,6 +211,11 @@ def build_scan_dashboard(loop: Any) -> str:
             verdict_guess = str(result_package.get("verdict_guess") or "").strip()
             if verdict_guess:
                 lines.append(f"     worker_verdict: {verdict_guess[:30]}")
+            proof_brief = agent_graph_evidence_artifact_brief(
+                agent, width=80 if local_strict else 120
+            )
+            if proof_brief:
+                lines.append(f"     {proof_brief}")
             escalation = (
                 agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
             )

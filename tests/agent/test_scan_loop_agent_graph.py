@@ -175,6 +175,23 @@ def test_scan_dashboard_surfaces_director_worker_exchange():
                             "control_result": "baseline 200 vs payload 500",
                             "observed_delta": "SQL error signature present",
                             "verdict_guess": "candidate_positive",
+                            "evidence_artifact": {
+                                "schema": "vxis.agent_graph.evidence_artifact.v1",
+                                "claim": "SQL injection on /api/search",
+                                "target": "http://localhost:3000/api/search",
+                                "control": {
+                                    "request": "GET /api/search?q=test",
+                                    "response_status": 200,
+                                },
+                                "payload": {
+                                    "request": "GET /api/search?q='",
+                                    "response_status": 500,
+                                },
+                                "observed_delta": "baseline 200 vs payload 500 with SQL error",
+                                "repro_steps": ["send control", "send payload", "compare"],
+                                "missing_fields": [],
+                                "valid": True,
+                            },
                             "recommended_next_step": "Escalate to director for chain/pivot planning, then finish with concrete impact",
                         },
                         "result": "",
@@ -205,9 +222,10 @@ def test_scan_dashboard_surfaces_director_worker_exchange():
 
     assert "Director-worker exchange:" in dashboard
     assert "agent-0001 waiting exploit_worker skills=test_injection" in dashboard
-    assert "director_next=finish or send sharper instruction to agent-0001" in dashboard
+    assert "director_next=finish agent-0001 or open crown-chain pivot" in dashboard
     assert "contract: expect raw proof artifact" in dashboard
     assert "worker_verdict: candidate_positive" in dashboard
+    assert "proof: valid" in dashboard
     assert "worker_card: action: run_skill" in dashboard
 
 
@@ -901,6 +919,13 @@ async def test_agent_graph_insufficient_proof_finish_reforces_child_run():
         args={"action": "run", "agent_id": agent_id},
         result=ran,
     )
+    branch = loop.state.branches["agent:agent-0001"]
+    assert "valid EvidenceArtifact" in branch.next_step
+    assert "valid EvidenceArtifact" in branch.blocker
+    assert loop._forced_branch_action(branch) == (
+        "agent_graph",
+        {"action": "run", "agent_id": agent_id},
+    )
 
     rejected = await reg.dispatch(
         "agent_graph",
@@ -1192,6 +1217,7 @@ async def test_agent_graph_run_dispatches_declared_skill_via_scan_loop_executor(
     assert run_skill.calls
     assert run_skill.calls[0]["skill"] == "test_injection"
     assert ran.data["execution"]["tool"] == "run_skill"
+    assert "artifact_schema=EvidenceArtifact" in ran.data["execution"]["data"]["instruction"]
     assert ran.data["agent"]["status"] == "waiting"
     assert ran.data["agent"]["execution_count"] == 1
 
@@ -1203,7 +1229,7 @@ async def test_agent_graph_run_dispatches_declared_skill_via_scan_loop_executor(
     branch = loop.state.branches["agent:agent-0001"]
     assert branch.status == "active"
     assert "confirmed injection signal" in branch.last_summary
-    assert "Successful child execution is available" in branch.next_step
+    assert "Valid EvidenceArtifact is available" in branch.next_step
     assert loop._forced_branch_action(branch) is None
     assert "agent:agent-0001" in {b.id for b in loop._blocking_finish_branches()}
 

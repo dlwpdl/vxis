@@ -1327,10 +1327,24 @@ class ScanLoopDecisionPolicyMixin:
     def _agent_graph_branch_has_successful_child_evidence(branch: BranchState) -> bool:
         if branch.owner != "agent_graph":
             return False
+        if str(branch.escalation_status or "").strip() == "needs_proof":
+            return False
         text = " ".join(
             str(value or "") for value in (branch.next_step, branch.evidence, branch.last_report)
         ).lower()
-        return "successful child execution is available" in text
+        if any(
+            token in text
+            for token in (
+                "proof is incomplete",
+                "requires valid evidenceartifact",
+                "proof: invalid",
+            )
+        ):
+            return False
+        return (
+            "successful child execution is available" in text
+            or "valid evidenceartifact is available" in text
+        )
 
     def _declared_agent_graph_branch_skills(self, branch: BranchState) -> list[str]:
         if branch.owner != "agent_graph":

@@ -543,9 +543,27 @@ class ScanLiveDisplay:
             delta = self._short(result_package.get("observed_delta"), 86)
             verdict_guess = self._short(result_package.get("verdict_guess"), 42)
             recommended = self._short(result_package.get("recommended_next_step"), 92)
+            evidence_artifact = (
+                result_package.get("evidence_artifact")
+                if isinstance(result_package.get("evidence_artifact"), dict)
+                else {}
+            )
             lines.append("[bold green]artifact[/bold green]")
             if attempted_tool:
                 lines.append(f"[dim]tool:[/dim] {attempted_tool}")
+            if evidence_artifact:
+                proof_state = "valid" if evidence_artifact.get("valid") else "invalid"
+                source = self._short(evidence_artifact.get("source"), 24)
+                missing = ",".join(
+                    str(item) for item in list(evidence_artifact.get("missing_fields") or [])[:6]
+                )
+                target = self._short(evidence_artifact.get("target"), 64)
+                label = f"{proof_state} ({source})" if source else proof_state
+                lines.append(f"[dim]proof:[/dim] {label}")
+                if missing:
+                    lines.append(f"[dim]missing:[/dim] {self._short(missing, 72)}")
+                if target:
+                    lines.append(f"[dim]target:[/dim] {target}")
             if raw_evidence:
                 lines.append(f"[dim]evidence:[/dim] {raw_evidence}")
             if control_result:

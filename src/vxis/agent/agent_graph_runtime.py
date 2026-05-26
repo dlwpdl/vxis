@@ -5,6 +5,57 @@ from __future__ import annotations
 from typing import Any
 
 
+def _agent_graph_result_package(agent: dict[str, Any]) -> dict[str, Any]:
+    return agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+
+
+def agent_graph_evidence_artifact(agent: dict[str, Any]) -> dict[str, Any]:
+    result_package = _agent_graph_result_package(agent)
+    artifact = result_package.get("evidence_artifact")
+    return artifact if isinstance(artifact, dict) else {}
+
+
+def agent_graph_has_valid_evidence_artifact(agent: dict[str, Any]) -> bool:
+    return bool(agent_graph_evidence_artifact(agent).get("valid"))
+
+
+def agent_graph_needs_evidence_artifact(agent: dict[str, Any]) -> bool:
+    result_package = _agent_graph_result_package(agent)
+    verdict = str(result_package.get("verdict_guess") or "").strip()
+    escalation = agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
+    escalation_status = str(escalation.get("status") or "").strip()
+    artifact = agent_graph_evidence_artifact(agent)
+    if verdict == "needs_proof" or escalation_status == "needs_proof":
+        return True
+    return (
+        verdict in {"candidate_positive", "proven"}
+        and bool(artifact)
+        and not bool(artifact.get("valid"))
+    )
+
+
+def agent_graph_evidence_artifact_brief(agent: dict[str, Any], *, width: int) -> str:
+    artifact = agent_graph_evidence_artifact(agent)
+    if not artifact:
+        return ""
+    if artifact.get("valid"):
+        target = str(artifact.get("target") or "").strip()
+        delta = str(artifact.get("observed_delta") or "").strip()
+        detail = f" target={target[:42]}" if target else ""
+        if delta:
+            detail = f"{detail} delta={delta[:58]}".strip()
+        return f"proof: valid{(' ' + detail) if detail else ''}"[:width]
+    if not agent_graph_needs_evidence_artifact(agent):
+        return ""
+    missing = [
+        str(item).strip()
+        for item in list(artifact.get("missing_fields") or [])
+        if str(item).strip()
+    ]
+    missing_text = ",".join(missing[:6]) or "unknown"
+    return f"proof: invalid missing={missing_text}"[:width]
+
+
 def agent_graph_agents_from_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     agents: dict[str, dict[str, Any]] = {}
     for message in messages:
@@ -65,10 +116,9 @@ def agent_graph_director_brief(
             agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
         )
         expected = str(envelope.get("expected_artifact") or "").strip()
-        result_package = (
-            agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
-        )
+        result_package = _agent_graph_result_package(agent)
         verdict_guess = str(result_package.get("verdict_guess") or "").strip()
+        proof_brief = agent_graph_evidence_artifact_brief(agent, width=width)
         escalation = agent.get("escalation") if isinstance(agent.get("escalation"), dict) else {}
         escalation_reason = str(escalation.get("reason") or "").strip()
         result = str(agent.get("result") or "").strip()
@@ -83,6 +133,8 @@ def agent_graph_director_brief(
             lines.append(f"     contract: expect {expected[:width]}")
         if verdict_guess:
             lines.append(f"     worker_verdict: {verdict_guess[:width]}")
+        if proof_brief:
+            lines.append(f"     {proof_brief}")
         if escalation_reason:
             lines.append(f"     escalate: {escalation_reason[:width]}")
         skill_context = str(agent.get("skill_context") or "").strip()
@@ -108,6 +160,10 @@ def agent_graph_director_next_step(agent: dict[str, Any]) -> str:
         isinstance(item, dict) and item.get("ok") for item in executions
     )
     if status in {"running", "waiting"}:
+        if agent_graph_needs_evidence_artifact(agent):
+            return f"run {agent_id} for valid EvidenceArtifact"
+        if agent_graph_has_valid_evidence_artifact(agent):
+            return f"finish {agent_id} or open crown-chain pivot"
         if has_success:
             return f"finish or send sharper instruction to {agent_id}"
         return f"run {agent_id} or send a narrower instruction"
@@ -230,6 +286,10 @@ __all__ = [
     "agent_graph_crown_jewel_for_result",
     "agent_graph_director_brief",
     "agent_graph_director_next_step",
+    "agent_graph_evidence_artifact",
+    "agent_graph_evidence_artifact_brief",
+    "agent_graph_has_valid_evidence_artifact",
+    "agent_graph_needs_evidence_artifact",
     "agent_graph_result_needs_crown_chain",
     "agent_graph_terminal_branch_status",
 ]
