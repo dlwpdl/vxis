@@ -897,6 +897,10 @@ class ScanLoopState:
                 branch.blocker = summary[:180]
         elif status == "found":
             branch.status = "proven"
+            branch.blocker = ""
+            branch.escalation_status = ""
+            branch.escalation_reason = ""
+            branch.escalation_owner = ""
         elif status == "clean":
             branch.status = "exhausted"
         elif status == "blocked":

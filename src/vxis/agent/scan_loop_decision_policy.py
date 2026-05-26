@@ -1229,6 +1229,9 @@ class ScanLoopDecisionPolicyMixin:
         shell_exec_failed = (
             branch.last_tool == "shell_exec" and "exit=" in str(branch.last_summary).lower()
         )
+        crown_report = self._agent_graph_crown_report_action(branch)
+        if crown_report is not None:
+            return crown_report
         crown_agent_create = self._agent_graph_crown_followup_create_action(branch)
         if crown_agent_create is not None:
             return crown_agent_create
@@ -1378,6 +1381,140 @@ class ScanLoopDecisionPolicyMixin:
         if parent_agent_id:
             args["parent_id"] = parent_agent_id
         return ("agent_graph", args)
+
+    def _agent_graph_crown_report_action(
+        self, branch: BranchState
+    ) -> tuple[str, dict[str, Any]] | None:
+        if not self.registry.has_tool("report_finding"):
+            return None
+        if str(branch.escalation_status or "").strip() != "needs_report":
+            return None
+        if str(branch.role or "").lower() != "post_exploit_worker":
+            return None
+        if branch.vector_id not in {"WEB-CROWN-PIVOT", "DESK-CROWN-PIVOT"}:
+            return None
+        args = self._agent_graph_crown_report_args(branch)
+        if self._agent_graph_crown_report_already_exists(branch, args):
+            return None
+        return ("report_finding", args)
+
+    def _agent_graph_crown_report_args(self, branch: BranchState) -> dict[str, Any]:
+        text = " ".join(
+            str(value or "")
+            for value in (
+                branch.title,
+                branch.objective,
+                branch.crown_jewel,
+                branch.evidence,
+                branch.last_report,
+            )
+        )
+        lower = text.lower()
+        component = self._agent_graph_crown_report_component(branch)
+        finding_type = self._agent_graph_crown_report_type(branch)
+        severity = (
+            "critical"
+            if any(token in lower for token in ("admin", "db dump", "database rows", "rce"))
+            else "high"
+        )
+        crown = str(branch.crown_jewel or "crown-jewel impact").strip()
+        title = f"Post-exploit crown impact: {crown}"
+        poc = (
+            f"Branch: {branch.id}\n"
+            f"Crown jewel: {crown}\n"
+            f"Component: {component}\n\n"
+            f"{str(branch.evidence or branch.last_report or branch.objective)[:3600]}"
+        )
+        return self._build_report_finding_args(
+            title=title[:140],
+            severity=severity,
+            finding_type=finding_type,
+            affected_component=component,
+            description=(
+                "A post-exploit worker validated crown-jewel impact from a prior foothold "
+                "using a structured EvidenceArtifact."
+            ),
+            impact=(
+                f"The validated path reaches {crown}, converting the initial foothold into "
+                "reportable business/security impact."
+            ),
+            technical_analysis=(
+                "VXIS agent_graph marked the post_exploit_worker proof as valid and tied it "
+                f"to branch {branch.id}. The evidence includes control/payload comparison, "
+                "observed delta, and reproduction steps. post_exploit_worker report candidate."
+            ),
+            poc_description=(
+                "Replay the EvidenceArtifact control, then replay the payload/session step, "
+                "and compare the observed delta proving the crown-jewel impact."
+            ),
+            poc_script_code=poc,
+            remediation_steps=(
+                "Remove the foothold, enforce least-privilege authorization on the affected "
+                "data/session boundary, add server-side access checks, and regression-test the "
+                "recorded control/payload path."
+            ),
+            endpoint=component,
+            method="",
+            cwe="CWE-862" if finding_type == "broken_access_control" else "",
+            extra_evidence=[
+                {
+                    "evidence_type": "agent_graph_evidence_artifact",
+                    "title": f"{branch.id} post-exploit proof",
+                    "content": poc[:3000],
+                    "content_type": "text/plain",
+                }
+            ],
+        )
+
+    @staticmethod
+    def _agent_graph_crown_report_type(branch: BranchState) -> str:
+        text = " ".join(
+            str(value or "")
+            for value in (branch.crown_jewel, branch.title, branch.objective, branch.evidence)
+        ).lower()
+        if any(token in text for token in ("rce", "command execution", "shell")):
+            return "rce"
+        if any(token in text for token in ("session", "token", "admin", "privilege", "role")):
+            return "broken_access_control"
+        if any(token in text for token in ("data", "database", "db dump", "row", "exfil")):
+            return "broken_access_control"
+        return "information_disclosure"
+
+    def _agent_graph_crown_report_component(self, branch: BranchState) -> str:
+        blob = " ".join(str(value or "") for value in (branch.evidence, branch.last_report))
+        match = re.search(r"https?://[^\s|;,'\")]+", blob)
+        if match:
+            return match.group(0).rstrip(".,)")
+        path = re.search(r"(/[a-zA-Z0-9._~:/?#[\]@!$&'()*+,;=%-]+)", blob)
+        if path:
+            return path.group(1).rstrip(".,)")
+        return str(self.state.target)
+
+    @staticmethod
+    def _agent_graph_crown_report_already_exists(
+        branch: BranchState,
+        args: dict[str, Any],
+    ) -> bool:
+        try:
+            from vxis.agent.tools.finding_tools import _get_findings
+        except Exception:
+            return False
+        finding_type = str(args.get("finding_type") or "").strip().lower()
+        component = str(args.get("affected_component") or "").strip().rstrip("/")
+        branch_id = str(branch.id or "")
+        for finding in list(_get_findings() or []):
+            if not isinstance(finding, dict):
+                continue
+            same_type = str(finding.get("finding_type") or "").strip().lower() == finding_type
+            same_component = (
+                str(finding.get("affected_component") or "").strip().rstrip("/") == component
+            )
+            blob = " ".join(
+                str(finding.get(key) or "") for key in ("title", "description", "evidence")
+            )
+            if same_type and (same_component or branch_id in blob):
+                return True
+        return False
 
     @staticmethod
     def _agent_graph_branch_has_successful_child_evidence(branch: BranchState) -> bool:

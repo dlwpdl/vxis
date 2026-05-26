@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
 from vxis.agent.tools.agent_graph_tools import AgentGraphTool
-from vxis.agent.tools.finding_tools import _reset_for_tests as _reset_findings
+from vxis.agent.tools.finding_tools import (
+    ReportFindingTool,
+    _get_findings,
+    _reset_for_tests as _reset_findings,
+)
 
 
 class RunSkillTool:
@@ -752,6 +756,7 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
     reg = ToolRegistry()
     graph = AgentGraphTool()
     reg.register(graph)
+    reg.register(ReportFindingTool())
 
     class _RunSkill:
         name = "run_skill"
@@ -853,6 +858,64 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
         "agent_graph",
         {"action": "run", "agent_id": child_agent_id},
     )
+
+    child_ran = await reg.dispatch("agent_graph", {"action": "run", "agent_id": child_agent_id})
+    assert child_ran.ok is True
+    assert child_ran.data["agent"]["result_package"]["evidence_artifact"]["valid"] is True
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "run", "agent_id": child_agent_id},
+        result=child_ran,
+    )
+
+    child_finished = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "finish",
+            "agent_id": child_agent_id,
+            "result": "Confirmed session token allows admin data access to database rows.",
+        },
+    )
+    assert child_finished.ok is True
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "finish", "agent_id": child_agent_id},
+        result=child_finished,
+    )
+
+    assert followup.status == "active"
+    assert followup.escalation_status == "needs_report"
+    assert "report_finding" in followup.next_step
+    assert "report_finding required" in followup.blocker
+    report_forced = loop._forced_branch_action(followup)
+    assert report_forced is not None
+    assert report_forced[0] == "report_finding"
+    report_args = report_forced[1]
+    assert report_args["finding_type"] == "broken_access_control"
+    assert report_args["severity"] == "critical"
+    assert "post_exploit_worker report candidate" in report_args["technical_analysis"]
+    assert "EvidenceArtifact" in report_args["poc_script_code"]
+    assert "valid EvidenceArtifact" not in report_args["poc_script_code"]
+    assert report_args["impact"]
+    assert report_args["remediation_steps"]
+
+    reported = await reg.dispatch(report_forced[0], report_args)
+    assert reported.ok is True
+    assert loop._status_from_tool_result(reported) == "found"
+    loop.state.record_branch_attempt(
+        followup.id,
+        report_forced[0],
+        report_args,
+        status=loop._status_from_tool_result(reported),
+        summary=reported.summary,
+    )
+
+    assert followup.status == "proven"
+    assert followup.blocker == ""
+    assert followup.escalation_status == ""
+    findings = _get_findings()
+    assert findings
+    assert findings[-1]["finding_type"] == "broken_access_control"
 
 
 @pytest.mark.asyncio

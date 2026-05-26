@@ -854,6 +854,7 @@ class ScanLoopActionMixin:
         if any(tok in text for tok in (
             "confirmed", "vulnerable", "succeeded", "jwt payload",
             "sql injection", "xss", "idor", "admin", "token",
+            "finding recorded", "finding grouped",
         )):
             return "found"
         if any(tok in text for tok in ("no finding", "not vulnerable", "nothing found", "no issue")):
@@ -1535,5 +1536,4 @@ class ScanLoopActionMixin:
 
         filtered = [tool for tool in catalog if str(tool.get("name") or "") in allowed]
         return filtered or catalog
-
 

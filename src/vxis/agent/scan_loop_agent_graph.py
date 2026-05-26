@@ -11,6 +11,7 @@ from vxis.agent.agent_graph_runtime import (
     agent_graph_crown_jewel_for_result,
     agent_graph_director_brief,
     agent_graph_director_next_step,
+    agent_graph_evidence_artifact,
     agent_graph_evidence_artifact_brief,
     agent_graph_has_valid_evidence_artifact,
     agent_graph_needs_evidence_artifact,
@@ -112,6 +113,83 @@ class ScanLoopAgentGraphMixin:
         todo.detail = branch.last_report[:120]
         todo.last_iter = self.state.iteration
         return branch
+
+    @staticmethod
+    def _agent_graph_evidence_artifact_report_text(agent: dict[str, Any]) -> str:
+        artifact = agent_graph_evidence_artifact(agent)
+        if not artifact or not artifact.get("valid"):
+            return ""
+
+        def _section(value: Any) -> str:
+            if isinstance(value, dict):
+                return " | ".join(
+                    str(value.get(key) or "").strip()
+                    for key in (
+                        "summary",
+                        "request",
+                        "response_status",
+                        "status",
+                        "response_excerpt",
+                        "response",
+                        "body",
+                    )
+                    if str(value.get(key) or "").strip()
+                )
+            if isinstance(value, list):
+                return " | ".join(
+                    str(item or "").strip() for item in value if str(item or "").strip()
+                )
+            return str(value or "").strip()
+
+        parts = [
+            f"EvidenceArtifact: {artifact.get('claim', '')}",
+            f"target: {artifact.get('target', '')}",
+            f"control: {_section(artifact.get('control'))}",
+            f"payload: {_section(artifact.get('payload'))}",
+            f"delta: {artifact.get('observed_delta', '')}",
+            f"repro: {_section(artifact.get('repro_steps'))}",
+        ]
+        return "\n".join(part for part in parts if part.split(":", 1)[-1].strip())[:1400]
+
+    def _mark_agent_graph_crown_parent_needs_report(
+        self,
+        *,
+        parent_branch_id: str,
+        agent: dict[str, Any],
+        summary: str,
+    ) -> None:
+        parent = self.state.branches.get(parent_branch_id)
+        if parent is None or parent.status in _TERMINAL_BRANCH_STATUSES:
+            return
+        result_text = str(agent.get("result") or "").strip()
+        artifact_text = self._agent_graph_evidence_artifact_report_text(agent)
+        proof_text = " | ".join(part for part in (result_text[:240], artifact_text[:900]) if part)
+        if proof_text and proof_text not in parent.evidence:
+            parent.evidence = (parent.evidence + "; " + proof_text).strip("; ")
+        parent.status = "active"
+        parent.escalation_status = "needs_report"
+        parent.escalation_reason = (
+            "proven post-exploit EvidenceArtifact requires report_finding/link_chain"
+        )
+        parent.escalation_owner = "director"
+        parent.blocker = "report_finding required for proven crown-jewel impact"
+        parent.next_step = (
+            "Call report_finding for the proven post-exploit crown impact, then link_chain "
+            "to the foothold finding when a prior finding exists."
+        )
+        parent.last_tool = "agent_graph"
+        parent.last_summary = summary[:240]
+        parent.last_report = result_text[:160] or parent.last_report
+        parent.last_iter = self.state.iteration
+        todo = self.state.ensure_scan_todo(
+            parent.id,
+            parent.title,
+            priority=parent.priority,
+            source_candidate_id=parent.source_candidate_id or parent.id,
+        )
+        todo.status = "in_progress"
+        todo.detail = "report_finding required for proven crown impact"
+        todo.last_iter = self.state.iteration
 
     @staticmethod
     def _agent_graph_crown_jewel_for_result(result: str) -> str:
@@ -343,6 +421,17 @@ class ScanLoopAgentGraphMixin:
             if verdict_guess == "candidate_positive" and branch.status == "active":
                 todo.detail = f"candidate positive -> {str(result_package.get('recommended_next_step') or '')[:96]}"
             self.state.add_shared_note(f"agent_graph {agent_id}: {branch.status} {task[:80]}")
+            if (
+                role == "post_exploit_worker"
+                and branch.status == "proven"
+                and parent_branch_id
+                and agent_graph_has_valid_evidence_artifact(agent)
+            ):
+                self._mark_agent_graph_crown_parent_needs_report(
+                    parent_branch_id=parent_branch_id,
+                    agent=agent,
+                    summary=result.summary,
+                )
             crown_next = self._agent_graph_crown_chain_next(agent)
             if crown_next:
                 self.state.add_shared_note(f"chain directive {agent_id}: {crown_next}")
