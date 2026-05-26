@@ -748,6 +748,114 @@ def test_agent_graph_positive_worker_result_spawns_crown_chain_branch():
 
 
 @pytest.mark.asyncio
+async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent():
+    reg = ToolRegistry()
+    graph = AgentGraphTool()
+    reg.register(graph)
+
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs):
+            return ToolResult(
+                ok=True,
+                summary="confirmed SQL injection with token impact",
+                data={
+                    "proof_artifact": {
+                        "claim": "SQL injection on /api/search exposes token material",
+                        "target": "http://localhost:3000/api/search",
+                        "control": {
+                            "request": "GET /api/search?q=test",
+                            "response_status": 200,
+                        },
+                        "payload": {
+                            "request": "GET /api/search?q='",
+                            "response_status": 500,
+                            "response_excerpt": "SQL error with session token column",
+                        },
+                        "observed_delta": "control HTTP 200 vs payload HTTP 500 with token-bearing SQL error",
+                        "repro_steps": ["send control", "send payload", "compare token/error body"],
+                    }
+                },
+            )
+
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=30)
+
+    created = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Validate SQL injection on /api/search",
+            "skills": ["test_injection"],
+        },
+    )
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "create", "role": "exploit_worker"},
+        result=created,
+    )
+    parent_agent_id = created.data["agent"]["id"]
+
+    ran = await reg.dispatch("agent_graph", {"action": "run", "agent_id": parent_agent_id})
+    assert ran.ok is True
+    assert ran.data["agent"]["result_package"]["evidence_artifact"]["valid"] is True
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "run", "agent_id": parent_agent_id},
+        result=ran,
+    )
+
+    finished = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "finish",
+            "agent_id": parent_agent_id,
+            "result": "Confirmed SQL injection on /api/search exposes session token material.",
+        },
+    )
+    assert finished.ok is True
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "finish", "agent_id": parent_agent_id},
+        result=finished,
+    )
+
+    followup = loop.state.branches["agent:agent-0001:crown-chain"]
+    forced = loop._forced_branch_action(followup)
+    assert forced is not None
+    assert forced[0] == "agent_graph"
+    assert forced[1]["action"] == "create"
+    assert forced[1]["role"] == "post_exploit_worker"
+    assert forced[1]["parent_id"] == parent_agent_id
+    assert forced[1]["skills"] == ["post_auth_enum"]
+    assert "valid EvidenceArtifact" in forced[1]["expected_artifact"]
+
+    child_created = await reg.dispatch(forced[0], forced[1])
+    assert child_created.ok is True
+    loop._sync_agent_graph_result_to_branches(
+        name=forced[0],
+        args=forced[1],
+        result=child_created,
+    )
+
+    child_agent_id = child_created.data["agent"]["id"]
+    child_branch_id = f"agent:{child_agent_id}"
+    child_branch = loop.state.branches[child_branch_id]
+    assert child_branch.role == "post_exploit_worker"
+    assert child_branch.parent_branch_id == followup.id
+    assert child_branch_id in followup.child_ids
+    assert "post_auth_enum" in child_branch.watch_terms
+    assert loop._forced_branch_action(child_branch) == (
+        "agent_graph",
+        {"action": "run", "agent_id": child_agent_id},
+    )
+
+
+@pytest.mark.asyncio
 async def test_agent_graph_positive_finish_without_child_execution_keeps_branch_active():
     reg = ToolRegistry()
     reg.register(AgentGraphTool())

@@ -1213,8 +1213,6 @@ class ScanLoopDecisionPolicyMixin:
 
     def _forced_branch_action(self, branch: BranchState) -> tuple[str, dict[str, Any]] | None:
         allowed = self._platform_allowed_skills()
-        if "run_skill" not in self.registry.list_tools() or not allowed:
-            return None
         target = str(self.state.target)
         role = str(branch.role).lower()
         phase = str(branch.phase).lower()
@@ -1231,6 +1229,11 @@ class ScanLoopDecisionPolicyMixin:
         shell_exec_failed = (
             branch.last_tool == "shell_exec" and "exit=" in str(branch.last_summary).lower()
         )
+        crown_agent_create = self._agent_graph_crown_followup_create_action(branch)
+        if crown_agent_create is not None:
+            return crown_agent_create
+        if "run_skill" not in self.registry.list_tools() or not allowed:
+            return None
         if branch.owner == "agent_graph":
             if self._agent_graph_branch_has_successful_child_evidence(branch):
                 return None
@@ -1322,6 +1325,59 @@ class ScanLoopDecisionPolicyMixin:
                 return ("run_skill", {"skill": skill, "target_url": target, "params": params})
             return None
         return None
+
+    def _agent_graph_crown_followup_create_action(
+        self, branch: BranchState
+    ) -> tuple[str, dict[str, Any]] | None:
+        if branch.owner == "agent_graph" or not self.registry.has_tool("agent_graph"):
+            return None
+        if str(branch.role or "").lower() != "post_exploit_worker":
+            return None
+        if branch.vector_id not in {"WEB-CROWN-PIVOT", "DESK-CROWN-PIVOT"}:
+            return None
+        if any(
+            child_id in self.state.branches
+            and self.state.branches[child_id].owner == "agent_graph"
+            and self.state.branches[child_id].role == "post_exploit_worker"
+            for child_id in branch.child_ids
+        ):
+            return None
+        if (
+            branch.last_tool == "agent_graph"
+            and "created" in str(branch.last_summary or "").lower()
+            and "post_exploit_worker" in str(branch.last_summary or "").lower()
+        ):
+            return None
+
+        parent_agent_id = ""
+        parent_branch_id = str(branch.parent_branch_id or "").strip()
+        if parent_branch_id.startswith("agent:"):
+            parent_agent_id = parent_branch_id.removeprefix("agent:").split(":", 1)[0]
+        task = f"Turn validated proof into crown-jewel impact: {branch.crown_jewel or branch.title}"
+        args: dict[str, Any] = {
+            "action": "create",
+            "role": "post_exploit_worker",
+            "task": task,
+            "objective": str(branch.objective or task)[:160],
+            "expected_artifact": (
+                "valid EvidenceArtifact proving session reuse, privilege boundary, "
+                "data access, or chain closure with control/payload/repro_steps"
+            ),
+            "stop_condition": (
+                "stop after proving or refuting crown-jewel impact with valid EvidenceArtifact"
+            ),
+            "escalation_trigger": (
+                "escalate if auth/session/crown path is blocked, ambiguous, or proof is missing"
+            ),
+            "skills": ["post_auth_enum"],
+            "message": (
+                f"Use prior proof from {parent_agent_id or branch.parent_branch_id}: "
+                f"{str(branch.evidence or branch.last_report)[:220]}"
+            ),
+        }
+        if parent_agent_id:
+            args["parent_id"] = parent_agent_id
+        return ("agent_graph", args)
 
     @staticmethod
     def _agent_graph_branch_has_successful_child_evidence(branch: BranchState) -> bool:

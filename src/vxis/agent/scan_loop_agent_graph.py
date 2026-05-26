@@ -64,9 +64,13 @@ class ScanLoopAgentGraphMixin:
             f"Turn delegated result into crown-jewel impact: {task}. Worker result: {result[:220]}"
         )
         next_step = (
-            "Create or run a post_exploit_worker. Test session reuse, privilege boundaries, "
-            "data access, and chain closure before allowing finish_scan."
+            "Create a post_exploit_worker agent_graph child. Test session reuse, privilege "
+            "boundaries, data access, and chain closure before allowing finish_scan."
         )
+        artifact_brief = agent_graph_evidence_artifact_brief(agent, width=120)
+        evidence = f"{agent_id}: {result[:220]}"
+        if artifact_brief:
+            evidence = f"{evidence} | {artifact_brief}"
         branch = self.state.ensure_branch(
             branch_id,
             vector_id,
@@ -80,7 +84,7 @@ class ScanLoopAgentGraphMixin:
             objective=objective,
             next_step=next_step,
             crown_jewel=crown_jewel,
-            evidence=f"{agent_id}: {result[:240]}",
+            evidence=evidence,
             watch_terms=[
                 agent_id,
                 "post_exploit_worker",
@@ -177,6 +181,10 @@ class ScanLoopAgentGraphMixin:
             parent_branch_id = self._agent_graph_branch_id(parent_agent_id)
             if parent_branch_id and parent_branch_id not in self.state.branches:
                 parent_branch_id = ""
+            if role == "post_exploit_worker" and parent_branch_id:
+                crown_parent_id = f"{parent_branch_id}:crown-chain"
+                if crown_parent_id in self.state.branches:
+                    parent_branch_id = crown_parent_id
             skills = (
                 [
                     str(skill).strip()
