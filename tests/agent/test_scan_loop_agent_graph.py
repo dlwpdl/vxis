@@ -320,8 +320,79 @@ async def test_agent_graph_create_and_run_capture_contract_and_artifact():
     assert "payload caused SQL error signature" in str(
         result_agent["result_package"]["observed_delta"]
     )
+    artifact = result_agent["result_package"]["evidence_artifact"]
+    assert artifact["schema"] == "vxis.agent_graph.evidence_artifact.v1"
+    assert artifact["valid"] is True
+    assert artifact["source"] == "legacy_result_fields"
+    assert artifact["missing_fields"] == []
     assert result_agent["result_package"]["verdict_guess"] == "candidate_positive"
     assert "recommended_next_step" in result_agent["result_package"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_structured_evidence_artifact_allows_positive_finish():
+    graph = AgentGraphTool()
+
+    async def _executor(agent: dict[str, object], instruction: str) -> ToolResult:
+        return ToolResult(
+            ok=True,
+            summary="confirmed sql injection with response delta",
+            data={
+                "tool": "run_skill",
+                "args": {"skill": "test_injection", "target_url": "http://localhost:3000"},
+                "result": {
+                    "ok": True,
+                    "summary": "confirmed sql injection with response delta",
+                    "proof_artifact": {
+                        "claim": "SQL injection on /search",
+                        "target": "http://localhost:3000/search?q=",
+                        "control": {
+                            "request": "GET /search?q=test",
+                            "response_status": 200,
+                            "response_excerpt": "normal search results",
+                        },
+                        "payload": {
+                            "request": "GET /search?q='",
+                            "response_status": 500,
+                            "response_excerpt": "SQL syntax error",
+                        },
+                        "observed_delta": "control returns HTTP 200; payload returns HTTP 500 with SQL error",
+                        "repro_steps": [
+                            "send control request",
+                            "send payload request",
+                            "compare status and SQL error body",
+                        ],
+                    },
+                },
+            },
+        )
+
+    graph.set_executor(_executor)
+    created = await graph.run(
+        action="create",
+        role="exploit_worker",
+        task="Validate SQL injection on /search",
+        skills=["test_injection"],
+    )
+    agent_id = created.data["agent"]["id"]
+    ran = await graph.run(action="run", agent_id=agent_id)
+
+    artifact = ran.data["agent"]["result_package"]["evidence_artifact"]
+    assert artifact["valid"] is True
+    assert artifact["source"] == "structured"
+    assert ran.data["agent"]["result_package"]["proof_quality"] == "strong"
+    assert ran.data["agent"]["result_package"]["verdict_guess"] == "candidate_positive"
+
+    finished = await graph.run(
+        action="finish",
+        agent_id=agent_id,
+        result="Confirmed SQL injection on /search with HTTP status and SQL error delta.",
+    )
+
+    assert finished.ok is True
+    assert finished.data["agent"]["status"] == "finished"
+    assert finished.data["agent"]["result_package"]["verdict_guess"] == "proven"
+    assert finished.data["agent"]["result_package"]["evidence_artifact"]["valid"] is True
 
 
 @pytest.mark.asyncio
@@ -411,6 +482,49 @@ async def test_agent_graph_positive_run_without_poc_requires_proof_before_finish
     assert rejected.ok is False
     assert rejected.error == "insufficient_proof_artifact"
     assert "PoC/control artifact" in rejected.summary
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_positive_summary_with_proof_words_still_requires_artifact_fields():
+    graph = AgentGraphTool()
+
+    async def _executor(agent: dict[str, object], instruction: str) -> ToolResult:
+        summary = "confirmed sql injection baseline 200 payload 500"
+        return ToolResult(
+            ok=True,
+            summary=summary,
+            data={
+                "tool": "run_skill",
+                "args": {"skill": "test_injection", "target_url": "http://localhost:3000"},
+                "result": {"ok": True, "summary": summary},
+            },
+        )
+
+    graph.set_executor(_executor)
+    created = await graph.run(
+        action="create",
+        role="exploit_worker",
+        task="Validate SQL injection on /search",
+        skills=["test_injection"],
+    )
+    agent_id = created.data["agent"]["id"]
+    ran = await graph.run(action="run", agent_id=agent_id)
+
+    package = ran.data["agent"]["result_package"]
+    assert package["verdict_guess"] == "needs_proof"
+    assert package["proof_quality"] == "weak"
+    assert package["evidence_artifact"]["valid"] is False
+    assert "control" in package["evidence_artifact"]["missing_fields"]
+    assert "payload" in package["evidence_artifact"]["missing_fields"]
+
+    rejected = await graph.run(
+        action="finish",
+        agent_id=agent_id,
+        result="Confirmed SQL injection on /search.",
+    )
+
+    assert rejected.ok is False
+    assert rejected.error == "insufficient_proof_artifact"
 
 
 def test_judge_replan_hint_uses_agent_graph_escalation_status():
@@ -1029,7 +1143,28 @@ async def test_agent_graph_run_dispatches_declared_skill_via_scan_loop_executor(
             return ToolResult(
                 ok=True,
                 summary="confirmed injection signal on search route",
-                data={"evidence": "status delta observed"},
+                data={
+                    "proof_artifact": {
+                        "claim": "SQL injection on /search",
+                        "target": "http://localhost:3000/search",
+                        "control": {
+                            "request": "GET /search?q=test",
+                            "response_status": 200,
+                            "response_excerpt": "normal search results",
+                        },
+                        "payload": {
+                            "request": "GET /search?q='",
+                            "response_status": 500,
+                            "response_excerpt": "SQL syntax error",
+                        },
+                        "observed_delta": "control HTTP 200 vs payload HTTP 500 with SQL error",
+                        "repro_steps": [
+                            "send control request",
+                            "send payload request",
+                            "compare status and body",
+                        ],
+                    }
+                },
             )
 
     run_skill = _RunSkill()
@@ -1147,7 +1282,28 @@ async def test_scan_loop_runs_agent_graph_create_run_finish_end_to_end():
             return ToolResult(
                 ok=True,
                 summary="confirmed injection signal on search route",
-                data={"evidence": "status delta observed"},
+                data={
+                    "proof_artifact": {
+                        "claim": "SQL injection on /search",
+                        "target": "http://localhost:3000/search",
+                        "control": {
+                            "request": "GET /search?q=test",
+                            "response_status": 200,
+                            "response_excerpt": "normal search results",
+                        },
+                        "payload": {
+                            "request": "GET /search?q='",
+                            "response_status": 500,
+                            "response_excerpt": "SQL syntax error",
+                        },
+                        "observed_delta": "control HTTP 200 vs payload HTTP 500 with SQL error",
+                        "repro_steps": [
+                            "send control request",
+                            "send payload request",
+                            "compare status and body",
+                        ],
+                    }
+                },
             )
 
     run_skill = _RunSkill()

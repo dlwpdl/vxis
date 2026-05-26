@@ -29,7 +29,9 @@ async def test_agent_graph_create_send_wait_finish_view_cycle():
     assert created.data["agent"]["status"] == "running"
     assert created.data["agent"]["message_count"] == 1
 
-    sent = await tool.run(action="send", agent_id=agent_id, message="Prioritize admin and API routes.")
+    sent = await tool.run(
+        action="send", agent_id=agent_id, message="Prioritize admin and API routes."
+    )
     assert sent.ok is True
     assert sent.data["agent"]["message_count"] == 2
 
@@ -133,7 +135,9 @@ async def test_agent_graph_rejects_empty_create_and_empty_finish():
     assert missing_task.ok is False
     assert missing_task.error == "missing_task"
 
-    created = await tool.run(action="create", role="review_worker", task="Review current finding evidence")
+    created = await tool.run(
+        action="create", role="review_worker", task="Review current finding evidence"
+    )
     agent_id = created.data["agent"]["id"]
     missing_result = await tool.run(action="finish", agent_id=agent_id)
     assert missing_result.ok is False
@@ -230,12 +234,39 @@ async def test_agent_graph_rejects_positive_finish_with_unrelated_successful_exe
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_accepts_positive_finish_with_related_successful_execution():
+async def test_agent_graph_accepts_positive_finish_with_related_structured_evidence_artifact():
     async def _executor(agent, instruction):
         return ToolResult(
             ok=True,
             summary="run_skill: status delta observed on /search",
-            data={"tool": "run_skill", "args": {"skill": "test_injection"}},
+            data={
+                "tool": "run_skill",
+                "args": {"skill": "test_injection", "target_url": "http://localhost:3000"},
+                "result": {
+                    "ok": True,
+                    "summary": "confirmed sql injection on /search",
+                    "proof_artifact": {
+                        "claim": "SQL injection on /search",
+                        "target": "http://localhost:3000/search",
+                        "control": {
+                            "request": "GET /search?q=test",
+                            "response_status": 200,
+                            "response_excerpt": "normal results",
+                        },
+                        "payload": {
+                            "request": "GET /search?q='",
+                            "response_status": 500,
+                            "response_excerpt": "SQL syntax error",
+                        },
+                        "observed_delta": "control HTTP 200 vs payload HTTP 500 with SQL error",
+                        "repro_steps": [
+                            "send control request",
+                            "send payload request",
+                            "compare response status and body",
+                        ],
+                    },
+                },
+            },
         )
 
     tool = AgentGraphTool(executor=_executor)
@@ -257,6 +288,7 @@ async def test_agent_graph_accepts_positive_finish_with_related_successful_execu
 
     assert finished.ok is True
     assert finished.data["agent"]["status"] == "finished"
+    assert finished.data["agent"]["result_package"]["evidence_artifact"]["valid"] is True
 
 
 @pytest.mark.asyncio
@@ -300,7 +332,9 @@ async def test_agent_graph_rejects_unknown_agent_operations():
 @pytest.mark.asyncio
 async def test_agent_graph_run_requires_executor():
     tool = AgentGraphTool()
-    created = await tool.run(action="create", role="recon_worker", task="Map unauthenticated routes")
+    created = await tool.run(
+        action="create", role="recon_worker", task="Map unauthenticated routes"
+    )
     result = await tool.run(action="run", agent_id=created.data["agent"]["id"])
     assert result.ok is False
     assert result.error == "executor_unavailable"
@@ -331,7 +365,9 @@ async def test_agent_graph_run_records_bounded_executor_turn():
     )
     agent_id = created.data["agent"]["id"]
 
-    result = await tool.run(action="run", agent_id=agent_id, instruction="try the declared route mapper")
+    result = await tool.run(
+        action="run", agent_id=agent_id, instruction="try the declared route mapper"
+    )
     assert result.ok is True
     assert result.data["execution"]["tool"] == "run_skill"
     assert result.data["agent"]["status"] == "waiting"

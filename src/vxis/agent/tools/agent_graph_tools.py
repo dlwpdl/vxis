@@ -78,6 +78,27 @@ _PROOF_ARTIFACT_TOKENS = (
     "poc",
     "proof",
 )
+_EVIDENCE_ARTIFACT_SCHEMA = "vxis.agent_graph.evidence_artifact.v1"
+_ARTIFACT_DICT_KEYS = (
+    "summary",
+    "request",
+    "response",
+    "response_excerpt",
+    "response_status",
+    "status",
+    "body",
+    "header",
+    "headers",
+    "value",
+)
+_ARTIFACT_REQUIRED_FIELDS = (
+    "claim",
+    "target",
+    "control",
+    "payload",
+    "observed_delta",
+    "repro_steps",
+)
 _RESULT_FAMILY_TOKENS = {
     "injection": ("sql injection", "sqli", "sql", "nosql", "ssti", "injection"),
     "xss": ("xss", "script", "cross-site scripting"),
@@ -207,22 +228,176 @@ def _execution_blob(execution: AgentGraphExecution) -> str:
     ).lower()
 
 
-def _execution_evidence_blob(execution: AgentGraphExecution) -> str:
+def _artifact_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, dict):
+        return _join_nonempty(
+            [str(value.get(key) or "") for key in _ARTIFACT_DICT_KEYS],
+            sep=" | ",
+        )
+    if isinstance(value, list):
+        return _join_nonempty([_artifact_text(item) for item in value], sep=" | ")
+    return str(value or "").strip()
+
+
+def _first_artifact_text(*values: Any) -> str:
+    for value in values:
+        text = _artifact_text(value)
+        if text:
+            return text
+    return ""
+
+
+def _artifact_steps(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [
+            trim_text_chars(_artifact_text(item), 140) for item in value if _artifact_text(item)
+        ][:5]
+    text = _artifact_text(value)
+    return [trim_text_chars(text, 140)] if text else []
+
+
+def _artifact_section(value: Any) -> dict[str, str]:
+    if isinstance(value, dict):
+        section = {
+            "summary": trim_text_chars(_first_artifact_text(value.get("summary"), value), 180)
+        }
+        for key in (
+            "request",
+            "response",
+            "response_excerpt",
+            "response_status",
+            "status",
+            "body",
+        ):
+            text = _artifact_text(value.get(key))
+            if text:
+                section[key] = trim_text_chars(text, 240)
+        return section
+    text = _artifact_text(value)
+    return {"summary": trim_text_chars(text, 240)} if text else {}
+
+
+def _proof_artifact_raw(execution: AgentGraphExecution) -> dict[str, Any]:
     result = execution.data.get("result") if isinstance(execution.data.get("result"), dict) else {}
     result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
-    return " ".join(
-        str(value or "")
-        for value in (
-            execution.summary,
-            result.get("summary"),
-            result.get("evidence"),
-            result.get("control"),
-            result.get("baseline"),
-            result.get("delta"),
-            result.get("observed"),
-            result_data,
-        )
-    ).lower()
+    for source in (execution.data, result, result_data):
+        for key in ("evidence_artifact", "proof_artifact"):
+            raw = source.get(key) if isinstance(source, dict) else None
+            if isinstance(raw, dict):
+                return raw
+    return {}
+
+
+def _target_from_execution(execution: AgentGraphExecution, node: AgentGraphNode | None) -> str:
+    result = execution.data.get("result") if isinstance(execution.data.get("result"), dict) else {}
+    result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    return _first_artifact_text(
+        execution.args.get("target_url"),
+        execution.args.get("url"),
+        execution.args.get("target"),
+        result.get("target"),
+        result.get("url"),
+        result_data.get("target"),
+        result_data.get("url"),
+        node.task if node is not None else "",
+    )
+
+
+def _execution_evidence_artifact(
+    execution: AgentGraphExecution,
+    *,
+    node: AgentGraphNode | None = None,
+) -> dict[str, Any]:
+    result = execution.data.get("result") if isinstance(execution.data.get("result"), dict) else {}
+    result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    raw = _proof_artifact_raw(execution)
+    result_summary = str(result.get("summary") or execution.summary or "").strip()
+
+    claim = _first_artifact_text(
+        raw.get("claim"),
+        raw.get("title"),
+        result.get("claim"),
+        result_data.get("claim"),
+        result_summary,
+    )
+    target = _first_artifact_text(
+        raw.get("target"),
+        raw.get("url"),
+        raw.get("endpoint"),
+        raw.get("surface"),
+        _target_from_execution(execution, node),
+    )
+    control = _artifact_section(
+        raw.get("control")
+        or raw.get("baseline")
+        or result.get("control")
+        or result.get("baseline")
+        or result_data.get("control")
+        or result_data.get("baseline")
+    )
+    payload = _artifact_section(
+        raw.get("payload")
+        or raw.get("exploit")
+        or raw.get("attack")
+        or result.get("payload")
+        or result.get("control_payload")
+        or result_data.get("payload")
+        or result_data.get("attack")
+        or result.get("evidence")
+    )
+    observed_delta = _first_artifact_text(
+        raw.get("observed_delta"),
+        raw.get("delta"),
+        raw.get("evidence"),
+        result.get("observed_delta"),
+        result.get("delta"),
+        result.get("observed"),
+        result.get("evidence"),
+        result_data.get("observed_delta"),
+        result_data.get("delta"),
+        result_data.get("observed"),
+        result_data.get("evidence"),
+    )
+    repro_steps = _artifact_steps(
+        raw.get("repro_steps")
+        or raw.get("reproduction")
+        or raw.get("steps")
+        or result.get("repro_steps")
+        or result_data.get("repro_steps")
+    )
+    if not repro_steps and control and payload and observed_delta:
+        repro_steps = [
+            "Run the recorded control input",
+            "Run the recorded payload input",
+            "Compare the observed delta",
+        ]
+
+    artifact: dict[str, Any] = {
+        "schema": _EVIDENCE_ARTIFACT_SCHEMA,
+        "claim": trim_text_chars(claim, 180),
+        "target": trim_text_chars(target, 180),
+        "tool": execution.tool,
+        "source": "structured" if raw else "legacy_result_fields",
+        "control": control,
+        "payload": payload,
+        "observed_delta": trim_text_chars(observed_delta, 240),
+        "repro_steps": repro_steps,
+    }
+    missing = [
+        field
+        for field in _ARTIFACT_REQUIRED_FIELDS
+        if (not artifact.get(field))
+        or (field in {"control", "payload"} and not _artifact_text(artifact.get(field)))
+    ]
+    proof_blob = " ".join(
+        _artifact_text(artifact.get(field))
+        for field in ("control", "payload", "observed_delta", "repro_steps")
+    )
+    artifact["missing_fields"] = missing
+    artifact["valid"] = not missing and _has_proof_artifact_text(proof_blob)
+    return artifact
 
 
 def _execution_skill(execution: AgentGraphExecution) -> str:
@@ -261,13 +436,19 @@ def _has_proof_artifact_text(value: str) -> bool:
     return has_status_code and has_comparison
 
 
-def _execution_has_proof_artifact(execution: AgentGraphExecution) -> bool:
-    return _has_proof_artifact_text(_execution_evidence_blob(execution))
+def _execution_has_proof_artifact(
+    execution: AgentGraphExecution,
+    *,
+    node: AgentGraphNode | None = None,
+) -> bool:
+    artifact = _execution_evidence_artifact(execution, node=node)
+    return bool(artifact.get("valid"))
 
 
 def _has_sufficient_proof_artifact(node: AgentGraphNode, result: str) -> bool:
     return any(
-        _execution_supports_result(execution, result) and _execution_has_proof_artifact(execution)
+        _execution_supports_result(execution, result)
+        and _execution_has_proof_artifact(execution, node=node)
         for execution in node.executions
     )
 
@@ -1009,16 +1190,18 @@ class AgentGraphTool:
             execution.data.get("result") if isinstance(execution.data.get("result"), dict) else {}
         )
         result_summary = str(result_data.get("summary") or execution.summary or "").strip()
+        evidence_artifact = _execution_evidence_artifact(execution, node=node)
         control_text = _join_nonempty(
             [
+                _artifact_text(evidence_artifact.get("control")),
                 str(result_data.get("control") or ""),
-                str(result_data.get("control_payload") or ""),
                 str(result_data.get("baseline") or ""),
             ],
             sep=" | ",
         )
         delta_text = _join_nonempty(
             [
+                _artifact_text(evidence_artifact.get("observed_delta")),
                 str(result_data.get("evidence") or ""),
                 str(result_data.get("delta") or ""),
                 str(result_data.get("observed") or ""),
@@ -1026,7 +1209,7 @@ class AgentGraphTool:
             sep=" | ",
         )
         has_positive_signal = execution.ok and _looks_like_positive_security_result(result_summary)
-        has_proof_artifact = _execution_has_proof_artifact(execution)
+        has_proof_artifact = bool(evidence_artifact.get("valid"))
         if has_positive_signal and has_proof_artifact:
             verdict_guess = "candidate_positive"
         elif has_positive_signal:
@@ -1042,6 +1225,9 @@ class AgentGraphTool:
             "control_result": trim_text_chars(control_text, 140),
             "observed_delta": trim_text_chars(delta_text, 160),
             "proof_quality": "strong" if has_proof_artifact else "weak",
+            "evidence_artifact": compact_context_value(
+                evidence_artifact, max_chars=self._worker_budget.max_execution_chars
+            ),
             "verdict_guess": verdict_guess,
             "recommended_next_step": trim_text_chars(
                 self._recommended_next_step(node, execution), 180
@@ -1088,10 +1274,16 @@ class AgentGraphTool:
             node.executions
             and node.executions[-1].ok
             and _looks_like_positive_security_result(node.executions[-1].summary)
-            and not _execution_has_proof_artifact(node.executions[-1])
+            and not _execution_has_proof_artifact(node.executions[-1], node=node)
         ):
             status = "needs_proof"
-            reason = "positive-looking child output lacks PoC/control artifact"
+            artifact = _execution_evidence_artifact(node.executions[-1], node=node)
+            missing = ", ".join(str(item) for item in list(artifact.get("missing_fields") or []))
+            reason = (
+                f"positive-looking child output lacks valid EvidenceArtifact fields: {missing}"
+                if missing
+                else "positive-looking child output lacks valid EvidenceArtifact"
+            )
         elif (
             node.executions
             and node.executions[-1].ok
@@ -1112,8 +1304,14 @@ class AgentGraphTool:
             return "Escalate to director with blocker details or rerun a sharper bounded task"
         summary = execution.summary.lower()
         if _looks_like_positive_security_result(summary):
-            if not _execution_has_proof_artifact(execution):
-                return "Rerun with concrete PoC/control evidence before finish; positive summary alone is insufficient"
+            artifact = _execution_evidence_artifact(execution, node=node)
+            if not artifact.get("valid"):
+                missing = ", ".join(
+                    str(item) for item in list(artifact.get("missing_fields") or [])
+                )
+                if missing:
+                    return f"Rerun with valid EvidenceArtifact before finish; missing {missing}"
+                return "Rerun with valid EvidenceArtifact before finish; positive summary alone is insufficient"
             return "Escalate to director for chain/pivot planning, then finish with concrete impact"
         if "clean" in summary or "no issue" in summary:
             return "Finish as clean or redirect worker to a new surface"
