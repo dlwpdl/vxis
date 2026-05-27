@@ -99,6 +99,15 @@ _ARTIFACT_REQUIRED_FIELDS = (
     "observed_delta",
     "repro_steps",
 )
+_MAX_REPEATED_EVIDENCE_GAPS = 2
+_ARTIFACT_FIELD_DIRECTIVES = {
+    "claim": "state the exact vulnerability claim being tested",
+    "target": "name the exact URL/component/account boundary",
+    "control": "add baseline control request and response/status",
+    "payload": "add payload/variant request and response/status",
+    "observed_delta": "compare control vs payload and state the security delta",
+    "repro_steps": "list concise replay steps for control, payload, and comparison",
+}
 _RESULT_FAMILY_TOKENS = {
     "injection": ("sql injection", "sqli", "sql", "nosql", "ssti", "injection"),
     "xss": ("xss", "script", "cross-site scripting"),
@@ -396,8 +405,124 @@ def _execution_evidence_artifact(
         for field in ("control", "payload", "observed_delta", "repro_steps")
     )
     artifact["missing_fields"] = missing
-    artifact["valid"] = not missing and _has_proof_artifact_text(proof_blob)
+    weak = _artifact_weak_fields(artifact)
+    artifact["weak_fields"] = weak
+    artifact["gap_fields"] = _dedupe_preserve_order([*missing, *weak])
+    artifact["valid"] = not artifact["gap_fields"] and _has_proof_artifact_text(proof_blob)
     return artifact
+
+
+def _artifact_weak_fields(artifact: dict[str, Any]) -> list[str]:
+    weak: list[str] = []
+    for artifact_field in ("control", "payload"):
+        value = artifact.get(artifact_field)
+        text = _artifact_text(value)
+        if not text:
+            continue
+        if len(text) < 12:
+            weak.append(artifact_field)
+            continue
+        if not any(
+            token in text.lower()
+            for token in (
+                "request",
+                "response",
+                "status",
+                "http",
+                "baseline",
+                "control",
+                "payload",
+                "error",
+                "token",
+                "admin",
+                "200",
+                "401",
+                "403",
+                "500",
+                "body",
+                "header",
+                "cookie",
+                "session",
+            )
+        ):
+            weak.append(artifact_field)
+    delta = _artifact_text(artifact.get("observed_delta"))
+    if delta and len(delta) < 16:
+        weak.append("observed_delta")
+    steps = artifact.get("repro_steps")
+    if isinstance(steps, list) and steps and len([step for step in steps if _artifact_text(step)]) < 2:
+        weak.append("repro_steps")
+    return _dedupe_preserve_order(weak)
+
+
+def _artifact_gap_signature(artifact: dict[str, Any]) -> str:
+    fields = [
+        str(item).strip()
+        for item in list(artifact.get("gap_fields") or artifact.get("missing_fields") or [])
+        if str(item).strip()
+    ]
+    return ",".join(_dedupe_preserve_order(fields)) or "proof_artifact"
+
+
+def _evidence_gap_directive(fields: list[str], artifact: dict[str, Any]) -> str:
+    focused = _dedupe_preserve_order(fields)[:6]
+    if not focused:
+        focused = ["proof_artifact"]
+    directives = [
+        _ARTIFACT_FIELD_DIRECTIVES.get(field, f"strengthen {field}")
+        for field in focused
+    ]
+    claim = trim_text_chars(artifact.get("claim"), 80)
+    target = trim_text_chars(artifact.get("target"), 80)
+    context = _join_nonempty([f"claim={claim}" if claim else "", f"target={target}" if target else ""])
+    prefix = f"Evidence gap: add {', '.join(focused)}."
+    suffix = "; ".join(directives)
+    if context:
+        suffix = f"{suffix}. {context}"
+    return trim_text_chars(f"{prefix} {suffix}", 260)
+
+
+def _execution_evidence_gap_report(
+    execution: AgentGraphExecution,
+    *,
+    node: AgentGraphNode,
+) -> dict[str, Any]:
+    artifact = _execution_evidence_artifact(execution, node=node)
+    if artifact.get("valid"):
+        return {
+            "status": "valid",
+            "missing_fields": [],
+            "weak_fields": [],
+            "gap_fields": [],
+            "gap_signature": "",
+            "repeat_count": 0,
+            "next_instruction": "",
+        }
+    fields = [
+        str(item).strip()
+        for item in list(artifact.get("gap_fields") or artifact.get("missing_fields") or [])
+        if str(item).strip()
+    ]
+    if not fields:
+        fields = ["proof_artifact"]
+    signature = _artifact_gap_signature(artifact)
+    repeat_count = 0
+    for prior in node.executions:
+        prior_artifact = _execution_evidence_artifact(prior, node=node)
+        if prior_artifact.get("valid"):
+            continue
+        if _artifact_gap_signature(prior_artifact) == signature:
+            repeat_count += 1
+    return {
+        "status": "needs_more_evidence",
+        "missing_fields": list(artifact.get("missing_fields") or []),
+        "weak_fields": list(artifact.get("weak_fields") or []),
+        "gap_fields": _dedupe_preserve_order(fields),
+        "gap_signature": signature,
+        "repeat_count": repeat_count,
+        "max_repeats": _MAX_REPEATED_EVIDENCE_GAPS,
+        "next_instruction": _evidence_gap_directive(fields, artifact),
+    }
 
 
 def _execution_skill(execution: AgentGraphExecution) -> str:
@@ -455,6 +580,18 @@ def _has_sufficient_proof_artifact(node: AgentGraphNode, result: str) -> bool:
 
 def _join_nonempty(parts: list[str], *, sep: str = " ") -> str:
     return sep.join(part for part in parts if str(part or "").strip()).strip()
+
+
+def _dedupe_preserve_order(items: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        clean = str(item or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        out.append(clean)
+    return out
 
 
 class AgentGraphTool:
@@ -1224,6 +1361,7 @@ class AgentGraphTool:
         )
         has_positive_signal = execution.ok and _looks_like_positive_security_result(result_summary)
         has_proof_artifact = bool(evidence_artifact.get("valid"))
+        evidence_gap = _execution_evidence_gap_report(execution, node=node)
         if has_positive_signal and has_proof_artifact:
             verdict_guess = "candidate_positive"
         elif has_positive_signal:
@@ -1242,9 +1380,12 @@ class AgentGraphTool:
             "evidence_artifact": compact_context_value(
                 evidence_artifact, max_chars=self._worker_budget.max_execution_chars
             ),
+            "evidence_gap": compact_context_value(
+                evidence_gap, max_chars=self._worker_budget.max_execution_chars
+            ),
             "verdict_guess": verdict_guess,
             "recommended_next_step": trim_text_chars(
-                self._recommended_next_step(node, execution), 180
+                self._recommended_next_step(node, execution, evidence_gap=evidence_gap), 220
             ),
         }
 
@@ -1275,9 +1416,25 @@ class AgentGraphTool:
         failed_runs = sum(1 for execution in node.executions if not execution.ok)
         reason = ""
         status = "clear"
+        result_package = dict(node.result_package or {})
+        evidence_gap = (
+            result_package.get("evidence_gap")
+            if isinstance(result_package.get("evidence_gap"), dict)
+            else {}
+        )
         if node.status == "blocked":
             status = "blocked"
             reason = node.result or "worker blocked"
+        elif (
+            evidence_gap.get("status") == "needs_more_evidence"
+            and str(result_package.get("verdict_guess") or "") == "needs_proof"
+            and int(evidence_gap.get("repeat_count") or 0) >= _MAX_REPEATED_EVIDENCE_GAPS
+        ):
+            status = "blocked_with_reason"
+            reason = (
+                f"same EvidenceArtifact gap repeated x{int(evidence_gap.get('repeat_count') or 0)}: "
+                f"{str(evidence_gap.get('next_instruction') or '')}"
+            )
         elif len(node.executions) >= self._max_child_runs:
             status = "run_limit"
             reason = f"worker hit child-run limit ({self._max_child_runs})"
@@ -1292,9 +1449,12 @@ class AgentGraphTool:
         ):
             status = "needs_proof"
             artifact = _execution_evidence_artifact(node.executions[-1], node=node)
-            missing = ", ".join(str(item) for item in list(artifact.get("missing_fields") or []))
+            missing = ", ".join(
+                str(item) for item in list(artifact.get("gap_fields") or artifact.get("missing_fields") or [])
+            )
             reason = (
-                f"positive-looking child output lacks valid EvidenceArtifact fields: {missing}"
+                f"positive-looking child output lacks valid EvidenceArtifact fields: {missing}. "
+                f"{str(evidence_gap.get('next_instruction') or '')}"
                 if missing
                 else "positive-looking child output lacks valid EvidenceArtifact"
             )
@@ -1313,16 +1473,27 @@ class AgentGraphTool:
             "recommended_owner": "director",
         }
 
-    def _recommended_next_step(self, node: AgentGraphNode, execution: AgentGraphExecution) -> str:
+    def _recommended_next_step(
+        self,
+        node: AgentGraphNode,
+        execution: AgentGraphExecution,
+        *,
+        evidence_gap: dict[str, Any] | None = None,
+    ) -> str:
         if not execution.ok:
             return "Escalate to director with blocker details or rerun a sharper bounded task"
         summary = execution.summary.lower()
         if _looks_like_positive_security_result(summary):
             artifact = _execution_evidence_artifact(execution, node=node)
             if not artifact.get("valid"):
+                gap = evidence_gap if isinstance(evidence_gap, dict) else {}
                 missing = ", ".join(
-                    str(item) for item in list(artifact.get("missing_fields") or [])
+                    str(item)
+                    for item in list(artifact.get("gap_fields") or artifact.get("missing_fields") or [])
                 )
+                next_instruction = str(gap.get("next_instruction") or "").strip()
+                if next_instruction:
+                    return f"Rerun with bounded evidence repair: {next_instruction}"
                 if missing:
                     return f"Rerun with valid EvidenceArtifact before finish; missing {missing}"
                 return "Rerun with valid EvidenceArtifact before finish; positive summary alone is insufficient"

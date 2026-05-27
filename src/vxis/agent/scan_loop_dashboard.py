@@ -514,10 +514,13 @@ def build_scan_dashboard(loop: Any) -> str:
         if b.owner == "agent_graph":
             forced = loop._forced_branch_action(b)
             if forced is not None and forced[0] == "agent_graph":
+                instruction = str(forced[1].get("instruction") or "").strip()
                 lines.append(
                     f'   Forced next action: agent_graph(action="run", '
                     f'agent_id="{forced[1].get("agent_id", "")}")'
                 )
+                if instruction:
+                    lines.append(f"   Forced instruction: {instruction[:140]}")
             elif b.blocker:
                 lines.append(
                     '   Resolve blocker by calling agent_graph(action="finish", '

@@ -16,6 +16,7 @@ from vxis.agent.agent_graph_runtime import (
     agent_graph_director_next_step,
     agent_graph_evidence_artifact,
     agent_graph_evidence_artifact_brief,
+    agent_graph_evidence_gap,
     agent_graph_has_valid_evidence_artifact,
     agent_graph_needs_evidence_artifact,
     agent_graph_result_needs_crown_chain,
@@ -70,6 +71,10 @@ class ScanLoopAgentGraphMixin:
 
     def _agent_graph_crown_chain_next(self, agent: dict[str, Any]) -> str:
         return agent_graph_crown_chain_next(agent)
+
+    @staticmethod
+    def _agent_graph_evidence_gap(agent: dict[str, Any]) -> dict[str, Any]:
+        return agent_graph_evidence_gap(agent)
 
     def _ensure_agent_graph_crown_followup_branch(
         self,
@@ -324,6 +329,13 @@ class ScanLoopAgentGraphMixin:
             needs_artifact = agent_graph_needs_evidence_artifact(agent)
             has_valid_artifact = agent_graph_has_valid_evidence_artifact(agent)
             artifact_brief = agent_graph_evidence_artifact_brief(agent, width=140)
+            evidence_gap = agent_graph_evidence_gap(agent)
+            gap_instruction = str(evidence_gap.get("next_instruction") or "").strip()
+            gap_fields = [
+                str(item).strip()
+                for item in list(evidence_gap.get("gap_fields") or [])
+                if str(item).strip()
+            ]
             next_step = (
                 "Finish this delegated agent with agent_graph(action='finish', agent_id=..., result=...) "
                 "after concrete evidence is gathered."
@@ -337,10 +349,16 @@ class ScanLoopAgentGraphMixin:
                     else latest_success_tool
                 )
                 if needs_artifact:
+                    gap_text = f" Missing/weak: {', '.join(gap_fields[:6])}." if gap_fields else ""
+                    instruction_text = (
+                        gap_instruction
+                        or "Return a valid EvidenceArtifact with claim,target,control,payload,observed_delta,repro_steps."
+                    )
                     next_step = (
                         "Successful child execution is available but proof is incomplete. "
-                        f"Run agent_graph(action='run', agent_id='{agent_id}') until the worker returns "
-                        f"a valid EvidenceArtifact. Evidence: {evidence_hint[:100]}"
+                        f"Run agent_graph(action='run', agent_id='{agent_id}', "
+                        f"instruction='{instruction_text[:180]}') until the worker returns a valid "
+                        f"EvidenceArtifact.{gap_text} Evidence: {evidence_hint[:100]}"
                     )
                 elif has_valid_artifact:
                     next_step = (
@@ -404,8 +422,16 @@ class ScanLoopAgentGraphMixin:
             if branch.status == "active" and needs_artifact:
                 branch.blocker = str(
                     escalation.get("reason")
+                    or gap_instruction
                     or "positive delegated worker result requires valid EvidenceArtifact"
                 )[:180]
+            if str(escalation.get("status") or "") == "blocked_with_reason":
+                branch.blocker = str(escalation.get("reason") or branch.blocker)[:180]
+                branch.next_step = (
+                    "Evidence gap repeated without improvement. Finish this agent as blocked with the "
+                    "gap reason, or create a narrower worker with fresh scope. "
+                    f"Last gap: {(gap_instruction or branch.blocker)[:120]}"
+                )
             if result.error in {
                 "run_limit_reached",
                 "executor_unavailable",
@@ -1315,6 +1341,11 @@ class ScanLoopAgentGraphMixin:
         result_package = (
             agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
         )
+        evidence_gap = (
+            result_package.get("evidence_gap")
+            if isinstance(result_package.get("evidence_gap"), dict)
+            else {}
+        )
         parts = [
             f"objective={str(envelope.get('objective') or agent.get('task') or '').strip()}",
             f"tool={tool_name}",
@@ -1323,6 +1354,7 @@ class ScanLoopAgentGraphMixin:
         stop = str(envelope.get("stop_condition") or "").strip()
         escalate = str(envelope.get("escalation_trigger") or "").strip()
         prior = str(result_package.get("recommended_next_step") or "").strip()
+        gap_instruction = str(evidence_gap.get("next_instruction") or "").strip()
         if expected:
             parts.append(f"expect={expected}")
         if stop:
@@ -1331,6 +1363,8 @@ class ScanLoopAgentGraphMixin:
             parts.append(f"escalate={escalate}")
         if prior:
             parts.append(f"prior={prior}")
+        if gap_instruction:
+            parts.append(f"repair_gap={gap_instruction}")
         if instruction:
             parts.append(f"director_note={instruction.strip()}")
         parts.append(

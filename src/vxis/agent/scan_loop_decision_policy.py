@@ -1252,12 +1252,18 @@ class ScanLoopDecisionPolicyMixin:
                     "no executable step",
                     "not registered",
                     "not allowed for bounded child execution",
+                    "blocked_with_reason",
+                    "same evidenceartifact gap repeated",
                 )
             ):
                 return None
             agent_id = branch.id.removeprefix("agent:")
             if agent_id and self.registry.has_tool("agent_graph"):
-                return ("agent_graph", {"action": "run", "agent_id": agent_id})
+                args = {"action": "run", "agent_id": agent_id}
+                instruction = self._agent_graph_branch_gap_instruction(branch)
+                if instruction:
+                    args["instruction"] = instruction
+                return ("agent_graph", args)
             for declared_skill in self._declared_agent_graph_branch_skills(branch):
                 skill = self._pivoted_skill_name(declared_skill)
                 if not skill:
@@ -1328,6 +1334,14 @@ class ScanLoopDecisionPolicyMixin:
                 return ("run_skill", {"skill": skill, "target_url": target, "params": params})
             return None
         return None
+
+    @staticmethod
+    def _agent_graph_branch_gap_instruction(branch: BranchState) -> str:
+        text = " ".join(str(value or "") for value in (branch.next_step, branch.blocker))
+        marker = "Evidence gap:"
+        if marker not in text:
+            return ""
+        return text[text.index(marker) :].split(" Evidence:", 1)[0][:260].strip()
 
     def _agent_graph_crown_followup_create_action(
         self, branch: BranchState

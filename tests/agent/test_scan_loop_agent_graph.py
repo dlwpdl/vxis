@@ -1640,11 +1640,13 @@ async def test_agent_graph_insufficient_proof_finish_reforces_child_run():
     )
     branch = loop.state.branches["agent:agent-0001"]
     assert "valid EvidenceArtifact" in branch.next_step
-    assert "valid EvidenceArtifact" in branch.blocker
-    assert loop._forced_branch_action(branch) == (
-        "agent_graph",
-        {"action": "run", "agent_id": agent_id},
-    )
+    assert "Evidence gap:" in branch.blocker
+    forced = loop._forced_branch_action(branch)
+    assert forced is not None
+    assert forced[0] == "agent_graph"
+    assert forced[1]["action"] == "run"
+    assert forced[1]["agent_id"] == agent_id
+    assert "Evidence gap:" in forced[1]["instruction"]
 
     rejected = await reg.dispatch(
         "agent_graph",
@@ -1665,10 +1667,190 @@ async def test_agent_graph_insufficient_proof_finish_reforces_child_run():
     branch = loop.state.branches["agent:agent-0001"]
     assert "concrete PoC/control evidence" in branch.next_step
     assert "requires a concrete PoC/control artifact" in branch.blocker
-    assert loop._forced_branch_action(branch) == (
+    forced = loop._forced_branch_action(branch)
+    assert forced is not None
+    assert forced[0] == "agent_graph"
+    assert forced[1]["action"] == "run"
+    assert forced[1]["agent_id"] == agent_id
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_evidence_gap_retry_then_valid_artifact_allows_crown_chain():
+    reg = ToolRegistry()
+    reg.register(AgentGraphTool())
+
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def run(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            if len(self.calls) == 1:
+                return ToolResult(
+                    ok=True,
+                    summary="confirmed sql injection on search",
+                    data={"note": "positive summary without control pair"},
+                )
+            return ToolResult(
+                ok=True,
+                summary="confirmed sql injection exposes session token material",
+                data={
+                    "proof_artifact": {
+                        "claim": "SQL injection on /search exposes session token material",
+                        "target": "http://localhost:3000/search",
+                        "control": {
+                            "request": "GET /search?q=test",
+                            "response_status": 200,
+                            "response_excerpt": "normal search results",
+                        },
+                        "payload": {
+                            "request": "GET /search?q='",
+                            "response_status": 500,
+                            "response_excerpt": "SQL error includes session token column",
+                        },
+                        "observed_delta": (
+                            "control HTTP 200 vs payload HTTP 500 with token-bearing SQL error"
+                        ),
+                        "repro_steps": [
+                            "send control request",
+                            "send payload request",
+                            "compare status and token-bearing SQL error body",
+                        ],
+                    }
+                },
+            )
+
+    runner = _RunSkill()
+    reg.register(runner)
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=30)
+
+    created = await reg.dispatch(
         "agent_graph",
-        {"action": "run", "agent_id": agent_id},
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Validate SQL injection on /search",
+            "skills": ["test_injection"],
+        },
     )
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "create", "role": "exploit_worker"},
+        result=created,
+    )
+    agent_id = created.data["agent"]["id"]
+
+    first = await reg.dispatch("agent_graph", {"action": "run", "agent_id": agent_id})
+    gap = first.data["agent"]["result_package"]["evidence_gap"]
+    assert gap["status"] == "needs_more_evidence"
+    assert gap["repeat_count"] == 1
+    assert "control" in gap["gap_fields"]
+    assert "payload" in gap["gap_fields"]
+    assert "Evidence gap:" in gap["next_instruction"]
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "run", "agent_id": agent_id},
+        result=first,
+    )
+    forced = loop._forced_branch_action(loop.state.branches["agent:agent-0001"])
+    assert forced is not None
+    assert forced[0] == "agent_graph"
+    assert forced[1]["agent_id"] == agent_id
+    assert "instruction" in forced[1]
+    assert "Evidence gap:" in forced[1]["instruction"]
+
+    second = await reg.dispatch(forced[0], forced[1])
+    assert second.ok is True
+    assert second.data["agent"]["result_package"]["evidence_artifact"]["valid"] is True
+    loop._sync_agent_graph_result_to_branches(
+        name=forced[0],
+        args=forced[1],
+        result=second,
+    )
+    branch = loop.state.branches["agent:agent-0001"]
+    assert "Valid EvidenceArtifact is available" in branch.next_step
+
+    finished = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "finish",
+            "agent_id": agent_id,
+            "result": "Confirmed SQL injection on /search exposes session token material.",
+        },
+    )
+    assert finished.ok is True
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "finish", "agent_id": agent_id},
+        result=finished,
+    )
+
+    assert loop.state.branches["agent:agent-0001"].status == "proven"
+    assert "agent:agent-0001:crown-chain" in loop.state.branches
+    assert runner.calls and len(runner.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_repeated_evidence_gap_stops_automatic_retry():
+    reg = ToolRegistry()
+    reg.register(AgentGraphTool())
+
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs):
+            return ToolResult(
+                ok=True,
+                summary="confirmed sql injection on search",
+                data={"note": "positive summary without control pair"},
+            )
+
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=30)
+    created = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Validate SQL injection on /search",
+            "skills": ["test_injection"],
+        },
+    )
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "create", "role": "exploit_worker"},
+        result=created,
+    )
+    agent_id = created.data["agent"]["id"]
+
+    first = await reg.dispatch("agent_graph", {"action": "run", "agent_id": agent_id})
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "run", "agent_id": agent_id},
+        result=first,
+    )
+    forced = loop._forced_branch_action(loop.state.branches["agent:agent-0001"])
+    assert forced is not None
+
+    second = await reg.dispatch(forced[0], forced[1])
+    assert second.data["agent"]["escalation"]["status"] == "blocked_with_reason"
+    assert second.data["agent"]["result_package"]["evidence_gap"]["repeat_count"] == 2
+    loop._sync_agent_graph_result_to_branches(
+        name=forced[0],
+        args=forced[1],
+        result=second,
+    )
+
+    branch = loop.state.branches["agent:agent-0001"]
+    assert "same EvidenceArtifact gap repeated" in branch.blocker
+    assert "create a narrower worker" in branch.next_step
+    assert loop._forced_branch_action(branch) is None
 
 
 def test_agent_graph_branch_declared_skill_forces_run_skill_action():
