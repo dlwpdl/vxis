@@ -468,13 +468,15 @@ class ScanLoopAgentGraphMixin:
             if branch is not None and branch.owner != "agent_graph"
             else None
         )
+        if action is not None:
+            planner_meta = {"source": "forced_branch_action"}
         if action is None:
             planned = await self._agent_graph_worker_llm_action(
                 agent,
                 instruction,
                 allowed_child_tools=allowed_child_tools,
             )
-            if planned is not None:
+            if planned.get("ok"):
                 action = (planned["tool"], planned["args"])
                 planner_meta = {
                     "source": "worker_llm",
@@ -483,14 +485,16 @@ class ScanLoopAgentGraphMixin:
                     "evidence_intent": planned.get("evidence_intent", ""),
                     "prompt_tokens": planned.get("prompt_tokens", 0),
                 }
+            else:
+                planner_meta = self._agent_graph_worker_planner_fallback_meta(planned)
         if action is None:
             action = self._agent_graph_action_from_node(agent, instruction)
             if action is not None:
-                planner_meta = {"source": "deterministic_fallback"}
+                planner_meta = planner_meta or {"source": "deterministic_fallback"}
         if action is None:
             return ToolResult(
                 ok=False,
-                data={"agent_id": agent_id, "instruction": instruction},
+                data={"agent_id": agent_id, "instruction": instruction, "planner": planner_meta},
                 summary="agent_graph child turn: no executable step found for delegated task",
                 error="no_child_action",
             )
@@ -583,14 +587,16 @@ class ScanLoopAgentGraphMixin:
         instruction: str,
         *,
         allowed_child_tools: set[str],
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         brain = getattr(self, "brain", None)
         endpoint = self._agent_graph_worker_endpoint()
         can_call_worker = callable(getattr(brain, "_call_llm_direct", None)) or callable(
             getattr(brain, "_call_openai_compatible", None)
         )
-        if brain is None or endpoint is None or not can_call_worker:
-            return None
+        if brain is None or endpoint is None:
+            return self._agent_graph_worker_planner_failure("worker_planner_not_configured")
+        if not can_call_worker:
+            return self._agent_graph_worker_planner_failure("worker_llm_not_callable")
 
         system_prompt, user_prompt, budget = self._agent_graph_worker_planner_prompts(
             agent,
@@ -604,6 +610,7 @@ class ScanLoopAgentGraphMixin:
                 max(900, int(budget.max_prompt_tokens * 2.2)),
             )
             prompt_tokens = estimate_context_tokens(system_prompt) + estimate_context_tokens(user_prompt)
+        compacted = prompt_tokens > budget.max_prompt_tokens
 
         semaphore = self._agent_graph_worker_llm_semaphore()
         provider = str(getattr(endpoint, "provider", "") or "")
@@ -622,10 +629,21 @@ class ScanLoopAgentGraphMixin:
                         base_url=str(getattr(endpoint, "base_url", "") or ""),
                     ),
                 )
-        except Exception:
-            return None
+        except Exception as exc:
+            return self._agent_graph_worker_planner_failure(
+                "worker_llm_call_failed",
+                detail=str(exc)[:180],
+                provider=provider,
+                model=model,
+                prompt_tokens=prompt_tokens,
+            )
         if not text:
-            return None
+            return self._agent_graph_worker_planner_failure(
+                "worker_llm_empty_response",
+                provider=provider,
+                model=model,
+                prompt_tokens=prompt_tokens,
+            )
 
         planned = self._agent_graph_parse_worker_llm_action(
             str(text),
@@ -633,10 +651,63 @@ class ScanLoopAgentGraphMixin:
             instruction=instruction,
             allowed_child_tools=allowed_child_tools,
         )
-        if planned is None:
-            return None
         planned.update({"provider": provider, "model": model, "prompt_tokens": prompt_tokens})
+        if compacted:
+            planned["prompt_compacted"] = True
         return planned
+
+    @staticmethod
+    def _agent_graph_worker_planner_failure(
+        reason: str,
+        *,
+        detail: str = "",
+        provider: str = "",
+        model: str = "",
+        prompt_tokens: int = 0,
+    ) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "failure_reason": str(reason or "unknown_worker_planner_failure"),
+            "detail": str(detail or "")[:240],
+            "provider": provider,
+            "model": model,
+            "prompt_tokens": int(prompt_tokens or 0),
+        }
+
+    def _agent_graph_worker_planner_fallback_meta(
+        self,
+        planned: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        failure = planned or self._agent_graph_worker_planner_failure("worker_planner_not_configured")
+        reason = str(failure.get("failure_reason") or "unknown_worker_planner_failure")
+        counts = getattr(self, "_agent_graph_worker_planner_fallback_counts", None)
+        if not isinstance(counts, dict):
+            counts = {}
+            self._agent_graph_worker_planner_fallback_counts = counts
+        counts[reason] = int(counts.get(reason, 0)) + 1
+        meta = {
+            "source": "deterministic_fallback",
+            "fallback_reason": reason,
+            "fallback_count": counts[reason],
+            "provider": str(failure.get("provider") or ""),
+            "model": str(failure.get("model") or ""),
+            "prompt_tokens": int(failure.get("prompt_tokens") or 0),
+        }
+        detail = str(failure.get("detail") or "").strip()
+        if detail:
+            meta["detail"] = detail[:180]
+        local_unavailable_reasons = {
+            "worker_llm_not_callable",
+            "worker_llm_call_failed",
+            "worker_llm_empty_response",
+        }
+        if reason in local_unavailable_reasons and counts[reason] >= 3:
+            meta["health"] = "local_worker_unavailable"
+            note = f"agent_graph local worker unavailable: {reason} x{counts[reason]}"
+            marker = f"agent_graph local worker unavailable: {reason}"
+            if not any(str(existing).startswith(marker) for existing in self.state.shared_notes):
+                self.state.add_shared_note(note)
+        return meta
 
     @staticmethod
     def _agent_graph_call_worker_llm_direct(
@@ -789,36 +860,55 @@ class ScanLoopAgentGraphMixin:
         agent: dict[str, Any],
         instruction: str,
         allowed_child_tools: set[str],
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         try:
             parsed = _parse_llm_json(text)
-        except Exception:
-            return None
+        except Exception as exc:
+            return self._agent_graph_worker_planner_failure(
+                "invalid_json",
+                detail=str(exc)[:180],
+            )
         item: Any = parsed
         if isinstance(item, list):
             item = item[0] if item else {}
         if isinstance(item, dict) and isinstance(item.get("actions"), list):
             item = item["actions"][0] if item["actions"] else {}
         if not isinstance(item, dict):
-            return None
+            return self._agent_graph_worker_planner_failure("invalid_json_shape")
         tool_name = str(item.get("tool") or "").strip()
         raw_args = item.get("args") if isinstance(item.get("args"), dict) else {}
+        if not tool_name:
+            return self._agent_graph_worker_planner_failure("missing_tool")
         if tool_name not in allowed_child_tools:
-            return None
+            return self._agent_graph_worker_planner_failure(
+                "disallowed_tool",
+                detail=tool_name,
+            )
         if not self.registry.has_tool(tool_name):
-            return None
-        tool_args = self._agent_graph_normalize_worker_tool_args(
+            return self._agent_graph_worker_planner_failure(
+                "tool_unavailable",
+                detail=tool_name,
+            )
+        normalized = self._agent_graph_normalize_worker_tool_args(
             tool_name,
             raw_args,
             agent=agent,
             instruction=instruction,
         )
-        if tool_args is None:
-            return None
+        if not normalized.get("ok"):
+            return self._agent_graph_worker_planner_failure(
+                str(normalized.get("failure_reason") or "invalid_args"),
+                detail=str(normalized.get("detail") or "")[:180],
+            )
+        tool_args = normalized["args"]
         role = str(agent.get("role") or "recon_worker").strip() or "recon_worker"
         if not self._role_allows_action(role, tool_name, tool_args):
-            return None
+            return self._agent_graph_worker_planner_failure(
+                "role_disallowed",
+                detail=f"{role}:{tool_name}",
+            )
         return {
+            "ok": True,
             "tool": tool_name,
             "args": tool_args,
             "evidence_intent": trim_text_chars(item.get("evidence_intent") or "", 220),
@@ -831,19 +921,21 @@ class ScanLoopAgentGraphMixin:
         *,
         agent: dict[str, Any],
         instruction: str,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         if tool_name == "run_skill":
             raw_skill = str(args.get("skill") or args.get("_skill_override") or "").strip()
+            if not raw_skill:
+                return {"ok": False, "failure_reason": "missing_skill"}
             skill = self._pivoted_skill_name(raw_skill)
             if not skill:
-                return None
+                return {"ok": False, "failure_reason": "invalid_skill", "detail": raw_skill}
             allowed_skills = {
                 self._pivoted_skill_name(str(item))
                 for item in list(agent.get("skills") or [])
                 if self._pivoted_skill_name(str(item))
             }
             if allowed_skills and skill not in allowed_skills:
-                return None
+                return {"ok": False, "failure_reason": "disallowed_skill", "detail": skill}
             hint_blob = " ".join(
                 str(value or "")
                 for value in (
@@ -857,14 +949,17 @@ class ScanLoopAgentGraphMixin:
             default_params = self._best_skill_params(skill, hint_blob=hint_blob)
             merged_params = {**default_params, **params}
             return {
-                "skill": skill,
-                "target_url": str(args.get("target_url") or self.state.target),
-                "params": compact_context_value(merged_params, max_chars=900),
+                "ok": True,
+                "args": {
+                    "skill": skill,
+                    "target_url": str(args.get("target_url") or self.state.target),
+                    "params": compact_context_value(merged_params, max_chars=900),
+                },
             }
         if tool_name == "http_request":
             method = str(args.get("method") or "GET").strip().upper()
             if method not in {"GET", "POST", "HEAD", "OPTIONS"}:
-                return None
+                return {"ok": False, "failure_reason": "invalid_args", "detail": method}
             out: dict[str, Any] = {
                 "method": method,
                 "url": str(args.get("url") or self.state.target),
@@ -873,16 +968,19 @@ class ScanLoopAgentGraphMixin:
                 out["headers"] = compact_context_value(args["headers"], max_chars=600)
             if "body" in args:
                 out["body"] = trim_text_chars(args.get("body"), 1200)
-            return out
+            return {"ok": True, "args": out}
         if tool_name == "browser_navigate":
-            return {"url": str(args.get("url") or self.state.target)}
+            return {"ok": True, "args": {"url": str(args.get("url") or self.state.target)}}
         if tool_name == "browser_analyze_dom":
             return {
-                str(key): compact_context_value(value, max_chars=500)
-                for key, value in args.items()
-                if str(key) in {"selector", "include_text", "limit"}
+                "ok": True,
+                "args": {
+                    str(key): compact_context_value(value, max_chars=500)
+                    for key, value in args.items()
+                    if str(key) in {"selector", "include_text", "limit"}
+                },
             }
-        return None
+        return {"ok": False, "failure_reason": "disallowed_tool", "detail": tool_name}
 
     def _agent_graph_action_from_node(
         self,

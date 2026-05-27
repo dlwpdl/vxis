@@ -112,6 +112,20 @@ def agent_graph_director_brief(
             latest_tool = str(latest.get("tool") or "child")
             latest_ok = "ok" if latest.get("ok") else "fail"
             latest_summary = f"{latest_tool} {latest_ok}: {str(latest.get('summary') or '')}"
+            latest_data = latest.get("data") if isinstance(latest.get("data"), dict) else {}
+            planner = (
+                latest_data.get("planner") if isinstance(latest_data.get("planner"), dict) else {}
+            )
+            if planner:
+                source = str(planner.get("source") or "unknown")
+                reason = str(planner.get("fallback_reason") or "").strip()
+                health = str(planner.get("health") or "").strip()
+                planner_bits = [source]
+                if reason:
+                    planner_bits.append(f"reason={reason}")
+                if health:
+                    planner_bits.append(f"health={health}")
+                latest_summary = f"{latest_summary} | planner={' '.join(planner_bits)}"
         envelope = (
             agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
         )

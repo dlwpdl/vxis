@@ -196,6 +196,26 @@ def build_scan_dashboard(loop: Any) -> str:
                 summary = str(latest.get("summary") or "")[: 80 if local_strict else 120]
                 if summary:
                     lines.append(f"     last_run: {tool_name} {verdict}: {summary}")
+                latest_data = latest.get("data") if isinstance(latest.get("data"), dict) else {}
+                planner = (
+                    latest_data.get("planner") if isinstance(latest_data.get("planner"), dict) else {}
+                )
+                if planner:
+                    source = str(planner.get("source") or "unknown")
+                    reason = str(planner.get("fallback_reason") or "").strip()
+                    health = str(planner.get("health") or "").strip()
+                    intent = str(planner.get("evidence_intent") or "").strip()
+                    tokens = int(planner.get("prompt_tokens") or 0)
+                    detail = f"     planner: {source}"
+                    if reason:
+                        detail += f" reason={reason}"
+                    if health:
+                        detail += f" health={health}"
+                    if tokens:
+                        detail += f" tokens={tokens}"
+                    if intent and not local_strict:
+                        detail += f" intent={intent[:70]}"
+                    lines.append(detail[: 100 if local_strict else 170])
             if status in {"RUNNING", "WAITING"}:
                 if needs_artifact:
                     lines.append(f'     next: agent_graph(action="run", agent_id="{agent_id}")')

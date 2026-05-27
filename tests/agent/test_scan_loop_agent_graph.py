@@ -34,12 +34,19 @@ class RunSkillTool:
 
 
 class WorkerPlannerBrain:
-    def __init__(self, *, response: str = "", delay: float = 0.0) -> None:
+    def __init__(
+        self,
+        *,
+        response: str = "",
+        delay: float = 0.0,
+        unavailable: bool = False,
+    ) -> None:
         self._hybrid_model_config = resolve_hybrid_model_config(
             env={"VXIS_WORKER_LLM": "llamacpp/local-35b"}
         )
         self.response = response
         self.delay = delay
+        self.unavailable = unavailable
         self.calls: list[dict] = []
         self.active = 0
         self.max_active = 0
@@ -52,7 +59,7 @@ class WorkerPlannerBrain:
         provider: str = "",
         model: str = "",
         image_path: str = "",
-    ) -> str:
+    ) -> str | None:
         with self._lock:
             self.active += 1
             self.max_active = max(self.max_active, self.active)
@@ -68,6 +75,8 @@ class WorkerPlannerBrain:
                     "image_path": image_path,
                 }
             )
+            if self.unavailable:
+                return None
             if self.response:
                 return self.response
             skill = "post_auth_enum" if "allowed_skills=post_auth_enum" in user_prompt else "test_injection"
@@ -1082,6 +1091,149 @@ async def test_agent_graph_worker_llm_invalid_action_falls_back_to_deterministic
     assert runner.calls
     assert runner.calls[-1]["skill"] == "test_injection"
     assert ran.data["execution"]["data"]["planner"]["source"] == "deterministic_fallback"
+    assert ran.data["execution"]["data"]["planner"]["fallback_reason"] == "disallowed_tool"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_worker_llm_invalid_json_falls_back_with_reason():
+    reg = ToolRegistry()
+    graph = AgentGraphTool()
+    reg.register(graph)
+
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs):
+            return ToolResult(
+                ok=True,
+                summary="confirmed SQL injection with control/payload delta",
+                data={
+                    "proof_artifact": {
+                        "claim": "SQL injection on /api/search",
+                        "target": "http://localhost:3000/api/search",
+                        "control": {"request": "GET /api/search?q=test", "response_status": 200},
+                        "payload": {"request": "GET /api/search?q='", "response_status": 500},
+                        "observed_delta": "control 200 vs payload 500",
+                        "repro_steps": ["send control", "send payload", "compare status"],
+                    }
+                },
+            )
+
+    reg.register(_RunSkill())
+    brain = WorkerPlannerBrain(response="not json")
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=30,
+        brain=brain,
+    )
+    created = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Validate SQL injection on /api/search",
+            "skills": ["test_injection"],
+        },
+    )
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "create", "role": "exploit_worker"},
+        result=created,
+    )
+
+    ran = await reg.dispatch(
+        "agent_graph",
+        {"action": "run", "agent_id": created.data["agent"]["id"]},
+    )
+
+    planner = ran.data["execution"]["data"]["planner"]
+    assert ran.ok is True
+    assert planner["source"] == "deterministic_fallback"
+    assert planner["fallback_reason"] == "invalid_json"
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_worker_llm_unavailable_repeated_fallback_surfaces_health():
+    reg = ToolRegistry()
+    graph = AgentGraphTool()
+    reg.register(graph)
+
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs):
+            return ToolResult(
+                ok=True,
+                summary="confirmed SQL injection with control/payload delta",
+                data={
+                    "proof_artifact": {
+                        "claim": "SQL injection on /api/search",
+                        "target": "http://localhost:3000/api/search",
+                        "control": {"request": "GET /api/search?q=test", "response_status": 200},
+                        "payload": {"request": "GET /api/search?q='", "response_status": 500},
+                        "observed_delta": "control 200 vs payload 500",
+                        "repro_steps": ["send control", "send payload", "compare status"],
+                    }
+                },
+            )
+
+    reg.register(_RunSkill())
+    brain = WorkerPlannerBrain(unavailable=True)
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=30,
+        brain=brain,
+    )
+    latest = None
+    for idx in range(3):
+        created = await reg.dispatch(
+            "agent_graph",
+            {
+                "action": "create",
+                "role": "exploit_worker",
+                "task": f"Validate SQL injection on /api/search unavailable-{idx}",
+                "skills": ["test_injection"],
+            },
+        )
+        loop._sync_agent_graph_result_to_branches(
+            name="agent_graph",
+            args={"action": "create", "role": "exploit_worker"},
+            result=created,
+        )
+        latest = await reg.dispatch(
+            "agent_graph",
+            {"action": "run", "agent_id": created.data["agent"]["id"]},
+        )
+
+    assert latest is not None
+    planner = latest.data["execution"]["data"]["planner"]
+    assert planner["source"] == "deterministic_fallback"
+    assert planner["fallback_reason"] == "worker_llm_empty_response"
+    assert planner["fallback_count"] == 3
+    assert planner["health"] == "local_worker_unavailable"
+    assert any("local worker unavailable" in note for note in loop.state.shared_notes)
+
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "agent_graph",
+            "args": {"action": "run", "agent_id": latest.data["agent"]["id"]},
+            "result": {
+                "ok": latest.ok,
+                "summary": latest.summary,
+                "data": latest.data,
+            },
+        },
+    )
+    dashboard = loop._build_scan_dashboard()
+    assert "planner: deterministic_fallback reason=worker_llm_empty_response" in dashboard
+    assert "health=local_worker_unavailable" in dashboard
 
 
 def test_agent_graph_worker_planner_prompt_fits_local_budget_and_preserves_artifact_fields():
