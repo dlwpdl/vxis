@@ -1,15 +1,23 @@
+import asyncio
+import json
 import pytest
+import threading
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+from vxis.agent.context_budget import estimate_context_tokens
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
 from vxis.agent.tools.agent_graph_tools import AgentGraphTool
 from vxis.agent.tools.finding_tools import (
+    LinkChainTool,
     ReportFindingTool,
+    _get_chains,
     _get_findings,
     _reset_for_tests as _reset_findings,
 )
+from vxis.llm.hybrid_config import resolve_hybrid_model_config
 
 
 class RunSkillTool:
@@ -23,6 +31,60 @@ class RunSkillTool:
     async def run(self, **kwargs) -> ToolResult:
         self.calls.append(dict(kwargs))
         return ToolResult(ok=True, summary=f"ran skill {kwargs.get('skill', '?')}", data={})
+
+
+class WorkerPlannerBrain:
+    def __init__(self, *, response: str = "", delay: float = 0.0) -> None:
+        self._hybrid_model_config = resolve_hybrid_model_config(
+            env={"VXIS_WORKER_LLM": "llamacpp/local-35b"}
+        )
+        self.response = response
+        self.delay = delay
+        self.calls: list[dict] = []
+        self.active = 0
+        self.max_active = 0
+        self._lock = threading.Lock()
+
+    def _call_llm_direct(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        provider: str = "",
+        model: str = "",
+        image_path: str = "",
+    ) -> str:
+        with self._lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            if self.delay:
+                time.sleep(self.delay)
+            self.calls.append(
+                {
+                    "system": system_prompt,
+                    "user": user_prompt,
+                    "provider": provider,
+                    "model": model,
+                    "image_path": image_path,
+                }
+            )
+            if self.response:
+                return self.response
+            skill = "post_auth_enum" if "allowed_skills=post_auth_enum" in user_prompt else "test_injection"
+            return json.dumps(
+                {
+                    "tool": "run_skill",
+                    "args": {
+                        "skill": skill,
+                        "target_url": "http://localhost:3000",
+                        "params": {},
+                    },
+                    "evidence_intent": "collect control/payload delta for EvidenceArtifact",
+                }
+            )
+        finally:
+            with self._lock:
+                self.active -= 1
 
 
 @pytest.fixture(autouse=True)
@@ -756,6 +818,7 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
     reg = ToolRegistry()
     graph = AgentGraphTool()
     reg.register(graph)
+    reg.register(LinkChainTool())
     reg.register(ReportFindingTool())
 
     class _RunSkill:
@@ -787,7 +850,29 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
             )
 
     reg.register(_RunSkill())
-    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=30)
+    planner_brain = WorkerPlannerBrain()
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=30,
+        brain=planner_brain,
+    )
+    foothold = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Authentication bypass via SQL injection",
+            "severity": "high",
+            "finding_type": "sql_injection",
+            "affected_component": "/api/search",
+            "description": "Authentication bypass and session token exposure via SQL injection.",
+            "impact": "The foothold exposes session material that can be reused post-auth.",
+            "technical_analysis": "Control and payload comparison showed SQL injection and token-bearing error output.",
+            "poc_description": "Send a benign search request, then send the SQL payload and compare the response delta.",
+            "poc_script_code": "GET /api/search?q=test\nGET /api/search?q='",
+            "remediation_steps": "Use parameterized queries and suppress token-bearing error output.",
+        },
+    )
+    assert foothold.ok is True
 
     created = await reg.dispatch(
         "agent_graph",
@@ -807,6 +892,7 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
 
     ran = await reg.dispatch("agent_graph", {"action": "run", "agent_id": parent_agent_id})
     assert ran.ok is True
+    assert ran.data["execution"]["data"]["planner"]["source"] == "worker_llm"
     assert ran.data["agent"]["result_package"]["evidence_artifact"]["valid"] is True
     loop._sync_agent_graph_result_to_branches(
         name="agent_graph",
@@ -861,6 +947,7 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
 
     child_ran = await reg.dispatch("agent_graph", {"action": "run", "agent_id": child_agent_id})
     assert child_ran.ok is True
+    assert child_ran.data["execution"]["data"]["planner"]["source"] == "worker_llm"
     assert child_ran.data["agent"]["result_package"]["evidence_artifact"]["valid"] is True
     loop._sync_agent_graph_result_to_branches(
         name="agent_graph",
@@ -902,6 +989,7 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
     reported = await reg.dispatch(report_forced[0], report_args)
     assert reported.ok is True
     assert loop._status_from_tool_result(reported) == "found"
+    await loop._maybe_auto_link_chain(reported.data["id"])
     loop.state.record_branch_attempt(
         followup.id,
         report_forced[0],
@@ -916,6 +1004,207 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
     findings = _get_findings()
     assert findings
     assert findings[-1]["finding_type"] == "broken_access_control"
+    chains = _get_chains()
+    assert chains
+    assert chains[-1]["finding_ids"] == [foothold.data["id"], reported.data["id"]]
+    assert planner_brain.calls
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_worker_llm_invalid_action_falls_back_to_deterministic_skill():
+    reg = ToolRegistry()
+    graph = AgentGraphTool()
+    reg.register(graph)
+
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def run(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return ToolResult(
+                ok=True,
+                summary="confirmed SQL injection with control/payload delta",
+                data={
+                    "proof_artifact": {
+                        "claim": "SQL injection on /api/search",
+                        "target": "http://localhost:3000/api/search",
+                        "control": {"request": "GET /api/search?q=test", "response_status": 200},
+                        "payload": {"request": "GET /api/search?q='", "response_status": 500},
+                        "observed_delta": "control 200 vs payload 500",
+                        "repro_steps": ["send control", "send payload", "compare status"],
+                    }
+                },
+            )
+
+    runner = _RunSkill()
+    reg.register(runner)
+    brain = WorkerPlannerBrain(
+        response=json.dumps(
+            {
+                "tool": "shell_exec",
+                "args": {"cmd": "id"},
+                "evidence_intent": "hallucinated unsafe tool",
+            }
+        )
+    )
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=30,
+        brain=brain,
+    )
+    created = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Validate SQL injection on /api/search",
+            "skills": ["test_injection"],
+        },
+    )
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "create", "role": "exploit_worker"},
+        result=created,
+    )
+
+    ran = await reg.dispatch(
+        "agent_graph",
+        {"action": "run", "agent_id": created.data["agent"]["id"]},
+    )
+
+    assert ran.ok is True
+    assert runner.calls
+    assert runner.calls[-1]["skill"] == "test_injection"
+    assert ran.data["execution"]["data"]["planner"]["source"] == "deterministic_fallback"
+
+
+def test_agent_graph_worker_planner_prompt_fits_local_budget_and_preserves_artifact_fields():
+    reg = ToolRegistry()
+    reg.register(AgentGraphTool())
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=30,
+        brain=WorkerPlannerBrain(),
+    )
+    agent = {
+        "id": "agent-large",
+        "role": "exploit_worker",
+        "task": "Validate SQL injection on /api/search " + ("noise " * 1200),
+        "skills": ["test_injection"],
+        "skill_context": "run_skill contract " + ("context " * 1600),
+        "task_envelope": {
+            "objective": "Validate SQL injection and return concrete proof " + ("objective " * 900),
+            "expected_artifact": "EvidenceArtifact with control and payload comparison",
+            "stop_condition": "stop after one bounded proof attempt",
+            "escalation_trigger": "escalate if proof is ambiguous",
+        },
+        "result_package": {
+            "evidence_artifact": {
+                "schema": "vxis.agent_graph.evidence_artifact.v1",
+                "claim": "SQL injection",
+                "target": "http://localhost:3000/api/search",
+                "control": {"request": "GET /api/search?q=test", "body": "A" * 5000},
+                "payload": {"request": "GET /api/search?q='", "body": "B" * 5000},
+                "observed_delta": "status delta",
+                "repro_steps": ["send control", "send payload", "compare"],
+                "valid": True,
+            }
+        },
+        "messages": [
+            {"sender": "root", "body": "old message " + ("M" * 4000)}
+            for _ in range(8)
+        ],
+        "executions": [
+            {"tool": "run_skill", "summary": "old execution " + ("E" * 5000)}
+            for _ in range(8)
+        ],
+    }
+
+    system_prompt, user_prompt, budget = loop._agent_graph_worker_planner_prompts(
+        agent,
+        "Use the sharpest bounded proof.",
+        allowed_child_tools={"run_skill", "http_request"},
+    )
+    rendered = system_prompt + "\n" + user_prompt
+
+    assert estimate_context_tokens(rendered) <= budget.max_prompt_tokens
+    assert "WORKER-CONTEXT COMPACTION" in rendered
+    for field in ("claim", "target", "control", "payload", "observed_delta", "repro_steps"):
+        assert field in rendered
+    assert "EvidenceArtifact" in rendered
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_worker_llm_planner_respects_local_concurrency(monkeypatch):
+    monkeypatch.setenv("VXIS_LOCAL_WORKER_CONCURRENCY", "1")
+    reg = ToolRegistry()
+    graph = AgentGraphTool()
+    reg.register(graph)
+
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs):
+            return ToolResult(
+                ok=True,
+                summary="confirmed SQL injection with control/payload delta",
+                data={
+                    "proof_artifact": {
+                        "claim": "SQL injection on /api/search",
+                        "target": "http://localhost:3000/api/search",
+                        "control": {"request": "GET /api/search?q=test", "response_status": 200},
+                        "payload": {"request": "GET /api/search?q='", "response_status": 500},
+                        "observed_delta": "control 200 vs payload 500",
+                        "repro_steps": ["send control", "send payload", "compare status"],
+                    }
+                },
+            )
+
+    reg.register(_RunSkill())
+    brain = WorkerPlannerBrain(delay=0.03)
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=30,
+        brain=brain,
+    )
+    agent_ids: list[str] = []
+    for suffix in ("one", "two"):
+        created = await reg.dispatch(
+            "agent_graph",
+            {
+                "action": "create",
+                "role": "exploit_worker",
+                "task": f"Validate SQL injection on /api/search {suffix}",
+                "skills": ["test_injection"],
+            },
+        )
+        loop._sync_agent_graph_result_to_branches(
+            name="agent_graph",
+            args={"action": "create", "role": "exploit_worker"},
+            result=created,
+        )
+        agent_ids.append(created.data["agent"]["id"])
+
+    results = await asyncio.gather(
+        *[
+            reg.dispatch("agent_graph", {"action": "run", "agent_id": agent_id})
+            for agent_id in agent_ids
+        ]
+    )
+
+    assert all(result.ok for result in results)
+    assert len(brain.calls) == 2
+    assert brain.max_active == 1
 
 
 @pytest.mark.asyncio

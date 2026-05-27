@@ -561,6 +561,20 @@ class AgentGraphTool:
     def set_target_kind(self, target_kind: Any) -> None:
         self._target_kind = str(getattr(target_kind, "value", target_kind) or "web").strip().lower()
 
+    def set_worker_model(
+        self,
+        provider: str,
+        model: str,
+        *,
+        context_window: int | None = None,
+    ) -> None:
+        self._worker_budget = resolve_context_budget(
+            "worker",
+            provider=provider,
+            model=model,
+            context_window=context_window,
+        )
+
     async def run(self, **kwargs: Any) -> ToolResult:
         action = _clean_text(kwargs.get("action")).lower()
         if action not in _VALID_ACTIONS:

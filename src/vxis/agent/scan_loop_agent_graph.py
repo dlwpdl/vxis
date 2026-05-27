@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import os
 import re
 from typing import Any
 
@@ -17,6 +20,14 @@ from vxis.agent.agent_graph_runtime import (
     agent_graph_needs_evidence_artifact,
     agent_graph_result_needs_crown_chain,
     agent_graph_terminal_branch_status,
+)
+from vxis.agent.brain_prompts import _parse_llm_json
+from vxis.agent.context_budget import (
+    compact_context_value,
+    estimate_context_tokens,
+    fit_lines_to_token_budget,
+    resolve_context_budget,
+    trim_text_chars,
 )
 from vxis.agent.scan_loop_state import _TERMINAL_BRANCH_STATUSES, BranchState
 from vxis.agent.tool_registry import ToolResult
@@ -450,13 +461,32 @@ class ScanLoopAgentGraphMixin:
     ) -> ToolResult:
         agent_id = str(agent.get("id") or "").strip()
         branch = self.state.branches.get(self._agent_graph_branch_id(agent_id))
+        allowed_child_tools = self._agent_graph_allowed_child_tools(agent)
+        planner_meta: dict[str, Any] = {}
         action = (
             self._forced_branch_action(branch)
             if branch is not None and branch.owner != "agent_graph"
             else None
         )
         if action is None:
+            planned = await self._agent_graph_worker_llm_action(
+                agent,
+                instruction,
+                allowed_child_tools=allowed_child_tools,
+            )
+            if planned is not None:
+                action = (planned["tool"], planned["args"])
+                planner_meta = {
+                    "source": "worker_llm",
+                    "provider": planned.get("provider", ""),
+                    "model": planned.get("model", ""),
+                    "evidence_intent": planned.get("evidence_intent", ""),
+                    "prompt_tokens": planned.get("prompt_tokens", 0),
+                }
+        if action is None:
             action = self._agent_graph_action_from_node(agent, instruction)
+            if action is not None:
+                planner_meta = {"source": "deterministic_fallback"}
         if action is None:
             return ToolResult(
                 ok=False,
@@ -466,29 +496,14 @@ class ScanLoopAgentGraphMixin:
             )
 
         tool_name, tool_args = action
-        allowed_child_tools = {
-            "run_skill",
-            "http_request",
-            "browser_navigate",
-            "browser_analyze_dom",
-        }
-        envelope_allowed = self._agent_graph_envelope_allowed_tools(agent)
-        if envelope_allowed:
-            allowed_child_tools = allowed_child_tools & envelope_allowed
-        if tool_name not in allowed_child_tools:
-            return ToolResult(
-                ok=False,
-                data={"agent_id": agent_id, "tool": tool_name, "args": tool_args},
-                summary=f"agent_graph child turn: tool {tool_name} is not allowed for bounded child execution",
-                error="child_tool_not_allowed",
-            )
-        if not self.registry.has_tool(tool_name):
-            return ToolResult(
-                ok=False,
-                data={"agent_id": agent_id, "tool": tool_name, "args": tool_args},
-                summary=f"agent_graph child turn: tool {tool_name} is not registered",
-                error="child_tool_unavailable",
-            )
+        validation_error = self._agent_graph_child_action_validation_error(
+            agent,
+            tool_name,
+            tool_args,
+            allowed_child_tools=allowed_child_tools,
+        )
+        if validation_error is not None:
+            return validation_error
 
         result = await self.registry.dispatch(tool_name, tool_args)
         return ToolResult(
@@ -497,6 +512,7 @@ class ScanLoopAgentGraphMixin:
                 "agent_id": agent_id,
                 "tool": tool_name,
                 "args": tool_args,
+                "planner": planner_meta,
                 "instruction": self._agent_graph_worker_instruction(agent, instruction, tool_name),
                 "result": {
                     "ok": result.ok,
@@ -508,6 +524,365 @@ class ScanLoopAgentGraphMixin:
             summary=f"{tool_name}: {result.summary}",
             error=result.error,
         )
+
+    def _agent_graph_child_action_validation_error(
+        self,
+        agent: dict[str, Any],
+        tool_name: str,
+        tool_args: dict[str, Any],
+        *,
+        allowed_child_tools: set[str],
+    ) -> ToolResult | None:
+        agent_id = str(agent.get("id") or "").strip()
+        role = str(agent.get("role") or "recon_worker").strip() or "recon_worker"
+        if tool_name not in allowed_child_tools:
+            return ToolResult(
+                ok=False,
+                data={
+                    "agent_id": agent_id,
+                    "tool": tool_name,
+                    "args": tool_args,
+                    "allowed_tools": sorted(allowed_child_tools),
+                },
+                summary=f"agent_graph child turn: tool {tool_name} is not allowed for bounded child execution",
+                error="child_tool_not_allowed",
+            )
+        if not self._role_allows_action(role, tool_name, tool_args):
+            return ToolResult(
+                ok=False,
+                data={"agent_id": agent_id, "role": role, "tool": tool_name, "args": tool_args},
+                summary=(
+                    f"agent_graph child turn: tool {tool_name} is not allowed for role {role}"
+                ),
+                error="child_role_not_allowed",
+            )
+        if not self.registry.has_tool(tool_name):
+            return ToolResult(
+                ok=False,
+                data={"agent_id": agent_id, "tool": tool_name, "args": tool_args},
+                summary=f"agent_graph child turn: tool {tool_name} is not registered",
+                error="child_tool_unavailable",
+            )
+        return None
+
+    def _agent_graph_allowed_child_tools(self, agent: dict[str, Any]) -> set[str]:
+        allowed_child_tools = {
+            "run_skill",
+            "http_request",
+            "browser_navigate",
+            "browser_analyze_dom",
+        }
+        envelope_allowed = self._agent_graph_envelope_allowed_tools(agent)
+        if envelope_allowed:
+            allowed_child_tools = allowed_child_tools & envelope_allowed
+        return allowed_child_tools
+
+    async def _agent_graph_worker_llm_action(
+        self,
+        agent: dict[str, Any],
+        instruction: str,
+        *,
+        allowed_child_tools: set[str],
+    ) -> dict[str, Any] | None:
+        brain = getattr(self, "brain", None)
+        endpoint = self._agent_graph_worker_endpoint()
+        can_call_worker = callable(getattr(brain, "_call_llm_direct", None)) or callable(
+            getattr(brain, "_call_openai_compatible", None)
+        )
+        if brain is None or endpoint is None or not can_call_worker:
+            return None
+
+        system_prompt, user_prompt, budget = self._agent_graph_worker_planner_prompts(
+            agent,
+            instruction,
+            allowed_child_tools=allowed_child_tools,
+        )
+        prompt_tokens = estimate_context_tokens(system_prompt) + estimate_context_tokens(user_prompt)
+        if prompt_tokens > budget.max_prompt_tokens:
+            user_prompt = trim_text_chars(
+                user_prompt,
+                max(900, int(budget.max_prompt_tokens * 2.2)),
+            )
+            prompt_tokens = estimate_context_tokens(system_prompt) + estimate_context_tokens(user_prompt)
+
+        semaphore = self._agent_graph_worker_llm_semaphore()
+        provider = str(getattr(endpoint, "provider", "") or "")
+        model = str(getattr(endpoint, "model", "") or "")
+        try:
+            async with semaphore:
+                loop = asyncio.get_running_loop()
+                text = await loop.run_in_executor(
+                    None,
+                    lambda: self._agent_graph_call_worker_llm_direct(
+                        brain,
+                        system_prompt,
+                        user_prompt,
+                        provider=provider,
+                        model=model,
+                        base_url=str(getattr(endpoint, "base_url", "") or ""),
+                    ),
+                )
+        except Exception:
+            return None
+        if not text:
+            return None
+
+        planned = self._agent_graph_parse_worker_llm_action(
+            str(text),
+            agent=agent,
+            instruction=instruction,
+            allowed_child_tools=allowed_child_tools,
+        )
+        if planned is None:
+            return None
+        planned.update({"provider": provider, "model": model, "prompt_tokens": prompt_tokens})
+        return planned
+
+    @staticmethod
+    def _agent_graph_call_worker_llm_direct(
+        brain: Any,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        provider: str,
+        model: str,
+        base_url: str = "",
+    ) -> str | None:
+        if base_url and provider in {"llamacpp", "ollama"}:
+            call_compatible = getattr(brain, "_call_openai_compatible", None)
+            if callable(call_compatible):
+                return call_compatible(
+                    system_prompt,
+                    user_prompt,
+                    provider,
+                    model,
+                    base_url=base_url,
+                )
+        call_direct = getattr(brain, "_call_llm_direct", None)
+        if not callable(call_direct):
+            return None
+        return call_direct(
+            system_prompt,
+            user_prompt,
+            provider=provider,
+            model=model,
+        )
+
+    def _agent_graph_worker_endpoint(self) -> Any | None:
+        config = getattr(getattr(self, "brain", None), "_hybrid_model_config", None)
+        if config is None:
+            return None
+        try:
+            return config.for_role("worker")
+        except Exception:
+            return getattr(config, "worker", None)
+
+    def _agent_graph_worker_context_budget(self) -> Any:
+        endpoint = self._agent_graph_worker_endpoint()
+        provider = str(getattr(endpoint, "provider", "") or "llamacpp")
+        model = str(getattr(endpoint, "model", "") or "local")
+        return resolve_context_budget("worker", provider=provider, model=model)
+
+    def _agent_graph_worker_llm_semaphore(self) -> asyncio.Semaphore:
+        raw_limit = os.environ.get("VXIS_LOCAL_WORKER_CONCURRENCY", "1").strip()
+        try:
+            limit = max(1, int(raw_limit))
+        except ValueError:
+            limit = 1
+        current_limit = getattr(self, "_agent_graph_worker_llm_semaphore_limit", None)
+        semaphore = getattr(self, "_agent_graph_worker_llm_semaphore_obj", None)
+        if semaphore is None or current_limit != limit:
+            semaphore = asyncio.Semaphore(limit)
+            self._agent_graph_worker_llm_semaphore_obj = semaphore
+            self._agent_graph_worker_llm_semaphore_limit = limit
+        return semaphore
+
+    def _agent_graph_worker_planner_prompts(
+        self,
+        agent: dict[str, Any],
+        instruction: str,
+        *,
+        allowed_child_tools: set[str],
+    ) -> tuple[str, str, Any]:
+        budget = self._agent_graph_worker_context_budget()
+        system_prompt = (
+            "You are a bounded VXIS worker planner. Return JSON only. "
+            'Schema: {"tool":"run_skill|http_request|browser_navigate|browser_analyze_dom",'
+            '"args":{},"evidence_intent":"short proof goal"}. '
+            "Choose exactly one allowed tool. Do not report findings or finish scans. "
+            "Positive evidence must preserve EvidenceArtifact fields: "
+            "claim,target,control,payload,observed_delta,repro_steps."
+        )
+        envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        result_package = (
+            agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        )
+        critical_lines = [
+            f"target={self.state.target}",
+            f"agent_id={str(agent.get('id') or '')}",
+            f"role={str(agent.get('role') or 'recon_worker')}",
+            f"allowed_tools={','.join(sorted(allowed_child_tools))}",
+            f"allowed_skills={','.join(str(skill) for skill in list(agent.get('skills') or [])[:6])}",
+            "run_skill_args={\"skill\":\"one allowed skill\",\"target_url\":\"target\",\"params\":{}}",
+            "http_request_args={\"method\":\"GET|POST|HEAD\",\"url\":\"target/path\"}",
+            "browser_navigate_args={\"url\":\"target/path\"}",
+            "browser_analyze_dom_args={}",
+            f"task={trim_text_chars(agent.get('task'), budget.max_message_chars)}",
+            f"objective={trim_text_chars(envelope.get('objective'), budget.max_message_chars)}",
+            f"expected_artifact={trim_text_chars(envelope.get('expected_artifact'), budget.max_message_chars)}",
+            f"stop_condition={trim_text_chars(envelope.get('stop_condition'), budget.max_message_chars)}",
+            f"escalation_trigger={trim_text_chars(envelope.get('escalation_trigger'), budget.max_message_chars)}",
+        ]
+        if instruction:
+            critical_lines.append(
+                f"director_instruction={trim_text_chars(instruction, budget.max_message_chars)}"
+            )
+
+        history_lines = [
+            "skill_context="
+            + trim_text_chars(agent.get("skill_context"), budget.max_skill_chars),
+            "result_package="
+            + json.dumps(
+                compact_context_value(result_package, max_chars=budget.max_execution_chars),
+                ensure_ascii=False,
+                sort_keys=True,
+            ),
+        ]
+        messages = agent.get("messages") if isinstance(agent.get("messages"), list) else []
+        for message in messages[-budget.max_agent_messages :]:
+            history_lines.append(
+                "message="
+                + json.dumps(
+                    compact_context_value(message, max_chars=budget.max_message_chars),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+        executions = agent.get("executions") if isinstance(agent.get("executions"), list) else []
+        for execution in executions[-budget.max_agent_executions :]:
+            history_lines.append(
+                "execution="
+                + json.dumps(
+                    compact_context_value(execution, max_chars=budget.max_execution_chars),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+
+        static_tokens = estimate_context_tokens(system_prompt) + sum(
+            estimate_context_tokens(line) for line in critical_lines
+        )
+        history_budget = max(160, budget.max_prompt_tokens - static_tokens - 96)
+        fitted_history = fit_lines_to_token_budget(
+            history_lines,
+            history_budget,
+            prefer_recent=True,
+            marker="WORKER-CONTEXT COMPACTION",
+        )
+        user_prompt = "\n".join(critical_lines + fitted_history)
+        return system_prompt, user_prompt, budget
+
+    def _agent_graph_parse_worker_llm_action(
+        self,
+        text: str,
+        *,
+        agent: dict[str, Any],
+        instruction: str,
+        allowed_child_tools: set[str],
+    ) -> dict[str, Any] | None:
+        try:
+            parsed = _parse_llm_json(text)
+        except Exception:
+            return None
+        item: Any = parsed
+        if isinstance(item, list):
+            item = item[0] if item else {}
+        if isinstance(item, dict) and isinstance(item.get("actions"), list):
+            item = item["actions"][0] if item["actions"] else {}
+        if not isinstance(item, dict):
+            return None
+        tool_name = str(item.get("tool") or "").strip()
+        raw_args = item.get("args") if isinstance(item.get("args"), dict) else {}
+        if tool_name not in allowed_child_tools:
+            return None
+        if not self.registry.has_tool(tool_name):
+            return None
+        tool_args = self._agent_graph_normalize_worker_tool_args(
+            tool_name,
+            raw_args,
+            agent=agent,
+            instruction=instruction,
+        )
+        if tool_args is None:
+            return None
+        role = str(agent.get("role") or "recon_worker").strip() or "recon_worker"
+        if not self._role_allows_action(role, tool_name, tool_args):
+            return None
+        return {
+            "tool": tool_name,
+            "args": tool_args,
+            "evidence_intent": trim_text_chars(item.get("evidence_intent") or "", 220),
+        }
+
+    def _agent_graph_normalize_worker_tool_args(
+        self,
+        tool_name: str,
+        args: dict[str, Any],
+        *,
+        agent: dict[str, Any],
+        instruction: str,
+    ) -> dict[str, Any] | None:
+        if tool_name == "run_skill":
+            raw_skill = str(args.get("skill") or args.get("_skill_override") or "").strip()
+            skill = self._pivoted_skill_name(raw_skill)
+            if not skill:
+                return None
+            allowed_skills = {
+                self._pivoted_skill_name(str(item))
+                for item in list(agent.get("skills") or [])
+                if self._pivoted_skill_name(str(item))
+            }
+            if allowed_skills and skill not in allowed_skills:
+                return None
+            hint_blob = " ".join(
+                str(value or "")
+                for value in (
+                    agent.get("role"),
+                    agent.get("task"),
+                    instruction,
+                    args,
+                )
+            ).lower()
+            params = args.get("params") if isinstance(args.get("params"), dict) else {}
+            default_params = self._best_skill_params(skill, hint_blob=hint_blob)
+            merged_params = {**default_params, **params}
+            return {
+                "skill": skill,
+                "target_url": str(args.get("target_url") or self.state.target),
+                "params": compact_context_value(merged_params, max_chars=900),
+            }
+        if tool_name == "http_request":
+            method = str(args.get("method") or "GET").strip().upper()
+            if method not in {"GET", "POST", "HEAD", "OPTIONS"}:
+                return None
+            out: dict[str, Any] = {
+                "method": method,
+                "url": str(args.get("url") or self.state.target),
+            }
+            if isinstance(args.get("headers"), dict):
+                out["headers"] = compact_context_value(args["headers"], max_chars=600)
+            if "body" in args:
+                out["body"] = trim_text_chars(args.get("body"), 1200)
+            return out
+        if tool_name == "browser_navigate":
+            return {"url": str(args.get("url") or self.state.target)}
+        if tool_name == "browser_analyze_dom":
+            return {
+                str(key): compact_context_value(value, max_chars=500)
+                for key, value in args.items()
+                if str(key) in {"selector", "include_text", "limit"}
+            }
+        return None
 
     def _agent_graph_action_from_node(
         self,

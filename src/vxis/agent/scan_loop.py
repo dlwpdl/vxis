@@ -140,6 +140,14 @@ class ScanAgentLoop(
         set_target_kind = getattr(tool, "set_target_kind", None)
         if callable(set_target_kind):
             set_target_kind(self._target_kind)
+        set_worker_model = getattr(tool, "set_worker_model", None)
+        config = getattr(getattr(self, "brain", None), "_hybrid_model_config", None)
+        worker_endpoint = getattr(config, "worker", None)
+        if callable(set_worker_model) and worker_endpoint is not None:
+            set_worker_model(
+                str(getattr(worker_endpoint, "provider", "") or ""),
+                str(getattr(worker_endpoint, "model", "") or ""),
+            )
 
     @classmethod
     def _infer_branch_role(
