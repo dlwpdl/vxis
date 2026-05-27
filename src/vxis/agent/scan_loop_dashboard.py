@@ -162,6 +162,20 @@ def build_scan_dashboard(loop: Any) -> str:
             lines.append("Director-worker exchange:")
             lines.extend(director_worker_brief)
         lines.append("Agent graph:")
+        planner_metrics = getattr(loop, "_agent_graph_worker_planner_metrics", {})
+        if isinstance(planner_metrics, dict):
+            attempts = int(planner_metrics.get("attempts") or 0)
+            if attempts:
+                successes = int(planner_metrics.get("successes") or 0)
+                repairs = int(planner_metrics.get("repairs") or 0)
+                repair_successes = int(planner_metrics.get("repair_successes") or 0)
+                fallbacks = int(planner_metrics.get("fallbacks") or 0)
+                unavailable = int(planner_metrics.get("unavailable") or 0)
+                lines.append(
+                    "  Worker planner quality: "
+                    f"success={successes}/{attempts} repair={repair_successes}/{repairs} "
+                    f"fallback={fallbacks} unavailable={unavailable}"
+                )
         for agent in agent_graph_agents[:branch_limit]:
             status = str(agent.get("status") or "unknown").upper()
             role = str(agent.get("role") or "worker")
@@ -206,9 +220,16 @@ def build_scan_dashboard(loop: Any) -> str:
                     health = str(planner.get("health") or "").strip()
                     intent = str(planner.get("evidence_intent") or "").strip()
                     tokens = int(planner.get("prompt_tokens") or 0)
+                    repair_attempted = bool(planner.get("repair_attempted"))
+                    repair_succeeded = bool(planner.get("repair_succeeded"))
+                    initial_reason = str(planner.get("initial_failure_reason") or "").strip()
                     detail = f"     planner: {source}"
                     if reason:
                         detail += f" reason={reason}"
+                    if repair_attempted:
+                        detail += f" repair={'ok' if repair_succeeded else 'fail'}"
+                    if initial_reason:
+                        detail += f" initial={initial_reason}"
                     if health:
                         detail += f" health={health}"
                     if tokens:

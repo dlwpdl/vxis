@@ -33,6 +33,26 @@ from vxis.agent.scan_loop_state import _TERMINAL_BRANCH_STATUSES, BranchState
 from vxis.agent.tool_registry import ToolResult
 
 
+_WORKER_PLANNER_REPAIRABLE_FAILURES = {
+    "invalid_json",
+    "invalid_json_shape",
+    "missing_tool",
+    "disallowed_tool",
+    "tool_unavailable",
+    "missing_skill",
+    "invalid_skill",
+    "disallowed_skill",
+    "invalid_args",
+    "role_disallowed",
+}
+
+_WORKER_PLANNER_UNAVAILABLE_REASONS = {
+    "worker_llm_not_callable",
+    "worker_llm_call_failed",
+    "worker_llm_empty_response",
+}
+
+
 class ScanLoopAgentGraphMixin:
     def _agent_graph_agents_from_messages(self) -> list[dict[str, Any]]:
         return agent_graph_agents_from_messages(self.state.messages)
@@ -478,13 +498,7 @@ class ScanLoopAgentGraphMixin:
             )
             if planned.get("ok"):
                 action = (planned["tool"], planned["args"])
-                planner_meta = {
-                    "source": "worker_llm",
-                    "provider": planned.get("provider", ""),
-                    "model": planned.get("model", ""),
-                    "evidence_intent": planned.get("evidence_intent", ""),
-                    "prompt_tokens": planned.get("prompt_tokens", 0),
-                }
+                planner_meta = self._agent_graph_worker_planner_success_meta(planned)
             else:
                 planner_meta = self._agent_graph_worker_planner_fallback_meta(planned)
         if action is None:
@@ -651,10 +665,136 @@ class ScanLoopAgentGraphMixin:
             instruction=instruction,
             allowed_child_tools=allowed_child_tools,
         )
+        if self._agent_graph_worker_planner_should_repair(planned):
+            planned = await self._agent_graph_repair_worker_llm_action(
+                brain,
+                agent,
+                instruction,
+                allowed_child_tools=allowed_child_tools,
+                initial_failure=planned,
+                previous_response=str(text),
+                provider=provider,
+                model=model,
+                base_url=str(getattr(endpoint, "base_url", "") or ""),
+            )
         planned.update({"provider": provider, "model": model, "prompt_tokens": prompt_tokens})
         if compacted:
             planned["prompt_compacted"] = True
         return planned
+
+    async def _agent_graph_repair_worker_llm_action(
+        self,
+        brain: Any,
+        agent: dict[str, Any],
+        instruction: str,
+        *,
+        allowed_child_tools: set[str],
+        initial_failure: dict[str, Any],
+        previous_response: str,
+        provider: str,
+        model: str,
+        base_url: str,
+    ) -> dict[str, Any]:
+        system_prompt, user_prompt, repair_tokens = self._agent_graph_worker_repair_prompts(
+            agent,
+            instruction,
+            allowed_child_tools=allowed_child_tools,
+            initial_failure=initial_failure,
+            previous_response=previous_response,
+        )
+        initial_reason = str(initial_failure.get("failure_reason") or "unknown_worker_planner_failure")
+        try:
+            async with self._agent_graph_worker_llm_semaphore():
+                loop = asyncio.get_running_loop()
+                text = await loop.run_in_executor(
+                    None,
+                    lambda: self._agent_graph_call_worker_llm_direct(
+                        brain,
+                        system_prompt,
+                        user_prompt,
+                        provider=provider,
+                        model=model,
+                        base_url=base_url,
+                    ),
+                )
+        except Exception as exc:
+            repaired = self._agent_graph_worker_planner_failure(
+                "worker_llm_call_failed",
+                detail=str(exc)[:180],
+                provider=provider,
+                model=model,
+                prompt_tokens=repair_tokens,
+            )
+            return self._agent_graph_worker_planner_repair_failure(
+                initial_failure,
+                repaired,
+                repair_tokens=repair_tokens,
+            )
+        if not text:
+            repaired = self._agent_graph_worker_planner_failure(
+                "worker_llm_empty_response",
+                provider=provider,
+                model=model,
+                prompt_tokens=repair_tokens,
+            )
+            return self._agent_graph_worker_planner_repair_failure(
+                initial_failure,
+                repaired,
+                repair_tokens=repair_tokens,
+            )
+
+        repaired = self._agent_graph_parse_worker_llm_action(
+            str(text),
+            agent=agent,
+            instruction=instruction,
+            allowed_child_tools=allowed_child_tools,
+        )
+        repaired["repair_attempted"] = True
+        repaired["repair_prompt_tokens"] = repair_tokens
+        repaired["initial_failure_reason"] = initial_reason
+        if repaired.get("ok"):
+            repaired["repair_succeeded"] = True
+            return repaired
+        return self._agent_graph_worker_planner_repair_failure(
+            initial_failure,
+            repaired,
+            repair_tokens=repair_tokens,
+        )
+
+    @staticmethod
+    def _agent_graph_worker_planner_should_repair(planned: dict[str, Any] | None) -> bool:
+        if not planned or planned.get("ok"):
+            return False
+        return str(planned.get("failure_reason") or "") in _WORKER_PLANNER_REPAIRABLE_FAILURES
+
+    @staticmethod
+    def _agent_graph_worker_planner_repair_failure(
+        initial_failure: dict[str, Any],
+        repaired_failure: dict[str, Any],
+        *,
+        repair_tokens: int,
+    ) -> dict[str, Any]:
+        initial_reason = str(
+            initial_failure.get("failure_reason") or "unknown_worker_planner_failure"
+        )
+        repair_reason = str(
+            repaired_failure.get("failure_reason") or "unknown_worker_planner_failure"
+        )
+        detail = str(repaired_failure.get("detail") or initial_failure.get("detail") or "")
+        failure = dict(repaired_failure)
+        failure.update(
+            {
+                "ok": False,
+                "failure_reason": repair_reason,
+                "detail": detail[:240],
+                "repair_attempted": True,
+                "repair_succeeded": False,
+                "initial_failure_reason": initial_reason,
+                "repair_failure_reason": repair_reason,
+                "repair_prompt_tokens": int(repair_tokens or 0),
+            }
+        )
+        return failure
 
     @staticmethod
     def _agent_graph_worker_planner_failure(
@@ -674,12 +814,29 @@ class ScanLoopAgentGraphMixin:
             "prompt_tokens": int(prompt_tokens or 0),
         }
 
+    def _agent_graph_worker_planner_success_meta(
+        self,
+        planned: dict[str, Any],
+    ) -> dict[str, Any]:
+        self._agent_graph_record_worker_planner_metric(planned, succeeded=True)
+        meta = {
+            "source": "worker_llm",
+            "provider": planned.get("provider", ""),
+            "model": planned.get("model", ""),
+            "evidence_intent": planned.get("evidence_intent", ""),
+            "prompt_tokens": planned.get("prompt_tokens", 0),
+        }
+        self._agent_graph_apply_worker_planner_repair_meta(meta, planned)
+        return meta
+
     def _agent_graph_worker_planner_fallback_meta(
         self,
         planned: dict[str, Any] | None,
     ) -> dict[str, Any]:
         failure = planned or self._agent_graph_worker_planner_failure("worker_planner_not_configured")
         reason = str(failure.get("failure_reason") or "unknown_worker_planner_failure")
+        if reason != "worker_planner_not_configured":
+            self._agent_graph_record_worker_planner_metric(failure, succeeded=False)
         counts = getattr(self, "_agent_graph_worker_planner_fallback_counts", None)
         if not isinstance(counts, dict):
             counts = {}
@@ -696,18 +853,68 @@ class ScanLoopAgentGraphMixin:
         detail = str(failure.get("detail") or "").strip()
         if detail:
             meta["detail"] = detail[:180]
-        local_unavailable_reasons = {
-            "worker_llm_not_callable",
-            "worker_llm_call_failed",
-            "worker_llm_empty_response",
-        }
-        if reason in local_unavailable_reasons and counts[reason] >= 3:
+        self._agent_graph_apply_worker_planner_repair_meta(meta, failure)
+        if reason in _WORKER_PLANNER_UNAVAILABLE_REASONS and counts[reason] >= 3:
             meta["health"] = "local_worker_unavailable"
             note = f"agent_graph local worker unavailable: {reason} x{counts[reason]}"
             marker = f"agent_graph local worker unavailable: {reason}"
             if not any(str(existing).startswith(marker) for existing in self.state.shared_notes):
                 self.state.add_shared_note(note)
         return meta
+
+    def _agent_graph_record_worker_planner_metric(
+        self,
+        planned: dict[str, Any],
+        *,
+        succeeded: bool,
+    ) -> None:
+        metrics = getattr(self, "_agent_graph_worker_planner_metrics", None)
+        if not isinstance(metrics, dict):
+            metrics = {}
+            self._agent_graph_worker_planner_metrics = metrics
+        for key in (
+            "attempts",
+            "successes",
+            "fallbacks",
+            "repairs",
+            "repair_successes",
+            "repair_failures",
+            "unavailable",
+        ):
+            metrics[key] = int(metrics.get(key) or 0)
+        metrics["attempts"] += 1
+        if succeeded:
+            metrics["successes"] += 1
+        else:
+            metrics["fallbacks"] += 1
+        if planned.get("repair_attempted"):
+            metrics["repairs"] += 1
+            if planned.get("repair_succeeded"):
+                metrics["repair_successes"] += 1
+            else:
+                metrics["repair_failures"] += 1
+        reason = str(planned.get("failure_reason") or planned.get("fallback_reason") or "")
+        if reason in _WORKER_PLANNER_UNAVAILABLE_REASONS:
+            metrics["unavailable"] += 1
+
+    @staticmethod
+    def _agent_graph_apply_worker_planner_repair_meta(
+        meta: dict[str, Any],
+        planned: dict[str, Any],
+    ) -> None:
+        if not planned.get("repair_attempted"):
+            return
+        meta["repair_attempted"] = True
+        meta["repair_succeeded"] = bool(planned.get("repair_succeeded"))
+        initial_reason = str(planned.get("initial_failure_reason") or "").strip()
+        repair_reason = str(planned.get("repair_failure_reason") or "").strip()
+        repair_tokens = int(planned.get("repair_prompt_tokens") or 0)
+        if initial_reason:
+            meta["initial_failure_reason"] = initial_reason
+        if repair_reason:
+            meta["repair_failure_reason"] = repair_reason
+        if repair_tokens:
+            meta["repair_prompt_tokens"] = repair_tokens
 
     @staticmethod
     def _agent_graph_call_worker_llm_direct(
@@ -852,6 +1059,47 @@ class ScanLoopAgentGraphMixin:
         )
         user_prompt = "\n".join(critical_lines + fitted_history)
         return system_prompt, user_prompt, budget
+
+    def _agent_graph_worker_repair_prompts(
+        self,
+        agent: dict[str, Any],
+        instruction: str,
+        *,
+        allowed_child_tools: set[str],
+        initial_failure: dict[str, Any],
+        previous_response: str,
+    ) -> tuple[str, str, int]:
+        budget = self._agent_graph_worker_context_budget()
+        envelope = agent.get("task_envelope") if isinstance(agent.get("task_envelope"), dict) else {}
+        system_prompt = (
+            "Repair VXIS worker planner output. JSON only. "
+            'Schema: {"tool":"allowed_tool","args":{},"evidence_intent":"short proof goal"}. '
+            "No prose. One bounded action."
+        )
+        user_lines = [
+            f"failure_reason={str(initial_failure.get('failure_reason') or '')}",
+            f"failure_detail={trim_text_chars(initial_failure.get('detail'), 180)}",
+            f"target={self.state.target}",
+            f"role={str(agent.get('role') or 'recon_worker')}",
+            f"allowed_tools={','.join(sorted(allowed_child_tools))}",
+            f"allowed_skills={','.join(str(skill) for skill in list(agent.get('skills') or [])[:6])}",
+            "run_skill_args={\"skill\":\"one allowed skill\",\"target_url\":\"target\",\"params\":{}}",
+            "EvidenceArtifact_fields=claim,target,control,payload,observed_delta,repro_steps",
+            f"task={trim_text_chars(agent.get('task'), 420)}",
+            f"objective={trim_text_chars(envelope.get('objective'), 360)}",
+            f"expected_artifact={trim_text_chars(envelope.get('expected_artifact'), 240)}",
+        ]
+        if instruction:
+            user_lines.append(f"director_instruction={trim_text_chars(instruction, 280)}")
+        user_lines.append(f"bad_output={trim_text_chars(previous_response, 500)}")
+        user_lines.append("return_valid_json_now=true")
+        user_prompt = "\n".join(user_lines)
+        repair_tokens = estimate_context_tokens(system_prompt) + estimate_context_tokens(user_prompt)
+        if repair_tokens > budget.max_prompt_tokens:
+            user_lines[-2] = f"bad_output={trim_text_chars(previous_response, 240)}"
+            user_prompt = "\n".join(user_lines)
+            repair_tokens = estimate_context_tokens(system_prompt) + estimate_context_tokens(user_prompt)
+        return system_prompt, user_prompt, repair_tokens
 
     def _agent_graph_parse_worker_llm_action(
         self,

@@ -120,9 +120,16 @@ def agent_graph_director_brief(
                 source = str(planner.get("source") or "unknown")
                 reason = str(planner.get("fallback_reason") or "").strip()
                 health = str(planner.get("health") or "").strip()
+                repair_attempted = bool(planner.get("repair_attempted"))
+                repair_succeeded = bool(planner.get("repair_succeeded"))
+                initial_reason = str(planner.get("initial_failure_reason") or "").strip()
                 planner_bits = [source]
                 if reason:
                     planner_bits.append(f"reason={reason}")
+                if repair_attempted:
+                    planner_bits.append(f"repair={'ok' if repair_succeeded else 'fail'}")
+                if initial_reason:
+                    planner_bits.append(f"initial={initial_reason}")
                 if health:
                     planner_bits.append(f"health={health}")
                 latest_summary = f"{latest_summary} | planner={' '.join(planner_bits)}"

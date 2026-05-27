@@ -38,6 +38,7 @@ class WorkerPlannerBrain:
         self,
         *,
         response: str = "",
+        responses: list[str | None] | None = None,
         delay: float = 0.0,
         unavailable: bool = False,
     ) -> None:
@@ -45,6 +46,7 @@ class WorkerPlannerBrain:
             env={"VXIS_WORKER_LLM": "llamacpp/local-35b"}
         )
         self.response = response
+        self.responses = list(responses) if responses is not None else None
         self.delay = delay
         self.unavailable = unavailable
         self.calls: list[dict] = []
@@ -77,6 +79,8 @@ class WorkerPlannerBrain:
             )
             if self.unavailable:
                 return None
+            if self.responses is not None and self.responses:
+                return self.responses.pop(0)
             if self.response:
                 return self.response
             skill = "post_auth_enum" if "allowed_skills=post_auth_enum" in user_prompt else "test_injection"
@@ -1020,7 +1024,7 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_worker_llm_invalid_action_falls_back_to_deterministic_skill():
+async def test_agent_graph_worker_llm_disallowed_tool_repairs_to_allowed_skill():
     reg = ToolRegistry()
     graph = AgentGraphTool()
     reg.register(graph)
@@ -1053,13 +1057,26 @@ async def test_agent_graph_worker_llm_invalid_action_falls_back_to_deterministic
     runner = _RunSkill()
     reg.register(runner)
     brain = WorkerPlannerBrain(
-        response=json.dumps(
-            {
-                "tool": "shell_exec",
-                "args": {"cmd": "id"},
-                "evidence_intent": "hallucinated unsafe tool",
-            }
-        )
+        responses=[
+            json.dumps(
+                {
+                    "tool": "shell_exec",
+                    "args": {"cmd": "id"},
+                    "evidence_intent": "hallucinated unsafe tool",
+                }
+            ),
+            json.dumps(
+                {
+                    "tool": "run_skill",
+                    "args": {
+                        "skill": "test_injection",
+                        "target_url": "http://localhost:3000",
+                        "params": {},
+                    },
+                    "evidence_intent": "collect control/payload delta for EvidenceArtifact",
+                }
+            ),
+        ]
     )
     loop = ScanAgentLoop(
         target="http://localhost:3000",
@@ -1090,12 +1107,32 @@ async def test_agent_graph_worker_llm_invalid_action_falls_back_to_deterministic
     assert ran.ok is True
     assert runner.calls
     assert runner.calls[-1]["skill"] == "test_injection"
-    assert ran.data["execution"]["data"]["planner"]["source"] == "deterministic_fallback"
-    assert ran.data["execution"]["data"]["planner"]["fallback_reason"] == "disallowed_tool"
+    planner = ran.data["execution"]["data"]["planner"]
+    assert planner["source"] == "worker_llm"
+    assert planner["repair_attempted"] is True
+    assert planner["repair_succeeded"] is True
+    assert planner["initial_failure_reason"] == "disallowed_tool"
+    assert len(brain.calls) == 2
+    assert "Repair VXIS worker planner output" in brain.calls[1]["system"]
+    assert "failure_reason=disallowed_tool" in brain.calls[1]["user"]
+    assert estimate_context_tokens(brain.calls[1]["system"] + "\n" + brain.calls[1]["user"]) < 700
+    assert loop._agent_graph_worker_planner_metrics["successes"] == 1
+    assert loop._agent_graph_worker_planner_metrics["repair_successes"] == 1
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "agent_graph",
+            "args": {"action": "run", "agent_id": created.data["agent"]["id"]},
+            "result": {"ok": ran.ok, "summary": ran.summary, "data": ran.data},
+        },
+    )
+    dashboard = loop._build_scan_dashboard()
+    assert "Worker planner quality: success=1/1 repair=1/1 fallback=0 unavailable=0" in dashboard
+    assert "planner: worker_llm repair=ok initial=disallowed_tool" in dashboard
 
 
 @pytest.mark.asyncio
-async def test_agent_graph_worker_llm_invalid_json_falls_back_with_reason():
+async def test_agent_graph_worker_llm_invalid_json_repairs_to_valid_action():
     reg = ToolRegistry()
     graph = AgentGraphTool()
     reg.register(graph)
@@ -1122,7 +1159,22 @@ async def test_agent_graph_worker_llm_invalid_json_falls_back_with_reason():
             )
 
     reg.register(_RunSkill())
-    brain = WorkerPlannerBrain(response="not json")
+    brain = WorkerPlannerBrain(
+        responses=[
+            "not json",
+            json.dumps(
+                {
+                    "tool": "run_skill",
+                    "args": {
+                        "skill": "test_injection",
+                        "target_url": "http://localhost:3000",
+                        "params": {},
+                    },
+                    "evidence_intent": "collect control/payload delta for EvidenceArtifact",
+                }
+            ),
+        ]
+    )
     loop = ScanAgentLoop(
         target="http://localhost:3000",
         registry=reg,
@@ -1151,8 +1203,62 @@ async def test_agent_graph_worker_llm_invalid_json_falls_back_with_reason():
 
     planner = ran.data["execution"]["data"]["planner"]
     assert ran.ok is True
+    assert planner["source"] == "worker_llm"
+    assert planner["repair_attempted"] is True
+    assert planner["repair_succeeded"] is True
+    assert planner["initial_failure_reason"] == "invalid_json"
+    assert len(brain.calls) == 2
+    assert "failure_reason=invalid_json" in brain.calls[1]["user"]
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_worker_llm_repair_fails_once_then_deterministic_fallback():
+    reg = ToolRegistry()
+    graph = AgentGraphTool()
+    reg.register(graph)
+    runner = RunSkillTool()
+    reg.register(runner)
+    brain = WorkerPlannerBrain(responses=["not json", "{bad"])
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=30,
+        brain=brain,
+    )
+    created = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Validate SQL injection on /api/search",
+            "skills": ["test_injection"],
+        },
+    )
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "create", "role": "exploit_worker"},
+        result=created,
+    )
+
+    ran = await reg.dispatch(
+        "agent_graph",
+        {"action": "run", "agent_id": created.data["agent"]["id"]},
+    )
+
+    planner = ran.data["execution"]["data"]["planner"]
+    assert ran.ok is True
+    assert runner.calls
     assert planner["source"] == "deterministic_fallback"
     assert planner["fallback_reason"] == "invalid_json"
+    assert planner["repair_attempted"] is True
+    assert planner["repair_succeeded"] is False
+    assert planner["initial_failure_reason"] == "invalid_json"
+    assert planner["repair_failure_reason"] == "invalid_json"
+    assert len(brain.calls) == 2
+    metrics = loop._agent_graph_worker_planner_metrics
+    assert metrics["fallbacks"] == 1
+    assert metrics["repairs"] == 1
+    assert metrics["repair_failures"] == 1
 
 
 @pytest.mark.asyncio
@@ -1232,6 +1338,7 @@ async def test_agent_graph_worker_llm_unavailable_repeated_fallback_surfaces_hea
         },
     )
     dashboard = loop._build_scan_dashboard()
+    assert "Worker planner quality: success=0/3 repair=0/0 fallback=3 unavailable=3" in dashboard
     assert "planner: deterministic_fallback reason=worker_llm_empty_response" in dashboard
     assert "health=local_worker_unavailable" in dashboard
 
