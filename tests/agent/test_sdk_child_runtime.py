@@ -414,3 +414,93 @@ async def test_sdk_child_completion_feeds_report_and_chain_golden_path(monkeypat
     assert chained.ok is True
     assert [finding["id"] for finding in _get_findings()] == ["VXIS-0001", "VXIS-0002"]
     assert _get_chains()[0]["finding_ids"] == ["VXIS-0001", "VXIS-0002"]
+
+
+@pytest.mark.asyncio
+async def test_sdk_runtime_syncs_agent_graph_create_send_before_worker_run(monkeypatch, tmp_path):
+    monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
+    monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(tmp_path / "sdk-run"))
+    registry = ToolRegistry()
+    registry.register(AgentGraphTool())
+    registry.register(RunSkillTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+
+    created = await registry.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Prove IDOR on /api/orders/2",
+            "message": "Collect baseline and payload evidence before running.",
+        },
+    )
+    await loop._sync_agent_graph_result_to_sdk_runtime(
+        name="agent_graph",
+        args={"action": "create"},
+        result=created,
+    )
+    agent_id = created.data["agent"]["id"]
+
+    first = await loop._sdk_agent_loop.coordinator.agent_drilldown(agent_id)
+    assert first["agent"]["status"] == "running"
+    assert first["agent"]["pending_count"] == 1
+    assert "Collect baseline and payload" in first["session_items"][-1]["content"]
+
+    sent = await registry.dispatch(
+        "agent_graph",
+        {
+            "action": "send",
+            "agent_id": agent_id,
+            "message": "Narrow to the order ownership boundary.",
+        },
+    )
+    await loop._sync_agent_graph_result_to_sdk_runtime(
+        name="agent_graph",
+        args={"action": "send", "agent_id": agent_id},
+        result=sent,
+    )
+
+    second = await loop._sdk_agent_loop.coordinator.agent_drilldown(agent_id)
+    assert second["agent"]["pending_count"] == 2
+    assert "Narrow to the order ownership boundary" in second["session_items"][-1]["content"]
+    assert [event["event_type"] for event in second["events"]].count("message_sent") >= 2
+
+    await loop._sdk_agent_loop.coordinator.close_sessions()
+
+
+@pytest.mark.asyncio
+async def test_sdk_runtime_sync_does_not_reopen_completed_worker(monkeypatch, tmp_path):
+    monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
+    monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(tmp_path / "sdk-run"))
+    registry = ToolRegistry()
+    registry.register(AgentGraphTool())
+    registry.register(RunSkillTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+    loop._sdk_agent_loop.runner = FakeSDKRunner()
+
+    created = await registry.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Prove IDOR on /api/orders/2",
+        },
+    )
+    ran = await registry.dispatch(
+        "agent_graph",
+        {"action": "run", "agent_id": created.data["agent"]["id"]},
+    )
+    agent_id = created.data["agent"]["id"]
+
+    assert ran.data["agent"]["status"] == "finished"
+    assert (await loop._sdk_agent_loop.coordinator.get_record(agent_id)).status == "completed"
+
+    await loop._sync_agent_graph_result_to_sdk_runtime(
+        name="agent_graph",
+        args={"action": "run", "agent_id": agent_id},
+        result=ran,
+    )
+
+    assert (await loop._sdk_agent_loop.coordinator.get_record(agent_id)).status == "completed"
+
+    await loop._sdk_agent_loop.coordinator.close_sessions()

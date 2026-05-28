@@ -14,7 +14,7 @@ from vxis.agent.context_budget import (
     resolve_context_budget,
     trim_text_chars,
 )
-from vxis.agent.sdk_runtime.coordinator import SDKAgentCoordinator
+from vxis.agent.sdk_runtime.coordinator import SDKAgentCoordinator, TERMINAL_AGENT_STATUSES
 from vxis.agent.sdk_runtime.events import SDKEventJournal
 from vxis.agent.sdk_runtime.sessions import SDKRunPaths, open_sdk_agent_session
 from vxis.agent.sdk_runtime.tools import build_vxis_sdk_agent, sdk_tools_from_registry
@@ -76,6 +76,7 @@ class SDKChildAgentLoop:
         self.max_turns = max(1, int(max_turns))
         self._completions: dict[str, dict[str, Any]] = {}
         self._latest_drilldowns: dict[str, dict[str, Any]] = {}
+        self._synced_agent_graph_messages: dict[str, set[str]] = {}
 
     async def run_turn(self, agent: dict[str, Any], instruction: str = "") -> ToolResult:
         agent_id = str(agent.get("id") or agent.get("agent_id") or "").strip()
@@ -275,6 +276,113 @@ class SDKChildAgentLoop:
             self._latest_drilldowns[agent_id] = compact_context_value(detail, max_chars=1_200)
         return detail
 
+    async def sync_agent_graph_result(
+        self,
+        *,
+        action: str,
+        result_data: dict[str, Any],
+    ) -> None:
+        agents = self._agents_from_agent_graph_result(result_data)
+        for agent in agents:
+            agent_id = str(agent.get("id") or agent.get("agent_id") or "").strip()
+            if not agent_id:
+                continue
+            await self._ensure_agent_records(agent)
+            session = open_sdk_agent_session(agent_id, self.paths.agents_db_path)
+            await self.coordinator.attach_session(agent_id, session)
+            await self._sync_agent_graph_messages(agent_id, agent)
+            if action == "finish" or str(agent.get("status") or "").lower() in {
+                "finished",
+                "blocked",
+            }:
+                await self._sync_agent_graph_completion(agent_id, agent)
+            await self._runtime_drilldown(agent_id)
+
+    @staticmethod
+    def _agents_from_agent_graph_result(result_data: dict[str, Any]) -> list[dict[str, Any]]:
+        agents: list[dict[str, Any]] = []
+        single = result_data.get("agent")
+        if isinstance(single, dict):
+            agents.append(single)
+        for key in ("agents", "active_agents"):
+            collection = result_data.get(key)
+            if isinstance(collection, list):
+                agents.extend(item for item in collection if isinstance(item, dict))
+        seen: set[str] = set()
+        deduped: list[dict[str, Any]] = []
+        for agent in agents:
+            agent_id = str(agent.get("id") or agent.get("agent_id") or "").strip()
+            if not agent_id or agent_id in seen:
+                continue
+            seen.add(agent_id)
+            deduped.append(agent)
+        return deduped
+
+    async def _sync_agent_graph_messages(
+        self,
+        agent_id: str,
+        agent: dict[str, Any],
+    ) -> None:
+        messages = agent.get("messages") if isinstance(agent.get("messages"), list) else []
+        synced = self._synced_agent_graph_messages.setdefault(agent_id, set())
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            message_id = str(message.get("id") or "").strip()
+            if message_id and message_id in synced:
+                continue
+            sender = str(message.get("sender") or "root").strip() or "root"
+            recipient = str(message.get("recipient") or agent_id).strip() or agent_id
+            content = str(message.get("body") or "").strip()
+            if not content:
+                continue
+            if sender == recipient:
+                continue
+            delivered = await self.coordinator.send(
+                sender,
+                recipient,
+                content,
+                message_type="agent_graph",
+                priority="normal",
+                metadata={"agent_graph_message_id": message_id, "source": "agent_graph_sync"},
+            )
+            if delivered and message_id:
+                synced.add(message_id)
+
+    async def _sync_agent_graph_completion(
+        self,
+        agent_id: str,
+        agent: dict[str, Any],
+    ) -> None:
+        record = await self.coordinator.get_record(agent_id)
+        if record is not None and record.status in {"completed", "blocked", "failed", "crashed", "stopped"}:
+            return
+        result_summary = str(agent.get("result") or "").strip()
+        if not result_summary:
+            result_package = (
+                agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+            )
+            result_summary = str(
+                result_package.get("final_result")
+                or result_package.get("raw_evidence_summary")
+                or "agent_graph worker completed"
+            ).strip()
+        status = "blocked" if str(agent.get("status") or "").lower() == "blocked" else "completed"
+        result_package = (
+            agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        )
+        evidence_artifact = (
+            result_package.get("evidence_artifact")
+            if isinstance(result_package.get("evidence_artifact"), dict)
+            else {}
+        )
+        await self.coordinator.complete_agent(
+            agent_id,
+            result_summary=result_summary,
+            status=status,
+            evidence_artifact=evidence_artifact,
+        )
+
     def build_prompt(
         self,
         agent: dict[str, Any],
@@ -414,7 +522,8 @@ class SDKChildAgentLoop:
         parent_id: str | None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        if await self.coordinator.get_record(agent_id) is None:
+        record = await self.coordinator.get_record(agent_id)
+        if record is None:
             await self.coordinator.register(
                 agent_id,
                 name=name,
@@ -424,7 +533,7 @@ class SDKChildAgentLoop:
                 metadata=metadata,
                 status="running",
             )
-        else:
+        elif record.status not in TERMINAL_AGENT_STATUSES:
             await self.coordinator.set_status(agent_id, "running")
 
     def _allowed_tool_names(self, agent: dict[str, Any]) -> set[str]:

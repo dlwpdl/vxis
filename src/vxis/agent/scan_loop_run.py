@@ -892,6 +892,11 @@ class ScanLoopRunMixin(
                     )
                 self._sync_agent_graph_result_to_branches(name=name, args=args, result=result)
                 if name == "agent_graph":
+                    await self._sync_agent_graph_result_to_sdk_runtime(
+                        name=name,
+                        args=args,
+                        result=result,
+                    )
                     await self._credit_agent_graph_child_execution(
                         result,
                         skills_completed=_skills_completed,

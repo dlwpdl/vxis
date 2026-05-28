@@ -502,6 +502,24 @@ class ScanLoopAgentGraphMixin:
                         f"chain follow-up {agent_id}: {followup.id} -> {followup.crown_jewel}"
                     )
 
+    async def _sync_agent_graph_result_to_sdk_runtime(
+        self,
+        *,
+        name: str,
+        args: dict[str, Any] | Any,
+        result: ToolResult,
+    ) -> None:
+        if name != "agent_graph" or not isinstance(args, dict) or not isinstance(result.data, dict):
+            return
+        sdk_loop = getattr(self, "_sdk_agent_loop", None)
+        sync = getattr(sdk_loop, "sync_agent_graph_result", None)
+        if not callable(sync):
+            return
+        await sync(
+            action=str(args.get("action") or ""),
+            result_data=result.data,
+        )
+
     async def _run_agent_graph_child_turn(
         self, agent: dict[str, Any], instruction: str
     ) -> ToolResult:
