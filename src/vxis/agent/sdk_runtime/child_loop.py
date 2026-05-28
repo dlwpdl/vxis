@@ -75,6 +75,7 @@ class SDKChildAgentLoop:
         self.context_window = context_window
         self.max_turns = max(1, int(max_turns))
         self._completions: dict[str, dict[str, Any]] = {}
+        self._latest_drilldowns: dict[str, dict[str, Any]] = {}
 
     async def run_turn(self, agent: dict[str, Any], instruction: str = "") -> ToolResult:
         agent_id = str(agent.get("id") or agent.get("agent_id") or "").strip()
@@ -103,6 +104,7 @@ class SDKChildAgentLoop:
             instruction,
             allowed_tool_names=allowed_tool_names,
         )
+        await self._deliver_director_task(agent_id, prompt, instruction=instruction)
         tools = sdk_tools_from_registry(self.registry, tool_names=allowed_tool_names)
         tools.append(self._build_agent_finish_tool(agent_id))
         sdk_agent = build_vxis_sdk_agent(
@@ -116,14 +118,14 @@ class SDKChildAgentLoop:
         try:
             await self.runner.run(
                 starting_agent=sdk_agent,
-                input=prompt.input_text,
+                input=self._runner_input_text(agent_id),
                 session=session,
                 max_turns=self.max_turns,
             )
         except Exception as exc:
             completion = self._completions.get(agent_id)
             if completion:
-                return self._completion_tool_result(
+                return await self._completion_tool_result(
                     agent_id,
                     instruction=instruction,
                     prompt=prompt,
@@ -132,6 +134,7 @@ class SDKChildAgentLoop:
                     runner_error=f"{type(exc).__name__}: {exc}",
                 )
             await self.coordinator.set_status(agent_id, "failed")
+            sdk_runtime = await self._runtime_drilldown(agent_id)
             return ToolResult(
                 ok=False,
                 data={
@@ -139,6 +142,7 @@ class SDKChildAgentLoop:
                     "tool": "sdk_agent",
                     "args": {"instruction": instruction},
                     "planner": self._planner_meta(prompt, allowed_tool_names),
+                    "sdk_runtime": sdk_runtime,
                 },
                 summary=f"sdk child agent failed: {type(exc).__name__}: {exc}",
                 error="sdk_child_run_failed",
@@ -147,6 +151,7 @@ class SDKChildAgentLoop:
         completion = self._completions.get(agent_id)
         if not completion:
             await self.coordinator.set_status(agent_id, "waiting")
+            sdk_runtime = await self._runtime_drilldown(agent_id)
             return ToolResult(
                 ok=False,
                 data={
@@ -154,12 +159,13 @@ class SDKChildAgentLoop:
                     "tool": "sdk_agent",
                     "args": {"instruction": instruction},
                     "planner": self._planner_meta(prompt, allowed_tool_names),
+                    "sdk_runtime": sdk_runtime,
                 },
                 summary="sdk child agent did not call agent_finish",
                 error="missing_agent_finish",
             )
 
-        return self._completion_tool_result(
+        return await self._completion_tool_result(
             agent_id,
             instruction=instruction,
             prompt=prompt,
@@ -167,7 +173,7 @@ class SDKChildAgentLoop:
             completion=completion,
         )
 
-    def _completion_tool_result(
+    async def _completion_tool_result(
         self,
         agent_id: str,
         *,
@@ -187,6 +193,7 @@ class SDKChildAgentLoop:
         planner_meta = self._planner_meta(prompt, allowed_tool_names)
         if runner_error:
             planner_meta["runner_error_after_finish"] = runner_error
+        sdk_runtime = await self._runtime_drilldown(agent_id)
         return ToolResult(
             ok=completion.get("status") not in {"failed", "crashed"},
             data={
@@ -196,6 +203,7 @@ class SDKChildAgentLoop:
                 "planner": planner_meta,
                 "agent_finish": completion,
                 "evidence_artifact": evidence_artifact,
+                "sdk_runtime": sdk_runtime,
                 "result": {
                     "ok": completion.get("status") not in {"failed", "crashed"},
                     "summary": result_summary,
@@ -208,6 +216,64 @@ class SDKChildAgentLoop:
             },
             summary=result_summary or f"sdk child agent {agent_id} completed",
         )
+
+    def control_plane_snapshot(self, *, limit: int = 6) -> dict[str, Any]:
+        agents = sorted(
+            self._latest_drilldowns.values(),
+            key=lambda item: str(
+                (item.get("agent") if isinstance(item.get("agent"), dict) else {}).get(
+                    "updated_at"
+                )
+            ),
+            reverse=True,
+        )
+        return {
+            "enabled": True,
+            "run_dir": str(self.paths.run_dir),
+            "agents": compact_context_value(agents[:limit], max_chars=900),
+            "events": compact_context_value(self.journal.load_events(limit=limit * 2), max_chars=700),
+        }
+
+    async def _deliver_director_task(
+        self,
+        agent_id: str,
+        prompt: SDKChildPrompt,
+        *,
+        instruction: str,
+    ) -> None:
+        delivered = await self.coordinator.send(
+            "root",
+            agent_id,
+            prompt.input_text,
+            message_type="task",
+            priority="high",
+            metadata={
+                "instruction": trim_text_chars(instruction, 240),
+                "prompt_tokens": prompt.prompt_tokens,
+                "history_tokens": prompt.history_tokens,
+                "compacted": prompt.compacted,
+            },
+        )
+        if delivered:
+            await self.coordinator.consume_pending(agent_id)
+
+    @staticmethod
+    def _runner_input_text(agent_id: str) -> str:
+        return (
+            f"Run the latest VXIS director task for {agent_id}. "
+            "Use the available tools, preserve proof fields, then call agent_finish."
+        )
+
+    async def _runtime_drilldown(self, agent_id: str) -> dict[str, Any]:
+        detail = await self.coordinator.agent_drilldown(
+            agent_id,
+            session_item_limit=5,
+            event_limit=10,
+        )
+        if detail:
+            detail["run_dir"] = str(self.paths.run_dir)
+            self._latest_drilldowns[agent_id] = compact_context_value(detail, max_chars=1_200)
+        return detail
 
     def build_prompt(
         self,

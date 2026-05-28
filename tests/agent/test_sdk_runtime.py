@@ -77,6 +77,12 @@ async def test_sdk_coordinator_writes_messages_to_agent_sessions(tmp_path):
     assert "VXIS message from Director (root)" in pending_items[-1]["content"]
     assert "baseline/control/payload" in pending_items[-1]["content"]
 
+    drilldown = await coordinator.agent_drilldown("worker-1", session_item_limit=3, event_limit=5)
+    assert drilldown["agent"]["agent_id"] == "worker-1"
+    assert drilldown["agent"]["pending_count"] == 0
+    assert "baseline/control/payload" in drilldown["session_items"][-1]["content"]
+    assert [event["event_type"] for event in drilldown["events"]][-1] == "message_sent"
+
     snapshot = json.loads(paths.agents_snapshot_path.read_text(encoding="utf-8"))
     assert snapshot["agents"]["worker-1"]["parent_id"] == "root"
     assert snapshot["agents"]["worker-1"]["status"] == "running"
@@ -186,6 +192,10 @@ def test_sdk_event_journal_continues_sequence_after_reopen(tmp_path):
 
     assert [event["sequence"] for event in reopened.load_events()] == [1, 2, 3]
     assert [event["event_type"] for event in reopened.load_events()] == ["one", "two", "three"]
+    assert [event["event_type"] for event in reopened.load_events(agent_id="root")] == [
+        "one",
+        "three",
+    ]
 
 
 @pytest.mark.asyncio

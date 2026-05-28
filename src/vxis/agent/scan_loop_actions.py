@@ -735,6 +735,19 @@ class ScanLoopActionMixin:
         ][-4:]
         snapshot["chain_candidates"] = self._suggest_chain_candidates(limit=3)
         snapshot["agents"] = self._agent_graph_agents_from_messages()[:6]
+        sdk_loop = getattr(self, "_sdk_agent_loop", None)
+        if sdk_loop is not None and callable(getattr(sdk_loop, "control_plane_snapshot", None)):
+            sdk_runtime = sdk_loop.control_plane_snapshot(limit=6)
+            snapshot["sdk_runtime"] = sdk_runtime
+            sdk_agents = {
+                str((item.get("agent") or {}).get("agent_id") or ""): item
+                for item in list(sdk_runtime.get("agents") or [])
+                if isinstance(item, dict) and isinstance(item.get("agent"), dict)
+            }
+            for agent in snapshot["agents"]:
+                agent_id = str(agent.get("id") or "")
+                if agent_id in sdk_agents:
+                    agent["sdk_runtime"] = sdk_agents[agent_id]
         snapshot["note"] = self._truncate_ui_text(note, 140) if note else ""
         snapshot["telemetry"] = telemetry
         snapshot["proxy"] = proxy_status
@@ -1536,4 +1549,3 @@ class ScanLoopActionMixin:
 
         filtered = [tool for tool in catalog if str(tool.get("name") or "") in allowed]
         return filtered or catalog
-

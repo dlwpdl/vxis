@@ -258,6 +258,24 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                         "### test_injection\n"
                         'action: run_skill(skill="test_injection", target_url=<target>, params={...})'
                     ),
+                    "sdk_runtime": {
+                        "run_dir": "/tmp/vxis-sdk-run",
+                        "agent": {
+                            "agent_id": "agent-0001",
+                            "status": "completed",
+                            "pending_count": 0,
+                        },
+                        "events": [
+                            {"event_type": "message_sent", "agent_id": "agent-0001"},
+                            {"event_type": "agent_completed", "agent_id": "agent-0001"},
+                        ],
+                        "session_items": [
+                            {
+                                "role": "user",
+                                "content": "EvidenceArtifact_fields=claim,target,control,payload,observed_delta,repro_steps",
+                            }
+                        ],
+                    },
                 },
                 {
                     "id": "agent-0002",
@@ -285,6 +303,12 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                     "triggered": 2,
                     "total_tokens_saved": 1200,
                 },
+            },
+            "sdk_runtime": {
+                "enabled": True,
+                "run_dir": "/tmp/vxis-sdk-run",
+                "agents": [],
+                "events": [{"event_type": "agent_completed", "agent_id": "agent-0001"}],
             },
             "proxy": {
                 "backend": "xray",
@@ -390,6 +414,10 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "http://localhost:3000/api/search" in agent_text
     assert "escalation" in agent_text
     assert 'action: run_skill(skill="test_injection"' in agent_text
+    assert "sdk session" in agent_text
+    assert "session tail" in agent_text
+    assert "agent_completed" in agent_text
+    assert "EvidenceArtifact_fields" in agent_text
 
     chain_panel = display._render_chains()
     chain_text = str(chain_panel.renderable)

@@ -303,6 +303,55 @@ class SDKAgentCoordinator:
                 },
             }
 
+    async def agent_drilldown(
+        self,
+        agent_id: str,
+        *,
+        session_item_limit: int = 6,
+        event_limit: int = 12,
+    ) -> dict[str, Any]:
+        async with self._lock:
+            record = self._records.get(agent_id)
+            runtime = self._runtimes.get(agent_id)
+            session = runtime.session if runtime is not None else None
+        if record is None:
+            return {}
+
+        raw_items: list[Any] = []
+        if session is not None and session_item_limit > 0:
+            raw_items = await session.get_items()
+        events = (
+            self.event_journal.load_events(agent_id=agent_id, limit=event_limit)
+            if self.event_journal is not None
+            else []
+        )
+        return {
+            "agent": record.to_dict(),
+            "session_items": [_compact_session_item(item) for item in raw_items[-session_item_limit:]],
+            "events": events,
+        }
+
+    async def agent_drilldowns(
+        self,
+        agent_ids: list[str] | None = None,
+        *,
+        session_item_limit: int = 6,
+        event_limit: int = 12,
+    ) -> list[dict[str, Any]]:
+        if agent_ids is None:
+            async with self._lock:
+                agent_ids = list(self._records)
+        drilldowns: list[dict[str, Any]] = []
+        for agent_id in agent_ids:
+            detail = await self.agent_drilldown(
+                agent_id,
+                session_item_limit=session_item_limit,
+                event_limit=event_limit,
+            )
+            if detail:
+                drilldowns.append(detail)
+        return drilldowns
+
     async def restore(self, snapshot: dict[str, Any]) -> None:
         raw_agents = snapshot.get("agents") if isinstance(snapshot, dict) else {}
         records: dict[str, SDKAgentRecord] = {}
@@ -406,3 +455,22 @@ def _coerce_terminal_status(value: Any) -> AgentStatus:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _compact_session_item(item: Any) -> dict[str, Any]:
+    if isinstance(item, dict):
+        content = str(item.get("content") or "")
+        if len(content) > 900:
+            content = content[:877].rstrip() + "...truncated..."
+        out = {
+            "role": str(item.get("role") or ""),
+            "content": content,
+        }
+        for key in ("type", "name", "call_id"):
+            if item.get(key):
+                out[key] = str(item.get(key) or "")
+        return out
+    text = str(item or "")
+    if len(text) > 900:
+        text = text[:877].rstrip() + "...truncated..."
+    return {"role": "", "content": text}

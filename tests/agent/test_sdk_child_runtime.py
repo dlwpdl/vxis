@@ -129,7 +129,17 @@ async def test_sdk_child_loop_runs_sdk_agent_and_reports_completion_to_parent(tm
     assert result.data["agent_finish"]["status"] == "completed"
     assert result.data["evidence_artifact"]["observed_delta"]
     assert result.data["planner"]["source"] == "sdk_agent_runtime"
+    assert result.data["sdk_runtime"]["agent"]["agent_id"] == "agent-0001"
+    assert "EvidenceArtifact_fields" in result.data["sdk_runtime"]["session_items"][-1]["content"]
+    assert "message_sent" in [
+        event["event_type"] for event in result.data["sdk_runtime"]["events"]
+    ]
     assert runner.calls[0]["max_turns"] == 6
+    assert "latest VXIS director task" in runner.calls[0]["input"]
+    assert "EvidenceArtifact_fields" not in runner.calls[0]["input"]
+    control_snapshot = loop.control_plane_snapshot()
+    assert control_snapshot["enabled"] is True
+    assert control_snapshot["agents"][0]["agent"]["agent_id"] == "agent-0001"
 
     pending_count, pending_items = await loop.coordinator.consume_pending("root", include_items=True)
     assert pending_count == 1
@@ -298,10 +308,16 @@ async def test_agent_graph_rejects_positive_sdk_completion_without_valid_evidenc
 async def test_scan_loop_feature_flag_wires_agent_graph_to_sdk_child_loop(monkeypatch, tmp_path):
     monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
     monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(tmp_path / "sdk-run"))
+    events: list[tuple[str, dict]] = []
     registry = ToolRegistry()
     registry.register(AgentGraphTool())
     registry.register(RunSkillTool())
-    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=registry,
+        max_iters=3,
+        event_callback=lambda event_type, data: events.append((event_type, data)),
+    )
     loop._sdk_agent_loop.runner = FakeSDKRunner()
 
     created = await registry.dispatch(
@@ -321,6 +337,10 @@ async def test_scan_loop_feature_flag_wires_agent_graph_to_sdk_child_loop(monkey
     assert ran.ok is True
     assert ran.data["agent"]["status"] == "finished"
     assert loop._sdk_agent_loop.paths.agents_db_path.exists()
+    loop._emit_control_plane("sdk runtime ready")
+    control_events = [data for event_type, data in events if event_type == "control_plane"]
+    assert control_events[-1]["sdk_runtime"]["enabled"] is True
+    assert control_events[-1]["sdk_runtime"]["agents"][0]["session_items"]
 
 
 @pytest.mark.asyncio

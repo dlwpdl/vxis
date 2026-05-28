@@ -237,6 +237,33 @@ def build_scan_dashboard(loop: Any) -> str:
                     if intent and not local_strict:
                         detail += f" intent={intent[:70]}"
                     lines.append(detail[: 100 if local_strict else 170])
+                sdk_runtime = (
+                    latest_data.get("sdk_runtime")
+                    if isinstance(latest_data.get("sdk_runtime"), dict)
+                    else {}
+                )
+                if sdk_runtime:
+                    record = (
+                        sdk_runtime.get("agent")
+                        if isinstance(sdk_runtime.get("agent"), dict)
+                        else {}
+                    )
+                    runtime_status = str(record.get("status") or "").strip()
+                    events = [
+                        str(event.get("event_type") or "")
+                        for event in list(sdk_runtime.get("events") or [])[-3:]
+                        if isinstance(event, dict) and event.get("event_type")
+                    ]
+                    session_items = list(sdk_runtime.get("session_items") or [])
+                    session_tail = ""
+                    if session_items and isinstance(session_items[-1], dict):
+                        session_tail = str(session_items[-1].get("content") or "").strip()
+                    detail = f"     sdk_session: {runtime_status or 'active'}"
+                    if events:
+                        detail += f" events={','.join(events)}"
+                    if session_tail and not local_strict:
+                        detail += f" tail={session_tail[:70]}"
+                    lines.append(detail[: 100 if local_strict else 170])
             if status in {"RUNNING", "WAITING"}:
                 if needs_artifact:
                     lines.append(f'     next: agent_graph(action="run", agent_id="{agent_id}")')

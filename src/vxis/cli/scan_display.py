@@ -71,6 +71,7 @@ class ScanLiveDisplay:
         self.focus_branch: dict | None = None
         self.recent_attempts: list[dict] = []
         self.agent_items: list[dict] = []
+        self.sdk_runtime: dict = {}
         self.shared_notes: list[str] = []
         self.telemetry: dict = {}
         self.proxy: dict = {}
@@ -220,6 +221,7 @@ class ScanLiveDisplay:
             self.focus_branch = data.get("focus_branch") or None
             self.recent_attempts = list(data.get("recent_attempts") or [])
             self.agent_items = list(data.get("agents") or [])
+            self.sdk_runtime = dict(data.get("sdk_runtime") or {})
             self.shared_notes = list(data.get("shared_notes") or [])
             self.telemetry = dict(data.get("telemetry") or {})
             self.proxy = dict(data.get("proxy") or {})
@@ -536,6 +538,11 @@ class ScanLiveDisplay:
             tool = self._short(latest.get("tool") or "child", 18)
             summary = self._short(latest.get("summary"), 86)
             lines.append(f"[bold]last[/bold] {tool} {verdict}: {summary}")
+        sdk_runtime = (
+            agent.get("sdk_runtime") if isinstance(agent.get("sdk_runtime"), dict) else {}
+        )
+        if sdk_runtime:
+            lines.extend(self._agent_sdk_runtime_lines(sdk_runtime))
         if result_package:
             attempted_tool = self._short(result_package.get("attempted_tool"), 18)
             raw_evidence = self._short(result_package.get("raw_evidence_summary"), 86)
@@ -608,6 +615,36 @@ class ScanLiveDisplay:
         )
         if action_line:
             lines.append(f"[dim]{self._short(action_line, 92)}[/dim]")
+        return lines
+
+    def _agent_sdk_runtime_lines(self, sdk_runtime: dict) -> list[str]:
+        lines: list[str] = ["[bold magenta]sdk session[/bold magenta]"]
+        record = sdk_runtime.get("agent") if isinstance(sdk_runtime.get("agent"), dict) else {}
+        pending = int(record.get("pending_count") or 0)
+        status = self._short(record.get("status"), 18)
+        run_dir = self._short(sdk_runtime.get("run_dir"), 56)
+        if status or pending:
+            lines.append(f"[dim]runtime:[/dim] {status or '?'} pending={pending}")
+        if run_dir:
+            lines.append(f"[dim]run:[/dim] {run_dir}")
+        events = list(sdk_runtime.get("events") or [])
+        if events:
+            labels = [
+                self._short(event.get("event_type"), 22)
+                for event in events[-4:]
+                if isinstance(event, dict)
+            ]
+            if labels:
+                lines.append(f"[dim]events:[/dim] {', '.join(labels)}")
+        session_items = list(sdk_runtime.get("session_items") or [])
+        if session_items:
+            lines.append("[bold]session tail[/bold]")
+            for item in session_items[-2:]:
+                if not isinstance(item, dict):
+                    continue
+                role = self._short(item.get("role"), 12)
+                content = self._short(item.get("content"), 86)
+                lines.append(f"[dim]{role}:[/dim] {content}")
         return lines
 
     def _agent_next_action_hint(self, agent: dict) -> str:

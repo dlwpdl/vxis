@@ -56,7 +56,12 @@ class SDKEventJournal:
                 fh.write("\n")
             return event.to_dict()
 
-    def load_events(self, *, limit: int | None = None) -> list[dict[str, Any]]:
+    def load_events(
+        self,
+        *,
+        limit: int | None = None,
+        agent_id: str = "",
+    ) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
         events: list[dict[str, Any]] = []
@@ -71,6 +76,8 @@ class SDKEventJournal:
                     continue
                 if isinstance(item, dict):
                     events.append(item)
+        if agent_id:
+            events = [event for event in events if str(event.get("agent_id") or "") == agent_id]
         if limit is not None and limit >= 0:
             return events[-limit:]
         return events
