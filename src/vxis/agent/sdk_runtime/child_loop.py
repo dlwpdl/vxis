@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +57,8 @@ class SDKChildAgentLoop:
         provider: str = "openai",
         context_window: int | None = None,
         max_turns: int = 6,
+        background_workers: bool = False,
+        background_worker_concurrency: int = 1,
     ) -> None:
         self.registry = registry
         self.paths = (
@@ -74,9 +77,15 @@ class SDKChildAgentLoop:
         self.provider = str(provider or "openai")
         self.context_window = context_window
         self.max_turns = max(1, int(max_turns))
+        self.background_workers = bool(background_workers)
+        self.background_worker_concurrency = max(1, int(background_worker_concurrency or 1))
         self._completions: dict[str, dict[str, Any]] = {}
         self._latest_drilldowns: dict[str, dict[str, Any]] = {}
         self._synced_agent_graph_messages: dict[str, set[str]] = {}
+        self._agent_snapshots: dict[str, dict[str, Any]] = {}
+        self._background_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._background_results: dict[str, ToolResult] = {}
+        self._background_semaphores: dict[int, asyncio.Semaphore] = {}
 
     async def run_turn(self, agent: dict[str, Any], instruction: str = "") -> ToolResult:
         agent_id = str(agent.get("id") or agent.get("agent_id") or "").strip()
@@ -86,6 +95,13 @@ class SDKChildAgentLoop:
                 summary="sdk child agent: missing agent id",
                 error="missing_agent_id",
             )
+        record = await self.coordinator.get_record(agent_id)
+        if (
+            record is not None
+            and record.status in TERMINAL_AGENT_STATUSES
+            and agent_id in self._background_results
+        ):
+            return self._background_results[agent_id]
         allowed_tool_names = self._allowed_tool_names(agent)
         if not allowed_tool_names:
             return ToolResult(
@@ -296,7 +312,196 @@ class SDKChildAgentLoop:
                 "blocked",
             }:
                 await self._sync_agent_graph_completion(agent_id, agent)
+            else:
+                self._agent_snapshots[agent_id] = dict(agent)
+                if self.background_workers and action in {"create", "send"}:
+                    await self.wake_background_worker(agent_id)
             await self._runtime_drilldown(agent_id)
+
+    async def wake_background_worker(self, agent_id: str) -> bool:
+        record = await self.coordinator.get_record(agent_id)
+        if record is None or record.status in TERMINAL_AGENT_STATUSES:
+            return False
+        existing = self._background_tasks.get(agent_id)
+        if existing is not None and not existing.done():
+            return False
+        task = asyncio.create_task(self._background_worker_once(agent_id))
+        self._background_tasks[agent_id] = task
+        await self.coordinator.attach_task(agent_id, task)
+        return True
+
+    async def wait_for_background_worker(
+        self,
+        agent_id: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ToolResult | None:
+        task = self._background_tasks.get(agent_id)
+        if task is None:
+            return self._background_results.get(agent_id)
+        try:
+            if timeout_seconds is None:
+                await task
+            else:
+                await asyncio.wait_for(task, timeout_seconds)
+        except TimeoutError:
+            return None
+        return self._background_results.get(agent_id)
+
+    async def wait_for_background_workers(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, ToolResult]:
+        tasks = [task for task in self._background_tasks.values() if not task.done()]
+        if tasks:
+            try:
+                if timeout_seconds is None:
+                    await asyncio.gather(*tasks)
+                else:
+                    await asyncio.wait_for(asyncio.gather(*tasks), timeout_seconds)
+            except TimeoutError:
+                pass
+        return dict(self._background_results)
+
+    async def _background_worker_once(self, agent_id: str) -> None:
+        await self.journal.append(
+            "background_worker_started",
+            agent_id=agent_id,
+            payload={"concurrency": self.background_worker_concurrency},
+        )
+        try:
+            async with self._background_semaphore():
+                result = await self._run_agent_from_existing_session(agent_id)
+        except Exception as exc:
+            await self.coordinator.set_status(agent_id, "failed")
+            result = ToolResult(
+                ok=False,
+                data={"agent_id": agent_id},
+                summary=f"sdk background worker crashed: {type(exc).__name__}: {exc}",
+                error="sdk_background_worker_crashed",
+            )
+        self._background_results[agent_id] = result
+        await self.journal.append(
+            "background_worker_completed",
+            agent_id=agent_id,
+            payload={
+                "ok": result.ok,
+                "summary": result.summary,
+                "error": result.error,
+            },
+        )
+
+    async def _run_agent_from_existing_session(self, agent_id: str) -> ToolResult:
+        agent = dict(self._agent_snapshots.get(agent_id) or {})
+        if not agent:
+            record = await self.coordinator.get_record(agent_id)
+            if record is None:
+                return ToolResult(
+                    ok=False,
+                    data={"agent_id": agent_id},
+                    summary="sdk background worker: unknown agent",
+                    error="unknown_agent",
+                )
+            agent = {
+                "id": record.agent_id,
+                "role": record.role,
+                "task": record.task,
+                "parent_id": record.parent_id,
+            }
+        allowed_tool_names = self._allowed_tool_names(agent)
+        if not allowed_tool_names:
+            return ToolResult(
+                ok=False,
+                data={"agent_id": agent_id, "allowed_tools": []},
+                summary="sdk background worker: no registered child tools are available",
+                error="no_child_tools",
+            )
+
+        session = open_sdk_agent_session(agent_id, self.paths.agents_db_path)
+        await self.coordinator.attach_session(agent_id, session)
+        pending_count, _items = await self.coordinator.consume_pending(agent_id)
+        prompt = self.build_prompt(
+            agent,
+            f"process {pending_count} pending SDK inbox item(s)",
+            allowed_tool_names=allowed_tool_names,
+        )
+        tools = sdk_tools_from_registry(self.registry, tool_names=allowed_tool_names)
+        tools.append(self._build_agent_finish_tool(agent_id))
+        sdk_agent = build_vxis_sdk_agent(
+            name=f"vxis-{agent_id}",
+            instructions=prompt.instructions,
+            tools=tools,
+            model=self.model,
+            require_tool=True,
+        )
+        self._completions.pop(agent_id, None)
+
+        try:
+            await self.runner.run(
+                starting_agent=sdk_agent,
+                input=self._runner_input_text(agent_id),
+                session=session,
+                max_turns=self.max_turns,
+            )
+        except Exception as exc:
+            completion = self._completions.get(agent_id)
+            if completion:
+                return await self._completion_tool_result(
+                    agent_id,
+                    instruction="background inbox run",
+                    prompt=prompt,
+                    allowed_tool_names=allowed_tool_names,
+                    completion=completion,
+                    runner_error=f"{type(exc).__name__}: {exc}",
+                )
+            await self.coordinator.set_status(agent_id, "failed")
+            sdk_runtime = await self._runtime_drilldown(agent_id)
+            return ToolResult(
+                ok=False,
+                data={
+                    "agent_id": agent_id,
+                    "tool": "sdk_agent",
+                    "args": {"instruction": "background inbox run"},
+                    "planner": self._planner_meta(prompt, allowed_tool_names),
+                    "sdk_runtime": sdk_runtime,
+                },
+                summary=f"sdk background worker failed: {type(exc).__name__}: {exc}",
+                error="sdk_background_worker_failed",
+            )
+
+        completion = self._completions.get(agent_id)
+        if not completion:
+            await self.coordinator.set_status(agent_id, "waiting")
+            sdk_runtime = await self._runtime_drilldown(agent_id)
+            return ToolResult(
+                ok=False,
+                data={
+                    "agent_id": agent_id,
+                    "tool": "sdk_agent",
+                    "args": {"instruction": "background inbox run"},
+                    "planner": self._planner_meta(prompt, allowed_tool_names),
+                    "sdk_runtime": sdk_runtime,
+                },
+                summary="sdk background worker did not call agent_finish",
+                error="missing_agent_finish",
+            )
+
+        return await self._completion_tool_result(
+            agent_id,
+            instruction="background inbox run",
+            prompt=prompt,
+            allowed_tool_names=allowed_tool_names,
+            completion=completion,
+        )
+
+    def _background_semaphore(self) -> asyncio.Semaphore:
+        loop_id = id(asyncio.get_running_loop())
+        semaphore = self._background_semaphores.get(loop_id)
+        if semaphore is None:
+            semaphore = asyncio.Semaphore(self.background_worker_concurrency)
+            self._background_semaphores[loop_id] = semaphore
+        return semaphore
 
     @staticmethod
     def _agents_from_agent_graph_result(result_data: dict[str, Any]) -> list[dict[str, Any]]:

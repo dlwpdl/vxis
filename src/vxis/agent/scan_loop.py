@@ -147,6 +147,16 @@ class ScanAgentLoop(
             config = getattr(getattr(self, "brain", None), "_hybrid_model_config", None)
             worker_endpoint = getattr(config, "worker", None)
             run_dir = os.environ.get("VXIS_SDK_RUN_DIR") or ".vxis/sdk-runtime/latest"
+            try:
+                background_worker_concurrency = int(
+                    os.environ.get(
+                        "VXIS_SDK_BACKGROUND_WORKER_CONCURRENCY",
+                        os.environ.get("VXIS_LOCAL_WORKER_CONCURRENCY", "1"),
+                    )
+                    or "1"
+                )
+            except ValueError:
+                background_worker_concurrency = 1
             self._sdk_agent_loop = SDKChildAgentLoop(
                 registry=self.registry,
                 run_paths=SDKRunPaths.for_run_dir(run_dir),
@@ -154,6 +164,8 @@ class ScanAgentLoop(
                 provider=str(getattr(worker_endpoint, "provider", "") or "openai"),
                 model=str(getattr(worker_endpoint, "model", "") or "") or None,
                 context_window=getattr(worker_endpoint, "context_window", None),
+                background_workers=_env_flag("VXIS_SDK_BACKGROUND_WORKERS"),
+                background_worker_concurrency=max(1, background_worker_concurrency),
             )
             executor = self._sdk_agent_loop.run_turn
         if callable(set_executor):

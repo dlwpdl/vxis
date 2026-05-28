@@ -1,4 +1,5 @@
 import json
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -63,37 +64,53 @@ class FakeSDKRunner:
         artifact: dict | None = None,
         status: str = "completed",
         raise_after_finish: bool = False,
+        delay_seconds: float = 0.0,
     ) -> None:
         self.artifact = artifact if artifact is not None else _valid_evidence_artifact()
         self.status = status
         self.raise_after_finish = raise_after_finish
+        self.delay_seconds = delay_seconds
         self.calls: list[dict] = []
+        self.active = 0
+        self.max_active = 0
 
     async def run(self, *, starting_agent, input, session=None, max_turns=0, **kwargs):
-        self.calls.append(
-            {
-                "agent": starting_agent,
-                "input": input,
-                "session": session,
-                "max_turns": max_turns,
-                "kwargs": kwargs,
-            }
-        )
-        finish_tool = next(tool for tool in starting_agent.tools if tool.name == "agent_finish")
-        await finish_tool.on_invoke_tool(
-            None,
-            json.dumps(
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            self.calls.append(
                 {
-                    "status": self.status,
-                    "result_summary": "Confirmed IDOR with control 403 vs payload 200.",
-                    "findings": [{"title": "IDOR", "severity": "high"}],
-                    "evidence_artifact": self.artifact,
+                    "agent": starting_agent,
+                    "input": input,
+                    "session": session,
+                    "max_turns": max_turns,
+                    "kwargs": kwargs,
                 }
-            ),
-        )
-        if self.raise_after_finish:
-            raise RuntimeError("runner continued after agent_finish")
-        return SimpleNamespace(final_output="done")
+            )
+            if self.delay_seconds:
+                await asyncio.sleep(self.delay_seconds)
+            finish_tool = next(tool for tool in starting_agent.tools if tool.name == "agent_finish")
+            await finish_tool.on_invoke_tool(
+                None,
+                json.dumps(
+                    {
+                        "status": self.status,
+                        "result_summary": "Confirmed IDOR with control 403 vs payload 200.",
+                        "findings": [{"title": "IDOR", "severity": "high"}],
+                        "evidence_artifact": self.artifact,
+                    }
+                ),
+            )
+            if self.raise_after_finish:
+                raise RuntimeError("runner continued after agent_finish")
+            return SimpleNamespace(final_output="done")
+        finally:
+            self.active -= 1
+
+
+class CrashingBackgroundSDKRunner:
+    async def run(self, **kwargs):
+        raise RuntimeError("worker task crashed")
 
 
 @pytest.mark.asyncio
@@ -502,5 +519,176 @@ async def test_sdk_runtime_sync_does_not_reopen_completed_worker(monkeypatch, tm
     )
 
     assert (await loop._sdk_agent_loop.coordinator.get_record(agent_id)).status == "completed"
+
+    await loop._sdk_agent_loop.coordinator.close_sessions()
+
+
+@pytest.mark.asyncio
+async def test_sdk_background_worker_runs_pending_inbox_after_create_sync(monkeypatch, tmp_path):
+    monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
+    monkeypatch.setenv("VXIS_SDK_BACKGROUND_WORKERS", "1")
+    monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(tmp_path / "sdk-run"))
+    registry = ToolRegistry()
+    registry.register(AgentGraphTool())
+    registry.register(RunSkillTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+    runner = FakeSDKRunner()
+    loop._sdk_agent_loop.runner = runner
+
+    created = await registry.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Prove IDOR on /api/orders/2",
+            "message": "Collect baseline and payload evidence.",
+        },
+    )
+    await loop._sync_agent_graph_result_to_sdk_runtime(
+        name="agent_graph",
+        args={"action": "create"},
+        result=created,
+    )
+    agent_id = created.data["agent"]["id"]
+
+    result = await loop._sdk_agent_loop.wait_for_background_worker(
+        agent_id,
+        timeout_seconds=1.0,
+    )
+    record = await loop._sdk_agent_loop.coordinator.get_record(agent_id)
+    detail = await loop._sdk_agent_loop.coordinator.agent_drilldown(agent_id)
+    event_types = [event["event_type"] for event in loop._sdk_agent_loop.journal.load_events()]
+
+    assert result is not None and result.ok is True
+    assert record.status == "completed"
+    assert detail["agent"]["pending_count"] == 0
+    assert "Collect baseline and payload evidence" in detail["session_items"][0]["content"]
+    assert "latest VXIS director task" in runner.calls[0]["input"]
+    assert "background_worker_started" in event_types
+    assert "background_worker_completed" in event_types
+
+    await loop._sdk_agent_loop.coordinator.close_sessions()
+
+
+@pytest.mark.asyncio
+async def test_sdk_background_workers_respect_local_concurrency(monkeypatch, tmp_path):
+    monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
+    monkeypatch.setenv("VXIS_SDK_BACKGROUND_WORKERS", "1")
+    monkeypatch.setenv("VXIS_SDK_BACKGROUND_WORKER_CONCURRENCY", "1")
+    monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(tmp_path / "sdk-run"))
+    registry = ToolRegistry()
+    registry.register(AgentGraphTool())
+    registry.register(RunSkillTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+    runner = FakeSDKRunner(delay_seconds=0.02)
+    loop._sdk_agent_loop.runner = runner
+
+    created_ids: list[str] = []
+    for idx in range(2):
+        created = await registry.dispatch(
+            "agent_graph",
+            {
+                "action": "create",
+                "role": "exploit_worker",
+                "task": f"Prove IDOR on /api/orders/{idx + 2}",
+                "message": f"Collect evidence for order {idx + 2}.",
+            },
+        )
+        created_ids.append(created.data["agent"]["id"])
+        await loop._sync_agent_graph_result_to_sdk_runtime(
+            name="agent_graph",
+            args={"action": "create"},
+            result=created,
+        )
+
+    results = await loop._sdk_agent_loop.wait_for_background_workers(timeout_seconds=2.0)
+
+    assert set(results) >= set(created_ids)
+    assert all(results[agent_id].ok for agent_id in created_ids)
+    assert runner.max_active == 1
+    assert len(runner.calls) == 2
+
+    await loop._sdk_agent_loop.coordinator.close_sessions()
+
+
+@pytest.mark.asyncio
+async def test_agent_graph_run_reuses_completed_background_worker_result(monkeypatch, tmp_path):
+    monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
+    monkeypatch.setenv("VXIS_SDK_BACKGROUND_WORKERS", "1")
+    monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(tmp_path / "sdk-run"))
+    registry = ToolRegistry()
+    registry.register(AgentGraphTool())
+    registry.register(RunSkillTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+    runner = FakeSDKRunner()
+    loop._sdk_agent_loop.runner = runner
+
+    created = await registry.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Prove IDOR on /api/orders/2",
+            "message": "Collect baseline and payload evidence.",
+        },
+    )
+    await loop._sync_agent_graph_result_to_sdk_runtime(
+        name="agent_graph",
+        args={"action": "create"},
+        result=created,
+    )
+    agent_id = created.data["agent"]["id"]
+
+    background_result = await loop._sdk_agent_loop.wait_for_background_worker(
+        agent_id,
+        timeout_seconds=1.0,
+    )
+    ran = await registry.dispatch("agent_graph", {"action": "run", "agent_id": agent_id})
+
+    assert background_result is not None and background_result.ok is True
+    assert ran.ok is True
+    assert ran.data["agent"]["status"] == "finished"
+    assert len(runner.calls) == 1
+
+    await loop._sdk_agent_loop.coordinator.close_sessions()
+
+
+@pytest.mark.asyncio
+async def test_sdk_background_worker_records_task_crash(monkeypatch, tmp_path):
+    monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
+    monkeypatch.setenv("VXIS_SDK_BACKGROUND_WORKERS", "1")
+    monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(tmp_path / "sdk-run"))
+    registry = ToolRegistry()
+    registry.register(AgentGraphTool())
+    registry.register(RunSkillTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+    loop._sdk_agent_loop.runner = CrashingBackgroundSDKRunner()
+
+    created = await registry.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Prove IDOR on /api/orders/2",
+            "message": "Collect baseline and payload evidence.",
+        },
+    )
+    await loop._sync_agent_graph_result_to_sdk_runtime(
+        name="agent_graph",
+        args={"action": "create"},
+        result=created,
+    )
+    agent_id = created.data["agent"]["id"]
+
+    result = await loop._sdk_agent_loop.wait_for_background_worker(
+        agent_id,
+        timeout_seconds=1.0,
+    )
+    record = await loop._sdk_agent_loop.coordinator.get_record(agent_id)
+
+    assert result is not None
+    assert result.ok is False
+    assert result.error == "sdk_background_worker_failed"
+    assert record.status == "failed"
 
     await loop._sdk_agent_loop.coordinator.close_sessions()
