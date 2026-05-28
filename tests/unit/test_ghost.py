@@ -260,6 +260,8 @@ def test_ghost_status_snapshot_marks_nmap_as_direct_raw_socket():
     try:
         status = ghost_status_snapshot()
         assert status["active"] is True
+        assert status["coverage"]["http_request"] == "ghost_transport"
+        assert status["coverage"]["browser_render"] == "ghost_proxy_or_ua"
         assert status["coverage"]["shell_exec"] == "env_proxy"
         assert status["coverage"]["python_exec"] == "env_proxy"
         assert status["coverage"]["nmap_scan"] == "direct_raw_socket"

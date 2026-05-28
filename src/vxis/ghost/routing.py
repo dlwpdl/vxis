@@ -111,12 +111,50 @@ def ghost_python_env_prelude(identity: dict[str, Any] | None) -> str:
     )
 
 
+def ghost_transport_metadata(component: str) -> dict[str, Any]:
+    if not ghost_layer.is_active():
+        return {"active": False}
+    proxy_pool = list(getattr(ghost_layer, "_proxy_pool", []) or [])
+    return {
+        "active": True,
+        "component": component,
+        "network_coverage": "ghost_transport",
+        "proxy_mode": "proxy_pool" if proxy_pool else "direct",
+        "proxy_count": len(proxy_pool),
+    }
+
+
+def build_browser_ghost_route(
+    component: str,
+    *,
+    capture_proxy: str | None = None,
+) -> tuple[str | None, str | None, dict[str, Any]]:
+    if not ghost_layer.is_active():
+        return capture_proxy, None, {"active": False}
+    ghost_proxy = ghost_layer.next_proxy() or ""
+    proxy = ghost_proxy or capture_proxy
+    ua = ghost_layer.next_ua()
+    identity = build_ghost_identity(
+        component,
+        proxy=proxy,
+        user_agent=ua,
+        rotate_proxy=False,
+        include_raw=True,
+    )
+    meta = public_ghost_identity(identity)
+    if proxy and proxy == capture_proxy and not ghost_proxy:
+        meta["proxy_mode"] = "capture_proxy_no_exit_proxy"
+    return proxy, ua, meta
+
+
 def ghost_status_snapshot() -> dict[str, Any]:
     active = ghost_layer.is_active()
     proxy_pool = list(getattr(ghost_layer, "_proxy_pool", []) or [])
     coverage = {
         "target_session": "ghost_transport" if active else "off",
+        "http_request": "ghost_transport" if active else "off",
         "browser": "ghost_proxy_or_ua" if active else "off",
+        "browser_render": "ghost_proxy_or_ua" if active else "off",
         "shell_exec": "env_proxy" if active and proxy_pool else ("ua_env_only" if active else "off"),
         "python_exec": "env_proxy" if active and proxy_pool else ("ua_env_only" if active else "off"),
         "nmap_scan": "direct_raw_socket" if active else "off",

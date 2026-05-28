@@ -13,9 +13,13 @@ from vxis.agent.tools.hands_tools import (
 
 @pytest.fixture(autouse=True)
 def reset_tool_state():
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.deactivate()
     _reset_for_tests()
     yield
     _reset_for_tests()
+    ghost_layer.deactivate()
 
 
 # ── HttpRequestTool ──────────────────────────────────────────
@@ -49,6 +53,36 @@ async def test_http_request_tool_successful_get():
     assert result.data["body_length"] == 11
     assert result.data["links"] == ["/about", "/login"]
     assert "200" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_http_request_tool_reports_ghost_transport_when_active():
+    from vxis.ghost.layer import ghost_layer
+
+    fake_response = MagicMock()
+    fake_response.status = 204
+    fake_response.body = ""
+    fake_response.body_length = 0
+    fake_response.headers = {}
+    fake_response.links = []
+    fake_response.forms = []
+
+    fake_session = MagicMock()
+    fake_session.request = AsyncMock(return_value=fake_response)
+
+    fake_manager = MagicMock()
+    fake_manager.get_session = AsyncMock(return_value=fake_session)
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+
+    tool = HttpRequestTool()
+    with patch("vxis.agent.tools.hands_tools._get_session_manager", return_value=fake_manager):
+        result = await tool.run(base_url="http://x", method="GET", path="/")
+
+    assert result.ok is True
+    assert result.data["ghost"]["active"] is True
+    assert result.data["ghost"]["component"] == "http_request"
+    assert result.data["ghost"]["network_coverage"] == "ghost_transport"
+    assert result.data["ghost"]["proxy_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -114,6 +148,38 @@ async def test_browser_render_tool_stubbed_engine():
     fake_engine.stop.assert_awaited_once()
     fake_page.navigate.assert_awaited_once_with("http://example.com")
     fake_page.snapshot.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_browser_render_tool_uses_ghost_route_when_active():
+    from vxis.ghost.layer import ghost_layer
+
+    fake_snapshot = MagicMock()
+    fake_snapshot.title = "Example Domain"
+    fake_snapshot.url = "http://example.com"
+    fake_snapshot.html = "<html>...</html>"
+    fake_snapshot.links = []
+    fake_snapshot.forms = []
+
+    fake_page = MagicMock()
+    fake_page.navigate = AsyncMock()
+    fake_page.snapshot = AsyncMock(return_value=fake_snapshot)
+
+    fake_engine = MagicMock()
+    fake_engine.start = AsyncMock()
+    fake_engine.stop = AsyncMock()
+    fake_engine.new_page = AsyncMock(return_value=fake_page)
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+
+    with patch("vxis.interaction.eyes.BrowserEngine", return_value=fake_engine) as mock_engine:
+        tool = BrowserRenderTool()
+        result = await tool.run(url="http://example.com")
+
+    assert result.ok is True
+    assert mock_engine.call_args.kwargs["proxy"] == "socks5://127.0.0.1:9050"
+    assert mock_engine.call_args.kwargs["user_agent"]
+    assert result.data["ghost"]["active"] is True
+    assert result.data["ghost"]["component"] == "browser_render"
 
 
 # ── InterceptProxyTool ───────────────────────────────────────

@@ -15,6 +15,7 @@ from vxis.agent.tools.proxy_runtime import (
     get_proxy_runtime,
     reset_proxy_runtime_for_tests,
 )
+from vxis.ghost.routing import build_browser_ghost_route, ghost_transport_metadata
 
 # ── Module-level singletons ─────────────────────────────────────────────
 # Session + proxy state must persist across tool calls within a scan so
@@ -149,6 +150,7 @@ class HttpRequestTool:
                 "headers": dict(getattr(resp, "headers", {}) or {}),
                 "links": list(getattr(resp, "links", []) or [])[:20],
                 "forms_count": len(getattr(resp, "forms", []) or []),
+                "ghost": ghost_transport_metadata("http_request"),
             },
             summary=f"{method} {path} → {getattr(resp, 'status', '?')} ({getattr(resp, 'body_length', 0)} bytes)",
         )
@@ -189,7 +191,11 @@ class BrowserRenderTool:
             )
 
         try:
-            engine = BrowserEngine(proxy=get_active_proxy_url())
+            proxy, user_agent, ghost_meta = build_browser_ghost_route(
+                "browser_render",
+                capture_proxy=get_active_proxy_url(),
+            )
+            engine = BrowserEngine(proxy=proxy, user_agent=user_agent)
             await engine.start()
             try:
                 page = await engine.new_page()
@@ -218,6 +224,7 @@ class BrowserRenderTool:
                 "html_length": html_len,
                 "links": links,
                 "forms_count": len(forms),
+                "ghost": ghost_meta,
             },
             summary=(
                 f"rendered {url} → title='{title[:50]}' "
