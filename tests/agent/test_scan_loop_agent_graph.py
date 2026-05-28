@@ -1206,6 +1206,106 @@ async def test_agent_graph_worker_llm_can_choose_bounded_nmap_scan():
 
 
 @pytest.mark.asyncio
+async def test_agent_graph_nmap_scan_result_spawns_service_pivot_branches():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=30)
+    loop.state.ensure_branch(
+        "agent:agent-0001",
+        "agent_graph:recon_worker",
+        "recon_worker: Map exposed services",
+        priority=88,
+        role="recon_worker",
+        owner="agent_graph",
+    )
+    result = ToolResult(
+        ok=True,
+        summary="agent_graph: ran agent-0001 -> nmap_scan: 2 open services",
+        data={
+            "agent": {"id": "agent-0001"},
+            "execution": {
+                "tool": "nmap_scan",
+                "args": {"target": "localhost", "ports": "top-1000"},
+                "ok": True,
+                "summary": "nmap_scan: 2 open service(s) on localhost",
+                "data": {
+                    "result": {
+                        "ok": True,
+                        "summary": "nmap_scan: 2 open service(s) on localhost",
+                        "data": {
+                            "target": "localhost",
+                            "open_ports": [
+                                {
+                                    "host": "127.0.0.1",
+                                    "port": "6379",
+                                    "protocol": "tcp",
+                                    "service": "redis",
+                                    "product": "Redis key-value store",
+                                    "reason": "syn-ack",
+                                },
+                                {
+                                    "host": "127.0.0.1",
+                                    "port": "80",
+                                    "protocol": "tcp",
+                                    "service": "http",
+                                    "product": "nginx",
+                                    "reason": "syn-ack",
+                                },
+                            ],
+                        },
+                        "error": None,
+                    }
+                },
+            },
+        },
+    )
+
+    promoted = await loop._credit_agent_graph_child_execution(
+        result,
+        skills_completed=set(),
+        real_skills_completed=set(),
+    )
+
+    redis_branch = loop.state.branches["agent:agent-0001:svc:tcp-6379"]
+    http_branch = loop.state.branches["agent:agent-0001:svc:tcp-80"]
+    assert promoted is True
+    assert redis_branch.status == "open"
+    assert redis_branch.priority == 96
+    assert redis_branch.role == "exploit_worker"
+    assert "database service" in redis_branch.objective
+    assert "nmap_scan" in redis_branch.next_step
+    assert http_branch.role == "recon_worker"
+    assert loop.state.scan_todos[redis_branch.id].status == "pending"
+    assert any("nmap service pivot" in str(note) for note in loop.state.shared_notes)
+
+
+def test_service_pivot_branch_forces_agent_graph_worker_create():
+    reg = ToolRegistry()
+    reg.register(AgentGraphTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=30)
+    branch = loop.state.ensure_branch(
+        "agent:agent-0001:svc:tcp-6379",
+        "NET-SERVICE-PIVOT",
+        "Probe redis Redis key-value store on 127.0.0.1:6379/tcp",
+        priority=96,
+        role="exploit_worker",
+        owner="root",
+        objective="Determine whether the database service exposes unauthenticated access.",
+        next_step="Create an exploit_worker and use nmap_scan safe/vuln scripts.",
+        crown_jewel="database data exposure or credential material",
+        evidence="nmap_scan 127.0.0.1:6379/tcp redis Redis key-value store",
+        watch_terms=["nmap_scan", "6379", "redis", "database"],
+    )
+
+    forced = loop._forced_branch_action(branch)
+
+    assert forced is not None
+    assert forced[0] == "agent_graph"
+    assert forced[1]["action"] == "create"
+    assert forced[1]["role"] == "exploit_worker"
+    assert forced[1]["skills"] == ["test_infra"]
+    assert "nmap_scan" in forced[1]["message"]
+
+
+@pytest.mark.asyncio
 async def test_agent_graph_worker_llm_invalid_json_repairs_to_valid_action():
     reg = ToolRegistry()
     graph = AgentGraphTool()

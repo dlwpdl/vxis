@@ -1235,6 +1235,9 @@ class ScanLoopDecisionPolicyMixin:
         crown_agent_create = self._agent_graph_crown_followup_create_action(branch)
         if crown_agent_create is not None:
             return crown_agent_create
+        service_agent_create = self._agent_graph_service_followup_create_action(branch)
+        if service_agent_create is not None:
+            return service_agent_create
         if "run_skill" not in self.registry.list_tools() or not allowed:
             return None
         if branch.owner == "agent_graph":
@@ -1334,6 +1337,75 @@ class ScanLoopDecisionPolicyMixin:
                 return ("run_skill", {"skill": skill, "target_url": target, "params": params})
             return None
         return None
+
+    def _agent_graph_service_followup_create_action(
+        self,
+        branch: BranchState,
+    ) -> tuple[str, dict[str, Any]] | None:
+        if branch.owner == "agent_graph" or not self.registry.has_tool("agent_graph"):
+            return None
+        if str(branch.vector_id or "") != "NET-SERVICE-PIVOT":
+            return None
+        if any(
+            child_id in self.state.branches
+            and self.state.branches[child_id].owner == "agent_graph"
+            for child_id in branch.child_ids
+        ):
+            return None
+        if (
+            branch.last_tool == "agent_graph"
+            and "created" in str(branch.last_summary or "").lower()
+        ):
+            return None
+
+        blob = " ".join(
+            str(value or "")
+            for value in (
+                branch.title,
+                branch.objective,
+                branch.next_step,
+                branch.crown_jewel,
+                branch.evidence,
+                " ".join(branch.watch_terms),
+            )
+        ).lower()
+        role = "recon_worker" if "http" in blob or "api" in blob else "exploit_worker"
+        skills: list[str] = []
+        if "http" in blob or "api" in blob:
+            skills = ["enumerate_endpoints", "test_misconfig"]
+        elif any(token in blob for token in ("database", "redis", "mongodb", "postgres", "mysql")):
+            skills = ["test_infra"]
+        elif any(token in blob for token in ("remote", "share", "file", "smb", "ftp", "nfs")):
+            skills = ["test_sensitive_files"]
+
+        task = (
+            f"Deepen nmap service pivot: {branch.title}. "
+            f"Evidence: {str(branch.evidence or branch.last_report)[:220]}"
+        )
+        args: dict[str, Any] = {
+            "action": "create",
+            "role": role,
+            "task": task[:320],
+            "objective": str(branch.objective or task)[:160],
+            "expected_artifact": (
+                "service-specific transcript or valid EvidenceArtifact with target, "
+                "control, payload, observed_delta, and repro_steps"
+            ),
+            "stop_condition": (
+                "stop after proving exploitable service impact or recording a concrete blocker"
+            ),
+            "escalation_trigger": (
+                "escalate if nmap service evidence implies database, remote access, admin, "
+                "file disclosure, or lateral-movement impact"
+            ),
+            "message": (
+                "Use bounded tools only. Prefer nmap_scan for service fingerprinting, "
+                "then choose http_request/browser/run_skill only when the service evidence fits."
+            ),
+        }
+        if skills:
+            args["skills"] = skills
+        return ("agent_graph", args)
 
     @staticmethod
     def _agent_graph_branch_gap_instruction(branch: BranchState) -> str:
