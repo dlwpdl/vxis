@@ -25,6 +25,7 @@ from vxis.agent.tool_registry import ToolRegistry, ToolResult
 _DEFAULT_CHILD_TOOLS = {
     "run_skill",
     "http_request",
+    "nmap_scan",
     "browser_navigate",
     "browser_analyze_dom",
 }

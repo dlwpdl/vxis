@@ -697,6 +697,7 @@ class ScanLoopAgentGraphMixin:
         allowed_child_tools = {
             "run_skill",
             "http_request",
+            "nmap_scan",
             "browser_navigate",
             "browser_analyze_dom",
         }
@@ -1095,7 +1096,7 @@ class ScanLoopAgentGraphMixin:
         budget = self._agent_graph_worker_context_budget()
         system_prompt = (
             "You are a bounded VXIS worker planner. Return JSON only. "
-            'Schema: {"tool":"run_skill|http_request|browser_navigate|browser_analyze_dom",'
+            'Schema: {"tool":"run_skill|http_request|nmap_scan|browser_navigate|browser_analyze_dom",'
             '"args":{},"evidence_intent":"short proof goal"}. '
             "Choose exactly one allowed tool. Do not report findings or finish scans. "
             "Positive evidence must preserve EvidenceArtifact fields: "
@@ -1326,6 +1327,18 @@ class ScanLoopAgentGraphMixin:
                 out["headers"] = compact_context_value(args["headers"], max_chars=600)
             if "body" in args:
                 out["body"] = trim_text_chars(args.get("body"), 1200)
+            return {"ok": True, "args": out}
+        if tool_name == "nmap_scan":
+            out = {"target": str(args.get("target") or self.state.target)}
+            for key in ("ports", "scripts"):
+                if key in args:
+                    out[key] = trim_text_chars(args.get(key), 80)
+            if "udp" in args:
+                out["udp"] = bool(args.get("udp"))
+            if "timing" in args:
+                out["timing"] = args.get("timing")
+            if "timeout" in args:
+                out["timeout"] = args.get("timeout")
             return {"ok": True, "args": out}
         if tool_name == "browser_navigate":
             return {"ok": True, "args": {"url": str(args.get("url") or self.state.target)}}

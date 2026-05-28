@@ -118,6 +118,8 @@ def action_capability(name: str, args: dict[str, Any] | Any) -> str:
         return "recon"
     if name.startswith("browser_"):
         return "browse"
+    if name in {"nmap_scan"}:
+        return "probe"
     if name in {"http_request"}:
         return "probe"
     if name in {"shell_exec", "python_exec"}:

@@ -1367,6 +1367,8 @@ class AgentGraphTool:
     @staticmethod
     def _allowed_tools_for_role(*, role: str, skills: list[str]) -> list[str]:
         tools = ["run_skill", "http_request"]
+        if role in {"recon_worker", "exploit_worker", "post_exploit_worker"}:
+            tools.append("nmap_scan")
         if role in {"recon_worker", "exploit_worker"}:
             tools.append("browser_navigate")
         if role in {"exploit_worker", "post_exploit_worker"}:

@@ -13,6 +13,7 @@ from vxis.agent.tools.hands_tools import (
     InterceptProxyTool,
 )
 from vxis.agent.tools.shell_tools import ShellExecTool
+from vxis.agent.tools.nmap_tools import NmapScanTool
 from vxis.agent.tools.python_tools import PythonExecTool
 from vxis.agent.tools.finding_tools import (
     ReportFindingTool,
@@ -46,6 +47,7 @@ __all__ = [
     "BrowserRenderTool",
     "InterceptProxyTool",
     "ShellExecTool",
+    "NmapScanTool",
     "PythonExecTool",
     "ReportFindingTool",
     "QueryFindingsTool",
@@ -82,6 +84,7 @@ def build_default_registry(
     reg.register(BrowserRenderTool())
     reg.register(InterceptProxyTool())
     reg.register(ShellExecTool(sandbox_key=sandbox_key))
+    reg.register(NmapScanTool(sandbox_key=sandbox_key))
     reg.register(PythonExecTool(sandbox_key=sandbox_key))
     reg.register(ReportFindingTool())
     reg.register(QueryFindingsTool())

@@ -1132,6 +1132,80 @@ async def test_agent_graph_worker_llm_disallowed_tool_repairs_to_allowed_skill()
 
 
 @pytest.mark.asyncio
+async def test_agent_graph_worker_llm_can_choose_bounded_nmap_scan():
+    reg = ToolRegistry()
+    graph = AgentGraphTool()
+    reg.register(graph)
+
+    class _NmapScan:
+        name = "nmap_scan"
+        description = "bounded nmap"
+        input_schema = {"type": "object"}
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def run(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return ToolResult(
+                ok=True,
+                summary="nmap_scan: 1 open service on localhost",
+                data={
+                    "open_count": 1,
+                    "open_ports": [{"port": "80", "service": "http"}],
+                },
+            )
+
+    nmap_scan = _NmapScan()
+    reg.register(nmap_scan)
+    brain = WorkerPlannerBrain(
+        response=json.dumps(
+            {
+                "tool": "nmap_scan",
+                "args": {
+                    "target": "http://localhost:3000",
+                    "ports": "top-100",
+                    "scripts": "default,http-title",
+                },
+                "evidence_intent": "map open services before exploit selection",
+            }
+        )
+    )
+    _loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=30,
+        brain=brain,
+    )
+    created = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "recon_worker",
+            "task": "Map exposed services with nmap before choosing deeper probes",
+        },
+    )
+
+    ran = await reg.dispatch(
+        "agent_graph",
+        {"action": "run", "agent_id": created.data["agent"]["id"]},
+    )
+
+    assert "nmap_scan" in created.data["agent"]["task_envelope"]["allowed_tools"]
+    assert ran.ok is True
+    assert nmap_scan.calls == [
+        {
+            "target": "http://localhost:3000",
+            "ports": "top-100",
+            "scripts": "default,http-title",
+        }
+    ]
+    assert ran.data["execution"]["tool"] == "nmap_scan"
+    assert ran.data["agent"]["status"] == "waiting"
+    assert "nmap_scan" in brain.calls[0]["system"]
+
+
+@pytest.mark.asyncio
 async def test_agent_graph_worker_llm_invalid_json_repairs_to_valid_action():
     reg = ToolRegistry()
     graph = AgentGraphTool()
