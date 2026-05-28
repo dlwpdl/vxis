@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from vxis.agent.scan_loop_policy import _DESKTOP_SKILLS
+from vxis.agent.scan_loop_execution_monitor import ScanLoopExecutionMonitorMixin
 from vxis.agent.scan_loop_run_auto import ScanLoopAutoOrchestrationMixin
 from vxis.agent.scan_loop_run_followups import ScanLoopRunFollowupMixin
 from vxis.agent.scan_loop_run_skills import ScanLoopScheduledSkillsMixin
@@ -12,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 class ScanLoopRunMixin(
-    ScanLoopAutoOrchestrationMixin, ScanLoopRunFollowupMixin, ScanLoopScheduledSkillsMixin
+    ScanLoopAutoOrchestrationMixin,
+    ScanLoopRunFollowupMixin,
+    ScanLoopScheduledSkillsMixin,
+    ScanLoopExecutionMonitorMixin,
 ):
     async def run(self) -> dict[str, Any]:
         import json as _json
@@ -48,6 +52,8 @@ class ScanLoopRunMixin(
         # time and inject a synthetic "DEDUP" result instead of re-running.
         # This breaks the loop regardless of whether Brain's prompt adherence.
         _call_counts: dict[str, int] = {}
+        _stagnant_action_counts: dict[str, int] = {}
+        _stagnant_monitor_keys: set[str] = set()
 
         # Phase B fix: baseline tracking + auto-finding extraction.
         # When Brain runs a probe that returns "status size path" rows, we
@@ -863,6 +869,7 @@ class ScanLoopRunMixin(
                             else:
                                 continue
 
+                _pre_progress_marker = self._execution_progress_marker()
                 self._emit_action_progress(name, args, "Executing")
                 result = await self.registry.dispatch(name, args)
                 if name == "run_skill" and isinstance(args, dict) and not result.ok:
@@ -960,6 +967,33 @@ class ScanLoopRunMixin(
                                 _promote_params,
                                 alias=_promote_alias,
                             )
+
+                _post_progress_marker = self._execution_progress_marker()
+                if _post_progress_marker != _pre_progress_marker:
+                    _call_counts.clear()
+                    _stagnant_action_counts.clear()
+                    _stagnant_monitor_keys.clear()
+                else:
+                    _stagnant_count = _stagnant_action_counts.get(key, 0) + 1
+                    _stagnant_action_counts[key] = _stagnant_count
+                    if self._maybe_emit_execution_monitor(
+                        action_key=key,
+                        name=name,
+                        args=args,
+                        stagnant_count=_stagnant_count,
+                        branch_ids=_action_branch_ids,
+                        candidate_ids=_action_candidate_ids,
+                        emitted_keys=_stagnant_monitor_keys,
+                    ):
+                        logger.warning(
+                            "iter %d: execution monitor escalated stagnant action %s count=%d",
+                            self.state.iteration,
+                            name,
+                            _stagnant_count,
+                        )
+                        self._emit_control_plane(
+                            f"Execution monitor escalated repeated no-progress action: {name}"
+                        )
 
                 # Phase 4: record sandbox invocations for VC scoring.
                 # Every shell_exec / python_exec call — whether ok or not —

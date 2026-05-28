@@ -1922,6 +1922,105 @@ async def test_vector_candidates_record_attempt_outcomes_for_brain_tools():
 
 
 @pytest.mark.asyncio
+async def test_execution_monitor_escalates_repeated_no_progress_action():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+
+    class HttpRequestTool:
+        name = "http_request"
+        description = "http"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            return ToolResult(ok=True, summary="HTTP 404 unchanged", data={"status": 404})
+
+    reg.register(HttpRequestTool())
+
+    decisions = iter([
+        [("http_request", {"url": "http://localhost:3000/health"})],
+        [("http_request", {"url": "http://localhost:3000/health"})],
+        [("finish_scan", {})],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=3,
+        brain=SimpleNamespace(_provider="ollama", _model="qwen-30b"),
+    )
+    loop._focus_branch = lambda: None  # type: ignore[method-assign]
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    assert any(
+        item["stage"] == "monitor"
+        and item["status"] == "escalated"
+        and item["title"] == "repeated_action_no_progress"
+        for item in result["review_queue"]
+    )
+    assert any("monitor: repeated http_request" in note for note in result["shared_notes"])
+    assert any(
+        isinstance(message.get("content"), dict)
+        and "EXECUTION MONITOR" in str(message["content"].get("hint", ""))
+        for message in loop.state.messages
+    )
+
+
+@pytest.mark.asyncio
+async def test_execution_monitor_resets_after_progress():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+
+    class HttpRequestTool:
+        name = "http_request"
+        description = "http"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            return ToolResult(ok=True, summary="HTTP 404 unchanged", data={"status": 404})
+
+    reg.register(HttpRequestTool())
+
+    decisions = iter([
+        [("http_request", {"url": "http://localhost:3000/health"})],
+        [("report_finding", {
+            "title": "Debug endpoint exposes version",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "Debug endpoint leaks build metadata.",
+            "evidence": "GET /debug -> 200 OK build=dev",
+        })],
+        [("http_request", {"url": "http://localhost:3000/health"})],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=3,
+        brain=SimpleNamespace(_provider="ollama", _model="qwen-30b"),
+    )
+    loop._focus_branch = lambda: None  # type: ignore[method-assign]
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    assert not any(item["stage"] == "monitor" for item in result["review_queue"])
+
+
+@pytest.mark.asyncio
 async def test_finish_scan_rejected_when_high_priority_candidates_unattempted():
     reg = ToolRegistry()
     reg.register(FinishTool())
