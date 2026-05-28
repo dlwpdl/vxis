@@ -36,8 +36,15 @@ class ToolRegistry:
         return self._tools.get(name)
 
     def describe_all(self) -> list[dict[str, Any]]:
+        from vxis.agent.egress_contract import describe_tool_target_egress
+
         return [
-            {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+            {
+                "name": t.name,
+                "description": t.description,
+                "input_schema": t.input_schema,
+                "target_egress": describe_tool_target_egress(t.name),
+            }
             for t in self._tools.values()
         ]
 

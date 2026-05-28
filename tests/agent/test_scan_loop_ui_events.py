@@ -80,6 +80,11 @@ def test_control_plane_exposes_ghost_coverage() -> None:
     assert control_events[-1]["ghost"]["active"] is True
     assert control_events[-1]["ghost"]["coverage"]["shell_exec"] == "env_proxy"
     assert control_events[-1]["ghost"]["coverage"]["nmap_scan"] == "direct_raw_socket"
+    assert control_events[-1]["egress_contract"]["errors"] == []
+    egress_tools = {
+        item["name"]: item for item in control_events[-1]["egress_contract"]["tools"]
+    }
+    assert egress_tools["agent_graph"]["mode"] == "delegated"
 
 
 def test_scan_loop_spawns_followup_branches_from_finding() -> None:

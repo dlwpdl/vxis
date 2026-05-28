@@ -119,9 +119,10 @@ In-memory store per scan. Auto-assigns `VXIS-0001`, `VXIS-0002`, ... IDs.
 
 1. Create the tool class implementing the `BrainTool` protocol (`name`, `description`, `input_schema`, `async run(**kwargs) -> ToolResult`).
 2. Add it to `__init__.py` imports + `__all__` + `build_default_registry()`.
-3. Write tests in `tests/agent/tools/test_<new>_tools.py` — at minimum: protocol conformance, happy path, one failure mode, registry integration.
-4. If the tool manages state, include a `_reset_for_tests()` module-level helper.
-5. Update this README's tool table.
+3. Add its target-facing egress contract to `vxis.agent.egress_contract.TOOL_TARGET_EGRESS`.
+4. Write tests in `tests/agent/tools/test_<new>_tools.py` — at minimum: protocol conformance, happy path, one failure mode, registry integration.
+5. If the tool manages state, include a `_reset_for_tests()` module-level helper.
+6. Update this README's tool table.
 
 ## Forward-compatibility convention
 

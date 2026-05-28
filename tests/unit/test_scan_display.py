@@ -331,6 +331,14 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                 },
                 "warning": "nmap_scan uses raw TCP/UDP sockets",
             },
+            "egress_contract": {
+                "counts": {"low": 4, "partial": 2, "direct": 1, "delegated": 2},
+                "warnings": [
+                    "nmap_scan: direct egress (direct_raw_socket)",
+                    "shell_exec: partial egress (env_proxy)",
+                ],
+                "errors": [],
+            },
         },
     )
     display.handle_event(
@@ -395,6 +403,9 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "Ghost" in control_text
     assert "env_proxy" in control_text
     assert "direct_raw_socket" in control_text
+    assert "Egress" in control_text
+    assert "partial=2" in control_text
+    assert "direct=1" in control_text
 
     assert "frontier_loose" in display._runtime_summary()
 

@@ -76,6 +76,7 @@ class ScanLiveDisplay:
         self.telemetry: dict = {}
         self.proxy: dict = {}
         self.ghost_runtime: dict = {}
+        self.egress_contract: dict = {}
         self.start_time = time.monotonic()
         self.score: dict | None = None
         self.last_error: str | None = None
@@ -227,6 +228,7 @@ class ScanLiveDisplay:
             self.telemetry = dict(data.get("telemetry") or {})
             self.proxy = dict(data.get("proxy") or {})
             self.ghost_runtime = dict(data.get("ghost") or {})
+            self.egress_contract = dict(data.get("egress_contract") or {})
             note = (data.get("note") or "")[:100]
             if note:
                 self.loop_status = note
@@ -753,6 +755,22 @@ class ScanLiveDisplay:
             warning = str(self.ghost_runtime.get("warning") or "")[:78]
             if warning:
                 lines.append(f"[dim]{warning}[/dim]")
+
+        if self.egress_contract:
+            counts = self.egress_contract.get("counts") or {}
+            warnings = list(self.egress_contract.get("warnings") or [])
+            errors = list(self.egress_contract.get("errors") or [])
+            lines.append("[bold]Egress[/bold]")
+            lines.append(
+                "covered={covered} partial={partial} direct={direct} delegated={delegated}".format(
+                    covered=int(counts.get("low") or 0),
+                    partial=int(counts.get("partial") or 0),
+                    direct=int(counts.get("direct") or 0),
+                    delegated=int(counts.get("delegated") or 0),
+                )
+            )
+            for item in (errors or warnings)[:2]:
+                lines.append(f"[dim]{str(item)[:76]}[/dim]")
 
         if self.todo_items:
             lines.append("[bold]Todos[/bold]")

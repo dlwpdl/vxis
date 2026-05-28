@@ -80,6 +80,8 @@ def test_build_default_registry_describe_all_shape_matches_think_in_loop():
         assert "name" in entry
         assert "description" in entry
         assert "input_schema" in entry
+        assert "target_egress" in entry
         assert isinstance(entry["name"], str)
         assert isinstance(entry["description"], str)
         assert isinstance(entry["input_schema"], dict)
+        assert isinstance(entry["target_egress"], dict)
