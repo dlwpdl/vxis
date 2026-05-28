@@ -140,13 +140,17 @@ class ScanAgentLoop(
     def _install_agent_graph_executor(self) -> None:
         tool = self.registry.get_tool("agent_graph")
         set_executor = getattr(tool, "set_executor", None)
+        set_persistence_path = getattr(tool, "set_persistence_path", None)
         executor = self._run_agent_graph_child_turn
+        agent_graph_snapshot_path = os.environ.get("VXIS_AGENT_GRAPH_SNAPSHOT")
         if _env_flag("VXIS_USE_SDK_AGENT_RUNTIME"):
             from vxis.agent.sdk_runtime import SDKChildAgentLoop, SDKRunPaths
 
             config = getattr(getattr(self, "brain", None), "_hybrid_model_config", None)
             worker_endpoint = getattr(config, "worker", None)
             run_dir = os.environ.get("VXIS_SDK_RUN_DIR") or ".vxis/sdk-runtime/latest"
+            run_paths = SDKRunPaths.for_run_dir(run_dir)
+            agent_graph_snapshot_path = str(run_paths.runtime_dir / "agent_graph.json")
             try:
                 background_worker_concurrency = int(
                     os.environ.get(
@@ -159,7 +163,7 @@ class ScanAgentLoop(
                 background_worker_concurrency = 1
             self._sdk_agent_loop = SDKChildAgentLoop(
                 registry=self.registry,
-                run_paths=SDKRunPaths.for_run_dir(run_dir),
+                run_paths=run_paths,
                 target=self.state.target,
                 provider=str(getattr(worker_endpoint, "provider", "") or "openai"),
                 model=str(getattr(worker_endpoint, "model", "") or "") or None,
@@ -168,6 +172,8 @@ class ScanAgentLoop(
                 background_worker_concurrency=max(1, background_worker_concurrency),
             )
             executor = self._sdk_agent_loop.run_turn
+        if callable(set_persistence_path) and agent_graph_snapshot_path:
+            set_persistence_path(agent_graph_snapshot_path)
         if callable(set_executor):
             set_executor(executor)
         set_target_kind = getattr(tool, "set_target_kind", None)

@@ -427,6 +427,43 @@ async def test_agent_graph_create_and_run_capture_contract_and_artifact():
 
 
 @pytest.mark.asyncio
+async def test_agent_graph_tool_restores_nodes_messages_and_counters(tmp_path):
+    snapshot_path = tmp_path / "agent_graph.json"
+    tool = AgentGraphTool()
+    tool.set_persistence_path(snapshot_path)
+
+    created = await tool.run(
+        action="create",
+        role="exploit_worker",
+        task="Prove IDOR on /api/orders/2",
+        message="Collect baseline and payload evidence.",
+    )
+    agent_id = created.data["agent"]["id"]
+    sent = await tool.run(
+        action="send",
+        agent_id=agent_id,
+        message="Narrow to the order ownership boundary.",
+    )
+
+    restored = AgentGraphTool()
+    restored.set_persistence_path(snapshot_path)
+    viewed = await restored.run(action="view", agent_id=agent_id)
+    created_again = await restored.run(
+        action="create",
+        role="recon_worker",
+        task="Map admin routes",
+    )
+
+    assert created.ok is True
+    assert sent.ok is True
+    assert snapshot_path.exists()
+    assert viewed.ok is True
+    assert viewed.data["agent"]["message_count"] == 2
+    assert "Narrow to the order ownership" in viewed.data["agent"]["messages"][-1]["body"]
+    assert created_again.data["agent"]["id"] == "agent-0002"
+
+
+@pytest.mark.asyncio
 async def test_agent_graph_structured_evidence_artifact_allows_positive_finish():
     graph = AgentGraphTool()
 

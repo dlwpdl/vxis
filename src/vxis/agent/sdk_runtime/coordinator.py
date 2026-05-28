@@ -353,15 +353,7 @@ class SDKAgentCoordinator:
         return drilldowns
 
     async def restore(self, snapshot: dict[str, Any]) -> None:
-        raw_agents = snapshot.get("agents") if isinstance(snapshot, dict) else {}
-        records: dict[str, SDKAgentRecord] = {}
-        if isinstance(raw_agents, dict):
-            for agent_id, value in raw_agents.items():
-                if not isinstance(value, dict):
-                    continue
-                record = SDKAgentRecord.from_dict({"agent_id": agent_id, **value})
-                if record.agent_id:
-                    records[record.agent_id] = record
+        records = self._records_from_snapshot(snapshot)
         async with self._lock:
             self._records = records
             for agent_id in records:
@@ -376,6 +368,34 @@ class SDKAgentCoordinator:
             return False
         await self.restore(data)
         return True
+
+    def restore_from_path_sync(self, path: str | Path | None = None) -> bool:
+        source = Path(path) if path is not None else self.snapshot_path
+        if source is None or not source.exists():
+            return False
+        try:
+            data = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(data, dict):
+            return False
+        records = self._records_from_snapshot(data)
+        self._records = records
+        for agent_id in records:
+            self._runtimes.setdefault(agent_id, SDKAgentRuntime())
+        return True
+
+    def attach_session_sync(self, agent_id: str, session: "Session") -> bool:
+        if agent_id not in self._records:
+            return False
+        self._runtimes.setdefault(agent_id, SDKAgentRuntime()).session = session
+        return True
+
+    def record_ids(self) -> list[str]:
+        return list(self._records)
+
+    def records_snapshot(self) -> list[dict[str, Any]]:
+        return [record.to_dict() for record in self._records.values()]
 
     async def close_sessions(self) -> None:
         async with self._lock:
@@ -392,6 +412,19 @@ class SDKAgentCoordinator:
         if record is None:
             raise KeyError(f"unknown SDK agent: {agent_id}")
         return record
+
+    @staticmethod
+    def _records_from_snapshot(snapshot: dict[str, Any]) -> dict[str, SDKAgentRecord]:
+        raw_agents = snapshot.get("agents") if isinstance(snapshot, dict) else {}
+        records: dict[str, SDKAgentRecord] = {}
+        if isinstance(raw_agents, dict):
+            for agent_id, value in raw_agents.items():
+                if not isinstance(value, dict):
+                    continue
+                record = SDKAgentRecord.from_dict({"agent_id": agent_id, **value})
+                if record.agent_id:
+                    records[record.agent_id] = record
+        return records
 
     async def _record_event(
         self,

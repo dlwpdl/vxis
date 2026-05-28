@@ -88,6 +88,11 @@ class SDKChildAgentLoop:
         self._background_results: dict[str, ToolResult] = {}
         self._background_absorbed_agent_ids: set[str] = set()
         self._background_semaphores: dict[int, asyncio.Semaphore] = {}
+        self.restored_from_snapshot = self.coordinator.restore_from_path_sync()
+        if self.restored_from_snapshot:
+            for agent_id in self.coordinator.record_ids():
+                session = open_sdk_agent_session(agent_id, self.paths.agents_db_path)
+                self.coordinator.attach_session_sync(agent_id, session)
 
     async def run_turn(self, agent: dict[str, Any], instruction: str = "") -> ToolResult:
         agent_id = str(agent.get("id") or agent.get("agent_id") or "").strip()
@@ -247,9 +252,30 @@ class SDKChildAgentLoop:
             ),
             reverse=True,
         )
+        if not agents and self.restored_from_snapshot:
+            restored_records = sorted(
+                self.coordinator.records_snapshot(),
+                key=lambda item: (
+                    str(item.get("agent_id") or "") == "root",
+                    str(item.get("updated_at") or ""),
+                    str(item.get("agent_id") or ""),
+                ),
+            )
+            agents = [
+                {
+                    "agent": record,
+                    "session_items": [],
+                    "events": self.journal.load_events(
+                        agent_id=str(record.get("agent_id") or ""),
+                        limit=4,
+                    ),
+                }
+                for record in restored_records
+            ]
         return {
             "enabled": True,
             "run_dir": str(self.paths.run_dir),
+            "restored": self.restored_from_snapshot,
             "agents": compact_context_value(agents[:limit], max_chars=900),
             "events": compact_context_value(self.journal.load_events(limit=limit * 2), max_chars=700),
         }

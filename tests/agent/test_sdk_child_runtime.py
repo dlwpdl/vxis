@@ -486,6 +486,69 @@ async def test_sdk_runtime_syncs_agent_graph_create_send_before_worker_run(monke
 
 
 @pytest.mark.asyncio
+async def test_sdk_runtime_restores_agent_graph_and_sessions_across_loop_restart(
+    monkeypatch, tmp_path
+):
+    run_dir = tmp_path / "sdk-run"
+    monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
+    monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(run_dir))
+    registry = ToolRegistry()
+    registry.register(AgentGraphTool())
+    registry.register(RunSkillTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+
+    created = await registry.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Prove IDOR on /api/orders/2",
+            "message": "Collect baseline and payload evidence.",
+        },
+    )
+    agent_id = created.data["agent"]["id"]
+    await loop._sync_agent_graph_result_to_sdk_runtime(
+        name="agent_graph",
+        args={"action": "create"},
+        result=created,
+    )
+    await loop._sdk_agent_loop.coordinator.close_sessions()
+
+    restored_registry = ToolRegistry()
+    restored_registry.register(AgentGraphTool())
+    restored_registry.register(RunSkillTool())
+    restored_loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=restored_registry,
+        max_iters=3,
+    )
+    restored_loop._sdk_agent_loop.runner = FakeSDKRunner()
+
+    viewed = await restored_registry.dispatch(
+        "agent_graph",
+        {"action": "view", "agent_id": agent_id},
+    )
+    record = await restored_loop._sdk_agent_loop.coordinator.get_record(agent_id)
+    control_snapshot = restored_loop._sdk_agent_loop.control_plane_snapshot()
+    ran = await restored_registry.dispatch(
+        "agent_graph",
+        {"action": "run", "agent_id": agent_id},
+    )
+
+    assert viewed.ok is True
+    assert viewed.data["agent"]["id"] == agent_id
+    assert record is not None and record.status == "running"
+    assert control_snapshot["restored"] is True
+    assert control_snapshot["agents"][0]["agent"]["agent_id"] == agent_id
+    assert ran.ok is True
+    assert ran.data["agent"]["status"] == "finished"
+    assert (run_dir / "runtime" / "agent_graph.json").exists()
+    assert restored_loop._sdk_agent_loop.paths.agents_db_path.exists()
+
+    await restored_loop._sdk_agent_loop.coordinator.close_sessions()
+
+
+@pytest.mark.asyncio
 async def test_sdk_runtime_sync_does_not_reopen_completed_worker(monkeypatch, tmp_path):
     monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
     monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(tmp_path / "sdk-run"))

@@ -8,9 +8,12 @@ the same protocol without changing the Brain-facing tool contract.
 
 from __future__ import annotations
 
+import json
 import inspect
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable
 
 from vxis.agent.context_budget import compact_context_value, resolve_context_budget, trim_text_chars
@@ -133,6 +136,7 @@ _SKILL_RESULT_FAMILIES = {
     "test_business_logic": {"auth", "idor", "admin", "data"},
     "test_misconfig": {"disclosure", "credential", "admin"},
 }
+_SNAPSHOT_SCHEMA = "vxis.agent_graph.snapshot.v1"
 
 
 @dataclass
@@ -721,9 +725,55 @@ class AgentGraphTool:
         self._max_child_runs = max(1, int(max_child_runs))
         self._target_kind = "web"
         self._worker_budget = resolve_context_budget("worker", provider="llamacpp", model="local")
+        self._persistence_path: Path | None = None
 
     def set_executor(self, executor: AgentGraphExecutor | None) -> None:
         self._executor = executor
+
+    def set_persistence_path(self, path: str | Path | None, *, restore: bool = True) -> None:
+        self._persistence_path = Path(path) if path else None
+        if restore:
+            self.restore_snapshot()
+
+    def restore_snapshot(self, path: str | Path | None = None) -> bool:
+        source = Path(path) if path is not None else self._persistence_path
+        if source is None or not source.exists():
+            return False
+        try:
+            payload = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        nodes_raw = payload.get("nodes") if isinstance(payload, dict) else None
+        if not isinstance(nodes_raw, list):
+            return False
+        nodes: dict[str, AgentGraphNode] = {}
+        for item in nodes_raw:
+            if not isinstance(item, dict):
+                continue
+            node = self._node_from_snapshot(item)
+            if node.id:
+                nodes[node.id] = node
+        self._nodes = nodes
+        self._agent_counter = max(
+            self._counter_from_id("agent-", node_id) for node_id in [*nodes.keys(), "agent-0000"]
+        )
+        self._message_counter = max(
+            [
+                self._counter_from_id("msg-", message.id)
+                for node in nodes.values()
+                for message in node.messages
+            ]
+            or [0]
+        )
+        self._execution_counter = max(
+            [
+                self._counter_from_id("exec-", execution.id)
+                for node in nodes.values()
+                for execution in node.executions
+            ]
+            or [0]
+        )
+        return True
 
     def set_target_kind(self, target_kind: Any) -> None:
         self._target_kind = str(getattr(target_kind, "value", target_kind) or "web").strip().lower()
@@ -801,6 +851,7 @@ class AgentGraphTool:
             duplicate.skill_context = skill_context or duplicate.skill_context
             duplicate.status = "running"
             duplicate.updated_at = _now_iso()
+            self._save_snapshot()
             return ToolResult(
                 ok=True,
                 data={
@@ -833,6 +884,7 @@ class AgentGraphTool:
         )
         self._append_message(node, sender="root", recipient=agent_id, body=message)
         self._nodes[agent_id] = node
+        self._save_snapshot()
 
         return ToolResult(
             ok=True,
@@ -882,6 +934,7 @@ class AgentGraphTool:
         )
         node.status = "running"
         node.updated_at = _now_iso()
+        self._save_snapshot()
         return ToolResult(
             ok=True,
             data={"agent": self._node_to_dict(node)},
@@ -982,6 +1035,7 @@ class AgentGraphTool:
                     recipient="root",
                     body=evidence_error,
                 )
+                self._save_snapshot()
                 return ToolResult(
                     ok=False,
                     data={
@@ -1009,6 +1063,7 @@ class AgentGraphTool:
             recipient="root",
             body=executor_result.summary or f"child turn {execution.id} completed",
         )
+        self._save_snapshot()
         return ToolResult(
             ok=executor_result.ok,
             data={
@@ -1137,6 +1192,7 @@ class AgentGraphTool:
         node.escalation = self._build_escalation_state(node)
         node.updated_at = _now_iso()
         self._append_message(node, sender=agent_id, recipient="root", body=result)
+        self._save_snapshot()
         return ToolResult(
             ok=True,
             data={"agent": self._node_to_dict(node), "active_agents": self._active_count()},
@@ -1232,6 +1288,142 @@ class AgentGraphTool:
         )
         node.executions.append(execution)
         return execution
+
+    def _save_snapshot(self) -> None:
+        if self._persistence_path is None:
+            return
+        payload = {
+            "schema": _SNAPSHOT_SCHEMA,
+            "saved_at": _now_iso(),
+            "counters": {
+                "agent": self._agent_counter,
+                "message": self._message_counter,
+                "execution": self._execution_counter,
+            },
+            "nodes": [self._node_snapshot(node) for node in self._nodes.values()],
+        }
+        self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
+        encoded = json.dumps(payload, ensure_ascii=False, default=str)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(self._persistence_path.parent),
+            prefix=f".{self._persistence_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp.write(encoded)
+            tmp_path = Path(tmp.name)
+        tmp_path.replace(self._persistence_path)
+
+    @staticmethod
+    def _node_snapshot(node: AgentGraphNode) -> dict[str, Any]:
+        return {
+            "id": node.id,
+            "role": node.role,
+            "task": node.task,
+            "status": node.status,
+            "created_at": node.created_at,
+            "updated_at": node.updated_at,
+            "parent_id": node.parent_id,
+            "skills": list(node.skills),
+            "skill_context": node.skill_context,
+            "task_envelope": dict(node.task_envelope),
+            "result_package": dict(node.result_package),
+            "escalation": dict(node.escalation),
+            "result": node.result,
+            "messages": [
+                {
+                    "id": message.id,
+                    "sender": message.sender,
+                    "recipient": message.recipient,
+                    "body": message.body,
+                    "created_at": message.created_at,
+                }
+                for message in node.messages
+            ],
+            "executions": [
+                {
+                    "id": execution.id,
+                    "tool": execution.tool,
+                    "args": dict(execution.args),
+                    "ok": execution.ok,
+                    "summary": execution.summary,
+                    "data": dict(execution.data),
+                    "error": execution.error,
+                    "created_at": execution.created_at,
+                }
+                for execution in node.executions
+            ],
+        }
+
+    @staticmethod
+    def _node_from_snapshot(value: dict[str, Any]) -> AgentGraphNode:
+        messages = []
+        for item in value.get("messages") or []:
+            if not isinstance(item, dict):
+                continue
+            messages.append(
+                AgentGraphMessage(
+                    id=str(item.get("id") or ""),
+                    sender=str(item.get("sender") or "root"),
+                    recipient=str(item.get("recipient") or value.get("id") or ""),
+                    body=str(item.get("body") or ""),
+                    created_at=str(item.get("created_at") or _now_iso()),
+                )
+            )
+        executions = []
+        for item in value.get("executions") or []:
+            if not isinstance(item, dict):
+                continue
+            args = item.get("args") if isinstance(item.get("args"), dict) else {}
+            data = item.get("data") if isinstance(item.get("data"), dict) else {}
+            executions.append(
+                AgentGraphExecution(
+                    id=str(item.get("id") or ""),
+                    tool=str(item.get("tool") or "child_turn"),
+                    args=dict(args),
+                    ok=bool(item.get("ok")),
+                    summary=str(item.get("summary") or ""),
+                    data=dict(data),
+                    error=str(item.get("error")) if item.get("error") is not None else None,
+                    created_at=str(item.get("created_at") or _now_iso()),
+                )
+            )
+        task_envelope = (
+            value.get("task_envelope") if isinstance(value.get("task_envelope"), dict) else {}
+        )
+        result_package = (
+            value.get("result_package") if isinstance(value.get("result_package"), dict) else {}
+        )
+        escalation = value.get("escalation") if isinstance(value.get("escalation"), dict) else {}
+        return AgentGraphNode(
+            id=str(value.get("id") or ""),
+            role=str(value.get("role") or "recon_worker"),
+            task=str(value.get("task") or ""),
+            status=str(value.get("status") or "running"),
+            created_at=str(value.get("created_at") or _now_iso()),
+            updated_at=str(value.get("updated_at") or _now_iso()),
+            parent_id=str(value["parent_id"]) if value.get("parent_id") else None,
+            skills=_clean_skills(value.get("skills")),
+            skill_context=str(value.get("skill_context") or ""),
+            task_envelope=dict(task_envelope),
+            result_package=dict(result_package),
+            escalation=dict(escalation),
+            result=str(value.get("result") or ""),
+            messages=messages,
+            executions=executions,
+        )
+
+    @staticmethod
+    def _counter_from_id(prefix: str, value: str) -> int:
+        text = str(value or "")
+        if not text.startswith(prefix):
+            return 0
+        try:
+            return int(text.removeprefix(prefix))
+        except ValueError:
+            return 0
 
     def _active_count(self) -> int:
         return sum(1 for node in self._nodes.values() if node.status in _ACTIVE_STATUSES)
