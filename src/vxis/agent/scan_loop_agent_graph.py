@@ -57,7 +57,28 @@ _WORKER_PLANNER_UNAVAILABLE_REASONS = {
 
 class ScanLoopAgentGraphMixin:
     def _agent_graph_agents_from_messages(self) -> list[dict[str, Any]]:
-        return agent_graph_agents_from_messages(self.state.messages)
+        agents_by_id: dict[str, dict[str, Any]] = {
+            str(agent.get("id") or ""): dict(agent)
+            for agent in agent_graph_agents_from_messages(self.state.messages)
+            if str(agent.get("id") or "")
+        }
+        try:
+            tool = self.registry.get_tool("agent_graph")
+            snapshot_agents = getattr(tool, "snapshot_agents", None)
+            if callable(snapshot_agents):
+                for agent in snapshot_agents(limit=20, active_only=False, include_messages=True):
+                    agent_id = str(agent.get("id") or "")
+                    if agent_id:
+                        agents_by_id[agent_id] = dict(agent)
+        except Exception:
+            pass
+
+        def _sort_key(item: dict[str, Any]) -> tuple[int, str, str]:
+            status = str(item.get("status") or "")
+            active_rank = 0 if status in {"running", "waiting"} else 1
+            return (active_rank, str(item.get("created_at") or ""), str(item.get("id") or ""))
+
+        return sorted(agents_by_id.values(), key=_sort_key)
 
     def _agent_graph_director_brief(
         self,

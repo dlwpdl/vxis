@@ -517,10 +517,12 @@ async def test_sdk_runtime_restores_agent_graph_and_sessions_across_loop_restart
     restored_registry = ToolRegistry()
     restored_registry.register(AgentGraphTool())
     restored_registry.register(RunSkillTool())
+    restored_events: list[tuple[str, dict]] = []
     restored_loop = ScanAgentLoop(
         target="http://localhost:3000",
         registry=restored_registry,
         max_iters=3,
+        event_callback=lambda event_type, data: restored_events.append((event_type, data)),
     )
     restored_loop._sdk_agent_loop.runner = FakeSDKRunner()
 
@@ -530,6 +532,8 @@ async def test_sdk_runtime_restores_agent_graph_and_sessions_across_loop_restart
     )
     record = await restored_loop._sdk_agent_loop.coordinator.get_record(agent_id)
     control_snapshot = restored_loop._sdk_agent_loop.control_plane_snapshot()
+    restored_loop._emit_control_plane("restored runtime")
+    live_control = [data for event_type, data in restored_events if event_type == "control_plane"][-1]
     ran = await restored_registry.dispatch(
         "agent_graph",
         {"action": "run", "agent_id": agent_id},
@@ -540,6 +544,8 @@ async def test_sdk_runtime_restores_agent_graph_and_sessions_across_loop_restart
     assert record is not None and record.status == "running"
     assert control_snapshot["restored"] is True
     assert control_snapshot["agents"][0]["agent"]["agent_id"] == agent_id
+    assert live_control["agents"][0]["id"] == agent_id
+    assert live_control["agents"][0]["sdk_runtime"]["agent"]["agent_id"] == agent_id
     assert ran.ok is True
     assert ran.data["agent"]["status"] == "finished"
     assert (run_dir / "runtime" / "agent_graph.json").exists()

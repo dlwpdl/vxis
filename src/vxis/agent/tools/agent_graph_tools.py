@@ -792,6 +792,19 @@ class AgentGraphTool:
             context_window=context_window,
         )
 
+    def snapshot_agents(
+        self,
+        *,
+        limit: int = 20,
+        active_only: bool = False,
+        include_messages: bool = True,
+    ) -> list[dict[str, Any]]:
+        return self._limited_nodes(
+            {"limit": limit},
+            active_only=active_only,
+            include_messages=include_messages,
+        )
+
     async def run(self, **kwargs: Any) -> ToolResult:
         action = _clean_text(kwargs.get("action")).lower()
         if action not in _VALID_ACTIONS:
