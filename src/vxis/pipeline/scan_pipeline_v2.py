@@ -77,6 +77,31 @@ def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
     return max(minimum, value)
 
 
+def _split_proxy_env(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _ghost_proxy_pool_from_config(config: Any | None) -> list[str]:
+    proxies: list[str] = []
+    if config is not None:
+        proxies.extend(_split_proxy_env(getattr(config, "proxy_pool", [])))
+    proxies.extend(_split_proxy_env(os.environ.get("VXIS_PROXY_POOL", "")))
+    proxies.extend(_split_proxy_env(os.environ.get("VXIS_GHOST_PROXIES", "")))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for proxy in proxies:
+        if proxy in seen:
+            continue
+        seen.add(proxy)
+        deduped.append(proxy)
+    return deduped
+
+
 def _resolve_scan_loop_budget() -> tuple[int, int, int]:
     """Return (soft_max, hard_max, extension_chunk) for the Brain loop."""
     provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "").strip().lower()
@@ -640,15 +665,36 @@ class ScanPipeline:
         }
         ctx.launcher_notes = list(runtime.shared_notes)  # type: ignore[attr-defined]
         ctx.target_hints = dict(target_hints or {})  # type: ignore[attr-defined]
+        ghost_activated_here = False
 
         # Ghost activation — preserve behavior from legacy pipeline
         try:
+            from vxis.ghost.layer import ghost_layer
             from vxis.ghost.trigger import parse_ghost_trigger
 
             _activated, target = parse_ghost_trigger(runtime.resolved_target, self.config)
             ctx.target = target
+            if _activated:
+                proxy_pool = _ghost_proxy_pool_from_config(self.config)
+                ghost_layer.activate(proxy_pool=proxy_pool)
+                ghost_activated_here = True
+                ctx.runtime_profile["metadata"]["ghost_active"] = True  # type: ignore[index]
+                ctx.runtime_profile["metadata"]["ghost_proxy_count"] = len(proxy_pool)  # type: ignore[index]
+                self._emit(
+                    "ghost",
+                    {
+                        "active": True,
+                        "proxy_count": len(proxy_pool),
+                        "target": ctx.target,
+                    },
+                )
+                logger.info(
+                    "[Ghost] activated for ScanPipelineV2 target=%s proxies=%d",
+                    ctx.target,
+                    len(proxy_pool),
+                )
         except Exception:
-            pass  # Ghost optional; missing = no-op
+            logger.exception("Ghost activation failed — continuing without ghost transport")
 
         # 3. Reset per-scan state (findings + brain counters + playbook dedup)
         _reset_finding_store()
@@ -834,6 +880,11 @@ class ScanPipeline:
                 await shutdown_proxy_runtime()
             except Exception:
                 pass
+            if ghost_activated_here:
+                try:
+                    ghost_layer.deactivate()
+                except Exception:
+                    logger.exception("Ghost deactivation failed after scan_loop error")
             _set_finding_event_callback(None)
             # Still attach a score so the CLI doesn't crash
             ctx.vxis_score = _SimpleScore(total=0.0, grade="F")
@@ -1071,6 +1122,11 @@ class ScanPipeline:
         except Exception:
             logger.exception("Failed to record scan retrospective")
 
+        if ghost_activated_here:
+            try:
+                ghost_layer.deactivate()
+            except Exception:
+                logger.exception("Ghost deactivation failed after scan")
         _set_finding_event_callback(None)
         return ctx
 

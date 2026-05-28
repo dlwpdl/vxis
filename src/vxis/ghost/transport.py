@@ -1,7 +1,6 @@
 """GhostTransport — httpx AsyncBaseTransport 래퍼.
 
 요청마다 GhostLayer에서 proxy/UA를 받아 적용.
-curl_cffi가 설치되어 있으면 Chrome TLS 핑거프린트 사용.
 """
 from __future__ import annotations
 
@@ -16,10 +15,10 @@ logger = logging.getLogger(__name__)
 try:
     import curl_cffi.requests as _curl  # noqa: F401
     _CURL_AVAILABLE = True
-    logger.debug("[Ghost] curl_cffi 감지 — Chrome TLS 핑거프린트 활성화")
+    logger.debug("[Ghost] curl_cffi 감지 — 향후 TLS fingerprint transport에 사용 가능")
 except ImportError:
     _CURL_AVAILABLE = False
-    logger.warning("[Ghost] curl_cffi 미설치 — TLS 핑거프린트 익명화 비활성 (pip install curl-cffi)")
+    logger.debug("[Ghost] curl_cffi 미설치 — httpx transport만 사용")
 
 # 브라우저 헤더 세트 (Chrome 120 기준)
 _BROWSER_HEADERS: dict[str, str] = {
@@ -51,12 +50,21 @@ class GhostTransport(httpx.AsyncBaseTransport):
     ) -> None:
         self._layer = layer
         self._inner = inner  # 테스트 주입용
+        self._transports: dict[str, httpx.AsyncBaseTransport] = {}
+
+    def _transport_for_proxy(self, proxy: str | None) -> httpx.AsyncBaseTransport:
+        key = proxy or "__direct__"
+        transport = self._transports.get(key)
+        if transport is None:
+            transport = _make_transport(proxy)
+            self._transports[key] = transport
+        return transport
 
     async def handle_async_request(
         self, request: httpx.Request
     ) -> httpx.Response:
         proxy = self._layer.next_proxy()
-        transport = self._inner or _make_transport(proxy)
+        transport = self._inner or self._transport_for_proxy(proxy)
 
         # UA 교체
         ua = self._layer.next_ua()
@@ -86,3 +94,6 @@ class GhostTransport(httpx.AsyncBaseTransport):
     async def aclose(self) -> None:
         if self._inner:
             await self._inner.aclose()
+        for transport in self._transports.values():
+            await transport.aclose()
+        self._transports.clear()

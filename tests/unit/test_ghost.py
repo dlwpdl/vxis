@@ -137,6 +137,27 @@ async def test_ghost_transport_applies_proxy():
 
 
 @pytest.mark.asyncio
+async def test_ghost_transport_reuses_cached_proxy_transport():
+    layer = make_layer()
+    layer.activate(["socks5://1.2.3.4:1080"])
+
+    with patch("vxis.ghost.transport._make_transport") as mock_make:
+        mock_inner = AsyncMock()
+        mock_inner.handle_async_request = AsyncMock(return_value=httpx.Response(200, content=b"ok"))
+        mock_inner.aclose = AsyncMock()
+        mock_make.return_value = mock_inner
+
+        transport = GhostTransport(layer)
+        request = httpx.Request("GET", "https://example.com")
+        await transport.handle_async_request(request)
+        await transport.handle_async_request(request)
+        await transport.aclose()
+
+        mock_make.assert_called_once_with("socks5://1.2.3.4:1080")
+        mock_inner.aclose.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_ghost_transport_no_proxy_direct_connect():
     """프록시 없으면 직접 연결 fallback."""
     layer = make_layer()
@@ -191,6 +212,21 @@ def test_mission_config_proxy_pool_default():
 def test_mission_config_proxy_pool_set():
     cfg = MissionConfig(target="example.com", proxy_pool=["socks5://1.2.3.4:1080"])
     assert cfg.proxy_pool == ["socks5://1.2.3.4:1080"]
+
+
+def test_ghost_activate_reads_vxis_proxy_pool(monkeypatch):
+    from vxis.ghost.layer import ghost_layer
+    from vxis.primitives.ghost import ghost_activate, ghost_deactivate
+
+    ghost_deactivate()
+    monkeypatch.setenv("VXIS_PROXY_POOL", "socks5://127.0.0.1:9050")
+
+    result = ghost_activate("standard")
+
+    assert result["active"] is True
+    assert result["proxy_count"] == 1
+    assert getattr(ghost_layer, "_proxy_pool") == ["socks5://127.0.0.1:9050"]
+    ghost_deactivate()
 
 
 def test_detect_ghost_keyword_english():

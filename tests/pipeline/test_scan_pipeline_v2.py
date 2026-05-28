@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from vxis.interaction.surface import TargetKind
@@ -106,6 +107,51 @@ async def test_scan_pipeline_v2_uses_platform_launcher_runtime():
     assert ctx.runtime_profile["launcher_name"] == "desktop_local"
     assert "desktop prepared" in " ".join(ctx.launcher_notes)
     assert ctx.target_hints == {}
+
+
+@pytest.mark.asyncio
+async def test_scan_pipeline_v2_activates_ghost_for_ghost_target(monkeypatch):
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.deactivate()
+    monkeypatch.setenv("VXIS_PROXY_POOL", "socks5://127.0.0.1:9050")
+    fake_brain = MagicMock()
+    pipe = ScanPipeline(
+        brain=fake_brain,
+        config=SimpleNamespace(proxy_pool=[]),
+        auto_approve_injection=True,
+        generate_report=False,
+    )
+    observed: dict[str, object] = {}
+
+    fake_loop_result = {
+        "target": "https://example.com",
+        "completed": True,
+        "iterations": 1,
+        "findings": [],
+        "messages": 1,
+    }
+
+    with patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls:
+        mock_loop = MagicMock()
+
+        async def _run():
+            observed["active_during_run"] = ghost_layer.is_active()
+            observed["proxy_pool"] = list(getattr(ghost_layer, "_proxy_pool", []))
+            return fake_loop_result
+
+        mock_loop.run = AsyncMock(side_effect=_run)
+        mock_loop.state = MagicMock(messages=[])
+        mock_loop_cls.return_value = mock_loop
+
+        ctx = await pipe.run(target="ghost://example.com")
+
+    call_kwargs = mock_loop_cls.call_args.kwargs
+    assert call_kwargs["target"] == "https://example.com"
+    assert ctx.target == "https://example.com"
+    assert observed["active_during_run"] is True
+    assert observed["proxy_pool"] == ["socks5://127.0.0.1:9050"]
+    assert ghost_layer.is_active() is False
 
 
 @pytest.mark.asyncio

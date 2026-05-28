@@ -21,15 +21,15 @@ GHOST_CONFIG: dict[str, dict] = {
         "timing": {"mean": 0.0, "sigma": 0.0, "min_delay": 0.0, "max_delay": 0.0},
     },
     "standard": {
-        "proxies_env": "VXIS_GHOST_PROXIES",
+        "proxies_env": "VXIS_PROXY_POOL",
         "timing": {"mean": 3.0, "sigma": 2.0, "min_delay": 0.5, "max_delay": 15.0},
     },
     "stealth": {
-        "proxies_env": "VXIS_GHOST_PROXIES",
+        "proxies_env": "VXIS_PROXY_POOL",
         "timing": {"mean": 8.0, "sigma": 4.0, "min_delay": 2.0, "max_delay": 30.0},
     },
     "paranoid": {
-        "proxies_env": "VXIS_GHOST_PROXIES",
+        "proxies_env": "VXIS_PROXY_POOL",
         "timing": {"mean": 20.0, "sigma": 8.0, "min_delay": 5.0, "max_delay": 90.0},
     },
 }
@@ -47,9 +47,11 @@ def ghost_activate(profile: str = "standard") -> dict:
 
     proxies: list[str] = []
     env = config.get("proxies_env")
-    if env:
-        raw = os.environ.get(env, "")
-        proxies = [p.strip() for p in raw.split(",") if p.strip()]
+    env_names = [str(env)] if env else []
+    env_names.append("VXIS_GHOST_PROXIES")
+    for env_name in env_names:
+        raw = os.environ.get(env_name, "")
+        proxies.extend(p.strip() for p in raw.split(",") if p.strip())
 
     ghost_layer.activate(proxy_pool=proxies)
 
