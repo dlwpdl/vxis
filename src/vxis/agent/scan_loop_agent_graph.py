@@ -438,6 +438,11 @@ class ScanLoopAgentGraphMixin:
                 "no_child_action",
                 "child_tool_unavailable",
                 "child_tool_not_allowed",
+                "sdk_background_worker_failed",
+                "sdk_background_worker_crashed",
+                "sdk_child_run_failed",
+                "missing_agent_finish",
+                "no_child_tools",
             }:
                 branch.blocker = result.summary[:180]
             if result.error in {"unsupported_execution_evidence", "insufficient_proof_artifact"}:
@@ -519,6 +524,67 @@ class ScanLoopAgentGraphMixin:
             action=str(args.get("action") or ""),
             result_data=result.data,
         )
+
+    async def _absorb_sdk_background_agent_results(
+        self,
+        *,
+        skills_completed: set[str] | None = None,
+        real_skills_completed: set[str] | None = None,
+    ) -> list[ToolResult]:
+        sdk_loop = getattr(self, "_sdk_agent_loop", None)
+        completed_agent_ids = getattr(sdk_loop, "completed_background_result_agent_ids", None)
+        mark_absorbed = getattr(sdk_loop, "mark_background_result_absorbed", None)
+        if not callable(completed_agent_ids) or not callable(mark_absorbed):
+            return []
+        if not self.registry.has_tool("agent_graph"):
+            return []
+
+        absorbed_results: list[ToolResult] = []
+        for agent_id in completed_agent_ids():
+            clean_agent_id = str(agent_id or "").strip()
+            if not clean_agent_id:
+                continue
+            args = {
+                "action": "run",
+                "agent_id": clean_agent_id,
+                "instruction": "absorb completed SDK background worker result",
+            }
+            result = await self.registry.dispatch("agent_graph", args)
+            self.state.add_message(
+                "tool",
+                {
+                    "name": "agent_graph",
+                    "args": args,
+                    "result": {
+                        "ok": result.ok,
+                        "summary": result.summary,
+                        "data": result.data,
+                    },
+                },
+            )
+            self._sync_agent_graph_result_to_branches(
+                name="agent_graph",
+                args=args,
+                result=result,
+            )
+            await self._sync_agent_graph_result_to_sdk_runtime(
+                name="agent_graph",
+                args=args,
+                result=result,
+            )
+            await self._credit_agent_graph_child_execution(
+                result,
+                skills_completed=skills_completed if skills_completed is not None else set(),
+                real_skills_completed=real_skills_completed
+                if real_skills_completed is not None
+                else set(),
+            )
+            mark_absorbed(clean_agent_id)
+            self.state.add_shared_note(
+                f"sdk background absorbed {clean_agent_id}: {result.summary[:120]}"
+            )
+            absorbed_results.append(result)
+        return absorbed_results
 
     async def _run_agent_graph_child_turn(
         self, agent: dict[str, Any], instruction: str

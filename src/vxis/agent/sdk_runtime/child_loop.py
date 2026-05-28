@@ -85,6 +85,7 @@ class SDKChildAgentLoop:
         self._agent_snapshots: dict[str, dict[str, Any]] = {}
         self._background_tasks: dict[str, asyncio.Task[Any]] = {}
         self._background_results: dict[str, ToolResult] = {}
+        self._background_absorbed_agent_ids: set[str] = set()
         self._background_semaphores: dict[int, asyncio.Semaphore] = {}
 
     async def run_turn(self, agent: dict[str, Any], instruction: str = "") -> ToolResult:
@@ -101,6 +102,7 @@ class SDKChildAgentLoop:
             and record.status in TERMINAL_AGENT_STATUSES
             and agent_id in self._background_results
         ):
+            self._background_absorbed_agent_ids.add(agent_id)
             return self._background_results[agent_id]
         allowed_tool_names = self._allowed_tool_names(agent)
         if not allowed_tool_names:
@@ -363,6 +365,24 @@ class SDKChildAgentLoop:
             except TimeoutError:
                 pass
         return dict(self._background_results)
+
+    def completed_background_result_agent_ids(self) -> list[str]:
+        """Return completed SDK background results not yet mirrored to agent_graph."""
+        agent_ids: list[str] = []
+        for agent_id in self._background_results:
+            if agent_id in self._background_absorbed_agent_ids:
+                continue
+            task = self._background_tasks.get(agent_id)
+            if task is not None and not task.done():
+                continue
+            agent_ids.append(agent_id)
+        return sorted(agent_ids)
+
+    def mark_background_result_absorbed(self, agent_id: str) -> bool:
+        if agent_id not in self._background_results:
+            return False
+        self._background_absorbed_agent_ids.add(agent_id)
+        return True
 
     async def _background_worker_once(self, agent_id: str) -> None:
         await self.journal.append(

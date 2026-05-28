@@ -159,6 +159,13 @@ class ScanLoopRunMixin(
                 self.state.messages = await compress_history(self.state.messages, self.brain)
             except Exception:
                 pass  # compression is best-effort
+            try:
+                await self._absorb_sdk_background_agent_results(
+                    skills_completed=_skills_completed,
+                    real_skills_completed=_real_skills_completed,
+                )
+            except Exception as exc:
+                logger.debug("sdk background absorption skipped: %s", exc)
             if _priority_action_lane is not None:
                 self.state.add_message(
                     "system",
@@ -902,8 +909,21 @@ class ScanLoopRunMixin(
                         skills_completed=_skills_completed,
                         real_skills_completed=_real_skills_completed,
                     )
+                try:
+                    absorbed = await self._absorb_sdk_background_agent_results(
+                        skills_completed=_skills_completed,
+                        real_skills_completed=_real_skills_completed,
+                    )
+                except Exception as exc:
+                    absorbed = []
+                    logger.debug("sdk background absorption skipped: %s", exc)
                 self.state.clear_waiting_reason()
-                self._emit_control_plane(f"Result: {result.summary}")
+                result_note = f"Result: {result.summary}"
+                if absorbed:
+                    result_note = (
+                        f"{result_note}; absorbed {len(absorbed)} SDK background worker result(s)"
+                    )
+                self._emit_control_plane(result_note)
                 if name == "report_finding" and result.ok and isinstance(args, dict):
                     self._mark_candidates_for_finding(args)
                     finding_id = ""

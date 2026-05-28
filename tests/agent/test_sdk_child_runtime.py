@@ -644,11 +644,81 @@ async def test_agent_graph_run_reuses_completed_background_worker_result(monkeyp
         timeout_seconds=1.0,
     )
     ran = await registry.dispatch("agent_graph", {"action": "run", "agent_id": agent_id})
+    absorbed = await loop._absorb_sdk_background_agent_results()
 
     assert background_result is not None and background_result.ok is True
     assert ran.ok is True
     assert ran.data["agent"]["status"] == "finished"
+    assert absorbed == []
     assert len(runner.calls) == 1
+
+    await loop._sdk_agent_loop.coordinator.close_sessions()
+
+
+@pytest.mark.asyncio
+async def test_scan_loop_absorbs_completed_sdk_background_worker_into_agent_graph(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("VXIS_USE_SDK_AGENT_RUNTIME", "1")
+    monkeypatch.setenv("VXIS_SDK_BACKGROUND_WORKERS", "1")
+    monkeypatch.setenv("VXIS_SDK_RUN_DIR", str(tmp_path / "sdk-run"))
+    registry = ToolRegistry()
+    registry.register(AgentGraphTool())
+    registry.register(RunSkillTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+    runner = FakeSDKRunner()
+    loop._sdk_agent_loop.runner = runner
+
+    created = await registry.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "exploit_worker",
+            "task": "Prove IDOR on /api/orders/2",
+            "message": "Collect baseline and payload evidence.",
+        },
+    )
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "create"},
+        result=created,
+    )
+    await loop._sync_agent_graph_result_to_sdk_runtime(
+        name="agent_graph",
+        args={"action": "create"},
+        result=created,
+    )
+    agent_id = created.data["agent"]["id"]
+
+    background_result = await loop._sdk_agent_loop.wait_for_background_worker(
+        agent_id,
+        timeout_seconds=1.0,
+    )
+    absorbed = await loop._absorb_sdk_background_agent_results()
+    second_absorb = await loop._absorb_sdk_background_agent_results()
+    viewed = await registry.dispatch("agent_graph", {"action": "view", "agent_id": agent_id})
+
+    assert background_result is not None and background_result.ok is True
+    assert len(absorbed) == 1
+    assert absorbed[0].ok is True
+    assert second_absorb == []
+    assert viewed.data["agent"]["status"] == "finished"
+    assert viewed.data["agent"]["execution_count"] == 1
+    assert len(runner.calls) == 1
+    assert loop.state.branches[f"agent:{agent_id}"].status == "proven"
+    tool_messages = [
+        message
+        for message in loop.state.messages
+        if isinstance(message.get("content"), dict)
+        and message["content"].get("name") == "agent_graph"
+    ]
+    assert tool_messages[-1]["content"]["args"]["instruction"].startswith(
+        "absorb completed SDK background"
+    )
+    assert any(
+        f"sdk background absorbed {agent_id}" in str(note)
+        for note in loop.state.shared_notes
+    )
 
     await loop._sdk_agent_loop.coordinator.close_sessions()
 
