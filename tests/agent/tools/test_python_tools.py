@@ -9,9 +9,13 @@ from vxis.agent.tools.shell_tools import _reset_for_tests, resolve_sandbox_runti
 
 @pytest.fixture(autouse=True)
 def reset_state():
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.deactivate()
     _reset_for_tests()
     yield
     _reset_for_tests()
+    ghost_layer.deactivate()
 
 
 @pytest.mark.asyncio
@@ -109,6 +113,44 @@ async def test_python_exec_session_uses_tmux_repl_and_returns_marked_output(tmp_
     assert result.data["session"] == "py"
     assert result.data["stdout"] == "42"
     assert "python_exec[py]" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_python_exec_session_injects_ghost_env(tmp_path):
+    from vxis.ghost.layer import ghost_layer
+
+    async def fake_ensure(**kwargs):
+        return True, "ok"
+
+    sent_payload = ""
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+
+    async def fake_run_docker(*args, timeout=30.0):
+        nonlocal sent_payload
+        if "has-session" in args:
+            return 1, "", "missing"
+        if "new-session" in args:
+            return 0, "", ""
+        if "send-keys" in args and "-l" in args:
+            sent_payload = args[-1]
+            return 0, "", ""
+        if "capture-pane" in args:
+            start = re.search(r"__VXIS_PY_START_[0-9a-f]+__", sent_payload).group(0)
+            end = re.search(r"__VXIS_PY_DONE_[0-9a-f]+__", sent_payload).group(0)
+            return 0, f"{start}\nok\n{end}:0\n", ""
+        return 0, "", ""
+
+    with patch("vxis.agent.tools.python_tools._ensure_sandbox_running", side_effect=fake_ensure), \
+         patch("vxis.agent.tools.shell_tools._run_docker", side_effect=fake_run_docker):
+        tool = PythonExecTool(sandbox_key="scan-123", workspace_host=str(tmp_path))
+        result = await tool.run(code="print('ok')", session="py")
+
+    assert result.ok is True
+    assert "VXIS_GHOST_ACTIVE" in sent_payload
+    assert "HTTP_PROXY" in sent_payload
+    assert result.data["ghost"]["active"] is True
+    assert result.data["ghost"]["component"] == "python_exec"
+    assert result.data["ghost"]["proxy"] == "socks5://127.0.0.1:9050"
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 from vxis.agent.tool_registry import ToolResult
+from vxis.ghost.routing import wrap_shell_command_for_ghost
 
 logger = logging.getLogger(__name__)
 
@@ -264,11 +265,22 @@ async def run_sandbox_shell_command(
     runtime: SandboxRuntime,
     command: str,
     timeout: float,
+    *,
+    component: str = "sandbox_shell",
 ) -> dict[str, Any]:
-    result = await _execute_via_tool_server(runtime, command, timeout)
+    effective_command, ghost_meta = wrap_shell_command_for_ghost(
+        command,
+        component=component,
+    )
+    result = await _execute_via_tool_server(runtime, effective_command, timeout)
     if result is not None:
+        if ghost_meta.get("active"):
+            result["ghost"] = ghost_meta
         return result
-    return await _execute_via_docker_exec(runtime, command, timeout)
+    result = await _execute_via_docker_exec(runtime, effective_command, timeout)
+    if ghost_meta.get("active"):
+        result["ghost"] = ghost_meta
+    return result
 
 
 async def _ensure_tmux_session(
@@ -533,11 +545,15 @@ class ShellExecTool:
             return ToolResult(ok=False, summary=f"shell_exec: {msg}", error="sandbox_unavailable")
 
         if session:
+            effective_command, ghost_meta = wrap_shell_command_for_ghost(
+                command,
+                component="shell_exec",
+            )
             try:
                 exit_code, stdout, stderr, timed_out = await _run_shell_session_command(
                     runtime,
                     session,
-                    command,
+                    effective_command,
                     timeout,
                 )
             except Exception as e:
@@ -554,6 +570,7 @@ class ShellExecTool:
                         "session": session,
                         "container": runtime.container,
                         "workspace": runtime.workspace_host,
+                        "ghost": ghost_meta,
                     },
                     summary=f"shell_exec session: {stderr}",
                     error="session_unavailable",
@@ -568,6 +585,7 @@ class ShellExecTool:
                         "container": runtime.container,
                         "workspace": runtime.workspace_host,
                         "stdout": stdout[:5000],
+                        "ghost": ghost_meta,
                     },
                     summary=f"shell_exec session timed out after {timeout}s",
                     error="timeout",
@@ -584,6 +602,7 @@ class ShellExecTool:
                     "workspace": runtime.workspace_host,
                     "stdout_truncated": len(stdout) > 5000,
                     "stderr_truncated": len(stderr) > 2000,
+                    "ghost": ghost_meta,
                 },
                 summary=(
                     f"shell_exec[{session}]: exit={exit_code}, "
@@ -592,7 +611,12 @@ class ShellExecTool:
             )
 
         try:
-            command_result = await run_sandbox_shell_command(runtime, command, timeout)
+            command_result = await run_sandbox_shell_command(
+                runtime,
+                command,
+                timeout,
+                component="shell_exec",
+            )
         except Exception as e:
             return ToolResult(
                 ok=False,
@@ -614,6 +638,7 @@ class ShellExecTool:
                     "transport": command_result.get("transport", ""),
                     "stdout": stdout[:5000],
                     "stderr": stderr[:2000],
+                    "ghost": command_result.get("ghost") or {},
                 },
                 summary=f"shell_exec timed out after {timeout}s",
                 error="timeout",
@@ -631,6 +656,7 @@ class ShellExecTool:
                 "transport": command_result.get("transport", ""),
                 "stdout_truncated": len(stdout) > 5000,
                 "stderr_truncated": len(stderr) > 2000,
+                "ghost": command_result.get("ghost") or {},
             },
             summary=f"shell_exec: exit={exit_code}, stdout={len(stdout)}b, stderr={len(stderr)}b",
         )

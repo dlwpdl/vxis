@@ -13,9 +13,13 @@ from vxis.agent.tools.shell_tools import (
 
 @pytest.fixture(autouse=True)
 def reset_state():
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.deactivate()
     _reset_for_tests()
     yield
     _reset_for_tests()
+    ghost_layer.deactivate()
 
 
 @pytest.mark.asyncio
@@ -122,6 +126,34 @@ async def test_shell_exec_tool_runs_command_via_docker_exec_when_sandbox_ready()
     assert call_args[5] == "echo hello world"
     assert result.data["container"] == runtime.container
     assert result.data["transport"] == "docker_exec"
+
+
+@pytest.mark.asyncio
+async def test_shell_exec_applies_ghost_proxy_env_without_leaking_in_command_data():
+    from vxis.ghost.layer import ghost_layer
+
+    async def fake_ensure(**kwargs):
+        return True, "sandbox already running"
+
+    fake_proc = MagicMock()
+    fake_proc.returncode = 0
+    fake_proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+    ghost_layer.activate(["socks5://user:secret@127.0.0.1:9050"])
+
+    with patch("vxis.agent.tools.shell_tools._ensure_sandbox_running", side_effect=fake_ensure), \
+         patch("vxis.agent.tools.shell_tools._execute_via_tool_server", AsyncMock(return_value=None)), \
+         patch("asyncio.create_subprocess_exec", return_value=fake_proc) as mock_exec:
+        tool = ShellExecTool(sandbox_key="scan-123")
+        result = await tool.run(command="curl https://example.com")
+
+    effective_command = mock_exec.call_args.args[5]
+    assert "export HTTP_PROXY=socks5://user:secret@127.0.0.1:9050" in effective_command
+    assert effective_command.rstrip().endswith("curl https://example.com")
+    assert result.data["command"] == "curl https://example.com"
+    assert result.data["ghost"]["active"] is True
+    assert result.data["ghost"]["component"] == "shell_exec"
+    assert result.data["ghost"]["proxy"] == "socks5://****@127.0.0.1:9050"
+    assert "secret" not in result.data["ghost"]["proxy"]
 
 
 @pytest.mark.asyncio

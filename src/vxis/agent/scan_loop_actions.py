@@ -666,6 +666,7 @@ class ScanLoopActionMixin:
 
         telemetry: dict[str, Any] = {}
         proxy_status: dict[str, Any] = {}
+        ghost_status: dict[str, Any] = {}
         try:
             from vxis.agent.brain import (
                 get_brain_decision_count as _get_brain_decision_count,
@@ -674,15 +675,18 @@ class ScanLoopActionMixin:
             )
             from vxis.agent.memory_compressor import get_memory_compression_stats
             from vxis.agent.tools.proxy_runtime import get_proxy_status_snapshot
+            from vxis.ghost.routing import ghost_status_snapshot
 
             telemetry = _get_llm_usage_stats()
             telemetry["llm_calls"] = _get_llm_call_count()
             telemetry["brain_decisions"] = _get_brain_decision_count()
             telemetry["memory_compression"] = get_memory_compression_stats()
             proxy_status = get_proxy_status_snapshot()
+            ghost_status = ghost_status_snapshot()
         except Exception:
             telemetry = {}
             proxy_status = {}
+            ghost_status = {}
         if not telemetry.get("provider"):
             telemetry["provider"] = getattr(self.brain, "_provider", "")
         if not telemetry.get("model"):
@@ -767,6 +771,7 @@ class ScanLoopActionMixin:
         snapshot["note"] = self._truncate_ui_text(note, 140) if note else ""
         snapshot["telemetry"] = telemetry
         snapshot["proxy"] = proxy_status
+        snapshot["ghost"] = ghost_status
         self._latest_control_plane = dict(snapshot)
         self._emit_event("control_plane", snapshot)
 

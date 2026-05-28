@@ -19,6 +19,8 @@ from typing import Any
 
 from vxis.agent.tool_registry import ToolResult
 from vxis.agent.tools.proxy_runtime import get_active_proxy_url
+from vxis.ghost.layer import ghost_layer
+from vxis.ghost.routing import build_ghost_identity, public_ghost_identity
 
 logger = logging.getLogger(__name__)
 
@@ -27,21 +29,56 @@ _engine: Any = None       # BrowserEngine
 _page: Any = None         # BrowserPage
 _screenshot_dir: str = ""
 _proxy_url: str | None = None
+_user_agent: str | None = None
+_ghost_browser_proxy: str | None = None
+_ghost_browser_ua: str | None = None
+
+
+def _desired_browser_route() -> tuple[str | None, str | None, dict[str, Any]]:
+    """Return proxy/UA for the browser without rotating every render call."""
+    global _ghost_browser_proxy, _ghost_browser_ua
+    if not ghost_layer.is_active():
+        _ghost_browser_proxy = None
+        _ghost_browser_ua = None
+        return get_active_proxy_url(), None, {"active": False}
+
+    if _ghost_browser_ua is None:
+        _ghost_browser_ua = ghost_layer.next_ua()
+    if _ghost_browser_proxy is None:
+        _ghost_browser_proxy = ghost_layer.next_proxy() or ""
+
+    capture_proxy = get_active_proxy_url()
+    proxy = _ghost_browser_proxy or capture_proxy
+    identity = build_ghost_identity(
+        "browser",
+        proxy=proxy,
+        user_agent=_ghost_browser_ua,
+        rotate_proxy=False,
+        include_raw=True,
+    )
+    meta = public_ghost_identity(identity)
+    if proxy and proxy == capture_proxy and not _ghost_browser_proxy:
+        meta["proxy_mode"] = "capture_proxy_no_exit_proxy"
+    return proxy, _ghost_browser_ua, meta
 
 
 async def _ensure_browser() -> tuple[Any, Any]:
     """Lazily start BrowserEngine and create a page."""
-    global _engine, _page, _screenshot_dir, _proxy_url
-    desired_proxy = get_active_proxy_url()
+    global _engine, _page, _screenshot_dir, _proxy_url, _user_agent
+    desired_proxy, desired_ua, _ghost_meta = _desired_browser_route()
     current_proxy = getattr(_engine, "_proxy", None) if _engine is not None else None
+    current_ua = getattr(_engine, "_user_agent", None) if _engine is not None else None
     if (
         _engine is not None
         and _page is not None
         and current_proxy == desired_proxy
+        and (desired_ua is None or current_ua == desired_ua)
     ):
         return _engine, _page
 
-    if _engine is not None and current_proxy != desired_proxy:
+    if _engine is not None and (
+        current_proxy != desired_proxy or (desired_ua is not None and current_ua != desired_ua)
+    ):
         try:
             await _engine.stop()
         except Exception:
@@ -56,8 +93,9 @@ async def _ensure_browser() -> tuple[Any, Any]:
         )
 
     _screenshot_dir = tempfile.mkdtemp(prefix="vxis_screenshots_")
-    _engine = BrowserEngine(headless=True, proxy=desired_proxy)
+    _engine = BrowserEngine(headless=True, proxy=desired_proxy, user_agent=desired_ua)
     _proxy_url = desired_proxy
+    _user_agent = desired_ua
     await _engine.start()
     _page = await _engine.new_page(isolated=False)
     logger.info(
@@ -70,7 +108,7 @@ async def _ensure_browser() -> tuple[Any, Any]:
 
 async def shutdown_browser() -> None:
     """Cleanup — called at scan end by ScanPipelineV2."""
-    global _engine, _page, _proxy_url
+    global _engine, _page, _proxy_url, _user_agent, _ghost_browser_proxy, _ghost_browser_ua
     if _engine is not None:
         try:
             await _engine.stop()
@@ -79,6 +117,9 @@ async def shutdown_browser() -> None:
         _engine = None
         _page = None
         _proxy_url = None
+        _user_agent = None
+        _ghost_browser_proxy = None
+        _ghost_browser_ua = None
         logger.info("Browser shut down")
 
 
@@ -123,6 +164,7 @@ class BrowserNavigateTool:
             snap = await page.navigate(url)
         except Exception as e:
             return ToolResult(ok=False, summary=f"browser_navigate: navigation failed: {e}", error=str(e))
+        _proxy, _ua, ghost_meta = _desired_browser_route()
 
         # Build a compact summary for the Brain
         forms_summary = []
@@ -161,6 +203,7 @@ class BrowserNavigateTool:
                 "js_errors": snap.js_errors[:10],
                 "console_messages": snap.console_messages[-10:],
                 "network_requests": network_summary,
+                "ghost": ghost_meta,
             },
             summary=(
                 f"browser: {snap.title} ({snap.url}) — "

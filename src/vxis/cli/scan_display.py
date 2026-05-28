@@ -75,6 +75,7 @@ class ScanLiveDisplay:
         self.shared_notes: list[str] = []
         self.telemetry: dict = {}
         self.proxy: dict = {}
+        self.ghost_runtime: dict = {}
         self.start_time = time.monotonic()
         self.score: dict | None = None
         self.last_error: str | None = None
@@ -225,6 +226,7 @@ class ScanLiveDisplay:
             self.shared_notes = list(data.get("shared_notes") or [])
             self.telemetry = dict(data.get("telemetry") or {})
             self.proxy = dict(data.get("proxy") or {})
+            self.ghost_runtime = dict(data.get("ghost") or {})
             note = (data.get("note") or "")[:100]
             if note:
                 self.loop_status = note
@@ -733,6 +735,24 @@ class ScanLiveDisplay:
                 path = str(req.get("path") or req.get("url") or "")[:42]
                 status = req.get("status_code") or "?"
                 lines.append(f"[dim]{method} {status} {path}[/dim]")
+
+        if self.ghost_runtime:
+            active = bool(self.ghost_runtime.get("active"))
+            proxy_count = int(self.ghost_runtime.get("proxy_count") or 0)
+            state = "active" if active else "off"
+            lines.append("[bold magenta]Ghost[/bold magenta]")
+            lines.append(f"{state} · proxies={proxy_count}")
+            coverage = self.ghost_runtime.get("coverage")
+            if isinstance(coverage, dict):
+                shell_cov = str(coverage.get("shell_exec") or "")[:24]
+                browser_cov = str(coverage.get("browser") or "")[:24]
+                nmap_cov = str(coverage.get("nmap_scan") or "")[:24]
+                lines.append(
+                    f"[dim]browser {browser_cov} · shell {shell_cov} · nmap {nmap_cov}[/dim]"
+                )
+            warning = str(self.ghost_runtime.get("warning") or "")[:78]
+            if warning:
+                lines.append(f"[dim]{warning}[/dim]")
 
         if self.todo_items:
             lines.append("[bold]Todos[/bold]")

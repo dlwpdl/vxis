@@ -9,6 +9,15 @@ from vxis.agent.tools import build_default_registry
 from vxis.agent.tools.nmap_tools import NmapScanTool
 
 
+@pytest.fixture(autouse=True)
+def _reset_ghost():
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.deactivate()
+    yield
+    ghost_layer.deactivate()
+
+
 class FakeShellTool:
     def __init__(self, stdout: str) -> None:
         self.stdout = stdout
@@ -68,6 +77,21 @@ async def test_nmap_scan_tool_builds_bounded_command_and_parses_services():
     command = shell.calls[0]["command"]
     assert "nmap -Pn -sV --open --reason -oX - -T4 -p 80,443 --script default,http-title localhost" == command
     assert "unsafe-shell" not in command
+
+
+@pytest.mark.asyncio
+async def test_nmap_scan_reports_direct_raw_socket_when_ghost_active():
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+    tool = NmapScanTool(shell_tool=FakeShellTool(_NMAP_XML))
+
+    result = await tool.run(target="localhost", ports="80")
+
+    assert result.ok is True
+    assert result.data["ghost"]["active"] is True
+    assert result.data["ghost"]["network_coverage"] == "direct_raw_socket"
+    assert "not anonymized" in result.data["ghost"]["warning"]
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from vxis.agent.context_budget import trim_text_chars
 from vxis.agent.tool_registry import ToolResult
 from vxis.agent.tools.shell_tools import ShellExecTool
+from vxis.ghost.routing import ghost_status_snapshot
 
 _TARGET_RE = re.compile(r"^[A-Za-z0-9._:-]+(?:/\d{1,3})?$")
 _PORTS_RE = re.compile(r"^[0-9TU:,\-]+$")
@@ -101,6 +102,7 @@ class NmapScanTool:
                 "stderr_excerpt": trim_text_chars(stderr, 800),
                 "parse_error": parse_error,
                 "shell": shell_result.data,
+                "ghost": _nmap_ghost_metadata(),
             },
             summary=(
                 f"nmap_scan: {open_count} open service(s) on {target}"
@@ -243,3 +245,15 @@ def _parse_nmap_xml(raw_xml: str) -> tuple[list[dict[str, Any]], str | None]:
                 }
             )
     return services, None
+
+
+def _nmap_ghost_metadata() -> dict[str, Any]:
+    status = ghost_status_snapshot()
+    if not status.get("active"):
+        return {"active": False}
+    return {
+        "active": True,
+        "component": "nmap_scan",
+        "network_coverage": "direct_raw_socket",
+        "warning": status.get("warning", ""),
+    }

@@ -31,6 +31,11 @@ from vxis.agent.tools.shell_tools import (
     sanitize_session_name,
     send_tmux_payload_and_wait,
 )
+from vxis.ghost.routing import (
+    build_ghost_identity,
+    ghost_python_env_prelude,
+    public_ghost_identity,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -98,12 +103,18 @@ class PythonExecTool:
 
         session = str(kwargs.get("session", "") or "").strip()
         if session:
+            ghost_identity = build_ghost_identity(
+                "python_exec",
+                include_raw=True,
+            )
+            ghost_meta = public_ghost_identity(ghost_identity)
             try:
                 exit_code, stdout, timed_out = await _run_python_session_code(
                     runtime,
                     session,
                     code,
                     timeout,
+                    ghost_identity=ghost_identity,
                 )
             except Exception as e:
                 return ToolResult(
@@ -119,6 +130,7 @@ class PythonExecTool:
                         "container": runtime.container,
                         "workspace": runtime.workspace_host,
                         "stdout": stdout[:5000],
+                        "ghost": ghost_meta,
                     },
                     summary=f"python_exec session: {stdout[:500]}",
                     error="session_unavailable",
@@ -132,6 +144,7 @@ class PythonExecTool:
                         "container": runtime.container,
                         "workspace": runtime.workspace_host,
                         "stdout": stdout[:5000],
+                        "ghost": ghost_meta,
                     },
                     summary=f"python_exec session timed out after {timeout}s",
                     error="timeout",
@@ -147,6 +160,7 @@ class PythonExecTool:
                     "workspace": runtime.workspace_host,
                     "stdout_truncated": len(stdout) > 5000,
                     "stderr_truncated": False,
+                    "ghost": ghost_meta,
                 },
                 summary=f"python_exec[{session}]: exit={exit_code}, stdout={len(stdout)}b",
             )
@@ -170,6 +184,7 @@ class PythonExecTool:
                 runtime,
                 f"python3 {container_script_path}",
                 timeout,
+                component="python_exec",
             )
             if command_result.get("timeout"):
                 return ToolResult(
@@ -182,6 +197,7 @@ class PythonExecTool:
                         "transport": command_result.get("transport", ""),
                         "stdout": str(command_result.get("stdout", ""))[:5000],
                         "stderr": str(command_result.get("stderr", ""))[:2000],
+                        "ghost": command_result.get("ghost") or {},
                     },
                     summary=f"python_exec timed out after {timeout}s",
                     error="timeout",
@@ -214,6 +230,7 @@ class PythonExecTool:
                 "transport": command_result.get("transport", ""),
                 "stdout_truncated": len(stdout) > 5000,
                 "stderr_truncated": len(stderr) > 2000,
+                "ghost": command_result.get("ghost") or {},
             },
             summary=f"python_exec: exit={exit_code}, stdout={len(stdout)}b, stderr={len(stderr)}b",
         )
@@ -227,6 +244,8 @@ async def _run_python_session_code(
     session: str,
     code: str,
     timeout: float,
+    *,
+    ghost_identity: dict[str, Any] | None = None,
 ) -> tuple[int, str, bool]:
     session_name = sanitize_session_name("py", session)
     ok, msg = await _ensure_tmux_session(runtime, session_name, command="python3 -q -i")
@@ -237,7 +256,8 @@ async def _run_python_session_code(
     start_marker = f"__VXIS_PY_START_{marker_id}__"
     end_marker = f"__VXIS_PY_DONE_{marker_id}__"
     driver = (
-        "import traceback as __vxis_tb\n"
+        ghost_python_env_prelude(ghost_identity)
+        + "import traceback as __vxis_tb\n"
         f"print({start_marker!r})\n"
         "try:\n"
         f"    exec({code!r}, globals())\n"

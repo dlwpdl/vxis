@@ -321,6 +321,16 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                     {"method": "GET", "path": "/admin", "status_code": 200},
                 ],
             },
+            "ghost": {
+                "active": True,
+                "proxy_count": 1,
+                "coverage": {
+                    "browser": "ghost_proxy_or_ua",
+                    "shell_exec": "env_proxy",
+                    "nmap_scan": "direct_raw_socket",
+                },
+                "warning": "nmap_scan uses raw TCP/UDP sockets",
+            },
         },
     )
     display.handle_event(
@@ -382,6 +392,9 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "Probe /admin" in control_text
     assert "xray running" in control_text
     assert "/login" in control_text
+    assert "Ghost" in control_text
+    assert "env_proxy" in control_text
+    assert "direct_raw_socket" in control_text
 
     assert "frontier_loose" in display._runtime_summary()
 

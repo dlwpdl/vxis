@@ -6,6 +6,11 @@ import httpx
 import pytest
 
 from vxis.ghost.layer import GhostLayer, GhostTiming
+from vxis.ghost.routing import (
+    ghost_status_snapshot,
+    mask_proxy_url,
+    wrap_shell_command_for_ghost,
+)
 from vxis.ghost.transport import GhostTransport
 from vxis.ghost.trigger import detect_ghost_keyword, parse_ghost_trigger
 from vxis.ghost.verifier import GhostVerifier
@@ -227,6 +232,40 @@ def test_ghost_activate_reads_vxis_proxy_pool(monkeypatch):
     assert result["proxy_count"] == 1
     assert getattr(ghost_layer, "_proxy_pool") == ["socks5://127.0.0.1:9050"]
     ghost_deactivate()
+
+
+def test_ghost_routing_wraps_shell_env_and_masks_proxy_credentials():
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.activate(["socks5://user:secret@127.0.0.1:9050"])
+    try:
+        wrapped, meta = wrap_shell_command_for_ghost(
+            "curl https://example.com",
+            component="shell_exec",
+        )
+        assert "export HTTP_PROXY=socks5://user:secret@127.0.0.1:9050" in wrapped
+        assert "export VXIS_GHOST_ACTIVE=1" in wrapped
+        assert wrapped.rstrip().endswith("curl https://example.com")
+        assert meta["active"] is True
+        assert meta["proxy"] == "socks5://****@127.0.0.1:9050"
+        assert "secret" not in mask_proxy_url("socks5://user:secret@127.0.0.1:9050")
+    finally:
+        ghost_layer.deactivate()
+
+
+def test_ghost_status_snapshot_marks_nmap_as_direct_raw_socket():
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+    try:
+        status = ghost_status_snapshot()
+        assert status["active"] is True
+        assert status["coverage"]["shell_exec"] == "env_proxy"
+        assert status["coverage"]["python_exec"] == "env_proxy"
+        assert status["coverage"]["nmap_scan"] == "direct_raw_socket"
+        assert "raw TCP/UDP" in status["warning"]
+    finally:
+        ghost_layer.deactivate()
 
 
 def test_detect_ghost_keyword_english():

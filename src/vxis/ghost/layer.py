@@ -10,7 +10,7 @@ from vxis.ghost.ua_pool import UA_POOL
 
 logger = logging.getLogger(__name__)
 
-_PROXY_URL_RE = re.compile(r"^(https?|socks5?)://[^/]+:\d+$")
+_PROXY_URL_RE = re.compile(r"^(https?|socks5?)://(?:[^/@]+(?::[^/@]*)?@)?[^/]+:\d+$")
 
 
 @dataclass

@@ -57,6 +57,31 @@ def test_scan_loop_emits_ui_events_for_regular_dispatch() -> None:
     assert control_events[0]["branches"], "control-plane state should include visible branches"
 
 
+def test_control_plane_exposes_ghost_coverage() -> None:
+    from vxis.agent.tools.agent_graph_tools import AgentGraphTool
+    from vxis.ghost.layer import ghost_layer
+
+    reg = ToolRegistry()
+    reg.register(AgentGraphTool())
+    events: list[tuple[str, dict]] = []
+    loop = ScanAgentLoop(
+        target="http://example.test",
+        registry=reg,
+        max_iters=1,
+        event_callback=lambda event_type, data: events.append((event_type, data)),
+    )
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+    try:
+        loop._emit_control_plane("ghost ready")
+    finally:
+        ghost_layer.deactivate()
+
+    control_events = [data for event_type, data in events if event_type == "control_plane"]
+    assert control_events[-1]["ghost"]["active"] is True
+    assert control_events[-1]["ghost"]["coverage"]["shell_exec"] == "env_proxy"
+    assert control_events[-1]["ghost"]["coverage"]["nmap_scan"] == "direct_raw_socket"
+
+
 def test_scan_loop_spawns_followup_branches_from_finding() -> None:
     async def _run() -> dict:
         _reset_for_tests()
