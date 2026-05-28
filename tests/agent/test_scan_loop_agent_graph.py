@@ -1305,6 +1305,167 @@ def test_service_pivot_branch_forces_agent_graph_worker_create():
     assert "nmap_scan" in forced[1]["message"]
 
 
+def test_control_plane_service_pivot_prefers_exploit_worker():
+    reg = ToolRegistry()
+    reg.register(AgentGraphTool())
+    loop = ScanAgentLoop(target="https://cluster.local", registry=reg, max_iters=30)
+    branch = loop.state.ensure_branch(
+        "agent:agent-0001:svc:tcp-8080",
+        "NET-SERVICE-PIVOT",
+        "Probe http Jenkins on 10.0.0.5:8080/tcp",
+        priority=94,
+        role="exploit_worker",
+        owner="root",
+        objective="Validate exposed control-plane/admin service.",
+        next_step="Create an exploit_worker and test only safe unauth/admin/API probes.",
+        crown_jewel="control-plane takeover or admin data access",
+        evidence="nmap_scan 10.0.0.5:8080/tcp http Jenkins",
+        watch_terms=["nmap_scan", "8080", "http", "jenkins", "control-plane", "api"],
+    )
+
+    forced = loop._forced_branch_action(branch)
+
+    assert forced is not None
+    assert forced[1]["role"] == "exploit_worker"
+    assert forced[1]["skills"] == ["test_api_security", "test_misconfig"]
+    assert "target=10.0.0.5 ports=8080 scripts=default,safe,vuln" in forced[1]["message"]
+
+
+def test_service_pivot_surfaces_in_dashboard_and_control_plane():
+    events: list[tuple[str, dict]] = []
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=ToolRegistry(),
+        max_iters=30,
+        event_callback=lambda event_type, data: events.append((event_type, data)),
+    )
+    branch = loop.state.ensure_branch(
+        "agent:agent-0001:svc:tcp-6379",
+        "NET-SERVICE-PIVOT",
+        "Probe redis Redis key-value store on 127.0.0.1:6379/tcp",
+        priority=96,
+        role="exploit_worker",
+        owner="root",
+        objective="Determine whether the database service exposes unauthenticated access.",
+        next_step="Create an exploit_worker and use nmap_scan safe/vuln scripts.",
+        crown_jewel="database data exposure or credential material",
+        evidence="nmap_scan 127.0.0.1:6379/tcp redis Redis key-value store",
+        watch_terms=["nmap_scan", "6379", "redis", "database"],
+    )
+    branch.status = "open"
+
+    dashboard = loop._build_scan_dashboard()
+    loop._emit_control_plane("service pivot ready")
+    control_events = [data for event_type, data in events if event_type == "control_plane"]
+
+    assert "Service pivots:" in dashboard
+    assert "tcp-6379" in dashboard
+    assert control_events[-1]["service_pivots"][0]["id"] == branch.id
+    assert "redis" in control_events[-1]["service_pivots"][0]["evidence"]
+
+
+@pytest.mark.asyncio
+async def test_nmap_service_pivot_golden_chain_reaches_bounded_blocker():
+    reg = ToolRegistry()
+    graph = AgentGraphTool()
+    reg.register(graph)
+
+    class _NmapScan:
+        name = "nmap_scan"
+        description = "bounded nmap"
+        input_schema = {"type": "object"}
+
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def run(self, **kwargs):
+            self.calls.append(dict(kwargs))
+            return ToolResult(
+                ok=True,
+                summary="nmap_scan: 1 open service on 127.0.0.1",
+                data={
+                    "target": str(kwargs.get("target") or "127.0.0.1"),
+                    "open_count": 1,
+                    "open_ports": [
+                        {
+                            "host": "127.0.0.1",
+                            "port": "6379",
+                            "protocol": "tcp",
+                            "service": "redis",
+                            "product": "Redis key-value store",
+                            "reason": "syn-ack",
+                        }
+                    ],
+                },
+            )
+
+    nmap_scan = _NmapScan()
+    reg.register(nmap_scan)
+    loop = ScanAgentLoop(target="127.0.0.1", registry=reg, max_iters=30)
+
+    created = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "create",
+            "role": "recon_worker",
+            "task": "Map exposed services with nmap before choosing deeper probes",
+        },
+    )
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "create", "role": "recon_worker"},
+        result=created,
+    )
+    first_run = await reg.dispatch(
+        "agent_graph",
+        {"action": "run", "agent_id": created.data["agent"]["id"]},
+    )
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args={"action": "run", "agent_id": created.data["agent"]["id"]},
+        result=first_run,
+    )
+    await loop._credit_agent_graph_child_execution(
+        first_run,
+        skills_completed=set(),
+        real_skills_completed=set(),
+    )
+
+    service_branch = loop.state.branches["agent:agent-0001:svc:tcp-6379"]
+    forced_create = loop._forced_branch_action(service_branch)
+    assert forced_create is not None
+    service_created = await reg.dispatch(*forced_create)
+    loop._sync_agent_graph_result_to_branches(
+        name="agent_graph",
+        args=forced_create[1],
+        result=service_created,
+    )
+    service_agent_id = service_created.data["agent"]["id"]
+    service_run = await reg.dispatch(
+        "agent_graph",
+        {"action": "run", "agent_id": service_agent_id},
+    )
+    service_finish = await reg.dispatch(
+        "agent_graph",
+        {
+            "action": "finish",
+            "agent_id": service_agent_id,
+            "status": "blocked",
+            "result": "Redis service was reachable, but no safe unauthenticated data proof was obtained.",
+        },
+    )
+
+    assert first_run.ok is True
+    assert service_created.ok is True
+    assert service_run.ok is True
+    assert service_finish.ok is True
+    assert nmap_scan.calls[0]["ports"] == "top-1000"
+    assert nmap_scan.calls[1]["target"] == "127.0.0.1"
+    assert nmap_scan.calls[1]["ports"] == "6379"
+    assert nmap_scan.calls[1]["scripts"] == "default,safe,vuln"
+    assert service_finish.data["agent"]["status"] == "blocked"
+
+
 @pytest.mark.asyncio
 async def test_agent_graph_worker_llm_invalid_json_repairs_to_valid_action():
     reg = ToolRegistry()

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 import shlex
 import xml.etree.ElementTree as ET
@@ -22,6 +24,7 @@ _ALLOWED_SCRIPTS = {
     "http-server-header",
     "ssh2-enum-algos",
 }
+_NMAP_SEMAPHORES: dict[int, tuple[int, asyncio.Semaphore]] = {}
 
 
 class NmapScanTool:
@@ -80,7 +83,8 @@ class NmapScanTool:
             timing=kwargs.get("timing"),
         )
         timeout = _bounded_int(kwargs.get("timeout"), default=240, minimum=1, maximum=600)
-        shell_result = await self._shell_tool.run(command=command, timeout=timeout)
+        async with _nmap_semaphore():
+            shell_result = await self._shell_tool.run(command=command, timeout=timeout)
         stdout = str((shell_result.data or {}).get("stdout") or "")
         stderr = str((shell_result.data or {}).get("stderr") or "")
         services, parse_error = _parse_nmap_xml(stdout)
@@ -181,6 +185,20 @@ def _bounded_int(value: Any, *, default: int, minimum: int, maximum: int) -> int
     except (TypeError, ValueError):
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def _nmap_semaphore() -> asyncio.Semaphore:
+    raw_limit = os.environ.get("VXIS_NMAP_CONCURRENCY", "1").strip()
+    try:
+        limit = max(1, int(raw_limit))
+    except ValueError:
+        limit = 1
+    loop_id = id(asyncio.get_running_loop())
+    current = _NMAP_SEMAPHORES.get(loop_id)
+    if current is None or current[0] != limit:
+        current = (limit, asyncio.Semaphore(limit))
+        _NMAP_SEMAPHORES[loop_id] = current
+    return current[1]
 
 
 def _parse_nmap_xml(raw_xml: str) -> tuple[list[dict[str, Any]], str | None]:

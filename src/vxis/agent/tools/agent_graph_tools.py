@@ -578,6 +578,36 @@ def _has_sufficient_proof_artifact(node: AgentGraphNode, result: str) -> bool:
     )
 
 
+def _is_service_probe_completion(node: AgentGraphNode, result: str) -> bool:
+    envelope = node.task_envelope if isinstance(node.task_envelope, dict) else {}
+    blob = " ".join(
+        str(value or "").lower()
+        for value in (
+            node.role,
+            node.task,
+            result,
+            envelope.get("objective"),
+            envelope.get("expected_artifact"),
+            envelope.get("stop_condition"),
+            envelope.get("escalation_trigger"),
+        )
+    )
+    if "deepen nmap service pivot" in blob:
+        return True
+    if "service-specific transcript" in blob:
+        return True
+    return "nmap_scan" in blob and any(
+        token in blob
+        for token in (
+            "open port",
+            "open service",
+            "service discovery",
+            "service fingerprint",
+            "port ",
+        )
+    )
+
+
 def _join_nonempty(parts: list[str], *, sep: str = " ") -> str:
     return sep.join(part for part in parts if str(part or "").strip()).strip()
 
@@ -1014,6 +1044,15 @@ class AgentGraphTool:
         result: str,
         status: str,
     ) -> str:
+        if (
+            status == "finished"
+            and _is_service_probe_completion(node, result)
+            and not _has_sufficient_proof_artifact(node, result)
+        ):
+            return (
+                "service-pivot completion requires a valid EvidenceArtifact or an explicit "
+                "blocked status; open port/service discovery alone is not a finding"
+            )
         if status != "finished" or not _looks_like_positive_security_result(result):
             return ""
         if not any(execution.ok for execution in node.executions):
@@ -1044,6 +1083,21 @@ class AgentGraphTool:
         if not result:
             return ToolResult(
                 ok=False, summary="agent_graph finish: result is required", error="missing_result"
+            )
+        if (
+            status == "finished"
+            and _is_service_probe_completion(node, result)
+            and not _has_sufficient_proof_artifact(node, result)
+        ):
+            return ToolResult(
+                ok=False,
+                data={"agent": self._node_to_dict(node), "active_agents": self._active_count()},
+                summary=(
+                    f"agent_graph finish: service-pivot result for {agent_id} requires "
+                    "valid EvidenceArtifact or blocked status; open port/service discovery alone "
+                    "is not a finding"
+                ),
+                error="insufficient_service_evidence",
             )
         if status == "finished" and _looks_like_positive_security_result(result):
             if not any(execution.ok for execution in node.executions):

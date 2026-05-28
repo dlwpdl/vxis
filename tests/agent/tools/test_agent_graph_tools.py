@@ -377,6 +377,57 @@ async def test_agent_graph_run_records_bounded_executor_turn():
 
 
 @pytest.mark.asyncio
+async def test_agent_graph_rejects_service_finish_from_open_port_only():
+    async def _executor(agent, instruction):
+        return ToolResult(
+            ok=True,
+            summary="nmap_scan: 1 open service on localhost",
+            data={
+                "tool": "nmap_scan",
+                "args": {"target": "localhost", "ports": "6379"},
+                "result": {
+                    "ok": True,
+                    "summary": "nmap_scan: 1 open service on localhost",
+                    "data": {
+                        "open_ports": [{"port": "6379", "service": "redis"}],
+                    },
+                },
+                "agent_finish": {
+                    "status": "completed",
+                    "result_summary": "Redis open service detected on port 6379.",
+                    "evidence_artifact": {},
+                },
+            },
+        )
+
+    tool = AgentGraphTool(executor=_executor)
+    created = await tool.run(
+        action="create",
+        role="exploit_worker",
+        task="Deepen nmap service pivot: Probe redis on localhost:6379/tcp",
+        expected_artifact=(
+            "service-specific transcript or valid EvidenceArtifact with target, "
+            "control, payload, observed_delta, and repro_steps"
+        ),
+    )
+    agent_id = created.data["agent"]["id"]
+
+    ran = await tool.run(action="run", agent_id=agent_id)
+    finish = await tool.run(
+        action="finish",
+        agent_id=agent_id,
+        result="Redis open service detected on port 6379.",
+    )
+
+    assert ran.ok is False
+    assert ran.error == "insufficient_completion_evidence"
+    assert "open port/service discovery alone is not a finding" in ran.summary
+    assert ran.data["agent"]["status"] == "waiting"
+    assert finish.ok is False
+    assert finish.error == "insufficient_service_evidence"
+
+
+@pytest.mark.asyncio
 async def test_agent_graph_run_limit_requires_explicit_finish_or_block():
     async def _executor(agent, instruction):
         return ToolResult(

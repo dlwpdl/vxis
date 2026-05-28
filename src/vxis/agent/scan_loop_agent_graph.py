@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import json
 import os
 import re
@@ -1397,14 +1398,7 @@ class ScanLoopAgentGraphMixin:
                 )
             )
         ):
-            return (
-                "nmap_scan",
-                {
-                    "target": str(self.state.target),
-                    "ports": "top-1000",
-                    "scripts": "default,safe",
-                },
-            )
+            return ("nmap_scan", self._agent_graph_nmap_args_from_blob(blob))
         if "run_skill" in self.registry.list_tools():
             for raw_skill in list(agent.get("skills") or []):
                 skill = self._pivoted_skill_name(str(raw_skill))
@@ -1444,6 +1438,36 @@ class ScanLoopAgentGraphMixin:
         if "http_request" in self.registry.list_tools():
             return ("http_request", {"method": "GET", "url": str(self.state.target)})
         return None
+
+    def _agent_graph_nmap_args_from_blob(self, blob: str) -> dict[str, Any]:
+        target = str(self.state.target)
+        host_match = re.search(r"\b(?:on|at|target=)?\s*([A-Za-z0-9._-]+):(\d{1,5})/(tcp|udp)\b", blob)
+        port = ""
+        protocol = ""
+        if host_match:
+            target = host_match.group(1)
+            port = host_match.group(2)
+            protocol = host_match.group(3)
+        if not port:
+            port_match = re.search(r"\b(?:port|p)\s*[:=]?\s*(\d{1,5})\b", blob)
+            if port_match:
+                port = port_match.group(1)
+        if not protocol and re.search(r"\budp\b", blob):
+            protocol = "udp"
+
+        scripts = "default,safe"
+        if any(token in blob for token in ("vuln", "cve", "noauth", "no-auth", "redis", "mongodb", "postgres", "mysql", "smb", "rdp", "vnc", "ftp", "nfs")):
+            scripts = "default,safe,vuln"
+        args: dict[str, Any] = {
+            "target": target,
+            "ports": port or "top-1000",
+            "scripts": scripts,
+        }
+        if protocol == "udp":
+            args["udp"] = True
+        if port:
+            args["timeout"] = 180
+        return args
 
     @staticmethod
     def _agent_graph_envelope_allowed_tools(agent: dict[str, Any]) -> set[str]:
@@ -1556,8 +1580,8 @@ class ScanLoopAgentGraphMixin:
     ) -> bool:
         if not isinstance(child_result.data, dict):
             return False
-        open_ports = child_result.data.get("open_ports")
-        if not isinstance(open_ports, list) or not open_ports:
+        open_ports = self._nmap_open_ports_from_child_result(child_result)
+        if not open_ports:
             return False
         agent = result.data.get("agent") if isinstance(result.data, dict) else {}
         parent_agent_id = str(agent.get("id") or child_result.data.get("agent_id") or "").strip()
@@ -1620,6 +1644,20 @@ class ScanLoopAgentGraphMixin:
         return promoted
 
     @staticmethod
+    def _nmap_open_ports_from_child_result(child_result: ToolResult) -> list[dict[str, Any]]:
+        if not isinstance(child_result.data, dict):
+            return []
+        raw_open_ports = child_result.data.get("open_ports")
+        if isinstance(raw_open_ports, str):
+            try:
+                raw_open_ports = ast.literal_eval(raw_open_ports)
+            except (SyntaxError, ValueError):
+                raw_open_ports = []
+        if not isinstance(raw_open_ports, list):
+            return []
+        return [dict(item) for item in raw_open_ports if isinstance(item, dict)]
+
+    @staticmethod
     def _nmap_service_label(service: dict[str, Any]) -> str:
         parts = [
             str(service.get("service") or "unknown").strip(),
@@ -1636,7 +1674,7 @@ class ScanLoopAgentGraphMixin:
             return 96
         if any(token in label for token in ("rdp", "vnc", "telnet", "ftp", "smb", "microsoft-ds", "nfs")) or port in {"21", "23", "445", "3389", "5900"}:
             return 92
-        if any(token in label for token in ("kubernetes", "docker", "etcd", "consul", "jenkins", "admin")):
+        if any(token in label for token in ("kubernetes", "docker", "etcd", "consul", "jenkins", "admin", "prometheus", "grafana")):
             return 91
         if "http" in label or port in {"80", "443", "8080", "8443", "8000", "9000"}:
             return 88
@@ -1649,13 +1687,26 @@ class ScanLoopAgentGraphMixin:
         label = ScanLoopAgentGraphMixin._nmap_service_label(service).lower()
         port = str(service.get("port") or "")
         base_watch = ["nmap_scan", port, str(service.get("service") or ""), str(service.get("product") or "")]
+        if any(token in label for token in ("kubernetes", "docker", "etcd", "consul", "jenkins", "prometheus", "grafana", "admin")):
+            return {
+                "priority": 94,
+                "role": "exploit_worker",
+                "objective": "Validate whether the exposed control-plane/admin service permits unauthenticated access or privilege-changing actions.",
+                "next_step": f"Create an exploit_worker. Re-run nmap_scan on exact port {port or '<port>'}, then test only safe unauth/admin/API probes with control evidence.",
+                "crown_jewel": "control-plane takeover or admin data access",
+                "service_family": "control_plane",
+                "recommended_scripts": "default,safe,vuln",
+                "watch_terms": [*base_watch, "admin", "control-plane", "unauth", "api", "privilege"],
+            }
         if "http" in label or port in {"80", "443", "8080", "8443", "8000", "9000"}:
             return {
                 "priority": 88,
                 "role": "recon_worker",
                 "objective": "Map the HTTP service, identify admin/API/auth surfaces, then hand off to exploit validation.",
-                "next_step": "Create a bounded agent_graph worker for this service. Use http_request/browser plus enumerate_endpoints/test_misconfig before reporting anything.",
+                "next_step": f"Create a bounded agent_graph worker for this service. First re-run nmap_scan against exact port {port or '<port>'}, then use http_request/browser plus enumerate_endpoints/test_misconfig before reporting anything.",
                 "crown_jewel": "admin route, API data, or service-side exploit path",
+                "service_family": "http",
+                "recommended_scripts": "default,http-title,http-headers",
                 "watch_terms": [*base_watch, "http", "api", "admin", "enumerate_endpoints", "test_misconfig"],
             }
         if any(token in label for token in ("redis", "mongodb", "postgres", "mysql", "mssql", "oracle", "elasticsearch")):
@@ -1663,25 +1714,42 @@ class ScanLoopAgentGraphMixin:
                 "priority": 96,
                 "role": "exploit_worker",
                 "objective": "Determine whether the database service exposes unauthenticated access, weak auth, or data exposure.",
-                "next_step": "Create an exploit_worker. Re-run nmap_scan with safe/vuln scripts for this port, then prove data access or mark blocked with exact service evidence.",
+                "next_step": f"Create an exploit_worker. Re-run nmap_scan with safe/vuln scripts for exact port {port or '<port>'}, then prove no-auth/weak-auth data access or mark blocked with exact service evidence.",
                 "crown_jewel": "database data exposure or credential material",
+                "service_family": "database",
+                "recommended_scripts": "default,safe,vuln",
                 "watch_terms": [*base_watch, "database", "noauth", "credential", "dump", "data"],
+            }
+        if "ssh" in label or port == "22":
+            return {
+                "priority": 84,
+                "role": "recon_worker",
+                "objective": "Fingerprint SSH exposure and decide whether credential, weak-algorithm, or lateral-movement validation is warranted.",
+                "next_step": f"Create a recon_worker. Re-run nmap_scan on exact port {port or '22'} with ssh2-enum-algos, then escalate only if concrete weak config or credential path exists.",
+                "crown_jewel": "credential reuse or lateral movement",
+                "service_family": "ssh",
+                "recommended_scripts": "default,ssh2-enum-algos",
+                "watch_terms": [*base_watch, "ssh", "credential", "algorithm", "lateral"],
             }
         if any(token in label for token in ("rdp", "vnc", "telnet", "ftp", "smb", "microsoft-ds", "nfs")) or port in {"21", "23", "445", "3389", "5900"}:
             return {
                 "priority": 92,
                 "role": "exploit_worker",
                 "objective": "Validate whether the remote/file service creates credential, file, or lateral-movement impact.",
-                "next_step": "Create an exploit_worker. Use nmap_scan safe scripts and service-specific controls; require transcript evidence before reporting.",
+                "next_step": f"Create an exploit_worker. Re-run nmap_scan on exact port {port or '<port>'} with safe scripts and service-specific controls; require transcript evidence before reporting.",
                 "crown_jewel": "remote access, file disclosure, or lateral movement",
+                "service_family": "remote_file",
+                "recommended_scripts": "default,safe,vuln",
                 "watch_terms": [*base_watch, "remote", "credential", "share", "lateral", "file"],
             }
         return {
             "priority": 78,
             "role": "recon_worker",
             "objective": "Fingerprint this exposed service and decide whether it warrants exploit validation.",
-            "next_step": "Create a bounded worker or re-run nmap_scan with safe scripts on the exact port; escalate only with concrete service evidence.",
+            "next_step": f"Create a bounded worker or re-run nmap_scan with safe scripts on exact port {port or '<port>'}; escalate only with concrete service evidence.",
             "crown_jewel": "service-specific exploit path",
+            "service_family": "generic_service",
+            "recommended_scripts": "default,safe",
             "watch_terms": [*base_watch, "service", "fingerprint"],
         }
 

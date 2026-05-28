@@ -1369,14 +1369,45 @@ class ScanLoopDecisionPolicyMixin:
                 " ".join(branch.watch_terms),
             )
         ).lower()
-        role = "recon_worker" if "http" in blob or "api" in blob else "exploit_worker"
+        is_control_plane = any(
+            token in blob
+            for token in (
+                "control-plane",
+                "kubernetes",
+                "docker",
+                "etcd",
+                "consul",
+                "jenkins",
+                "prometheus",
+                "grafana",
+            )
+        )
+        is_http_like = "http" in blob or "api" in blob
+        if is_control_plane:
+            role = "exploit_worker"
+        elif is_http_like:
+            role = "recon_worker"
+        else:
+            role = "exploit_worker"
         skills: list[str] = []
-        if "http" in blob or "api" in blob:
+        if is_control_plane:
+            skills = ["test_api_security", "test_misconfig"]
+        elif is_http_like:
             skills = ["enumerate_endpoints", "test_misconfig"]
         elif any(token in blob for token in ("database", "redis", "mongodb", "postgres", "mysql")):
             skills = ["test_infra"]
         elif any(token in blob for token in ("remote", "share", "file", "smb", "ftp", "nfs")):
             skills = ["test_sensitive_files"]
+
+        target_hint = ""
+        port_hint = ""
+        protocol_hint = ""
+        service_match = re.search(r"\b([A-Za-z0-9._-]+):(\d{1,5})/(tcp|udp)\b", blob)
+        if service_match:
+            target_hint = service_match.group(1)
+            port_hint = service_match.group(2)
+            protocol_hint = service_match.group(3)
+        scripts = "default,safe,vuln" if role == "exploit_worker" else "default,safe"
 
         task = (
             f"Deepen nmap service pivot: {branch.title}. "
@@ -1400,7 +1431,10 @@ class ScanLoopDecisionPolicyMixin:
             ),
             "message": (
                 "Use bounded tools only. Prefer nmap_scan for service fingerprinting, "
-                "then choose http_request/browser/run_skill only when the service evidence fits."
+                "then choose http_request/browser/run_skill only when the service evidence fits. "
+                f"Start with nmap_scan target={target_hint or self.state.target} "
+                f"ports={port_hint or '<exact-port>'} scripts={scripts}"
+                f"{' udp=true' if protocol_hint == 'udp' else ''}."
             ),
         }
         if skills:

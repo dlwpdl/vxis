@@ -735,6 +735,22 @@ class ScanLoopActionMixin:
         ][-4:]
         snapshot["chain_candidates"] = self._suggest_chain_candidates(limit=3)
         snapshot["agents"] = self._agent_graph_agents_from_messages()[:6]
+        snapshot["service_pivots"] = [
+            {
+                "id": branch.id,
+                "title": branch.title,
+                "status": branch.status,
+                "priority": branch.priority,
+                "role": branch.role,
+                "parent_branch_id": branch.parent_branch_id,
+                "objective": branch.objective,
+                "next_step": branch.next_step,
+                "evidence": branch.evidence,
+                "child_ids": list(branch.child_ids),
+            }
+            for branch in self.state.active_branches()
+            if branch.vector_id == "NET-SERVICE-PIVOT"
+        ][:6]
         sdk_loop = getattr(self, "_sdk_agent_loop", None)
         if sdk_loop is not None and callable(getattr(sdk_loop, "control_plane_snapshot", None)):
             sdk_runtime = sdk_loop.control_plane_snapshot(limit=6)

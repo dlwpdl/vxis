@@ -297,6 +297,25 @@ def build_scan_dashboard(loop: Any) -> str:
                 if chain_next:
                     lines.append(f"     crown_next: {chain_next[: 90 if local_strict else 130]}")
 
+    service_pivots = [
+        branch
+        for branch in s.active_branches()
+        if getattr(branch, "vector_id", "") == "NET-SERVICE-PIVOT"
+    ][: 3 if local_strict else 5]
+    if service_pivots:
+        lines.append("Service pivots:")
+        for branch in service_pivots:
+            lines.append(
+                f"  {branch.status.upper()} {branch.id} p{branch.priority}: "
+                f"{branch.title[: 70 if local_strict else 100]}"
+            )
+            if branch.evidence:
+                lines.append(f"     evidence: {branch.evidence[: 80 if local_strict else 120]}")
+            if branch.next_step and not local_strict:
+                lines.append(f"     next: {branch.next_step[:120]}")
+            if branch.child_ids:
+                lines.append(f"     workers: {', '.join(branch.child_ids[:3])}")
+
     # Endpoints
     if endpoints_seen:
         lines.append(f"Known endpoints: {', '.join(sorted(endpoints_seen)[:endpoint_limit])}")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from vxis.agent.tool_registry import ToolResult
@@ -11,14 +13,23 @@ class FakeShellTool:
     def __init__(self, stdout: str) -> None:
         self.stdout = stdout
         self.calls: list[dict] = []
+        self.active = 0
+        self.max_active = 0
 
     async def run(self, **kwargs):
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
         self.calls.append(dict(kwargs))
-        return ToolResult(
-            ok=True,
-            summary="shell ok",
-            data={"stdout": self.stdout, "stderr": "", "exit_code": 0},
-        )
+        try:
+            if kwargs.get("delay"):
+                await asyncio.sleep(float(kwargs["delay"]))
+            return ToolResult(
+                ok=True,
+                summary="shell ok",
+                data={"stdout": self.stdout, "stderr": "", "exit_code": 0},
+            )
+        finally:
+            self.active -= 1
 
 
 _NMAP_XML = """<?xml version="1.0"?>
@@ -67,6 +78,27 @@ async def test_nmap_scan_tool_rejects_shellish_target():
 
     assert result.ok is False
     assert result.error == "invalid_target"
+
+
+@pytest.mark.asyncio
+async def test_nmap_scan_tool_respects_default_local_backpressure(monkeypatch):
+    monkeypatch.setenv("VXIS_NMAP_CONCURRENCY", "1")
+
+    class SlowShell(FakeShellTool):
+        async def run(self, **kwargs):
+            return await super().run(**{**kwargs, "delay": 0.02})
+
+    shell = SlowShell(_NMAP_XML)
+    tool = NmapScanTool(shell_tool=shell)
+
+    results = await asyncio.gather(
+        tool.run(target="localhost", ports="80"),
+        tool.run(target="127.0.0.1", ports="443"),
+    )
+
+    assert all(result.ok for result in results)
+    assert shell.max_active == 1
+    assert len(shell.calls) == 2
 
 
 def test_build_default_registry_contains_nmap_scan_tool():
