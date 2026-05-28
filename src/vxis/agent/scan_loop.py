@@ -1,5 +1,6 @@
 from __future__ import annotations
 import logging
+import os
 from typing import Any, Callable
 from vxis.agent.scan_loop_state import (
     BranchState,
@@ -24,6 +25,10 @@ from vxis.agent.tool_registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 __all__ = ["DIRECTOR_PROMPT_TEMPLATE", "ScanAgentLoop", "VectorCandidate", "_DESKTOP_SKILLS"]
+
+
+def _env_flag(name: str) -> bool:
+    return str(os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class ScanAgentLoop(
@@ -135,8 +140,24 @@ class ScanAgentLoop(
     def _install_agent_graph_executor(self) -> None:
         tool = self.registry.get_tool("agent_graph")
         set_executor = getattr(tool, "set_executor", None)
+        executor = self._run_agent_graph_child_turn
+        if _env_flag("VXIS_USE_SDK_AGENT_RUNTIME"):
+            from vxis.agent.sdk_runtime import SDKChildAgentLoop, SDKRunPaths
+
+            config = getattr(getattr(self, "brain", None), "_hybrid_model_config", None)
+            worker_endpoint = getattr(config, "worker", None)
+            run_dir = os.environ.get("VXIS_SDK_RUN_DIR") or ".vxis/sdk-runtime/latest"
+            self._sdk_agent_loop = SDKChildAgentLoop(
+                registry=self.registry,
+                run_paths=SDKRunPaths.for_run_dir(run_dir),
+                target=self.state.target,
+                provider=str(getattr(worker_endpoint, "provider", "") or "openai"),
+                model=str(getattr(worker_endpoint, "model", "") or "") or None,
+                context_window=getattr(worker_endpoint, "context_window", None),
+            )
+            executor = self._sdk_agent_loop.run_turn
         if callable(set_executor):
-            set_executor(self._run_agent_graph_child_turn)
+            set_executor(executor)
         set_target_kind = getattr(tool, "set_target_kind", None)
         if callable(set_target_kind):
             set_target_kind(self._target_kind)

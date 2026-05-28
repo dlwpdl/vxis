@@ -930,8 +930,47 @@ class AgentGraphTool:
             await self._maybe_await(self._executor(self._node_to_dict(node), instruction))
         )
         execution = self._append_execution(node, executor_result)
-        node.status = "waiting"
         node.result_package = self._build_result_package(node, execution=execution)
+        completion = self._executor_agent_finish(executor_result)
+        completion_status = self._completion_node_status(completion)
+        if completion_status:
+            completion_result = _clean_text(
+                completion.get("result_summary") or executor_result.summary
+            )
+            evidence_error = self._completion_evidence_error(
+                node,
+                result=completion_result,
+                status=completion_status,
+            )
+            if evidence_error:
+                node.status = "waiting"
+                node.escalation = self._build_escalation_state(node)
+                node.updated_at = _now_iso()
+                self._append_message(
+                    node,
+                    sender=agent_id,
+                    recipient="root",
+                    body=evidence_error,
+                )
+                return ToolResult(
+                    ok=False,
+                    data={
+                        "agent": self._node_to_dict(node),
+                        "execution": self._execution_to_dict(execution),
+                        "active_agents": self._active_count(),
+                    },
+                    summary=f"agent_graph: {agent_id} SDK completion rejected: {evidence_error}",
+                    error="insufficient_completion_evidence",
+                )
+            node.status = completion_status
+            node.result = completion_result
+            node.result_package = self._finalize_result_package(
+                node,
+                result=completion_result,
+                status=completion_status,
+            )
+        else:
+            node.status = "waiting"
         node.escalation = self._build_escalation_state(node)
         node.updated_at = _now_iso()
         self._append_message(
@@ -950,6 +989,40 @@ class AgentGraphTool:
             summary=f"agent_graph: ran {agent_id} -> {executor_result.summary[:120]}",
             error=executor_result.error,
         )
+
+    @staticmethod
+    def _executor_agent_finish(result: ToolResult) -> dict[str, Any]:
+        data = result.data if isinstance(result.data, dict) else {}
+        completion = data.get("agent_finish")
+        return completion if isinstance(completion, dict) else {}
+
+    @staticmethod
+    def _completion_node_status(completion: dict[str, Any]) -> str:
+        if not completion:
+            return ""
+        status = str(completion.get("status") or "").strip().lower()
+        if status in {"completed", "finished"}:
+            return "finished"
+        if status in {"blocked", "failed", "crashed", "stopped"}:
+            return "blocked"
+        return ""
+
+    @staticmethod
+    def _completion_evidence_error(
+        node: AgentGraphNode,
+        *,
+        result: str,
+        status: str,
+    ) -> str:
+        if status != "finished" or not _looks_like_positive_security_result(result):
+            return ""
+        if not any(execution.ok for execution in node.executions):
+            return "positive SDK completion requires at least one successful child execution"
+        if not _has_supporting_successful_execution(node, result):
+            return "positive SDK completion is not supported by child execution history"
+        if not _has_sufficient_proof_artifact(node, result):
+            return "positive SDK completion requires a valid EvidenceArtifact"
+        return ""
 
     def _finish(self, kwargs: dict[str, Any]) -> ToolResult:
         agent_id = _clean_text(kwargs.get("agent_id"))
