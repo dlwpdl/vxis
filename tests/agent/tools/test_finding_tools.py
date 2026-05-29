@@ -36,6 +36,8 @@ def _verified_chain_artifact(
         "observed_result": observed_result,
         "control_result": control_result,
         "crown_jewel_evidence": crown_jewel_evidence,
+        "repeat_count": 2,
+        "negative_result": control_result,
         "source_output_used_in_pivot": True,
         "hops": [
             {
@@ -45,6 +47,8 @@ def _verified_chain_artifact(
                 "pivot_action": pivot_action,
                 "observed_result": observed_result,
                 "control_result": control_result,
+                "repeat_count": 2,
+                "negative_result": control_result,
                 "source_output_used_in_pivot": True,
             }
         ],
@@ -70,9 +74,24 @@ async def test_report_finding_stores_and_returns_id():
         affected_component="/login",
         description="Classic ' OR 1=1-- bypass on the username field",
         impact="Authentication bypass leads to administrative access.",
-        technical_analysis="Server accepted attacker-controlled quote payload and created an authenticated session.",
-        poc_description="Submit a quote-based payload to the login endpoint and observe a valid session cookie.",
+        technical_analysis=(
+            "Negative control with invalid credentials returned 401. The quote payload was "
+            "reproduced twice and created an authenticated admin session both times. repeat_count=2"
+        ),
+        poc_description="Submit invalid credentials, then submit the quote payload twice and compare responses.",
         poc_script_code=(
+            "POST /login HTTP/1.1\n"
+            "Host: app.local\n\n"
+            "{\"username\":\"bad\",\"password\":\"bad\"}\n\n"
+            "HTTP/1.1 401 Unauthorized\n\n"
+            "POST /login HTTP/1.1\n"
+            "Host: app.local\n"
+            "Content-Type: application/json\n\n"
+            "{\"username\":\"admin'--\",\"password\":\"x\"}\n\n"
+            "HTTP/1.1 200 OK\n"
+            "Set-Cookie: session=abc\n\n"
+            "{\"role\":\"admin\"}\n\n"
+            "repeat_count=2\n"
             "POST /login HTTP/1.1\n"
             "Host: app.local\n"
             "Content-Type: application/json\n\n"
@@ -181,11 +200,17 @@ async def test_report_finding_normalizes_escaped_poc_transcript():
         affected_component="/search",
         description="Payload is reflected into the response.",
         impact="Victim browser script execution.",
-        technical_analysis="Baseline text response changed to active markup with the payload.",
-        poc_description="Replay benign search, then replay payload search and compare response body.",
+        technical_analysis=(
+            "Negative control baseline did not reflect script markup. Payload reflection was "
+            "reproduced twice with active markup. repeat_count=2"
+        ),
+        poc_description="Replay benign search, then replay payload search twice and compare response body.",
         poc_script_code=(
             "GET /search?q=test HTTP/1.1\\nHost: example\\n\\n"
-            "HTTP/1.1 200 OK\\n\\nsearch:test\\n\\n"
+            "HTTP/1.1 200 OK\\n\\nnegative control: search:test; not reflected as script\\n\\n"
+            "GET /search?q=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1\\nHost: example\\n\\n"
+            "HTTP/1.1 200 OK\\n\\nsearch:<script>alert(1)</script>\\n\\n"
+            "repeat_count=2\\n"
             "GET /search?q=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1\\nHost: example\\n\\n"
             "HTTP/1.1 200 OK\\n\\nsearch:<script>alert(1)</script>"
         ),
@@ -233,9 +258,9 @@ async def test_query_findings_empty_store():
 @pytest.mark.asyncio
 async def test_query_findings_filters_by_severity_and_type():
     rep = ReportFindingTool()
-    await rep.run(title="A", severity="critical", finding_type="sqli", affected_component="/a", description="da", impact="ia", technical_analysis="ta", poc_description="pa", poc_script_code="GET /a\nHTTP/1.1 500", remediation_steps="ra")
-    await rep.run(title="B", severity="high",     finding_type="xss",  affected_component="/b", description="db", impact="ib", technical_analysis="tb", poc_description="pb", poc_script_code="GET /b?q=<script>alert(1)</script>\nHTTP/1.1 200 OK\n\n<script>alert(1)</script>", remediation_steps="rb")
-    await rep.run(title="C", severity="critical", finding_type="xss",  affected_component="/c", description="dc", impact="ic", technical_analysis="tc", poc_description="pc", poc_script_code="GET /c\nHTTP/1.1 200", remediation_steps="rc")
+    await rep.run(title="A", severity="critical", finding_type="sqli", affected_component="/a", description="da", impact="ia", technical_analysis="negative control baseline returned 200 without SQL error; payload repeated twice. repeat_count=2", poc_description="pa", poc_script_code="GET /a?q=test\nHTTP/1.1 200 OK\n\nno sql error\n\nGET /a?q='\nHTTP/1.1 500\n\nsql error\n\nrepeat_count=2\nGET /a?q='\nHTTP/1.1 500\n\nsql error", remediation_steps="ra")
+    await rep.run(title="B", severity="high",     finding_type="xss",  affected_component="/b", description="db", impact="ib", technical_analysis="negative control did not reflect script; payload repeated twice. repeat_count=2", poc_description="pb", poc_script_code="GET /b?q=test\nHTTP/1.1 200 OK\n\nnot reflected\n\nGET /b?q=<script>alert(1)</script>\nHTTP/1.1 200 OK\n\n<script>alert(1)</script>\n\nrepeat_count=2\nGET /b?q=<script>alert(1)</script>\nHTTP/1.1 200 OK\n\n<script>alert(1)</script>", remediation_steps="rb")
+    await rep.run(title="C", severity="critical", finding_type="xss",  affected_component="/c", description="dc", impact="ic", technical_analysis="negative control did not reflect script; payload repeated twice. repeat_count=2", poc_description="pc", poc_script_code="GET /c?q=test\nHTTP/1.1 200 OK\n\nnot reflected\n\nGET /c?q=<script>alert(1)</script>\nHTTP/1.1 200\n\n<script>alert(1)</script>\n\nrepeat_count=2\nGET /c?q=<script>alert(1)</script>\nHTTP/1.1 200\n\n<script>alert(1)</script>", remediation_steps="rc")
 
     q = QueryFindingsTool()
     r1 = await q.run(severity="critical")
@@ -261,11 +286,14 @@ async def test_query_findings_text_contains_matches_title_or_description():
         affected_component="/login",
         description="jwt none alg",
         impact="ia",
-        technical_analysis="Control without auth returned 401, forged JWT returned 200.",
-        poc_description="Replay baseline without token, then replay with forged JWT.",
+        technical_analysis="Negative control without auth returned 401, forged JWT returned 200 twice. repeat_count=2",
+        poc_description="Replay baseline without token, then replay with forged JWT twice.",
         poc_script_code=(
             "GET /admin HTTP/1.1\nCookie: token=\n\n"
             "HTTP/1.1 401 Unauthorized\n\n"
+            "GET /admin HTTP/1.1\nCookie: JWT=forged\n\n"
+            "HTTP/1.1 200 OK\n\n{\"role\":\"admin\"}\n\n"
+            "repeat_count=2\n"
             "GET /admin HTTP/1.1\nCookie: JWT=forged\n\n"
             "HTTP/1.1 200 OK\n\n{\"role\":\"admin\"}"
         ),
@@ -317,9 +345,21 @@ async def test_link_chain_happy_path():
         affected_component="/admin",
         description="d",
         impact="Administrative role escalation succeeds.",
-        technical_analysis="Server honored a low-privilege session during a promotion action.",
-        poc_description="Replay the promotion request with a low-privilege cookie and observe a success response.",
+        technical_analysis="Negative control without a privileged path returned 403; promotion replay succeeded twice. repeat_count=2",
+        poc_description="Replay denied control, then replay the promotion request twice and observe a success response.",
         poc_script_code=(
+            "POST /admin/promote HTTP/1.1\n"
+            "Host: app.local\n"
+            "Cookie: session=none\n\n"
+            "{\"user\":\"attacker\",\"role\":\"admin\"}\n\n"
+            "HTTP/1.1 403 Forbidden\n\n"
+            "POST /admin/promote HTTP/1.1\n"
+            "Host: app.local\n"
+            "Cookie: session=low\n\n"
+            "{\"user\":\"attacker\",\"role\":\"admin\"}\n\n"
+            "HTTP/1.1 200 OK\n\n"
+            "{\"status\":\"promoted\"}\n\n"
+            "repeat_count=2\n"
             "POST /admin/promote HTTP/1.1\n"
             "Host: app.local\n"
             "Cookie: session=low\n\n"
@@ -343,6 +383,8 @@ async def test_link_chain_happy_path():
             "observed_result": "HTTP/1.1 200 OK\n\n{\"status\":\"promoted\",\"role\":\"admin\"}",
             "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline low privilege denied",
             "crown_jewel_evidence": "Admin role promotion succeeded and returned role=admin.",
+            "repeat_count": 2,
+            "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline low privilege denied",
             "source_output_used_in_pivot": True,
             "hops": [
                 {
@@ -352,6 +394,8 @@ async def test_link_chain_happy_path():
                     "pivot_action": "Reused exposed /api/user ids for IDOR enumeration.",
                     "observed_result": "HTTP/1.1 200 OK\n\n{\"data\":\"other user\"}",
                     "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied",
+                    "repeat_count": 2,
+                    "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied",
                     "source_output_used_in_pivot": True,
                 },
                 {
@@ -361,6 +405,8 @@ async def test_link_chain_happy_path():
                     "pivot_action": "Used enumerated user id 1002 in the admin promotion request.",
                     "observed_result": "HTTP/1.1 200 OK\n\n{\"status\":\"promoted\",\"role\":\"admin\"}",
                     "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline low privilege denied",
+                    "repeat_count": 2,
+                    "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline low privilege denied",
                     "source_output_used_in_pivot": True,
                 },
             ],
@@ -387,11 +433,14 @@ async def test_link_chain_rejects_high_value_chain_without_verified_artifact():
         affected_component="/login",
         description="Default credentials work.",
         impact="Admin session takeover.",
-        technical_analysis="Baseline invalid credentials returned 401, default credentials returned 200.",
-        poc_description="Replay baseline and default credential requests.",
+        technical_analysis="Negative control invalid credentials returned 401, default credentials returned 200 twice. repeat_count=2",
+        poc_description="Replay baseline and default credential requests twice.",
         poc_script_code=(
             "POST /login HTTP/1.1\n\nusername=bad&password=bad\n\n"
             "HTTP/1.1 401 Unauthorized\n\n"
+            "POST /login HTTP/1.1\n\nusername=admin&password=admin\n\n"
+            "HTTP/1.1 200 OK\nSet-Cookie: session=admin\n\n"
+            "repeat_count=2\n"
             "POST /login HTTP/1.1\n\nusername=admin&password=admin\n\n"
             "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
         ),
@@ -423,7 +472,7 @@ async def test_link_chain_rejects_unknown_finding_ids():
 @pytest.mark.asyncio
 async def test_link_chain_requires_at_least_two_findings():
     rep = ReportFindingTool()
-    await rep.run(title="Solo", severity="high", finding_type="x", affected_component="/s", description="d", impact="i", technical_analysis="t", poc_description="p", poc_script_code="GET /s\nHTTP/1.1 200", remediation_steps="r")
+    await rep.run(title="Solo", severity="medium", finding_type="x", affected_component="/s", description="d")
 
     link = LinkChainTool()
     result = await link.run(finding_ids=["VXIS-0001"], rationale="alone")
@@ -434,8 +483,8 @@ async def test_link_chain_requires_at_least_two_findings():
 @pytest.mark.asyncio
 async def test_link_chain_requires_rationale():
     rep = ReportFindingTool()
-    await rep.run(title="A", severity="high", finding_type="x", affected_component="/a", description="d", impact="i", technical_analysis="t", poc_description="p", poc_script_code="GET /a\nHTTP/1.1 200", remediation_steps="r")
-    await rep.run(title="B", severity="high", finding_type="x", affected_component="/b", description="d", impact="i", technical_analysis="t", poc_description="p", poc_script_code="GET /b\nHTTP/1.1 200", remediation_steps="r")
+    await rep.run(title="A", severity="medium", finding_type="x", affected_component="/a", description="d")
+    await rep.run(title="B", severity="medium", finding_type="x", affected_component="/b", description="d")
 
     link = LinkChainTool()
     result = await link.run(finding_ids=["VXIS-0001", "VXIS-0002"], rationale="")

@@ -558,6 +558,29 @@ class ScanLoopRunMixin(
                                 args.get("severity", "?"),
                                 verdict,
                             )
+                            if verdict == "UNCONFIRMED":
+                                from vxis.agent.tool_registry import ToolResult as _ToolResult
+
+                                gap_branch_id = self._spawn_recursive_gap_branch_from_result(
+                                    "verify_finding",
+                                    verify_args,
+                                    _ToolResult(
+                                        ok=True,
+                                        summary=verdict_result.summary,
+                                        data=verdict_data,
+                                    ),
+                                )
+                                if gap_branch_id:
+                                    self.state.add_message(
+                                        "system",
+                                        {
+                                            "hint": (
+                                                "RECURSIVE DIG REQUIRED: verifier returned UNCONFIRMED. "
+                                                f"Work branch {gap_branch_id} with controls, negative test, "
+                                                "repeat reproduction, then retry report_finding."
+                                            ),
+                                        },
+                                    )
                             if verdict == "REFUTED":
                                 # Block the report_finding dispatch — treat
                                 # as a soft fail so Brain sees the refutation
@@ -931,6 +954,18 @@ class ScanLoopRunMixin(
                         f"{result_note}; absorbed {len(absorbed)} SDK background worker result(s)"
                     )
                 self._emit_control_plane(result_note)
+                gap_branch_id = self._spawn_recursive_gap_branch_from_result(name, args, result)
+                if gap_branch_id:
+                    self.state.add_message(
+                        "system",
+                        {
+                            "hint": (
+                                "RECURSIVE DIG REQUIRED: a positive/blocked result exposed an evidence gap. "
+                                f"Work branch {gap_branch_id} through hypothesis -> execute -> evidence -> "
+                                "refute -> reproduce -> pivot/chain -> crown impact -> report."
+                            ),
+                        },
+                    )
                 if name == "report_finding" and result.ok and isinstance(args, dict):
                     self._mark_candidates_for_finding(args)
                     finding_id = ""

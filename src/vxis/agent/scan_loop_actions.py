@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import re
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -294,16 +296,29 @@ class ScanLoopActionMixin:
         payload_preview = str(control.get("payload_preview", response_preview))[:700]
         baseline_status = control.get("baseline_status", "?")
         payload_status = control.get("payload_status", "?")
-        return (
+        try:
+            repeat_count = int(control.get("repeat_count") or control.get("reproduced_count") or 0)
+        except (TypeError, ValueError):
+            repeat_count = 0
+        transcript = (
             f"GET {baseline_target} HTTP/1.1\n"
             f"Host: {host}\n\n"
             f"HTTP/1.1 {baseline_status}\n\n"
-            f"{baseline_preview}\n\n"
+            f"negative control / baseline: {baseline_preview}\n\n"
             f"GET {payload_target} HTTP/1.1\n"
             f"Host: {host}\n\n"
             f"HTTP/1.1 {payload_status}\n\n"
             f"{payload_preview}"
         )
+        if repeat_count >= 2:
+            transcript += (
+                f"\n\nrepeat_count={repeat_count}\n"
+                f"GET {payload_target} HTTP/1.1\n"
+                f"Host: {host}\n\n"
+                f"HTTP/1.1 {payload_status}\n\n"
+                f"{payload_preview}"
+            )
+        return transcript
 
     def _build_simple_http_poc(
         self,
@@ -387,6 +402,337 @@ class ScanLoopActionMixin:
             if branch.parent_branch_id and branch.parent_branch_id in branch_ids_to_settle:
                 branch.status = "exhausted"
                 branch.last_report = (branch.last_report or "superseded by linked attack chain")[:160]
+
+    @staticmethod
+    def _challenge_text(value: Any) -> str:
+        if isinstance(value, dict):
+            return " ".join(ScanLoopActionMixin._challenge_text(item) for item in value.values())
+        if isinstance(value, list):
+            return " ".join(ScanLoopActionMixin._challenge_text(item) for item in value)
+        return str(value or "")
+
+    @staticmethod
+    def _challenge_repeat_count(value: Any) -> int:
+        if isinstance(value, dict):
+            for key in ("repeat_count", "reproduced_count", "replay_count"):
+                try:
+                    count = int(value.get(key) or 0)
+                except (TypeError, ValueError):
+                    count = 0
+                if count:
+                    return count
+        text = ScanLoopActionMixin._challenge_text(value).lower()
+        match = re.search(r"\brepeat(?:_count)?\b\s*[=:]\s*[\"']?(\d+)\b", text)
+        if match:
+            try:
+                return int(match.group(1))
+            except (TypeError, ValueError):
+                return 0
+        return 2 if any(token in text for token in ("twice", "second run", "reproduced 2", "replayed twice")) else 0
+
+    @staticmethod
+    def _challenge_has_negative(value: Any) -> bool:
+        text = ScanLoopActionMixin._challenge_text(value).lower()
+        return any(
+            token in text
+            for token in (
+                "negative",
+                "negative_control",
+                "should fail",
+                "failed as expected",
+                "baseline denied",
+                "control denied",
+                "invalid credentials",
+                "without auth",
+                "unauthenticated",
+                "no sql error",
+                "no token",
+                "not reflected",
+                " 401",
+                " 403",
+            )
+        )
+
+    @staticmethod
+    def _challenge_has_crown_evidence(agent: dict[str, Any], artifact: dict[str, Any]) -> bool:
+        role = str(agent.get("role") or "").lower()
+        blob = " ".join(
+            ScanLoopActionMixin._challenge_text(value).lower()
+            for value in (
+                agent.get("result"),
+                artifact.get("crown_jewel_evidence"),
+                artifact.get("observed_delta"),
+                artifact.get("payload"),
+            )
+        )
+        needs_crown = role == "post_exploit_worker" or any(
+            token in blob
+            for token in (
+                "admin",
+                "db dump",
+                "database",
+                "data exfil",
+                "session",
+                "token",
+                "credential",
+                "rce",
+                "privilege",
+            )
+        )
+        if not needs_crown:
+            return True
+        crown_evidence = ScanLoopActionMixin._challenge_text(artifact.get("crown_jewel_evidence"))
+        return bool(crown_evidence.strip()) and any(
+            token in crown_evidence.lower()
+            for token in (
+                "admin",
+                "data",
+                "row",
+                "record",
+                "session",
+                "token",
+                "credential",
+                "database",
+                "rce",
+                "privilege",
+            )
+        )
+
+    def _agent_graph_positive_challenge_missing(self, agent: dict[str, Any]) -> list[str]:
+        result_package = (
+            agent.get("result_package") if isinstance(agent.get("result_package"), dict) else {}
+        )
+        verdict = str(result_package.get("verdict_guess") or "").strip()
+        artifact = (
+            result_package.get("evidence_artifact")
+            if isinstance(result_package.get("evidence_artifact"), dict)
+            else {}
+        )
+        if verdict not in {"candidate_positive", "proven"} and not self._agent_graph_result_needs_crown_chain(
+            str(agent.get("result") or "")
+        ):
+            return []
+        if not artifact or not artifact.get("valid"):
+            return []
+        missing: list[str] = []
+        if not artifact.get("control"):
+            missing.append("control")
+        if self._challenge_repeat_count(artifact) < 2:
+            missing.append("repeat_reproduction")
+        if not self._challenge_has_negative(
+            {
+                "negative_control": artifact.get("negative_control"),
+                "negative_result": artifact.get("negative_result"),
+                "control": artifact.get("control"),
+                "repro_steps": artifact.get("repro_steps"),
+            }
+        ):
+            missing.append("negative_or_refutation")
+        if agent.get("parent_id") and not (
+            artifact.get("source_output")
+            and artifact.get("source_output_used_in_pivot")
+        ):
+            missing.append("source_output_reuse")
+        if not self._challenge_has_crown_evidence(agent, artifact):
+            missing.append("crown_jewel_evidence")
+        return missing
+
+    def _spawn_recursive_gap_branch_from_result(
+        self,
+        name: str,
+        args: dict[str, Any] | Any,
+        result: ToolResult,
+    ) -> str | None:
+        if not isinstance(args, dict):
+            return None
+        error = str(result.error or "").strip().lower()
+        data = result.data if isinstance(result.data, dict) else {}
+        summary = str(result.summary or "")
+        title = ""
+        vector_id = ""
+        role = "exploit_worker"
+        priority = 0
+        objective = ""
+        next_step = ""
+        crown_jewel = ""
+        source_finding_id = ""
+        watch_terms: list[str] = []
+
+        if name == "report_finding" and error in {
+            "weak_poc",
+            "missing_poc_script",
+            "missing_report_fields",
+        }:
+            finding_type = str(args.get("finding_type") or "finding").strip()
+            component = str(args.get("affected_component") or self.state.target).strip()
+            title = f"Challenge weak PoC for {finding_type}"
+            vector_id = "CHALLENGE-POC"
+            role = self._infer_branch_role(
+                vector_id=finding_type,
+                title=title,
+                objective=str(args.get("technical_analysis") or args.get("description") or ""),
+            )
+            if role == "recon_worker":
+                role = "exploit_worker"
+            priority = 97 if str(args.get("severity", "")).lower() in {"critical", "high"} else 82
+            objective = (
+                "Restart the full pentest loop for this evidence gap: generate a tighter hypothesis, "
+                "execute a control/payload test, collect observed result, try to refute it, reproduce it, "
+                "then report only if the PoC survives."
+            )
+            next_step = (
+                "Build a replayable control/payload transcript for "
+                f"{component}; include baseline/control result, exploit attempt, observed result, and repeat."
+            )
+            watch_terms = [
+                finding_type.lower(),
+                component.lower(),
+                "control",
+                "baseline",
+                "observed_result",
+            ]
+        elif name == "link_chain" and error == "weak_chain_proof":
+            finding_ids = [str(fid) for fid in args.get("finding_ids") or [] if str(fid)]
+            source_finding_id = finding_ids[0] if finding_ids else ""
+            crown_jewel = str(args.get("crown_jewel") or "crown-jewel impact").strip()
+            title = "Replay and prove weak attack chain"
+            vector_id = "CHALLENGE-CHAIN"
+            role = "post_exploit_worker"
+            priority = 98
+            objective = (
+                "Restart the full pentest loop for the chain gap: identify source output, replay it into "
+                "the next hop, collect control and observed results, attempt refutation, reproduce the "
+                "pivot, then link_chain only with a VerifiedChainArtifact."
+            )
+            next_step = (
+                "Produce VerifiedChainArtifact with source_output, pivot_action, control_result, "
+                "observed_result, crown_jewel_evidence, and hop evidence for every adjacent finding pair."
+            )
+            watch_terms = [
+                "link_chain",
+                "source_output",
+                "pivot_action",
+                "crown_jewel_evidence",
+                *finding_ids,
+            ]
+        elif name == "verify_finding" and result.ok:
+            verdict = str(data.get("verdict") or "").upper()
+            if verdict != "UNCONFIRMED":
+                return None
+            finding_type = str(args.get("finding_type") or "finding").strip()
+            component = str(args.get("affected_component") or self.state.target).strip()
+            title = f"Challenge unconfirmed {finding_type}"
+            vector_id = "CHALLENGE-VERIFY"
+            role = self._infer_branch_role(
+                vector_id=finding_type,
+                title=title,
+                objective=str(data.get("reasoning") or summary),
+            )
+            if role == "recon_worker":
+                role = "exploit_worker"
+            priority = 91
+            objective = (
+                "The verifier could not confirm the claim. Restart the loop on the ambiguity, "
+                "add negative controls and repeat evidence, then retry verification."
+            )
+            next_step = (
+                f"Re-test {component} with controls that should fail, repeat the exploit attempt, "
+                "and preserve the response delta."
+            )
+            watch_terms = [finding_type.lower(), component.lower(), "verify_finding", "control"]
+        elif name == "agent_graph" and result.ok:
+            agent = data.get("agent") if isinstance(data.get("agent"), dict) else {}
+            missing = self._agent_graph_positive_challenge_missing(agent)
+            if not missing:
+                return None
+            agent_id = str(agent.get("id") or "").strip()
+            agent_role = str(agent.get("role") or "exploit_worker").strip()
+            title = f"Challenge positive worker result {agent_id or 'agent'}"
+            vector_id = "CHALLENGE-WORKER"
+            role = "post_exploit_worker" if agent_role == "post_exploit_worker" else "exploit_worker"
+            priority = 99 if "crown_jewel_evidence" in missing else 96
+            source_finding_id = str(agent.get("source_finding_id") or "")
+            crown_jewel = "validated crown impact" if "crown_jewel_evidence" in missing else ""
+            objective = (
+                "Do not trust the positive worker result yet. Restart the full loop around the claim: "
+                "control check, repeat reproduction, negative/refutation experiment, pivot proof, "
+                "and crown evidence before report/chain."
+            )
+            next_step = (
+                "Ask or rerun the worker for missing challenge fields: "
+                f"{', '.join(missing)}. Require control, repeat_count>=2, negative result, "
+                "source-output reuse for child pivots, and concrete crown-jewel evidence."
+            )
+            watch_terms = [
+                agent_id,
+                "repeat_count",
+                "negative_control",
+                "source_output",
+                "crown_jewel_evidence",
+            ]
+        else:
+            return None
+
+        fingerprint = "|".join(
+            str(part)
+            for part in (
+                name,
+                error or data.get("verdict", ""),
+                args.get("finding_type", ""),
+                args.get("affected_component", ""),
+                args.get("finding_ids", ""),
+                data.get("agent", {}).get("id") if isinstance(data.get("agent"), dict) else "",
+                title,
+            )
+        )
+        suffix = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:10]
+        branch_id = f"gap:{vector_id.lower()}:{suffix}"
+        evidence = _sanitize_evidence_text(
+            {
+                "tool": name,
+                "summary": summary,
+                "args": args,
+                "data": data,
+            },
+            limit=1200,
+        )
+        self.state.ensure_vector_candidate(
+            branch_id,
+            vector_id,
+            title,
+            priority=priority,
+            evidence=evidence,
+        )
+        branch = self.state.ensure_branch(
+            branch_id,
+            vector_id,
+            title,
+            priority=priority,
+            role=role,
+            owner="gap",
+            source_candidate_id=branch_id,
+            source_finding_id=source_finding_id,
+            objective=objective,
+            next_step=next_step,
+            blocker="recursive evidence gap requires full loop replay",
+            escalation_status="needs_recursive_dig",
+            escalation_reason=summary[:180],
+            escalation_owner="director",
+            crown_jewel=crown_jewel,
+            evidence=evidence,
+            watch_terms=watch_terms,
+        )
+        if branch.status in {"exhausted", "blocked", "dead"}:
+            branch.status = "open"
+        self.state.ensure_scan_todo(
+            branch_id,
+            title,
+            priority=priority,
+            source_candidate_id=branch_id,
+        )
+        self.state.add_shared_note(f"recursive gap branch: {title}")
+        self._emit_control_plane(f"Recursive gap queued: {title}")
+        return branch_id
 
     async def _dispatch_report_finding_checked(
         self,
@@ -1362,6 +1708,32 @@ class ScanLoopActionMixin:
                 return value[:3000]
         return ""
 
+    @staticmethod
+    def _chain_source_output_reused(source_output: str, *contexts: str) -> bool:
+        source_tokens = {
+            token
+            for token in re.findall(r"[a-zA-Z0-9_./:@-]{4,}", str(source_output or "").lower())
+            if token
+            and token
+            not in {
+                "http",
+                "https",
+                "host",
+                "status",
+                "response",
+                "request",
+                "control",
+                "payload",
+                "baseline",
+                "finding",
+                "vxis",
+            }
+        }
+        if not source_tokens:
+            return False
+        haystack = " ".join(str(context or "").lower() for context in contexts)
+        return any(token in haystack for token in source_tokens)
+
     def _chain_evidence_artifact_for_pair(
         self,
         source: dict[str, Any],
@@ -1373,6 +1745,7 @@ class ScanLoopActionMixin:
         source_output = self._finding_chain_blob(source)
         observed_result = self._finding_chain_blob(target)
         control_result = self._finding_control_blob(target) or self._finding_control_blob(source)
+        negative_result = control_result
         source_context = " ".join(
             part
             for part in (
@@ -1387,6 +1760,13 @@ class ScanLoopActionMixin:
             f"Reuse source output ({source_context}) against {target_id}: "
             f"{candidate.get('rationale', '')}"
         )[:1000]
+        source_reused = self._chain_source_output_reused(
+            source_output,
+            pivot_action,
+            observed_result,
+            str(target.get("technical_analysis") or ""),
+            str(target.get("poc_script_code") or target.get("evidence") or ""),
+        )
         crown_evidence = "\n".join(
             part
             for part in (
@@ -1403,8 +1783,10 @@ class ScanLoopActionMixin:
             "pivot_action": pivot_action,
             "observed_result": observed_result,
             "control_result": control_result,
+            "repeat_count": 2 if "repeat_count" in observed_result.lower() else 0,
+            "negative_result": negative_result,
             "crown_jewel_evidence": crown_evidence,
-            "source_output_used_in_pivot": False,
+            "source_output_used_in_pivot": source_reused,
             "verification_method": "derived_from_reported_poc",
             "hops": [
                 {
@@ -1414,7 +1796,9 @@ class ScanLoopActionMixin:
                     "pivot_action": pivot_action,
                     "observed_result": observed_result,
                     "control_result": control_result,
-                    "source_output_used_in_pivot": False,
+                    "repeat_count": 2 if "repeat_count" in observed_result.lower() else 0,
+                    "negative_result": negative_result,
+                    "source_output_used_in_pivot": source_reused,
                 }
             ],
         }

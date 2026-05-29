@@ -75,11 +75,41 @@ _CONTROL_MARKERS = (
     "before:",
     "after:",
 )
+_REPEAT_MARKERS = (
+    "repeat_count",
+    "reproduced twice",
+    "reproduced 2",
+    "replayed twice",
+    "replay twice",
+    "second run",
+    "run 2",
+    "attempt 2",
+    "two runs",
+    "twice",
+)
+_NEGATIVE_MARKERS = (
+    "negative",
+    "negative_control",
+    "should fail",
+    "expected fail",
+    "failed as expected",
+    "baseline denied",
+    "control denied",
+    "invalid credentials",
+    "without auth",
+    "unauthenticated",
+    "403",
+    "401",
+    "no sql error",
+    "no token",
+    "not reflected",
+)
 _HTTP_STATUS_LINE_RE = re.compile(r"(?m)^\s*HTTP/\d(?:\.\d)?\s+\d{3}\b", re.IGNORECASE)
 _STATUS_ASSIGNMENT_RE = re.compile(
     r"\b(?:status|status_code|response_status|code)\b\s*[=:]\s*[\"']?\d{3}\b",
     re.IGNORECASE,
 )
+_REPEAT_COUNT_RE = re.compile(r"\brepeat(?:_count)?\b\s*[=:]\s*[\"']?(\d+)\b", re.IGNORECASE)
 _CHAIN_HIGH_VALUE_CROWN_TERMS = (
     "admin",
     "takeover",
@@ -104,6 +134,9 @@ _CHAIN_ARTIFACT_FIELDS = (
     "observed_result",
     "control_result",
     "crown_jewel_evidence",
+    "repeat_count",
+    "negative_result",
+    "negative_control",
     "source_output_used_in_pivot",
     "verification_method",
     "trace_id",
@@ -115,6 +148,9 @@ _CHAIN_HOP_FIELDS = (
     "pivot_action",
     "observed_result",
     "control_result",
+    "repeat_count",
+    "negative_result",
+    "negative_control",
     "source_output_used_in_pivot",
     "trace_id",
 )
@@ -243,6 +279,11 @@ def _normalize_chain_artifact(value: Any) -> dict[str, Any]:
             continue
         if field == "source_output_used_in_pivot":
             normalized[field] = bool(value.get(field))
+        elif field == "repeat_count":
+            try:
+                normalized[field] = int(value.get(field) or 0)
+            except (TypeError, ValueError):
+                normalized[field] = 0
         else:
             normalized[field] = _stringify_artifact_value(value.get(field))
 
@@ -258,6 +299,11 @@ def _normalize_chain_artifact(value: Any) -> dict[str, Any]:
                     continue
                 if field == "source_output_used_in_pivot":
                     hop[field] = bool(raw_hop.get(field))
+                elif field == "repeat_count":
+                    try:
+                        hop[field] = int(raw_hop.get(field) or 0)
+                    except (TypeError, ValueError):
+                        hop[field] = 0
                 else:
                     hop[field] = _stringify_artifact_value(raw_hop.get(field))
             if hop:
@@ -282,6 +328,31 @@ def _artifact_has_control(value: Any) -> bool:
     text = _stringify_artifact_value(value)
     lower = text.lower()
     return _artifact_has_observed_result(text) or any(marker in lower for marker in _CONTROL_MARKERS)
+
+
+def _artifact_repeat_count(value: Any) -> int:
+    if isinstance(value, dict):
+        try:
+            return int(value.get("repeat_count") or 0)
+        except (TypeError, ValueError):
+            return 0
+    text = _stringify_artifact_value(value)
+    match = _REPEAT_COUNT_RE.search(text)
+    if match:
+        try:
+            return int(match.group(1))
+        except (TypeError, ValueError):
+            return 0
+    lower = text.lower()
+    return 2 if any(marker in lower for marker in _REPEAT_MARKERS) else 0
+
+
+def _artifact_has_negative_result(*values: Any) -> bool:
+    text = "\n".join(_stringify_artifact_value(value) for value in values if value is not None)
+    lower = text.lower()
+    if any(marker in lower for marker in _NEGATIVE_MARKERS):
+        return True
+    return _HTTP_STATUS_LINE_RE.search(text) is not None and any(code in lower for code in (" 401", " 403"))
 
 
 def _source_output_reused(source_output: Any, reuse_context: Any, *, explicit: bool) -> bool:
@@ -361,6 +432,14 @@ def _evaluate_chain_artifact(
         missing.append("crown_jewel_evidence")
     elif not _crown_jewel_evidence_aligned(crown_jewel, crown_evidence):
         missing.append("crown_jewel_evidence_alignment")
+    if _artifact_repeat_count(evidence_artifact) < 2:
+        missing.append("repeat_reproduction")
+    if not _artifact_has_negative_result(
+        evidence_artifact.get("negative_result"),
+        evidence_artifact.get("negative_control"),
+        evidence_artifact.get("control_result"),
+    ):
+        missing.append("negative_or_refutation")
 
     hops = list(evidence_artifact.get("hops") or [])
     if not hops and len(finding_ids) == 2:
@@ -386,6 +465,12 @@ def _evaluate_chain_artifact(
         pivot_action = hop.get("pivot_action") or evidence_artifact.get("pivot_action", "")
         observed_result = hop.get("observed_result") or evidence_artifact.get("observed_result", "")
         control_result = hop.get("control_result") or evidence_artifact.get("control_result", "")
+        negative_result = (
+            hop.get("negative_result")
+            or hop.get("negative_control")
+            or evidence_artifact.get("negative_result")
+            or evidence_artifact.get("negative_control")
+        )
         if not source_output:
             missing.append(f"{label}_source_output")
         if not pivot_action:
@@ -394,6 +479,10 @@ def _evaluate_chain_artifact(
             missing.append(f"{label}_observed_result")
         if not control_result or not _artifact_has_control(control_result):
             missing.append(f"{label}_control_result")
+        if _artifact_repeat_count(hop) < 2 and _artifact_repeat_count(evidence_artifact) < 2:
+            missing.append(f"{label}_repeat_reproduction")
+        if not _artifact_has_negative_result(negative_result, control_result):
+            missing.append(f"{label}_negative_or_refutation")
         reuse_context = "\n".join(
             part
             for part in (
@@ -522,7 +611,10 @@ def _evaluate_high_severity_poc(
     has_observed_status = _HTTP_STATUS_LINE_RE.search(str(poc_script_code or "")) is not None
     has_observed_status = has_observed_status or _STATUS_ASSIGNMENT_RE.search(str(poc_script_code or "")) is not None
     has_result = has_observed_status or any(marker.lower() in poc_lower for marker in _POC_RESULT_MARKERS)
-    needs_control = any(token in str(finding_type or "").lower() for token in _CONTROL_REQUIRED_TYPES)
+    repeat_count = _artifact_repeat_count(combined)
+    has_repeat = repeat_count >= 2
+    has_negative = _artifact_has_negative_result(combined)
+    needs_control = True
     has_control = any(marker in lower for marker in _CONTROL_MARKERS)
     missing: list[str] = []
     if not has_attempt:
@@ -531,6 +623,10 @@ def _evaluate_high_severity_poc(
         missing.append("observed_result")
     if needs_control and not has_control:
         missing.append("control_or_baseline")
+    if not has_repeat:
+        missing.append("repeat_reproduction")
+    if not has_negative:
+        missing.append("negative_or_refutation")
     return {
         "ok": not missing,
         "missing": missing,
@@ -538,6 +634,9 @@ def _evaluate_high_severity_poc(
         "has_result": has_result,
         "needs_control": needs_control,
         "has_control": has_control,
+        "repeat_count": repeat_count,
+        "has_repeat": has_repeat,
+        "has_negative": has_negative,
     }
 
 
@@ -546,7 +645,9 @@ class ReportFindingTool:
     description = (
         "Submit a discovered vulnerability. Returns the assigned finding ID. "
         "Include enough detail (title, severity, component, evidence, description) "
-        "for a penetration test report. The ID is stable and can be used in link_chain."
+        "for a penetration test report. HIGH/CRITICAL findings must include control, "
+        "repeat_count>=2, and a negative/refutation result. The ID is stable and can "
+        "be used in link_chain."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -557,9 +658,9 @@ class ReportFindingTool:
             "affected_component": {"type": "string"},
             "description": {"type": "string"},
             "impact": {"type": "string", "description": "Concrete business/security impact validated for this finding"},
-            "technical_analysis": {"type": "string", "description": "Why this issue is real, including control checks and reasoning"},
-            "poc_description": {"type": "string", "description": "Step-by-step reproduction summary for the validated exploit"},
-            "poc_script_code": {"type": "string", "description": "Actual exploit payload / HTTP exchange / command transcript"},
+            "technical_analysis": {"type": "string", "description": "Why this issue is real, including control checks, repeat_count>=2, and negative/refutation reasoning"},
+            "poc_description": {"type": "string", "description": "Step-by-step reproduction summary for the validated exploit and its control/negative tests"},
+            "poc_script_code": {"type": "string", "description": "Actual exploit payload / HTTP exchange / command transcript with control, repeat_count>=2, and negative result"},
             "evidence": {"type": "string", "description": "Legacy alias for PoC transcript; prefer poc_script_code"},
             "remediation": {"type": "string", "description": "Legacy alias for remediation_steps"},
             "remediation_steps": {"type": "string", "description": "Specific remediation guidance"},
@@ -645,7 +746,8 @@ class ReportFindingTool:
                 ok=False,
                 summary=(
                     "report_finding: HIGH/CRITICAL findings require a replayable PoC "
-                    f"with exploit attempt, observed result, and required controls. Missing: {missing}."
+                    "with exploit attempt, observed result, control/baseline, "
+                    f"repeat_count>=2, and negative/refutation result. Missing: {missing}."
                 ),
                 error="weak_poc",
                 data={"proof": proof},
@@ -886,7 +988,7 @@ class LinkChainTool:
         "Example: low-sev info disclosure → medium-sev IDOR → high-sev privilege escalation. "
         "Finding IDs must be in the store (report_finding first). High-value chains must "
         "include evidence_artifact proving source output reuse, observed result, control "
-        "result, and crown-jewel impact."
+        "result, repeat_count>=2, negative/refutation result, and crown-jewel impact."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -904,6 +1006,7 @@ class LinkChainTool:
                 "description": (
                     "VerifiedChainArtifact. Required for high/critical or crown-jewel chains: "
                     "source_output, pivot_action, observed_result, control_result, "
+                    "repeat_count>=2, negative_result or negative_control, "
                     "crown_jewel_evidence, and optional hops for 3+ finding chains."
                 ),
             },
@@ -956,8 +1059,9 @@ class LinkChainTool:
                 ok=False,
                 summary=(
                     "link_chain: high-value chains require a VerifiedChainArtifact "
-                    "with source output reuse, observed result, control result, and "
-                    f"crown-jewel evidence. Missing: {missing}."
+                    "with source output reuse, observed result, control result, "
+                    "repeat_count>=2, negative/refutation result, and crown-jewel "
+                    f"evidence. Missing: {missing}."
                 ),
                 error="weak_chain_proof",
                 data={"proof": proof},

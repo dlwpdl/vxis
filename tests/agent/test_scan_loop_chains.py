@@ -27,6 +27,8 @@ def _chain_artifact(source_id: str, target_id: str, *, crown: str = "privileged 
         "observed_result": "HTTP/1.1 200 OK\n\n{\"data\":\"privileged record\",\"token\":\"abc\"}",
         "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied without token abc",
         "crown_jewel_evidence": f"{crown} returned with token abc in the response.",
+        "repeat_count": 2,
+        "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied without token abc",
         "source_output_used_in_pivot": True,
         "hops": [
             {
@@ -36,10 +38,86 @@ def _chain_artifact(source_id: str, target_id: str, *, crown: str = "privileged 
                 "pivot_action": "Reused token abc from the source finding against the target endpoint.",
                 "observed_result": "HTTP/1.1 200 OK\n\n{\"data\":\"privileged record\",\"token\":\"abc\"}",
                 "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied without token abc",
+                "repeat_count": 2,
+                "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied without token abc",
                 "source_output_used_in_pivot": True,
             }
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_weak_high_report_spawns_recursive_poc_challenge_branch():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
+    args = {
+        "title": "Thin admin bypass",
+        "severity": "high",
+        "finding_type": "access_control",
+        "affected_component": "/admin",
+        "description": "Admin endpoint looked reachable.",
+        "impact": "Admin data may be exposed.",
+        "technical_analysis": "The endpoint looked different after a payload.",
+        "poc_description": "Visit /admin and compare.",
+        "poc_script_code": "GET /admin HTTP/1.1\n\nAdmin page looked interesting",
+        "remediation_steps": "Enforce authorization.",
+    }
+
+    result = await reg.dispatch("report_finding", args)
+    assert result.ok is False
+    assert result.error == "weak_poc"
+
+    branch_id = loop._spawn_recursive_gap_branch_from_result("report_finding", args, result)
+
+    assert branch_id is not None
+    branch = loop.state.branches[branch_id]
+    assert branch.vector_id == "CHALLENGE-POC"
+    assert branch.owner == "gap"
+    assert branch.escalation_status == "needs_recursive_dig"
+    assert "control/payload transcript" in branch.next_step
+    assert "full pentest loop" in branch.objective
+
+
+@pytest.mark.asyncio
+async def test_weak_chain_proof_spawns_recursive_chain_challenge_branch():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
+    first = await reg.dispatch("report_finding", {
+        "title": "debug leak",
+        "severity": "medium",
+        "finding_type": "information_disclosure",
+        "affected_component": "/debug",
+        "description": "debug endpoint leaked /admin and token abc",
+    })
+    second = await reg.dispatch("report_finding", {
+        "title": "admin data exposed",
+        "severity": "medium",
+        "finding_type": "broken_access_control",
+        "affected_component": "/admin",
+        "description": "admin endpoint returned sensitive data",
+    })
+    args = {
+        "finding_ids": [first.data["id"], second.data["id"]],
+        "rationale": "debug leak led to admin data access",
+        "crown_jewel": "admin takeover",
+    }
+
+    result = await reg.dispatch("link_chain", args)
+    assert result.ok is False
+    assert result.error == "weak_chain_proof"
+
+    branch_id = loop._spawn_recursive_gap_branch_from_result("link_chain", args, result)
+
+    assert branch_id is not None
+    branch = loop.state.branches[branch_id]
+    assert branch.vector_id == "CHALLENGE-CHAIN"
+    assert branch.role == "post_exploit_worker"
+    assert branch.escalation_status == "needs_recursive_dig"
+    assert "VerifiedChainArtifact" in branch.next_step
+    assert "source_output" in branch.watch_terms
 
 
 @pytest.mark.asyncio
@@ -279,9 +357,9 @@ async def test_suggest_chain_candidates_keeps_best_source_per_target_and_crown()
         "affected_component": "/support/logs",
         "description": "leak",
         "impact": "leak",
-        "technical_analysis": "leak",
-        "poc_description": "GET logs",
-        "poc_script_code": "GET /support/logs HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlog token=abc",
+        "technical_analysis": "Negative control missing path returned 404, exposed logs returned token twice. repeat_count=2",
+        "poc_description": "GET missing path, then GET logs twice.",
+        "poc_script_code": "GET /support/missing HTTP/1.1\n\nHTTP/1.1 404 Not Found\n\nnegative control\n\nGET /support/logs HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlog token=abc\n\nrepeat_count=2\nGET /support/logs HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlog token=abc",
         "remediation_steps": "fix",
     })
     second = await reg.dispatch("report_finding", {
@@ -291,9 +369,9 @@ async def test_suggest_chain_candidates_keeps_best_source_per_target_and_crown()
         "affected_component": "/ftp",
         "description": "leak",
         "impact": "leak",
-        "technical_analysis": "leak",
-        "poc_description": "GET ftp",
-        "poc_script_code": "GET /ftp HTTP/1.1\n\nHTTP/1.1 200 OK\n\nbackup data",
+        "technical_analysis": "Negative control missing path returned 404, exposed ftp returned backup twice. repeat_count=2",
+        "poc_description": "GET missing path, then GET ftp twice.",
+        "poc_script_code": "GET /ftp-missing HTTP/1.1\n\nHTTP/1.1 404 Not Found\n\nnegative control\n\nGET /ftp HTTP/1.1\n\nHTTP/1.1 200 OK\n\nbackup data\n\nrepeat_count=2\nGET /ftp HTTP/1.1\n\nHTTP/1.1 200 OK\n\nbackup data",
         "remediation_steps": "fix",
     })
     target = await reg.dispatch("report_finding", {
@@ -303,11 +381,14 @@ async def test_suggest_chain_candidates_keeps_best_source_per_target_and_crown()
         "affected_component": "/api/profile",
         "description": "post-auth exposure",
         "impact": "impact",
-        "technical_analysis": "Baseline without auth returned 403, authenticated request returned profile data.",
-        "poc_description": "Replay unauthenticated control, then authenticated profile request and compare responses.",
+        "technical_analysis": "Negative control without auth returned 403, authenticated request returned profile data twice. repeat_count=2",
+        "poc_description": "Replay unauthenticated control, then authenticated profile request twice and compare responses.",
         "poc_script_code": (
             "GET /api/profile HTTP/1.1\nCookie: session=\n\n"
             "HTTP/1.1 403 Forbidden\n\n"
+            "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
+            "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}\n\n"
+            "repeat_count=2\n"
             "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
             "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}"
         ),
@@ -338,9 +419,9 @@ async def test_suggest_chain_candidates_collapses_same_target_family():
             "affected_component": path,
             "description": "leak",
             "impact": "leak",
-            "technical_analysis": "leak",
-            "poc_description": "GET file",
-            "poc_script_code": f"GET {path} HTTP/1.1\n\nHTTP/1.1 200 OK\n\nsecret file content",
+            "technical_analysis": "Negative control missing path returned 404, exposed file returned content twice. repeat_count=2",
+            "poc_description": "GET missing path, then GET file twice.",
+            "poc_script_code": f"GET {path}-missing HTTP/1.1\n\nHTTP/1.1 404 Not Found\n\nnegative control\n\nGET {path} HTTP/1.1\n\nHTTP/1.1 200 OK\n\nsecret file content\n\nrepeat_count=2\nGET {path} HTTP/1.1\n\nHTTP/1.1 200 OK\n\nsecret file content",
             "remediation_steps": "fix",
         })
     await reg.dispatch("report_finding", {
@@ -350,11 +431,14 @@ async def test_suggest_chain_candidates_collapses_same_target_family():
         "affected_component": "/api/profile",
         "description": "post-auth exposure",
         "impact": "impact",
-        "technical_analysis": "Baseline without auth returned 403, authenticated request returned profile data.",
-        "poc_description": "Replay unauthenticated control, then authenticated profile request and compare responses.",
+        "technical_analysis": "Negative control without auth returned 403, authenticated request returned profile data twice. repeat_count=2",
+        "poc_description": "Replay unauthenticated control, then authenticated profile request twice and compare responses.",
         "poc_script_code": (
             "GET /api/profile HTTP/1.1\nCookie: session=\n\n"
             "HTTP/1.1 403 Forbidden\n\n"
+            "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
+            "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}\n\n"
+            "repeat_count=2\n"
             "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
             "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}"
         ),

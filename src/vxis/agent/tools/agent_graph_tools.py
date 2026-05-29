@@ -380,6 +380,36 @@ def _execution_evidence_artifact(
         or result.get("repro_steps")
         or result_data.get("repro_steps")
     )
+    negative_control = _artifact_section(
+        raw.get("negative_control")
+        or raw.get("negative_result")
+        or result.get("negative_control")
+        or result.get("negative_result")
+        or result_data.get("negative_control")
+        or result_data.get("negative_result")
+    )
+    crown_jewel_evidence = _first_artifact_text(
+        raw.get("crown_jewel_evidence"),
+        raw.get("crown_impact"),
+        raw.get("impact_evidence"),
+        result.get("crown_jewel_evidence"),
+        result_data.get("crown_jewel_evidence"),
+    )
+    source_output = _first_artifact_text(
+        raw.get("source_output"),
+        raw.get("parent_output"),
+        result.get("source_output"),
+        result_data.get("source_output"),
+    )
+    try:
+        repeat_count = int(
+            raw.get("repeat_count")
+            or result.get("repeat_count")
+            or result_data.get("repeat_count")
+            or 0
+        )
+    except (TypeError, ValueError):
+        repeat_count = 0
     if not repro_steps and control and payload and observed_delta:
         repro_steps = [
             "Run the recorded control input",
@@ -397,6 +427,11 @@ def _execution_evidence_artifact(
         "payload": payload,
         "observed_delta": trim_text_chars(observed_delta, 240),
         "repro_steps": repro_steps,
+        "repeat_count": repeat_count,
+        "negative_control": negative_control,
+        "crown_jewel_evidence": trim_text_chars(crown_jewel_evidence, 240),
+        "source_output": trim_text_chars(source_output, 240),
+        "source_output_used_in_pivot": bool(raw.get("source_output_used_in_pivot")),
     }
     missing = [
         field

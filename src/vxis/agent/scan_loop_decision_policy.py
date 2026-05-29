@@ -1592,7 +1592,7 @@ class ScanLoopDecisionPolicyMixin:
             str(value or "")
             for value in (branch.crown_jewel, branch.title, branch.objective, branch.evidence)
         ).lower()
-        if any(token in text for token in ("rce", "command execution", "shell")):
+        if re.search(r"\b(?:rce|shell)\b|command execution", text):
             return "rce"
         if any(token in text for token in ("session", "token", "admin", "privilege", "role")):
             return "broken_access_control"

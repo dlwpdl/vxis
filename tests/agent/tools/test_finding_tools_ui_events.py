@@ -26,9 +26,17 @@ def test_finding_tools_emit_live_hit_and_chain_events() -> None:
             affected_component="/login",
             description="Classic auth bypass",
             impact="Authentication bypass to privileged session.",
-            technical_analysis="The login accepted a boolean-auth bypass payload and returned an authenticated response.",
-            poc_description="Submit a crafted username payload to bypass authentication.",
-            poc_script_code="POST /login HTTP/1.1\\n\\nusername=admin' --&password=x\\nHTTP/1.1 302 Found\\nLocation: /admin",
+            technical_analysis="Negative control invalid credentials returned 401; boolean-auth bypass returned /admin twice. repeat_count=2",
+            poc_description="Submit invalid credentials, then submit a crafted username payload twice to bypass authentication.",
+            poc_script_code=(
+                "POST /login HTTP/1.1\\n\\nusername=bad&password=bad\\n\\n"
+                "HTTP/1.1 401 Unauthorized\\n\\nnegative control\\n\\n"
+                "POST /login HTTP/1.1\\n\\nusername=admin' --&password=x\\n\\n"
+                "HTTP/1.1 302 Found\\nLocation: /admin\\n\\n"
+                "repeat_count=2\\n"
+                "POST /login HTTP/1.1\\n\\nusername=admin' --&password=x\\n\\n"
+                "HTTP/1.1 302 Found\\nLocation: /admin"
+            ),
             remediation_steps="Parameterize the login query and add strict authentication controls.",
         )
         second = await report.run(
@@ -38,11 +46,14 @@ def test_finding_tools_emit_live_hit_and_chain_events() -> None:
             affected_component="/admin",
             description="Default credentials accepted",
             impact="Administrative access with default credentials.",
-            technical_analysis="Baseline invalid credentials returned 401, default credentials returned 200 and an admin session.",
-            poc_description="Replay invalid-credential control, then authenticate to the admin panel with default credentials.",
+            technical_analysis="Negative control invalid credentials returned 401, default credentials returned 200 and an admin session twice. repeat_count=2",
+            poc_description="Replay invalid-credential control, then authenticate to the admin panel with default credentials twice.",
             poc_script_code=(
                 "POST /admin/login HTTP/1.1\\n\\nusername=guest&password=wrong\\n\\n"
-                "HTTP/1.1 401 Unauthorized\\n\\n"
+                "HTTP/1.1 401 Unauthorized\\n\\nnegative control\\n\\n"
+                "POST /admin/login HTTP/1.1\\n\\nusername=admin&password=admin\\n\\n"
+                "HTTP/1.1 200 OK\\nSet-Cookie: session=admin\\n\\n"
+                "repeat_count=2\\n"
                 "POST /admin/login HTTP/1.1\\n\\nusername=admin&password=admin\\n\\n"
                 "HTTP/1.1 200 OK\\nSet-Cookie: session=admin"
             ),
@@ -60,7 +71,22 @@ def test_finding_tools_emit_live_hit_and_chain_events() -> None:
                 "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
                 "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
                 "crown_jewel_evidence": "Admin session cookie issued by /admin/login.",
+                "repeat_count": 2,
+                "negative_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
                 "source_output_used_in_pivot": True,
+                "hops": [
+                    {
+                        "source_finding_id": first.data["id"],
+                        "target_finding_id": second.data["id"],
+                        "source_output": "SQL injection returned Location: /admin and an authenticated session hint.",
+                        "pivot_action": "Reused the authenticated session path against the admin login.",
+                        "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
+                        "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+                        "repeat_count": 2,
+                        "negative_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+                        "source_output_used_in_pivot": True,
+                    }
+                ],
             },
         )
         set_event_callback(None)

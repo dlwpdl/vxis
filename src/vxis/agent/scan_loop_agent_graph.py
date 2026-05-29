@@ -203,9 +203,14 @@ class ScanLoopAgentGraphMixin:
             f"EvidenceArtifact: {artifact.get('claim', '')}",
             f"target: {artifact.get('target', '')}",
             f"control: {_section(artifact.get('control'))}",
+            f"negative_control: {_section(artifact.get('negative_control'))}",
             f"payload: {_section(artifact.get('payload'))}",
             f"delta: {artifact.get('observed_delta', '')}",
             f"repro: {_section(artifact.get('repro_steps'))}",
+            f"repeat_count: {artifact.get('repeat_count', '')}",
+            f"source_output: {artifact.get('source_output', '')}",
+            f"source_output_used_in_pivot: {artifact.get('source_output_used_in_pivot', '')}",
+            f"crown_jewel_evidence: {artifact.get('crown_jewel_evidence', '')}",
         ]
         return "\n".join(part for part in parts if part.split(":", 1)[-1].strip())[:1400]
 

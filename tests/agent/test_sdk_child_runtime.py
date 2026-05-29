@@ -52,8 +52,16 @@ def _valid_evidence_artifact() -> dict:
         "repro_steps": [
             "Login as user-a and request /api/orders/2 for the control response",
             "Login as user-b and request the same order id",
+            "Repeat the user-b request and confirm the same 200 response",
             "Compare 403 control against 200 payload response",
         ],
+        "repeat_count": 2,
+        "negative_control": {
+            "request": "GET /api/orders/2 as user-a control",
+            "response_status": 403,
+            "response": "HTTP 403 denied for control account",
+        },
+        "crown_jewel_evidence": "Customer order data for order id 2 was returned.",
     }
 
 
@@ -408,8 +416,8 @@ async def test_sdk_child_completion_feeds_report_and_chain_golden_path(monkeypat
             "affected_component": "/api/orders/2",
             "description": "A low-privilege user can read another user's order.",
             "impact": "Attacker can access customer order data across accounts.",
-            "technical_analysis": "SDK child proved control HTTP 403 vs payload HTTP 200.",
-            "poc_description": "Replay the two recorded requests and compare the status delta.",
+            "technical_analysis": "SDK child proved negative control HTTP 403 vs payload HTTP 200 twice. repeat_count=2",
+            "poc_description": "Replay the control request, then replay the payload request twice and compare the status delta.",
             "poc_script_code": json.dumps(_valid_evidence_artifact(), sort_keys=True),
             "remediation_steps": "Enforce object ownership checks on every order read.",
             "endpoint": "/api/orders/2",
@@ -431,7 +439,22 @@ async def test_sdk_child_completion_feeds_report_and_chain_golden_path(monkeypat
                 "observed_result": "HTTP/1.1 200 OK\n\n{\"order_id\":2,\"data\":\"customer order\"}",
                 "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline owner check denied.",
                 "crown_jewel_evidence": "Customer order data for order id 2 was returned.",
+                "repeat_count": 2,
+                "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline owner check denied.",
                 "source_output_used_in_pivot": True,
+                "hops": [
+                    {
+                        "source_finding_id": source.data["id"],
+                        "target_finding_id": impact.data["id"],
+                        "source_output": "GET /api/orders shows sequential ids including order id 2.",
+                        "pivot_action": "Reused order id 2 from enumeration against /api/orders/2.",
+                        "observed_result": "HTTP/1.1 200 OK\n\n{\"order_id\":2,\"data\":\"customer order\"}",
+                        "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline owner check denied.",
+                        "repeat_count": 2,
+                        "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline owner check denied.",
+                        "source_output_used_in_pivot": True,
+                    }
+                ],
             },
         },
     )

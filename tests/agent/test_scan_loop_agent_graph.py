@@ -375,6 +375,52 @@ def test_agent_graph_positive_waiting_result_projects_director_followup_branch_s
     assert branch.blocker == "positive delegated worker result requires director pivot/finish"
 
 
+def test_positive_worker_result_missing_challenge_fields_spawns_gap_branch():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=30)
+    result = ToolResult(
+        ok=True,
+        summary="agent_graph: ran agent-0002 -> run_skill: admin data observed",
+        data={
+            "agent": {
+                "id": "agent-0002",
+                "role": "post_exploit_worker",
+                "parent_id": "agent-0001",
+                "task": "Use prior token to access admin data",
+                "status": "waiting",
+                "result": "Confirmed session token allows admin data access.",
+                "result_package": {
+                    "verdict_guess": "candidate_positive",
+                    "evidence_artifact": {
+                        "schema": "vxis.agent_graph.evidence_artifact.v1",
+                        "claim": "session token allows admin data access",
+                        "target": "http://localhost:3000/admin",
+                        "control": {"request": "GET /admin", "response_status": 403},
+                        "payload": {"request": "GET /admin with token", "response_status": 200},
+                        "observed_delta": "payload returned admin data",
+                        "repro_steps": ["send control", "send token request", "compare"],
+                        "valid": True,
+                    },
+                },
+            }
+        },
+    )
+
+    branch_id = loop._spawn_recursive_gap_branch_from_result(
+        "agent_graph",
+        {"action": "run", "agent_id": "agent-0002"},
+        result,
+    )
+
+    assert branch_id is not None
+    branch = loop.state.branches[branch_id]
+    assert branch.vector_id == "CHALLENGE-WORKER"
+    assert branch.owner == "gap"
+    assert branch.escalation_status == "needs_recursive_dig"
+    assert "repeat_count>=2" in branch.next_step
+    assert "source-output reuse" in branch.next_step
+    assert "crown-jewel evidence" in branch.next_step
+
+
 @pytest.mark.asyncio
 async def test_agent_graph_create_and_run_capture_contract_and_artifact():
     graph = AgentGraphTool()
@@ -894,7 +940,21 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
                             "response_excerpt": "SQL error with session token column",
                         },
                         "observed_delta": "control HTTP 200 vs payload HTTP 500 with token-bearing SQL error",
-                        "repro_steps": ["send control", "send payload", "compare token/error body"],
+                        "repro_steps": [
+                            "send negative control",
+                            "send payload",
+                            "send payload again",
+                            "compare token/error body",
+                        ],
+                        "repeat_count": 2,
+                        "negative_control": {
+                            "request": "GET /api/search?q=test",
+                            "response_status": 200,
+                            "response_excerpt": "no SQL error and no token material",
+                        },
+                        "source_output": "SQL error exposed session token column",
+                        "source_output_used_in_pivot": True,
+                        "crown_jewel_evidence": "SQL error exposed session token column/token material.",
                     }
                 },
             )
@@ -916,12 +976,16 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
             "affected_component": "/api/search",
             "description": "Authentication bypass and session token exposure via SQL injection.",
             "impact": "The foothold exposes session material that can be reused post-auth.",
-            "technical_analysis": "Control and payload comparison showed SQL injection and token-bearing error output.",
-            "poc_description": "Send a benign search request, then send the SQL payload and compare the response delta.",
+            "technical_analysis": "Negative control benign search showed no SQL error; SQL payload exposed token-bearing error output twice. repeat_count=2",
+            "poc_description": "Send a benign search request, then send the SQL payload twice and compare the response delta.",
             "poc_script_code": (
                 "GET /api/search?q=test HTTP/1.1\n\n"
                 "HTTP/1.1 200 OK\n\n"
-                "[]\n\n"
+                "negative control: [] and no SQL error\n\n"
+                "GET /api/search?q=' HTTP/1.1\n\n"
+                "HTTP/1.1 500 Internal Server Error\n\n"
+                "SQL error with session token column\n\n"
+                "repeat_count=2\n"
                 "GET /api/search?q=' HTTP/1.1\n\n"
                 "HTTP/1.1 500 Internal Server Error\n\n"
                 "SQL error with session token column"
@@ -2095,10 +2159,20 @@ async def test_agent_graph_evidence_gap_retry_then_valid_artifact_allows_crown_c
                             "control HTTP 200 vs payload HTTP 500 with token-bearing SQL error"
                         ),
                         "repro_steps": [
-                            "send control request",
+                            "send negative control request",
                             "send payload request",
+                            "send payload request again",
                             "compare status and token-bearing SQL error body",
                         ],
+                        "repeat_count": 2,
+                        "negative_control": {
+                            "request": "GET /search?q=test",
+                            "response_status": 200,
+                            "response_excerpt": "normal search results; no SQL error and no token",
+                        },
+                        "source_output": "SQL error includes session token column",
+                        "source_output_used_in_pivot": True,
+                        "crown_jewel_evidence": "Session token column exposed through SQL error output.",
                     }
                 },
             )

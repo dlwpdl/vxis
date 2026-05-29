@@ -17,6 +17,7 @@ This report explains how the recent hardening work affects the VXIS scan process
 7. Worker turns execute through deterministic guardrails and local-worker planning where configured.
 8. Findings must carry evidence, can be verifier-checked, and can be chained through `link_chain`.
 9. Control-plane/TUI receives runtime state for Ghost, egress, agents, SDK runtime, proxy, todos, branches, and chain candidates.
+10. Positive claims are challenged before they can settle work: the system now asks for control, repeat reproduction, negative/refutation, source-output reuse, and crown-jewel evidence.
 
 ## What Changed In Practice
 
@@ -91,8 +92,21 @@ Recent work moved VXIS closer to the Strix-style director/worker loop:
 - SDK child runtime state is attached to worker drilldown where available.
 - Worker execution is bounded by role, envelope, allowed tools, and action validation.
 - Director can observe child results and continue chaining based on returned evidence.
+- Worker EvidenceArtifacts now preserve `repeat_count`, `negative_control`, `source_output`, `source_output_used_in_pivot`, and `crown_jewel_evidence` so the director can challenge the proof instead of trusting a positive summary.
+- If a worker says it found something but those challenge fields are absent, VXIS queues a `CHALLENGE-WORKER` branch and forces the pentest loop back through control, repeat, refutation, pivot proof, crown impact, and report.
 
 This is still not identical to Strix independent child sessions, but it is no longer "one person pretending to be many" in the weak sense. VXIS now has durable worker state, explicit message history, bounded child turns, and director-visible results.
+
+### Recursive Evidence Challenge Loop
+
+VXIS now treats weak positive claims as new work, not as finished work:
+
+- weak high/critical PoCs create `CHALLENGE-POC` branches
+- weak chain proofs create `CHALLENGE-CHAIN` branches
+- `verify_finding=UNCONFIRMED` creates `CHALLENGE-VERIFY` branches
+- positive worker results with missing challenge fields create `CHALLENGE-WORKER` branches
+
+The branch objective restarts the same core loop: hypothesis -> execute -> evidence -> refute -> reproduce -> pivot/chain -> crown impact -> report. This is the guard that prevents "looks found" from becoming a report or a settled branch without the follow-up work.
 
 ### TUI / Control Plane
 
@@ -117,13 +131,13 @@ The current gates protect these boundaries:
 - Ghost routing metadata is visible in tool results and control-plane state
 - Ghost active mode blocks direct/raw egress unless `VXIS_ALLOW_DIRECT_EGRESS=1`
 - `run_skill` registered skills must pass static egress audit
-- high/critical `report_finding` calls require a replayable PoC transcript with an exploit attempt and observed result
-- auth/access-control/business-logic high-impact findings additionally require a control or baseline comparison
+- high/critical `report_finding` calls require a replayable PoC transcript with an exploit attempt, observed result, control/baseline, `repeat_count>=2`, and negative/refutation evidence
 - escaped LLM transcript newlines are normalized before PoC evaluation, without accepting request-only evidence
-- high-value `link_chain` calls require `VerifiedChainArtifact` evidence: source output, pivot action, control result, observed result, and crown-jewel evidence
+- high-value `link_chain` calls require `VerifiedChainArtifact` evidence: source output, pivot action, observed result, control result, `repeat_count>=2`, negative/refutation result, source-output reuse, and crown-jewel evidence
 - narrative-only chains can be stored, but they no longer settle branches as proven
-- auto-linking must pass the same chain artifact gate before closing parent/child branches
+- auto-linking must pass the same chain artifact gate before closing parent/child branches, and only marks source-output reuse when source evidence is actually present in the pivot/target context
 - multi-hop chains require hop evidence for every adjacent finding pair
+- recursive gap branches are generated for weak PoC, weak chain proof, unconfirmed verifier output, and under-challenged worker positives
 - raw `httpx` remains globally confined by the existing AST guard
 - repeated/stalled execution has monitor pressure
 - agent graph runtime state persists
@@ -132,7 +146,7 @@ The current gates protect these boundaries:
 Latest local verification for this report:
 
 - `uv run ruff check src tests`
-- `uv run pytest -q` -> `2106 passed, 4 skipped`
+- `uv run pytest -q` -> `2109 passed, 4 skipped`
 
 ## Remaining Gaps
 

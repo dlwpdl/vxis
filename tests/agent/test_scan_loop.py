@@ -437,7 +437,22 @@ async def test_budget_exhaustion_completion_accepts_when_no_meaningful_blockers_
             "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
             "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
             "crown_jewel_evidence": "Authenticated session cookie issued after credential reuse.",
+            "repeat_count": 2,
+            "negative_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
             "source_output_used_in_pivot": True,
+            "hops": [
+                {
+                    "source_finding_id": first.data["id"],
+                    "target_finding_id": second.data["id"],
+                    "source_output": "debug leak disclosed the /login path and default credential hint",
+                    "pivot_action": "Reused the default credential hint against /login.",
+                    "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
+                    "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+                    "repeat_count": 2,
+                    "negative_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+                    "source_output_used_in_pivot": True,
+                }
+            ],
         },
     })
     loop.state.record_review_item(
@@ -1358,7 +1373,7 @@ async def test_forced_replan_uses_remaining_family_candidate_when_branch_cannot_
             loop.state.record_blocked_skill(skill)
     await reg.dispatch("report_finding", {
         "title": "Authentication bypass via sqli_bypass",
-        "severity": "critical",
+        "severity": "medium",
         "finding_type": "sql_injection",
         "affected_component": "/rest/user/login",
         "description": "auth foothold",
@@ -1597,14 +1612,14 @@ async def test_direct_injection_promotion_skips_medium_noise():
                     "type": "xss",
                     "severity": "medium",
                     "payload": "<script>alert(1)</script>",
-                    "control": {"baseline_status": 200, "payload_status": 200},
+                    "control": {"baseline_status": 200, "payload_status": 200, "repeat_count": 2},
                     "response_preview": "payload reflected as inert text",
                 },
                 {
                     "type": "sql_injection",
                     "severity": "critical",
                     "payload": "' OR 1=1--",
-                    "control": {"baseline_status": 200, "payload_status": 200},
+                    "control": {"baseline_status": 200, "payload_status": 200, "repeat_count": 2},
                     "response_preview": "database error and altered response",
                 },
             ],
@@ -1642,7 +1657,7 @@ async def test_direct_promotion_requires_confirmed_verifier_for_high_signal():
                     "type": "sql_injection",
                     "severity": "critical",
                     "payload": "' OR 1=1--",
-                    "control": {"baseline_status": 200, "payload_status": 200},
+                    "control": {"baseline_status": 200, "payload_status": 200, "repeat_count": 2},
                     "response_preview": "database error and altered response",
                 },
             ],
@@ -1827,9 +1842,9 @@ async def test_short_smoke_can_finish_after_single_high_finding_once_branch_guar
             "affected_component": "/search?q=test",
             "description": "script payload reflected",
             "impact": "Attacker can execute script in the victim browser and act in their session context.",
-            "technical_analysis": "Baseline request returns normal content, while the payload request reflects active markup into the response body.",
-            "poc_description": "Replay a benign search, then inject an HTML payload and observe reflected execution content.",
-            "poc_script_code": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:test\\n\\n--- Variant replay ---\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>",
+            "technical_analysis": "Negative control baseline was not reflected as markup; payload reflection reproduced twice. repeat_count=2",
+            "poc_description": "Replay a benign search, then inject an HTML payload twice and observe reflected execution content.",
+            "poc_script_code": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nnegative control: search:test not reflected\\n\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>\\n\\nrepeat_count=2\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>",
             "remediation_steps": "Apply output encoding and context-aware templating.",
         })],
     ])
@@ -1860,7 +1875,8 @@ async def test_auto_chain_links_information_disclosure_to_weak_auth():
             "severity": "low",
             "finding_type": "information_disclosure",
             "affected_component": "/debug",
-            "description": "debug endpoint exposed stack details",
+            "description": "debug endpoint exposed stack details and default credential hint admin@juice-sh.op/admin123",
+            "evidence": "GET /debug -> default credential path /rest/user/login admin@juice-sh.op/admin123",
         })],
         [("report_finding", {
             "title": "default admin credentials",
@@ -1869,9 +1885,9 @@ async def test_auto_chain_links_information_disclosure_to_weak_auth():
             "affected_component": "/login",
             "description": "admin:admin works",
             "impact": "Attacker gains an authenticated foothold as a privileged user.",
-            "technical_analysis": "Public debug output exposed environment details that pointed the tester at a default credential path, which then succeeded against the login form.",
-            "poc_description": "Attempt login with the documented default credentials and observe successful authentication.",
-            "poc_script_code": "POST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{\"email\":\"admin@juice-sh.op\",\"password\":\"admin123\"}\\n\\nHTTP/1.1 200\\n\\n{\"authentication\":{\"token\":\"...\"}}",
+            "technical_analysis": "Negative control invalid credentials returned 401; debug-disclosed admin@juice-sh.op/admin123 succeeded twice. repeat_count=2",
+            "poc_description": "Attempt invalid credentials, then the documented default credentials twice and compare authentication responses.",
+            "poc_script_code": "POST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{\"email\":\"bad@example\",\"password\":\"bad\"}\\n\\nHTTP/1.1 401 Unauthorized\\n\\nnegative control\\n\\nPOST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{\"email\":\"admin@juice-sh.op\",\"password\":\"admin123\"}\\n\\nHTTP/1.1 200\\n\\n{\"authentication\":{\"token\":\"...\"}}\\n\\nrepeat_count=2\\nPOST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{\"email\":\"admin@juice-sh.op\",\"password\":\"admin123\"}\\n\\nHTTP/1.1 200\\n\\n{\"authentication\":{\"token\":\"...\"}}",
             "remediation_steps": "Disable default accounts and enforce unique bootstrap secrets.",
         })],
     ])

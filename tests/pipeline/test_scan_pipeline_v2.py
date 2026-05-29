@@ -404,9 +404,14 @@ async def test_scan_pipeline_v2_copies_findings_from_store_into_ctx():
         description="Classic bypass",
         evidence="POST /login user=admin'--",
         impact="Login bypass may expose privileged data.",
-        technical_analysis="The login endpoint accepted an injection payload and returned an authenticated response.",
-        poc_description="Replay the same POST request with the SQL injection payload.",
+        technical_analysis="Negative control invalid credentials returned 401; injection payload returned an authenticated response twice. repeat_count=2",
+        poc_description="Replay invalid credentials, then replay the SQL injection payload twice.",
         poc_script_code=(
+            "POST /login HTTP/1.1\n\nuser=bad&password=bad\n\n"
+            "HTTP/1.1 401 Unauthorized\n\nnegative control\n\n"
+            "POST /login HTTP/1.1\n\nuser=admin'--\n\n"
+            "HTTP/1.1 200 OK\nSet-Cookie: session=admin\n\n"
+            "repeat_count=2\n"
             "POST /login HTTP/1.1\n\nuser=admin'--\n\n"
             "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
         ),
