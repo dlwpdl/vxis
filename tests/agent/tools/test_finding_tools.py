@@ -18,6 +18,39 @@ def reset_state():
     _reset_for_tests()
 
 
+def _verified_chain_artifact(
+    *,
+    source_id: str = "VXIS-0001",
+    target_id: str = "VXIS-0002",
+    source_output: str = "debug leak exposed /api/user ids",
+    pivot_action: str = "Reused exposed /api/user ids against the target endpoint.",
+    observed_result: str = "HTTP/1.1 200 OK\n\n{\"role\":\"admin\",\"data\":\"secret\"}",
+    control_result: str = "HTTP/1.1 403 Forbidden\n\nbaseline denied",
+    crown_jewel_evidence: str = "Admin role and sensitive data returned in the target response.",
+) -> dict:
+    return {
+        "source_finding_id": source_id,
+        "target_finding_id": target_id,
+        "source_output": source_output,
+        "pivot_action": pivot_action,
+        "observed_result": observed_result,
+        "control_result": control_result,
+        "crown_jewel_evidence": crown_jewel_evidence,
+        "source_output_used_in_pivot": True,
+        "hops": [
+            {
+                "source_finding_id": source_id,
+                "target_finding_id": target_id,
+                "source_output": source_output,
+                "pivot_action": pivot_action,
+                "observed_result": observed_result,
+                "control_result": control_result,
+                "source_output_used_in_pivot": True,
+            }
+        ],
+    }
+
+
 # ── ReportFindingTool ────────────────────────────────────────
 
 @pytest.mark.asyncio
@@ -302,13 +335,78 @@ async def test_link_chain_happy_path():
         finding_ids=["VXIS-0001", "VXIS-0002", "VXIS-0003"],
         rationale="debug endpoint exposes internal IDs → enumerate users via IDOR → escalate to admin",
         crown_jewel="full admin account takeover",
+        evidence_artifact={
+            "source_finding_id": "VXIS-0001",
+            "target_finding_id": "VXIS-0003",
+            "source_output": "debug endpoint exposes internal IDs and /api/user route",
+            "pivot_action": "Reused /api/user ids to enumerate users, then replayed promotion request.",
+            "observed_result": "HTTP/1.1 200 OK\n\n{\"status\":\"promoted\",\"role\":\"admin\"}",
+            "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline low privilege denied",
+            "crown_jewel_evidence": "Admin role promotion succeeded and returned role=admin.",
+            "source_output_used_in_pivot": True,
+            "hops": [
+                {
+                    "source_finding_id": "VXIS-0001",
+                    "target_finding_id": "VXIS-0002",
+                    "source_output": "debug endpoint exposes internal IDs and /api/user route",
+                    "pivot_action": "Reused exposed /api/user ids for IDOR enumeration.",
+                    "observed_result": "HTTP/1.1 200 OK\n\n{\"data\":\"other user\"}",
+                    "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied",
+                    "source_output_used_in_pivot": True,
+                },
+                {
+                    "source_finding_id": "VXIS-0002",
+                    "target_finding_id": "VXIS-0003",
+                    "source_output": "IDOR returned attacker-controlled user id 1002",
+                    "pivot_action": "Used enumerated user id 1002 in the admin promotion request.",
+                    "observed_result": "HTTP/1.1 200 OK\n\n{\"status\":\"promoted\",\"role\":\"admin\"}",
+                    "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline low privilege denied",
+                    "source_output_used_in_pivot": True,
+                },
+            ],
+        },
     )
     assert result.ok is True
     assert result.data["id"] == "CHAIN-001"
     assert result.data["length"] == 3
+    assert result.data["verification_status"] == "verified"
     chains = _get_chains()
     assert len(chains) == 1
     assert chains[0]["crown_jewel"] == "full admin account takeover"
+    assert chains[0]["proof"]["verified"] is True
+
+
+@pytest.mark.asyncio
+async def test_link_chain_rejects_high_value_chain_without_verified_artifact():
+    rep = ReportFindingTool()
+    await rep.run(title="Info leak", severity="medium", finding_type="info_disclosure", affected_component="/debug", description="d")
+    await rep.run(
+        title="Default admin credentials",
+        severity="high",
+        finding_type="weak_auth",
+        affected_component="/login",
+        description="Default credentials work.",
+        impact="Admin session takeover.",
+        technical_analysis="Baseline invalid credentials returned 401, default credentials returned 200.",
+        poc_description="Replay baseline and default credential requests.",
+        poc_script_code=(
+            "POST /login HTTP/1.1\n\nusername=bad&password=bad\n\n"
+            "HTTP/1.1 401 Unauthorized\n\n"
+            "POST /login HTTP/1.1\n\nusername=admin&password=admin\n\n"
+            "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
+        ),
+        remediation_steps="Disable default credentials.",
+    )
+
+    result = await LinkChainTool().run(
+        finding_ids=["VXIS-0001", "VXIS-0002"],
+        rationale="debug leak points to login, then default credentials work",
+        crown_jewel="admin takeover",
+    )
+
+    assert result.ok is False
+    assert result.error == "weak_chain_proof"
+    assert "evidence_artifact" in result.data["proof"]["missing"]
 
 
 @pytest.mark.asyncio

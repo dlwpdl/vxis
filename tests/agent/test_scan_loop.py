@@ -429,6 +429,16 @@ async def test_budget_exhaustion_completion_accepts_when_no_meaningful_blockers_
         "finding_ids": [first.data["id"], second.data["id"]],
         "rationale": "debug leak leads to auth foothold",
         "crown_jewel": "authenticated foothold",
+        "evidence_artifact": {
+            "source_finding_id": first.data["id"],
+            "target_finding_id": second.data["id"],
+            "source_output": "debug leak disclosed the /login path and default credential hint",
+            "pivot_action": "Reused the default credential hint against /login.",
+            "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
+            "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+            "crown_jewel_evidence": "Authenticated session cookie issued after credential reuse.",
+            "source_output_used_in_pivot": True,
+        },
     })
     loop.state.record_review_item(
         "judge:unfinished_branches:http://localhost:3000",

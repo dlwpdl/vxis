@@ -1362,7 +1362,14 @@ class ScanLoopRunMixin(
                                     _suggestions.append(
                                         f'link_chain(finding_ids=["{_top[i]}","{_top[j]}"], '
                                         f'rationale="<why {_top[i]} enables {_top[j]}>", '
-                                        f'crown_jewel="<admin takeover | DB dump | RCE | data exfil>")'
+                                        f'crown_jewel="<admin takeover | DB dump | RCE | data exfil>", '
+                                        'evidence_artifact={'
+                                        '"source_output":"<credential/token/endpoint/object id from source finding>", '
+                                        '"pivot_action":"<how that output was replayed into the target finding>", '
+                                        '"control_result":"<baseline/control response>", '
+                                        '"observed_result":"<target response proving changed access or impact>", '
+                                        '"crown_jewel_evidence":"<admin/data/session/RCE evidence>", '
+                                        '"source_output_used_in_pivot":true})'
                                     )
                                     if len(_suggestions) >= 4:
                                         break

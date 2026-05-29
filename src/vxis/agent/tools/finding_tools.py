@@ -10,6 +10,7 @@ Tools:
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any, Callable
@@ -79,6 +80,57 @@ _STATUS_ASSIGNMENT_RE = re.compile(
     r"\b(?:status|status_code|response_status|code)\b\s*[=:]\s*[\"']?\d{3}\b",
     re.IGNORECASE,
 )
+_CHAIN_HIGH_VALUE_CROWN_TERMS = (
+    "admin",
+    "takeover",
+    "db",
+    "database",
+    "dump",
+    "rce",
+    "exfil",
+    "data",
+    "session",
+    "token",
+    "credential",
+    "key",
+    "privileged",
+    "crown",
+)
+_CHAIN_ARTIFACT_FIELDS = (
+    "source_finding_id",
+    "target_finding_id",
+    "source_output",
+    "pivot_action",
+    "observed_result",
+    "control_result",
+    "crown_jewel_evidence",
+    "source_output_used_in_pivot",
+    "verification_method",
+    "trace_id",
+)
+_CHAIN_HOP_FIELDS = (
+    "source_finding_id",
+    "target_finding_id",
+    "source_output",
+    "pivot_action",
+    "observed_result",
+    "control_result",
+    "source_output_used_in_pivot",
+    "trace_id",
+)
+_CHAIN_SOURCE_STOPWORDS = {
+    "http",
+    "https",
+    "host",
+    "status",
+    "response",
+    "request",
+    "control",
+    "payload",
+    "baseline",
+    "finding",
+    "vxis",
+}
 
 
 def _canonical_finding_type(value: str) -> str:
@@ -159,6 +211,217 @@ def _chain_signature(finding_ids: list[str], crown_jewel: str) -> tuple[str, str
         target_type,
         str(crown_jewel or "").strip().lower(),
     )
+
+
+def _stringify_artifact_value(value: Any, *, limit: int = 3000) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return _normalize_poc_transcript(value)[:limit]
+    try:
+        return json.dumps(value, sort_keys=True, ensure_ascii=True, default=str)[:limit]
+    except TypeError:
+        return str(value)[:limit]
+
+
+def _normalize_chain_artifact(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return {"observed_result": _normalize_poc_transcript(text)}
+        value = parsed
+    if not isinstance(value, dict):
+        return {}
+
+    normalized: dict[str, Any] = {}
+    for field in _CHAIN_ARTIFACT_FIELDS:
+        if field not in value:
+            continue
+        if field == "source_output_used_in_pivot":
+            normalized[field] = bool(value.get(field))
+        else:
+            normalized[field] = _stringify_artifact_value(value.get(field))
+
+    hops: list[dict[str, Any]] = []
+    raw_hops = value.get("hops")
+    if isinstance(raw_hops, list):
+        for raw_hop in raw_hops[:12]:
+            if not isinstance(raw_hop, dict):
+                continue
+            hop: dict[str, Any] = {}
+            for field in _CHAIN_HOP_FIELDS:
+                if field not in raw_hop:
+                    continue
+                if field == "source_output_used_in_pivot":
+                    hop[field] = bool(raw_hop.get(field))
+                else:
+                    hop[field] = _stringify_artifact_value(raw_hop.get(field))
+            if hop:
+                hops.append(hop)
+    if hops:
+        normalized["hops"] = hops
+    return normalized
+
+
+def _artifact_has_observed_result(value: Any) -> bool:
+    text = _stringify_artifact_value(value)
+    lower = text.lower()
+    return (
+        _HTTP_STATUS_LINE_RE.search(text) is not None
+        or _STATUS_ASSIGNMENT_RE.search(text) is not None
+        or any(marker.lower() in lower for marker in _POC_RESULT_MARKERS)
+        or any(token in lower for token in ("token=", "session=", "role=admin", "rows", "dumped"))
+    )
+
+
+def _artifact_has_control(value: Any) -> bool:
+    text = _stringify_artifact_value(value)
+    lower = text.lower()
+    return _artifact_has_observed_result(text) or any(marker in lower for marker in _CONTROL_MARKERS)
+
+
+def _source_output_reused(source_output: Any, reuse_context: Any, *, explicit: bool) -> bool:
+    if explicit:
+        return True
+    source = _stringify_artifact_value(source_output).lower()
+    context = _stringify_artifact_value(reuse_context).lower()
+    tokens = {
+        token
+        for token in re.findall(r"[a-z0-9_./:-]{4,}", source)
+        if token not in _CHAIN_SOURCE_STOPWORDS
+    }
+    if not tokens:
+        return False
+    return any(token in context for token in sorted(tokens, key=len, reverse=True)[:20])
+
+
+def _crown_jewel_evidence_aligned(crown_jewel: str, evidence: Any) -> bool:
+    crown = str(crown_jewel or "").lower()
+    text = _stringify_artifact_value(evidence).lower()
+    if not crown.strip():
+        return True
+    groups = []
+    if any(token in crown for token in ("admin", "privilege", "takeover")):
+        groups.append(("admin", "privileged", "role", "/admin", "200"))
+    if any(token in crown for token in ("db", "database", "dump", "data", "exfil", "order")):
+        groups.append(("data", "row", "record", "dump", "table", "export", "order", "token"))
+    if any(token in crown for token in ("session", "auth", "credential", "token")):
+        groups.append(("session", "token", "cookie", "credential", "authenticated"))
+    if any(token in crown for token in ("rce", "command", "code execution")):
+        groups.append(("command", "stdout", "shell", "rce", "uid="))
+    if any(token in crown for token in ("key", "secret")):
+        groups.append(("key", "secret", "credential", "token"))
+    if not groups:
+        return True
+    return any(any(marker in text for marker in group) for group in groups)
+
+
+def _chain_requires_verified_artifact(finding_ids: list[str], crown_jewel: str) -> bool:
+    crown = str(crown_jewel or "").lower()
+    if any(term in crown for term in _CHAIN_HIGH_VALUE_CROWN_TERMS):
+        return True
+    for fid in finding_ids:
+        finding = _finding_by_id(str(fid)) or {}
+        if str(finding.get("severity", "")).lower() in {"high", "critical"}:
+            return True
+    return False
+
+
+def _evaluate_chain_artifact(
+    *,
+    finding_ids: list[str],
+    rationale: str,
+    crown_jewel: str,
+    evidence_artifact: dict[str, Any],
+) -> dict[str, Any]:
+    required = _chain_requires_verified_artifact(finding_ids, crown_jewel)
+    if not required:
+        return {
+            "ok": True,
+            "required": False,
+            "verified": bool(evidence_artifact),
+            "missing": [],
+        }
+
+    missing: list[str] = []
+    if not evidence_artifact:
+        return {
+            "ok": False,
+            "required": True,
+            "verified": False,
+            "missing": ["evidence_artifact"],
+        }
+
+    crown_evidence = evidence_artifact.get("crown_jewel_evidence", "")
+    if not crown_evidence:
+        missing.append("crown_jewel_evidence")
+    elif not _crown_jewel_evidence_aligned(crown_jewel, crown_evidence):
+        missing.append("crown_jewel_evidence_alignment")
+
+    hops = list(evidence_artifact.get("hops") or [])
+    if not hops and len(finding_ids) == 2:
+        hops = [
+            {
+                field: evidence_artifact.get(field)
+                for field in _CHAIN_HOP_FIELDS
+                if field in evidence_artifact
+            }
+        ]
+
+    expected_pairs = list(zip(finding_ids, finding_ids[1:]))
+    if len(hops) < len(expected_pairs):
+        missing.append("complete_hop_evidence")
+    for index, (source_id, target_id) in enumerate(expected_pairs):
+        hop = hops[index] if index < len(hops) and isinstance(hops[index], dict) else {}
+        label = f"hop_{index + 1}"
+        if hop.get("source_finding_id") and hop.get("source_finding_id") != source_id:
+            missing.append(f"{label}_source_id")
+        if hop.get("target_finding_id") and hop.get("target_finding_id") != target_id:
+            missing.append(f"{label}_target_id")
+        source_output = hop.get("source_output") or evidence_artifact.get("source_output", "")
+        pivot_action = hop.get("pivot_action") or evidence_artifact.get("pivot_action", "")
+        observed_result = hop.get("observed_result") or evidence_artifact.get("observed_result", "")
+        control_result = hop.get("control_result") or evidence_artifact.get("control_result", "")
+        if not source_output:
+            missing.append(f"{label}_source_output")
+        if not pivot_action:
+            missing.append(f"{label}_pivot_action")
+        if not observed_result or not _artifact_has_observed_result(observed_result):
+            missing.append(f"{label}_observed_result")
+        if not control_result or not _artifact_has_control(control_result):
+            missing.append(f"{label}_control_result")
+        reuse_context = "\n".join(
+            part
+            for part in (
+                pivot_action,
+                observed_result,
+                crown_evidence,
+                rationale,
+            )
+            if part
+        )
+        explicit_reuse = bool(
+            hop.get("source_output_used_in_pivot")
+            or evidence_artifact.get("source_output_used_in_pivot")
+        )
+        if source_output and not _source_output_reused(
+            source_output,
+            reuse_context,
+            explicit=explicit_reuse,
+        ):
+            missing.append(f"{label}_source_output_reuse")
+
+    return {
+        "ok": not missing,
+        "required": True,
+        "verified": not missing,
+        "missing": missing,
+        "hop_count": len(hops),
+    }
 
 
 def _coalesce_report_fields(kwargs: dict[str, Any]) -> dict[str, str]:
@@ -621,8 +884,9 @@ class LinkChainTool:
     description = (
         "Assert that a sequence of previously-reported findings forms a causal attack chain. "
         "Example: low-sev info disclosure → medium-sev IDOR → high-sev privilege escalation. "
-        "Finding IDs must be in the store (report_finding first). The chain is stored "
-        "separately and surfaced in the final report."
+        "Finding IDs must be in the store (report_finding first). High-value chains must "
+        "include evidence_artifact proving source output reuse, observed result, control "
+        "result, and crown-jewel impact."
     )
     input_schema: dict[str, Any] = {
         "type": "object",
@@ -635,6 +899,17 @@ class LinkChainTool:
             },
             "rationale": {"type": "string", "description": "Why these findings chain together — the attack narrative"},
             "crown_jewel": {"type": "string", "description": "What the chain ultimately compromises (e.g. 'admin account takeover', 'full DB dump')"},
+            "evidence_artifact": {
+                "type": "object",
+                "description": (
+                    "VerifiedChainArtifact. Required for high/critical or crown-jewel chains: "
+                    "source_output, pivot_action, observed_result, control_result, "
+                    "crown_jewel_evidence, and optional hops for 3+ finding chains."
+                ),
+            },
+            "chain_evidence": {
+                "description": "Legacy alias for evidence_artifact.",
+            },
         },
         "required": ["finding_ids", "rationale"],
     }
@@ -643,6 +918,13 @@ class LinkChainTool:
         finding_ids = kwargs.get("finding_ids") or []
         rationale = kwargs.get("rationale", "")
         crown_jewel = kwargs.get("crown_jewel", "")
+        evidence_artifact = _normalize_chain_artifact(
+            kwargs.get("evidence_artifact")
+            or kwargs.get("chain_evidence")
+            or kwargs.get("proof")
+            or kwargs.get("evidence")
+            or {}
+        )
 
         if not isinstance(finding_ids, list) or len(finding_ids) < 2:
             return ToolResult(
@@ -662,19 +944,52 @@ class LinkChainTool:
                 error="unknown_finding_ids",
             )
 
+        proof = _evaluate_chain_artifact(
+            finding_ids=[str(fid) for fid in finding_ids],
+            rationale=str(rationale),
+            crown_jewel=str(crown_jewel),
+            evidence_artifact=evidence_artifact,
+        )
+        if not proof["ok"]:
+            missing = ", ".join(proof["missing"])
+            return ToolResult(
+                ok=False,
+                summary=(
+                    "link_chain: high-value chains require a VerifiedChainArtifact "
+                    "with source output reuse, observed result, control result, and "
+                    f"crown-jewel evidence. Missing: {missing}."
+                ),
+                error="weak_chain_proof",
+                data={"proof": proof},
+            )
+
         new_signature = _chain_signature(list(finding_ids), str(crown_jewel))
         for existing in _chains:
             existing_ids = list(existing.get("finding_ids") or [])
             if tuple(existing_ids) == tuple(finding_ids):
                 return ToolResult(
                     ok=True,
-                    data={"id": existing.get("id", ""), "length": len(existing_ids), "total_chains": len(_chains), "dedup": True},
+                    data={
+                        "id": existing.get("id", ""),
+                        "length": len(existing_ids),
+                        "total_chains": len(_chains),
+                        "dedup": True,
+                        "verification_status": existing.get("verification_status", "narrative"),
+                        "proof": existing.get("proof", {}),
+                    },
                     summary=f"link_chain: duplicate chain ignored ({existing.get('id', '')})",
                 )
             if _chain_signature(existing_ids, str(existing.get("crown_jewel", ""))) == new_signature:
                 return ToolResult(
                     ok=True,
-                    data={"id": existing.get("id", ""), "length": len(existing_ids), "total_chains": len(_chains), "dedup": True},
+                    data={
+                        "id": existing.get("id", ""),
+                        "length": len(existing_ids),
+                        "total_chains": len(_chains),
+                        "dedup": True,
+                        "verification_status": existing.get("verification_status", "narrative"),
+                        "proof": existing.get("proof", {}),
+                    },
                     summary=f"link_chain: similar chain ignored ({existing.get('id', '')})",
                 )
 
@@ -685,6 +1000,9 @@ class LinkChainTool:
             "rationale": str(rationale),
             "crown_jewel": str(crown_jewel),
             "length": len(finding_ids),
+            "evidence_artifact": evidence_artifact,
+            "proof": proof,
+            "verification_status": "verified" if proof.get("verified") else "narrative",
         }
         _chains.append(chain)
         logger.info("[Chain] %s: %s → %s", chain_id, " → ".join(finding_ids), str(crown_jewel)[:60])
@@ -702,6 +1020,7 @@ class LinkChainTool:
                 "source_title": str(first.get("title", "")),
                 "rationale": str(rationale),
                 "crown_jewel": str(crown_jewel),
+                "verification_status": chain["verification_status"],
             },
         )
         for fid in finding_ids:
@@ -722,6 +1041,15 @@ class LinkChainTool:
 
         return ToolResult(
             ok=True,
-            data={"id": chain_id, "length": len(finding_ids), "total_chains": len(_chains)},
-            summary=f"chain recorded: {chain_id} ({len(finding_ids)} findings) → {str(crown_jewel)[:60]}",
+            data={
+                "id": chain_id,
+                "length": len(finding_ids),
+                "total_chains": len(_chains),
+                "verification_status": chain["verification_status"],
+                "proof": proof,
+            },
+            summary=(
+                f"chain recorded: {chain_id} ({len(finding_ids)} findings) "
+                f"[{chain['verification_status']}] → {str(crown_jewel)[:60]}"
+            ),
         )

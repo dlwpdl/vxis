@@ -60,10 +60,17 @@ class ScanLoopRunFollowupMixin:
                     "CONCRETE ACTION you can take RIGHT NOW:\n"
                     f'  link_chain(finding_ids=["{_fid_a}", "{_fid_b}"], '
                     f'rationale="<why these compose>", '
-                    f'crown_jewel="<admin takeover | DB dump | RCE | data exfil>")\n\n'
+                    f'crown_jewel="<admin takeover | DB dump | RCE | data exfil>", '
+                    'evidence_artifact={'
+                    '"source_output":"<credential/token/endpoint/object id from source>", '
+                    '"pivot_action":"<how that output was replayed into target>", '
+                    '"control_result":"<baseline/control response>", '
+                    '"observed_result":"<target response proving impact>", '
+                    '"crown_jewel_evidence":"<admin/data/session/RCE evidence>", '
+                    '"source_output_used_in_pivot":true})\n\n'
                     "For EACH chain:\n"
                     "  1. TRY IT — use tools to prove the chain works.\n"
-                    "  2. Call link_chain with the finding IDs + rationale + crown jewel.\n"
+                    "  2. Call link_chain with finding IDs + VerifiedChainArtifact.\n"
                     "  3. Move to the next combination.\n\n"
                     "Think creatively. Combine findings in every way you can imagine. "
                     "The more chains you build, the better the report."

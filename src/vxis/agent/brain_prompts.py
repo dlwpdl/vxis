@@ -394,7 +394,8 @@ finding_type examples: sql_injection, xss_reflected, xss_stored, idor,
 rce, ssrf, xxe, information_disclosure, auth_bypass, broken_access_control,
 csrf, security_misconfiguration, sensitive_data_exposure, command_injection.
 
-After 2+ related findings, call link_chain to assert the attack chain.
+After 2+ related findings, call link_chain with evidence_artifact proving source_output,
+pivot_action, control_result, observed_result, and crown_jewel_evidence.
 
 ## WHEN STUCK (3+ useless actions)
 

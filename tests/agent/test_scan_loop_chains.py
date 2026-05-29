@@ -18,6 +18,30 @@ def _isolate_findings():
     _reset_findings()
 
 
+def _chain_artifact(source_id: str, target_id: str, *, crown: str = "privileged data") -> dict:
+    return {
+        "source_finding_id": source_id,
+        "target_finding_id": target_id,
+        "source_output": "exposed config disclosed /support/logs and token abc",
+        "pivot_action": "Reused token abc from the source finding against the target endpoint.",
+        "observed_result": "HTTP/1.1 200 OK\n\n{\"data\":\"privileged record\",\"token\":\"abc\"}",
+        "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied without token abc",
+        "crown_jewel_evidence": f"{crown} returned with token abc in the response.",
+        "source_output_used_in_pivot": True,
+        "hops": [
+            {
+                "source_finding_id": source_id,
+                "target_finding_id": target_id,
+                "source_output": "exposed config disclosed /support/logs and token abc",
+                "pivot_action": "Reused token abc from the source finding against the target endpoint.",
+                "observed_result": "HTTP/1.1 200 OK\n\n{\"data\":\"privileged record\",\"token\":\"abc\"}",
+                "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied without token abc",
+                "source_output_used_in_pivot": True,
+            }
+        ],
+    }
+
+
 @pytest.mark.asyncio
 async def test_suggested_chain_candidate_can_be_auto_linked():
     reg = ToolRegistry()
@@ -31,6 +55,7 @@ async def test_suggested_chain_candidate_can_be_auto_linked():
         "finding_type": "information_disclosure",
         "affected_component": "/debug",
         "description": "debug endpoint exposed",
+        "evidence": "GET /debug HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlogin_path=/login token_hint=abc",
     })
     await reg.dispatch("report_finding", {
         "title": "weak auth",
@@ -38,6 +63,12 @@ async def test_suggested_chain_candidate_can_be_auto_linked():
         "finding_type": "weak_auth",
         "affected_component": "/login",
         "description": "weak authentication evidence",
+        "evidence": (
+            "POST /login HTTP/1.1\n\nusername=bad&password=bad\n\n"
+            "HTTP/1.1 401 Unauthorized\n\n"
+            "POST /login HTTP/1.1\n\nusername=admin&password=admin\n\n"
+            "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
+        ),
     })
 
     candidates = loop._suggest_chain_candidates(limit=3)
@@ -90,6 +121,7 @@ async def test_chain_candidates_prioritize_auth_foothold_to_post_auth_data_acces
 async def test_settle_branches_after_chain_closes_parent_and_child_lineage():
     reg = ToolRegistry()
     reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
 
     loop.state.ensure_branch(
@@ -123,11 +155,63 @@ async def test_settle_branches_after_chain_closes_parent_and_child_lineage():
         "affected_component": "http://localhost:3000",
         "description": "Authenticated functionality exposed sensitive user data.",
     })
+    linked = await reg.dispatch("link_chain", {
+        "finding_ids": [first.data["id"], second.data["id"]],
+        "rationale": "Authentication bypass session was reused to read sensitive user data.",
+        "crown_jewel": "authenticated data exfiltration",
+        "evidence_artifact": _chain_artifact(
+            first.data["id"],
+            second.data["id"],
+            crown="authenticated user data",
+        ),
+    })
+    assert linked.ok is True
 
     loop._settle_branches_after_chain([first.data["id"], second.data["id"]])
 
     assert loop.state.branches["web:auth-bypass"].status == "proven"
     assert loop.state.branches["web:auth-bypass:post-auth-enum"].status == "proven"
+
+
+@pytest.mark.asyncio
+async def test_unverified_narrative_chain_does_not_settle_branches():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
+
+    first = await reg.dispatch("report_finding", {
+        "title": "Informational route hint",
+        "severity": "low",
+        "finding_type": "misc",
+        "affected_component": "/hint",
+        "description": "Route hint observed.",
+    })
+    second = await reg.dispatch("report_finding", {
+        "title": "Benign header",
+        "severity": "low",
+        "finding_type": "misc",
+        "affected_component": "/header",
+        "description": "Header observed.",
+    })
+    branch = loop.state.ensure_branch(
+        "manual:narrative",
+        "MANUAL-NARRATIVE",
+        "Narrative-only branch",
+        role="post_exploit_worker",
+        source_finding_id=first.data["id"],
+    )
+
+    linked = await reg.dispatch("link_chain", {
+        "finding_ids": [first.data["id"], second.data["id"]],
+        "rationale": "The two observations are related but no exploit chain was proven.",
+    })
+    assert linked.ok is True
+    assert linked.data["verification_status"] == "narrative"
+
+    loop._settle_branches_after_chain([first.data["id"], second.data["id"]])
+
+    assert loop.state.branches[branch.id].status != "proven"
 
 
 @pytest.mark.asyncio
@@ -167,11 +251,13 @@ async def test_link_chain_dedups_similar_source_target_type_and_crown_jewel():
         "finding_ids": [first, second],
         "rationale": "Leaked content helps pivot.",
         "crown_jewel": "privileged data exfiltration",
+        "evidence_artifact": _chain_artifact(first, second),
     })
     second_link = await reg.dispatch("link_chain", {
         "finding_ids": [first, third],
         "rationale": "Leaked content helps pivot again.",
         "crown_jewel": "privileged data exfiltration",
+        "evidence_artifact": _chain_artifact(first, third),
     })
 
     assert first_link.ok is True

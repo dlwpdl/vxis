@@ -120,6 +120,10 @@ The current gates protect these boundaries:
 - high/critical `report_finding` calls require a replayable PoC transcript with an exploit attempt and observed result
 - auth/access-control/business-logic high-impact findings additionally require a control or baseline comparison
 - escaped LLM transcript newlines are normalized before PoC evaluation, without accepting request-only evidence
+- high-value `link_chain` calls require `VerifiedChainArtifact` evidence: source output, pivot action, control result, observed result, and crown-jewel evidence
+- narrative-only chains can be stored, but they no longer settle branches as proven
+- auto-linking must pass the same chain artifact gate before closing parent/child branches
+- multi-hop chains require hop evidence for every adjacent finding pair
 - raw `httpx` remains globally confined by the existing AST guard
 - repeated/stalled execution has monitor pressure
 - agent graph runtime state persists
@@ -128,7 +132,7 @@ The current gates protect these boundaries:
 Latest local verification for this report:
 
 - `uv run ruff check src tests`
-- `uv run pytest -q` -> `2104 passed, 4 skipped`
+- `uv run pytest -q` -> `2106 passed, 4 skipped`
 
 ## Remaining Gaps
 
@@ -162,9 +166,9 @@ Latest local verification for this report:
 
    Show director prompt size, worker prompt size, memory compression count, and truncation reasons in one place.
 
-3. Add a golden end-to-end scan fixture.
+3. Add richer chain replay executors.
 
-   The test should assert: director sees egress contracts, creates worker, worker uses covered tool, evidence returns, director links chain, report includes verified finding.
+   `VerifiedChainArtifact` now blocks weak chain narratives, but the next step is having workers actively replay each hop rather than deriving chain proof from already reported PoC transcripts.
 
 4. Shift the next workstream to pentest depth.
 

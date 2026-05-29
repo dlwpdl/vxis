@@ -331,15 +331,29 @@ class ScanLoopActionMixin:
         if not chain_ids:
             return
         findings_by_id: dict[str, dict[str, Any]] = {}
+        verified_chain_seen = False
         try:
-            from vxis.agent.tools.finding_tools import _get_findings
+            from vxis.agent.tools.finding_tools import _get_chains, _get_findings
             findings_by_id = {
                 str(item.get("id")): item
                 for item in (_get_findings() or [])
                 if isinstance(item, dict) and item.get("id")
             }
+            for chain in _get_chains() or []:
+                if not isinstance(chain, dict):
+                    continue
+                chain_finding_ids = [str(fid) for fid in chain.get("finding_ids") or []]
+                if (
+                    chain_finding_ids
+                    and set(chain_finding_ids).issuperset(chain_ids)
+                    and chain.get("verification_status") == "verified"
+                ):
+                    verified_chain_seen = True
+                    break
         except Exception:
             findings_by_id = {}
+        if not verified_chain_seen:
+            return
 
         branch_ids_to_settle: set[str] = set()
         for fid in chain_ids:
@@ -1314,6 +1328,118 @@ class ScanLoopActionMixin:
             }
         return None
 
+    @staticmethod
+    def _finding_chain_blob(finding: dict[str, Any]) -> str:
+        for key in (
+            "poc_script_code",
+            "evidence",
+            "technical_analysis",
+            "description",
+            "title",
+        ):
+            value = str(finding.get(key) or "").strip()
+            if value:
+                return value[:3000]
+        return ""
+
+    @staticmethod
+    def _finding_control_blob(finding: dict[str, Any]) -> str:
+        for key in ("poc_script_code", "technical_analysis", "evidence", "description"):
+            value = str(finding.get(key) or "").strip()
+            if value and any(
+                marker in value.lower()
+                for marker in (
+                    "control",
+                    "baseline",
+                    "without auth",
+                    "unauthenticated",
+                    "403",
+                    "401",
+                    "http/1.1",
+                    "response_status",
+                )
+            ):
+                return value[:3000]
+        return ""
+
+    def _chain_evidence_artifact_for_pair(
+        self,
+        source: dict[str, Any],
+        target: dict[str, Any],
+        candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        source_id = str(source.get("id") or "")
+        target_id = str(target.get("id") or "")
+        source_output = self._finding_chain_blob(source)
+        observed_result = self._finding_chain_blob(target)
+        control_result = self._finding_control_blob(target) or self._finding_control_blob(source)
+        source_context = " ".join(
+            part
+            for part in (
+                source_id,
+                str(source.get("finding_type") or ""),
+                str(source.get("affected_component") or ""),
+                source_output[:600],
+            )
+            if part
+        )
+        pivot_action = (
+            f"Reuse source output ({source_context}) against {target_id}: "
+            f"{candidate.get('rationale', '')}"
+        )[:1000]
+        crown_evidence = "\n".join(
+            part
+            for part in (
+                str(target.get("impact") or ""),
+                str(target.get("technical_analysis") or ""),
+                str(target.get("poc_script_code") or target.get("evidence") or ""),
+            )
+            if part
+        )[:3000]
+        return {
+            "source_finding_id": source_id,
+            "target_finding_id": target_id,
+            "source_output": source_output,
+            "pivot_action": pivot_action,
+            "observed_result": observed_result,
+            "control_result": control_result,
+            "crown_jewel_evidence": crown_evidence,
+            "source_output_used_in_pivot": False,
+            "verification_method": "derived_from_reported_poc",
+            "hops": [
+                {
+                    "source_finding_id": source_id,
+                    "target_finding_id": target_id,
+                    "source_output": source_output,
+                    "pivot_action": pivot_action,
+                    "observed_result": observed_result,
+                    "control_result": control_result,
+                    "source_output_used_in_pivot": False,
+                }
+            ],
+        }
+
+    def _chain_evidence_artifact_for_ids(
+        self,
+        source_id: str,
+        target_id: str,
+        candidate: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            from vxis.agent.tools.finding_tools import _get_findings
+        except Exception:
+            return {}
+        by_id = {
+            str(item.get("id")): item
+            for item in (_get_findings() or [])
+            if isinstance(item, dict) and item.get("id")
+        }
+        source = by_id.get(str(source_id))
+        target = by_id.get(str(target_id))
+        if not source or not target:
+            return {}
+        return self._chain_evidence_artifact_for_pair(source, target, candidate)
+
     async def _maybe_auto_link_chain(self, finding_id: str) -> None:
         try:
             from vxis.agent.tools.finding_tools import (
@@ -1353,8 +1479,14 @@ class ScanLoopActionMixin:
             "finding_ids": [best_candidate["source_id"], best_candidate["target_id"]],
             "rationale": best_candidate["rationale"],
             "crown_jewel": best_candidate["crown_jewel"],
+            "evidence_artifact": self._chain_evidence_artifact_for_pair(
+                next(f for f in findings if str(f.get("id")) == best_candidate["source_id"]),
+                current,
+                best_candidate,
+            ),
         })
-        if result.ok:
+        result_data = result.data if isinstance(result.data, dict) else {}
+        if result.ok and result_data.get("verification_status") == "verified":
             self._settle_branches_after_chain([best_candidate["source_id"], best_candidate["target_id"]])
             logger.info("auto-linked chain %s -> %s", best_candidate["source_id"], finding_id)
 
@@ -1462,10 +1594,18 @@ class ScanLoopActionMixin:
             "finding_ids": [candidate["source_id"], candidate["target_id"]],
             "rationale": candidate["rationale"],
             "crown_jewel": candidate["crown_jewel"],
+            "evidence_artifact": self._chain_evidence_artifact_for_ids(
+                candidate["source_id"],
+                candidate["target_id"],
+                candidate,
+            ),
         })
         if not result.ok:
             return None
         if isinstance(result.data, dict) and result.data.get("dedup"):
+            return None
+        result_data = result.data if isinstance(result.data, dict) else {}
+        if result_data.get("verification_status") != "verified":
             return None
         self._settle_branches_after_chain([candidate["source_id"], candidate["target_id"]])
         logger.info(

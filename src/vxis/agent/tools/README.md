@@ -91,7 +91,7 @@ In-memory store per scan. Auto-assigns `VXIS-0001`, `VXIS-0002`, ... IDs.
 |---|---|
 | `report_finding` | Submit a discovered vulnerability. Required: `title`, `severity`, `finding_type`, `affected_component`, `description`. Optional: `evidence`, `remediation`, `cwe`. |
 | `query_findings` | Search current scan's findings. Filters: `severity`, `finding_type`, `component_contains`, `text_contains`. |
-| `link_chain` | Assert causal attack chain between 2+ findings. Required: `finding_ids: list[str]`, `rationale`. Optional: `crown_jewel`. |
+| `link_chain` | Assert causal attack chain between 2+ findings. Required: `finding_ids: list[str]`, `rationale`. High-value chains also require `evidence_artifact` with source output reuse, control/observed result, and crown evidence. |
 
 ### Verifier tool (`verifier_tools.py`) — 1 tool
 

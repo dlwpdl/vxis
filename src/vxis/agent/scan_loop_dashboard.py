@@ -536,7 +536,7 @@ def build_scan_dashboard(loop: Any) -> str:
         lines.append("CHAIN PROTOCOL:")
         lines.append("  1. Pick 2+ findings that plausibly compose.")
         lines.append("  2. Actually TRY the chain (use tools to prove exploitability).")
-        lines.append("  3. Call link_chain(finding_ids=[...], rationale=..., crown_jewel=...).")
+        lines.append("  3. Call link_chain with VerifiedChainArtifact evidence.")
         lines.append("  4. Repeat for every combination you can imagine.")
         lines.append("CROWN JEWELS: admin takeover, DB dump, RCE, key theft, full data exfil.")
 
@@ -616,6 +616,7 @@ def build_scan_dashboard(loop: Any) -> str:
             lines.append("   Try: shell_exec nuclei with http/cves templates")
     elif _chain_pressure:
         lines.append("\n>> PRIMARY GOAL: link_chain NOW — you have findings but 0 chains.")
+        lines.append("   Include evidence_artifact: source_output, pivot_action, control/observed result, crown evidence.")
         lines.append("   DO NOT call finish_scan until you've tried every chain above.")
         if untested:
             lines.append(f"   Secondary: also test {untested[0]} when you run out of chain ideas.")

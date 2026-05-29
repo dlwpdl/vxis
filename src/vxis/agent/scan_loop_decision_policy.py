@@ -2135,6 +2135,11 @@ class ScanLoopDecisionPolicyMixin:
                         "finding_ids": [cand["source_id"], cand["target_id"]],
                         "rationale": cand["rationale"],
                         "crown_jewel": cand["crown_jewel"],
+                        "evidence_artifact": self._chain_evidence_artifact_for_ids(
+                            cand["source_id"],
+                            cand["target_id"],
+                            cand,
+                        ),
                     },
                     f"forcing chain link {cand['source_id']} -> {cand['target_id']}",
                 )

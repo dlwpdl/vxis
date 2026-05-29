@@ -52,6 +52,16 @@ def test_finding_tools_emit_live_hit_and_chain_events() -> None:
             finding_ids=[first.data["id"], second.data["id"]],
             rationale="Initial foothold escalates to admin access",
             crown_jewel="admin takeover",
+            evidence_artifact={
+                "source_finding_id": first.data["id"],
+                "target_finding_id": second.data["id"],
+                "source_output": "SQL injection returned Location: /admin and an authenticated session hint.",
+                "pivot_action": "Reused the authenticated session path against the admin login.",
+                "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
+                "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+                "crown_jewel_evidence": "Admin session cookie issued by /admin/login.",
+                "source_output_used_in_pivot": True,
+            },
         )
         set_event_callback(None)
         return events

@@ -423,6 +423,16 @@ async def test_sdk_child_completion_feeds_report_and_chain_golden_path(monkeypat
             "finding_ids": [source.data["id"], impact.data["id"]],
             "rationale": "Enumeration supplies object ids, then IDOR reads another account order.",
             "crown_jewel": "customer order data exposure",
+            "evidence_artifact": {
+                "source_finding_id": source.data["id"],
+                "target_finding_id": impact.data["id"],
+                "source_output": "GET /api/orders shows sequential ids including order id 2.",
+                "pivot_action": "Reused order id 2 from enumeration against /api/orders/2.",
+                "observed_result": "HTTP/1.1 200 OK\n\n{\"order_id\":2,\"data\":\"customer order\"}",
+                "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline owner check denied.",
+                "crown_jewel_evidence": "Customer order data for order id 2 was returned.",
+                "source_output_used_in_pivot": True,
+            },
         },
     )
 
