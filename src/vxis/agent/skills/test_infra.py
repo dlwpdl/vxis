@@ -4,7 +4,6 @@ import asyncio
 import os
 import logging
 import re
-import socket
 from typing import Any
 from urllib.parse import urlparse
 from ._payload_loader import load_skill_dataset as _load_ds
@@ -21,6 +20,7 @@ SUBDOMAIN_PREFIXES = _load_ds("test_infra", "subdomain_prefixes")  # ADR-007 Pha
 
 _CLOUD_METADATA_TIMEOUT_SECONDS = 4.0
 _FIREBASE_TIMEOUT_SECONDS = 5.0
+_SUBDOMAIN_PROBE_TIMEOUT_SECONDS = 4.0
 
 
 def _normalize_seed_paths(seed_paths: Any) -> list[str]:
@@ -92,6 +92,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
     _mgr = SessionManager()
     _cloud_mgr = SessionManager()
     _firebase_mgr = SessionManager()
+    _subdomain_mgr = SessionManager()
     _session = await _mgr.get_session(target)
 
     try:
@@ -193,6 +194,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             parts = hostname.split(".")
             if len(parts) >= 2:
                 base_domain = ".".join(parts[-2:])
+                scheme = parsed.scheme or "https"
 
                 async def check_subdomain(prefix: str) -> None:
                     nonlocal tested
@@ -200,16 +202,22 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                         tested += 1
                         fqdn = f"{prefix}.{base_domain}"
                         try:
-                            loop = asyncio.get_event_loop()
-                            dns_result = await loop.run_in_executor(None, socket.gethostbyname, fqdn)
-                            if dns_result:
+                            probe_url = f"{scheme}://{fqdn}"
+                            subdomain_session = await _subdomain_mgr.get_session(
+                                probe_url,
+                                timeout=_SUBDOMAIN_PROBE_TIMEOUT_SECONDS,
+                            )
+                            r = await subdomain_session.request("GET", "/")
+                            if r.status in {200, 204, 301, 302, 307, 308, 401, 403, 404}:
                                 findings.append({
                                     "type": "subdomain_found",
                                     "payload": fqdn,
-                                    "evidence": f"Resolves to {dns_result}",
+                                    "evidence": f"HTTP probe returned status {r.status}",
+                                    "status": r.status,
+                                    "size": r.body_length,
                                     "severity": "informational",
                                 })
-                        except (socket.gaierror, OSError):
+                        except Exception:
                             pass
 
                 await asyncio.gather(*[check_subdomain(p) for p in SUBDOMAIN_PREFIXES])
@@ -243,6 +251,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         await _mgr.close_all()
         await _cloud_mgr.close_all()
         await _firebase_mgr.close_all()
+        await _subdomain_mgr.close_all()
 
     return {
         "vulnerable": len(findings) > 0,

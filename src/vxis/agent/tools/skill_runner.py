@@ -62,6 +62,12 @@ def _normalize_skill_name(skill_name: str) -> str:
     return _SKILL_ALIASES.get(normalized, normalized)
 
 
+def _with_egress_metadata(result: Any, egress: dict[str, Any]) -> dict[str, Any]:
+    data = dict(result) if isinstance(result, dict) else {"result": result}
+    data["_egress"] = egress
+    return data
+
+
 class RunSkillTool:
     name = "run_skill"
     description = (
@@ -133,6 +139,24 @@ class RunSkillTool:
                 ok=False,
                 summary=f"run_skill: unknown skill '{requested_skill}'. Available: {available}",
                 error="unknown_skill",
+            )
+
+        from vxis.agent.skill_audit import audit_registered_skill
+
+        egress = audit_registered_skill(skill_name, SKILL_REGISTRY)
+        if egress.get("errors"):
+            return ToolResult(
+                ok=False,
+                data={
+                    "blocked": True,
+                    "skill": skill_name,
+                    "egress": egress,
+                },
+                summary=(
+                    f"run_skill BLOCKED — skill '{skill_name}' has raw egress "
+                    "outside SessionManager/tool controls"
+                ),
+                error="raw_egress",
             )
 
         # Cache hit detection — normalize args so cosmetic differences
@@ -319,14 +343,15 @@ class RunSkillTool:
                 summary_parts.append(f"  {ftype}: {fpayload} ({fsev})")
 
         _summary = " | ".join(summary_parts)
+        _data = _with_egress_metadata(result, egress)
         # Store in cache so repeat calls short-circuit without re-execution
         _skill_cache[_cache_key] = {
-            "data": result,
+            "data": _data,
             "summary": _summary,
             "hits": 1,
         }
         return ToolResult(
             ok=True,
-            data=result,
+            data=_data,
             summary=_summary,
         )
