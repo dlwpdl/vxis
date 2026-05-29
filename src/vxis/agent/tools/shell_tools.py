@@ -31,6 +31,7 @@ from typing import Any
 from urllib import error as urlerror
 from urllib import request as urlrequest
 
+from vxis.agent.egress_policy import blocked_policy_data, evaluate_shell_egress
 from vxis.agent.tool_registry import ToolResult
 from vxis.ghost.routing import wrap_shell_command_for_ghost
 
@@ -528,6 +529,19 @@ class ShellExecTool:
         command = kwargs.get("command", "")
         if not command:
             return ToolResult(ok=False, summary="shell_exec: command is required", error="missing_command")
+
+        policy_decision = evaluate_shell_egress(str(command))
+        if not policy_decision.allowed:
+            return ToolResult(
+                ok=False,
+                data=blocked_policy_data(
+                    tool_name="shell_exec",
+                    decision=policy_decision,
+                    command=str(command),
+                ),
+                summary=f"shell_exec BLOCKED by Ghost egress policy: {policy_decision.reason}",
+                error="direct_egress_blocked",
+            )
 
         try:
             timeout = float(kwargs.get("timeout", DEFAULT_TIMEOUT))

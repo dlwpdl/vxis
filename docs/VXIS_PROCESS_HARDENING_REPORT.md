@@ -31,7 +31,18 @@ Ghost is now a runtime path, not only a trigger flag.
 - `browser_render`: legacy browser path now also receives Ghost proxy and user-agent.
 - `shell_exec`: injects `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and lower-case equivalents into sandbox commands.
 - `python_exec`: injects the same proxy env into one-shot scripts and persistent Python REPL sessions.
-- `nmap_scan`: explicitly reports `direct_raw_socket` because HTTP/SOCKS env proxy does not anonymize raw TCP/UDP scanning.
+- `nmap_scan`: explicitly reports `direct_raw_socket` because HTTP/SOCKS env proxy does not anonymize raw TCP/UDP scanning. When Ghost is active, this path is blocked unless `VXIS_ALLOW_DIRECT_EGRESS=1` is set.
+
+### Ghost Egress Enforcement
+
+Visibility now has an execution guard behind it:
+
+- `nmap_scan` is blocked during Ghost mode by default.
+- `shell_exec` blocks known raw egress tools during Ghost mode, including `nmap`, `masscan`, `hping`, `nping`, `nc`/`ncat`, `socat`, `dig`, `nslookup`, `ping`, `traceroute`, and `telnet`.
+- `python_exec` blocks Python code that imports or calls raw socket/subprocess paths during Ghost mode.
+- Explicit opt-in is available with `VXIS_ALLOW_DIRECT_EGRESS=1`.
+
+Proxy-aware HTTP tools remain allowed because they can use `GhostTransport`, browser proxy/UA routing, or injected proxy env.
 
 ### Egress Contract
 
@@ -104,6 +115,7 @@ The current gates protect these boundaries:
 - default registry tools must have egress contracts
 - tool catalog includes egress metadata for director/worker prompts
 - Ghost routing metadata is visible in tool results and control-plane state
+- Ghost active mode blocks direct/raw egress unless `VXIS_ALLOW_DIRECT_EGRESS=1`
 - `run_skill` registered skills must pass static egress audit
 - raw `httpx` remains globally confined by the existing AST guard
 - repeated/stalled execution has monitor pressure
@@ -113,17 +125,17 @@ The current gates protect these boundaries:
 Latest local verification for this report:
 
 - `uv run ruff check src tests`
-- `uv run pytest -q` -> `2095 passed, 4 skipped`
+- `uv run pytest -q` -> `2102 passed, 4 skipped`
 
 ## Remaining Gaps
 
 1. Sandbox egress is not OS-enforced yet.
 
-   `shell_exec` and `python_exec` receive proxy env, but a command can still use raw sockets or tools that ignore proxy env. This is why their contract is `partial`.
+   `shell_exec` and `python_exec` now block common raw egress patterns during Ghost mode, but this is still process-level policy, not container network enforcement.
 
 2. `nmap_scan` is intentionally direct.
 
-   This is accurate and transparent, but not anonymous. If Ghost anonymity is mandatory, director policy should avoid nmap or require explicit operator opt-in.
+   It is blocked during Ghost mode unless direct egress is explicitly allowed. In normal pentest mode, it remains useful for service discovery.
 
 3. Browser Ghost depends on proxy availability.
 
@@ -139,22 +151,18 @@ Latest local verification for this report:
 
 ## Recommended Next Steps
 
-1. Add sandbox-side egress enforcement.
-
-   Use container network policy or wrapper-level restrictions so `shell_exec`/`python_exec` cannot silently bypass proxy policy when Ghost is required.
-
-2. Add director policy for direct-egress tools.
-
-   If Ghost is active, `nmap_scan` should require explicit rationale or be blocked unless the mission allows direct raw socket scanning.
-
-3. Promote serious workers to durable child sessions.
+1. Promote serious workers to durable child sessions.
 
    Keep the current `agent_graph` interface, but back long-running workers with per-agent event journals and resumable sessions.
 
-4. Add context-budget report to control plane.
+2. Add context-budget report to control plane.
 
    Show director prompt size, worker prompt size, memory compression count, and truncation reasons in one place.
 
-5. Add a golden end-to-end scan fixture.
+3. Add a golden end-to-end scan fixture.
 
    The test should assert: director sees egress contracts, creates worker, worker uses covered tool, evidence returns, director links chain, report includes verified finding.
+
+4. Shift the next workstream to pentest depth.
+
+   Prioritize better attack-surface expansion, PoC verification, false-positive controls, and crown-jewel chain progression over more anonymity features.

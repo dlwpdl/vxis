@@ -157,6 +157,47 @@ async def test_shell_exec_applies_ghost_proxy_env_without_leaking_in_command_dat
 
 
 @pytest.mark.asyncio
+async def test_shell_exec_blocks_raw_network_tool_when_ghost_active():
+    from vxis.ghost.layer import ghost_layer
+
+    async def fake_ensure(**kwargs):
+        raise AssertionError("sandbox should not start for blocked raw egress")
+
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+    with patch("vxis.agent.tools.shell_tools._ensure_sandbox_running", side_effect=fake_ensure):
+        tool = ShellExecTool(sandbox_key="scan-123")
+        result = await tool.run(command="nmap -sV localhost")
+
+    assert result.ok is False
+    assert result.error == "direct_egress_blocked"
+    assert result.data["blocked"] is True
+    assert result.data["policy"]["match"] == "nmap"
+
+
+@pytest.mark.asyncio
+async def test_shell_exec_allows_raw_network_tool_with_explicit_opt_in(monkeypatch):
+    from vxis.ghost.layer import ghost_layer
+
+    async def fake_ensure(**kwargs):
+        return True, "sandbox already running"
+
+    fake_proc = MagicMock()
+    fake_proc.returncode = 0
+    fake_proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+    monkeypatch.setenv("VXIS_ALLOW_DIRECT_EGRESS", "1")
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+
+    with patch("vxis.agent.tools.shell_tools._ensure_sandbox_running", side_effect=fake_ensure), \
+         patch("vxis.agent.tools.shell_tools._execute_via_tool_server", AsyncMock(return_value=None)), \
+         patch("asyncio.create_subprocess_exec", return_value=fake_proc) as mock_exec:
+        tool = ShellExecTool(sandbox_key="scan-123")
+        result = await tool.run(command="nmap -sV localhost")
+
+    assert result.ok is True
+    assert mock_exec.call_args.args[5].rstrip().endswith("nmap -sV localhost")
+
+
+@pytest.mark.asyncio
 async def test_shell_exec_tool_uses_tool_server_when_available():
     async def fake_ensure(**kwargs):
         return True, "sandbox already running"

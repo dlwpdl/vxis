@@ -80,18 +80,38 @@ async def test_nmap_scan_tool_builds_bounded_command_and_parses_services():
 
 
 @pytest.mark.asyncio
-async def test_nmap_scan_reports_direct_raw_socket_when_ghost_active():
+async def test_nmap_scan_blocks_direct_raw_socket_when_ghost_active():
     from vxis.ghost.layer import ghost_layer
 
     ghost_layer.activate(["socks5://127.0.0.1:9050"])
-    tool = NmapScanTool(shell_tool=FakeShellTool(_NMAP_XML))
+    shell = FakeShellTool(_NMAP_XML)
+    tool = NmapScanTool(shell_tool=shell)
+
+    result = await tool.run(target="localhost", ports="80")
+
+    assert result.ok is False
+    assert result.error == "direct_egress_blocked"
+    assert shell.calls == []
+    assert result.data["ghost"]["active"] is True
+    assert result.data["ghost"]["network_coverage"] == "direct_raw_socket"
+    assert "not anonymized" in result.data["ghost"]["warning"]
+    assert result.data["policy"]["mode"] == "direct_raw_socket"
+
+
+@pytest.mark.asyncio
+async def test_nmap_scan_allows_direct_raw_socket_with_explicit_opt_in(monkeypatch):
+    from vxis.ghost.layer import ghost_layer
+
+    monkeypatch.setenv("VXIS_ALLOW_DIRECT_EGRESS", "1")
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+    shell = FakeShellTool(_NMAP_XML)
+    tool = NmapScanTool(shell_tool=shell)
 
     result = await tool.run(target="localhost", ports="80")
 
     assert result.ok is True
-    assert result.data["ghost"]["active"] is True
+    assert len(shell.calls) == 1
     assert result.data["ghost"]["network_coverage"] == "direct_raw_socket"
-    assert "not anonymized" in result.data["ghost"]["warning"]
 
 
 @pytest.mark.asyncio

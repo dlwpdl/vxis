@@ -21,6 +21,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from vxis.agent.egress_policy import blocked_policy_data, evaluate_python_egress
 from vxis.agent.tool_registry import ToolResult
 from vxis.agent.tools.shell_tools import (
     _ensure_sandbox_running,
@@ -86,6 +87,19 @@ class PythonExecTool:
         code = kwargs.get("code", "")
         if not code:
             return ToolResult(ok=False, summary="python_exec: code is required", error="missing_code")
+
+        policy_decision = evaluate_python_egress(str(code))
+        if not policy_decision.allowed:
+            return ToolResult(
+                ok=False,
+                data=blocked_policy_data(
+                    tool_name="python_exec",
+                    decision=policy_decision,
+                    command=str(code),
+                ),
+                summary=f"python_exec BLOCKED by Ghost egress policy: {policy_decision.reason}",
+                error="direct_egress_blocked",
+            )
 
         try:
             timeout = float(kwargs.get("timeout", DEFAULT_TIMEOUT))

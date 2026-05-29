@@ -9,6 +9,10 @@ from typing import Any
 from urllib.parse import urlparse
 
 from vxis.agent.context_budget import trim_text_chars
+from vxis.agent.egress_policy import (
+    blocked_policy_data,
+    enforce_direct_tool_policy,
+)
 from vxis.agent.tool_registry import ToolResult
 from vxis.agent.tools.shell_tools import ShellExecTool
 from vxis.ghost.routing import ghost_status_snapshot
@@ -83,6 +87,27 @@ class NmapScanTool:
             udp=bool(kwargs.get("udp", False)),
             timing=kwargs.get("timing"),
         )
+        decision = enforce_direct_tool_policy(
+            "nmap_scan",
+            mode="direct_raw_socket",
+            alternative="Use http_request/browser tools for Ghost-covered checks, or set VXIS_ALLOW_DIRECT_EGRESS=1 for explicit nmap opt-in.",
+        )
+        if not decision.allowed:
+            return ToolResult(
+                ok=False,
+                data={
+                    **blocked_policy_data(
+                        tool_name="nmap_scan",
+                        decision=decision,
+                        command=command,
+                    ),
+                    "target": target,
+                    "command": command,
+                    "ghost": _nmap_ghost_metadata(),
+                },
+                summary=f"nmap_scan BLOCKED by Ghost egress policy: {decision.reason}",
+                error="direct_egress_blocked",
+            )
         timeout = _bounded_int(kwargs.get("timeout"), default=240, minimum=1, maximum=600)
         async with _nmap_semaphore():
             shell_result = await self._shell_tool.run(command=command, timeout=timeout)

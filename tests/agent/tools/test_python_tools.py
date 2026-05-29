@@ -154,6 +154,49 @@ async def test_python_exec_session_injects_ghost_env(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_python_exec_blocks_raw_socket_when_ghost_active(tmp_path):
+    from vxis.ghost.layer import ghost_layer
+
+    async def fake_ensure(**kwargs):
+        raise AssertionError("sandbox should not start for blocked raw egress")
+
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+    with patch("vxis.agent.tools.python_tools._ensure_sandbox_running", side_effect=fake_ensure):
+        tool = PythonExecTool(sandbox_key="scan-123", workspace_host=str(tmp_path))
+        result = await tool.run(code="import socket\nsocket.socket()")
+
+    assert result.ok is False
+    assert result.error == "direct_egress_blocked"
+    assert result.data["blocked"] is True
+    assert result.data["policy"]["match"] == "socket"
+
+
+@pytest.mark.asyncio
+async def test_python_exec_allows_raw_socket_with_explicit_opt_in(monkeypatch, tmp_path):
+    from vxis.ghost.layer import ghost_layer
+
+    async def fake_ensure(**kwargs):
+        return True, "ok"
+
+    monkeypatch.setenv("VXIS_ALLOW_DIRECT_EGRESS", "1")
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+    with patch("vxis.agent.tools.python_tools._ensure_sandbox_running", side_effect=fake_ensure), \
+         patch("vxis.agent.tools.python_tools.run_sandbox_shell_command", AsyncMock(return_value={
+             "exit_code": 0,
+             "stdout": "ok",
+             "stderr": "",
+             "timeout": False,
+             "transport": "tool_server",
+             "ghost": {"active": True},
+         })):
+        tool = PythonExecTool(sandbox_key="scan-123", workspace_host=str(tmp_path))
+        result = await tool.run(code="import socket\nprint('ok')")
+
+    assert result.ok is True
+    assert result.data["ghost"]["active"] is True
+
+
+@pytest.mark.asyncio
 async def test_python_exec_tool_cleanup_on_success(tmp_path):
     async def fake_ensure(**kwargs):
         return True, "ok"
