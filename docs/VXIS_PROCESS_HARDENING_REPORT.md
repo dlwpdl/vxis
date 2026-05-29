@@ -117,6 +117,9 @@ The current gates protect these boundaries:
 - Ghost routing metadata is visible in tool results and control-plane state
 - Ghost active mode blocks direct/raw egress unless `VXIS_ALLOW_DIRECT_EGRESS=1`
 - `run_skill` registered skills must pass static egress audit
+- high/critical `report_finding` calls require a replayable PoC transcript with an exploit attempt and observed result
+- auth/access-control/business-logic high-impact findings additionally require a control or baseline comparison
+- escaped LLM transcript newlines are normalized before PoC evaluation, without accepting request-only evidence
 - raw `httpx` remains globally confined by the existing AST guard
 - repeated/stalled execution has monitor pressure
 - agent graph runtime state persists
@@ -125,7 +128,7 @@ The current gates protect these boundaries:
 Latest local verification for this report:
 
 - `uv run ruff check src tests`
-- `uv run pytest -q` -> `2102 passed, 4 skipped`
+- `uv run pytest -q` -> `2104 passed, 4 skipped`
 
 ## Remaining Gaps
 

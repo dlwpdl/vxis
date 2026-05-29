@@ -116,6 +116,56 @@ async def test_report_finding_rejects_high_without_real_poc():
 
 
 @pytest.mark.asyncio
+async def test_report_finding_rejects_high_with_weak_poc_transcript():
+    tool = ReportFindingTool()
+    result = await tool.run(
+        title="Admin access control bypass",
+        severity="high",
+        finding_type="access_control",
+        affected_component="/admin",
+        description="Admin endpoint may be reachable.",
+        impact="Admin data exposure.",
+        technical_analysis="The endpoint looked different.",
+        poc_description="Visit /admin.",
+        poc_script_code="Admin page looked interesting",
+        remediation_steps="Enforce authorization.",
+    )
+
+    assert result.ok is False
+    assert result.error == "weak_poc"
+    assert "exploit_attempt" in result.data["proof"]["missing"]
+    assert "observed_result" in result.data["proof"]["missing"]
+    assert "control_or_baseline" in result.data["proof"]["missing"]
+
+
+@pytest.mark.asyncio
+async def test_report_finding_normalizes_escaped_poc_transcript():
+    tool = ReportFindingTool()
+    result = await tool.run(
+        title="Reflected XSS",
+        severity="high",
+        finding_type="xss_reflected",
+        affected_component="/search",
+        description="Payload is reflected into the response.",
+        impact="Victim browser script execution.",
+        technical_analysis="Baseline text response changed to active markup with the payload.",
+        poc_description="Replay benign search, then replay payload search and compare response body.",
+        poc_script_code=(
+            "GET /search?q=test HTTP/1.1\\nHost: example\\n\\n"
+            "HTTP/1.1 200 OK\\n\\nsearch:test\\n\\n"
+            "GET /search?q=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1\\nHost: example\\n\\n"
+            "HTTP/1.1 200 OK\\n\\nsearch:<script>alert(1)</script>"
+        ),
+        remediation_steps="Apply context-aware output encoding.",
+    )
+
+    assert result.ok is True
+    findings = _get_findings()
+    assert "\nHost: example" in findings[0]["poc_script_code"]
+    assert result.data["proof"]["has_result"] is True
+
+
+@pytest.mark.asyncio
 async def test_report_finding_allows_medium_with_descriptive_evidence():
     tool = ReportFindingTool()
     result = await tool.run(
@@ -151,7 +201,7 @@ async def test_query_findings_empty_store():
 async def test_query_findings_filters_by_severity_and_type():
     rep = ReportFindingTool()
     await rep.run(title="A", severity="critical", finding_type="sqli", affected_component="/a", description="da", impact="ia", technical_analysis="ta", poc_description="pa", poc_script_code="GET /a\nHTTP/1.1 500", remediation_steps="ra")
-    await rep.run(title="B", severity="high",     finding_type="xss",  affected_component="/b", description="db", impact="ib", technical_analysis="tb", poc_description="pb", poc_script_code="<script>alert(1)</script>", remediation_steps="rb")
+    await rep.run(title="B", severity="high",     finding_type="xss",  affected_component="/b", description="db", impact="ib", technical_analysis="tb", poc_description="pb", poc_script_code="GET /b?q=<script>alert(1)</script>\nHTTP/1.1 200 OK\n\n<script>alert(1)</script>", remediation_steps="rb")
     await rep.run(title="C", severity="critical", finding_type="xss",  affected_component="/c", description="dc", impact="ic", technical_analysis="tc", poc_description="pc", poc_script_code="GET /c\nHTTP/1.1 200", remediation_steps="rc")
 
     q = QueryFindingsTool()
@@ -171,7 +221,23 @@ async def test_query_findings_filters_by_severity_and_type():
 @pytest.mark.asyncio
 async def test_query_findings_text_contains_matches_title_or_description():
     rep = ReportFindingTool()
-    await rep.run(title="Login bypass", severity="critical", finding_type="auth", affected_component="/login", description="jwt none alg", impact="ia", technical_analysis="ta", poc_description="pa", poc_script_code="Cookie: JWT=forged", remediation_steps="ra")
+    await rep.run(
+        title="Login bypass",
+        severity="critical",
+        finding_type="auth",
+        affected_component="/login",
+        description="jwt none alg",
+        impact="ia",
+        technical_analysis="Control without auth returned 401, forged JWT returned 200.",
+        poc_description="Replay baseline without token, then replay with forged JWT.",
+        poc_script_code=(
+            "GET /admin HTTP/1.1\nCookie: token=\n\n"
+            "HTTP/1.1 401 Unauthorized\n\n"
+            "GET /admin HTTP/1.1\nCookie: JWT=forged\n\n"
+            "HTTP/1.1 200 OK\n\n{\"role\":\"admin\"}"
+        ),
+        remediation_steps="ra",
+    )
     await rep.run(title="Open redirect", severity="low", finding_type="redirect", affected_component="/go", description="phishing vector")
 
     q = QueryFindingsTool()

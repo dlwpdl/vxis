@@ -406,7 +406,10 @@ async def test_scan_pipeline_v2_copies_findings_from_store_into_ctx():
         impact="Login bypass may expose privileged data.",
         technical_analysis="The login endpoint accepted an injection payload and returned an authenticated response.",
         poc_description="Replay the same POST request with the SQL injection payload.",
-        poc_script_code="POST /login user=admin'--",
+        poc_script_code=(
+            "POST /login HTTP/1.1\n\nuser=admin'--\n\n"
+            "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
+        ),
         remediation_steps="Use parameterized queries for authentication.",
     )
 

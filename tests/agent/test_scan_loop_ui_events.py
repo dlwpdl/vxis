@@ -111,9 +111,17 @@ def test_scan_loop_spawns_followup_branches_from_finding() -> None:
                         "description": "The login accepted a bypass payload.",
                         "evidence": "status 302 -> /admin",
                         "impact": "The bypass grants an authenticated session that can be reused against protected routes.",
-                        "technical_analysis": "The login flow returned a redirect to /admin after the bypass payload, indicating an auth boundary crossing.",
-                        "poc_description": "Submit the bypass payload to /login and confirm the 302 redirect into the authenticated area.",
-                        "poc_script_code": "POST /login payload=bypass -> HTTP/302 Location: /admin",
+                        "technical_analysis": (
+                            "Baseline invalid credentials returned 401, while the bypass payload returned "
+                            "a redirect to /admin, indicating an auth boundary crossing."
+                        ),
+                        "poc_description": "Replay invalid-credential control, then submit the bypass payload and compare responses.",
+                        "poc_script_code": (
+                            "POST /login HTTP/1.1\n\nusername=bad&password=bad\n\n"
+                            "HTTP/1.1 401 Unauthorized\n\n"
+                            "POST /login HTTP/1.1\n\npayload=bypass\n\n"
+                            "HTTP/1.1 302 Found\nLocation: /admin"
+                        ),
                         "remediation_steps": "Reject bypass payloads server-side and require verified credentials before issuing sessions.",
                     },
                 )

@@ -38,9 +38,14 @@ def test_finding_tools_emit_live_hit_and_chain_events() -> None:
             affected_component="/admin",
             description="Default credentials accepted",
             impact="Administrative access with default credentials.",
-            technical_analysis="The admin endpoint accepted the documented default credential pair and granted access.",
-            poc_description="Authenticate to the admin panel with default credentials.",
-            poc_script_code="POST /admin/login HTTP/1.1\\n\\nusername=admin&password=admin\\nHTTP/1.1 200 OK",
+            technical_analysis="Baseline invalid credentials returned 401, default credentials returned 200 and an admin session.",
+            poc_description="Replay invalid-credential control, then authenticate to the admin panel with default credentials.",
+            poc_script_code=(
+                "POST /admin/login HTTP/1.1\\n\\nusername=guest&password=wrong\\n\\n"
+                "HTTP/1.1 401 Unauthorized\\n\\n"
+                "POST /admin/login HTTP/1.1\\n\\nusername=admin&password=admin\\n\\n"
+                "HTTP/1.1 200 OK\\nSet-Cookie: session=admin"
+            ),
             remediation_steps="Disable default credentials and enforce rotation on first use.",
         )
         await chain.run(

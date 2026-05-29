@@ -918,7 +918,14 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
             "impact": "The foothold exposes session material that can be reused post-auth.",
             "technical_analysis": "Control and payload comparison showed SQL injection and token-bearing error output.",
             "poc_description": "Send a benign search request, then send the SQL payload and compare the response delta.",
-            "poc_script_code": "GET /api/search?q=test\nGET /api/search?q='",
+            "poc_script_code": (
+                "GET /api/search?q=test HTTP/1.1\n\n"
+                "HTTP/1.1 200 OK\n\n"
+                "[]\n\n"
+                "GET /api/search?q=' HTTP/1.1\n\n"
+                "HTTP/1.1 500 Internal Server Error\n\n"
+                "SQL error with session token column"
+            ),
             "remediation_steps": "Use parameterized queries and suppress token-bearing error output.",
         },
     )

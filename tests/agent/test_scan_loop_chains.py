@@ -195,7 +195,7 @@ async def test_suggest_chain_candidates_keeps_best_source_per_target_and_crown()
         "impact": "leak",
         "technical_analysis": "leak",
         "poc_description": "GET logs",
-        "poc_script_code": "GET /support/logs HTTP/1.1",
+        "poc_script_code": "GET /support/logs HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlog token=abc",
         "remediation_steps": "fix",
     })
     second = await reg.dispatch("report_finding", {
@@ -207,7 +207,7 @@ async def test_suggest_chain_candidates_keeps_best_source_per_target_and_crown()
         "impact": "leak",
         "technical_analysis": "leak",
         "poc_description": "GET ftp",
-        "poc_script_code": "GET /ftp HTTP/1.1",
+        "poc_script_code": "GET /ftp HTTP/1.1\n\nHTTP/1.1 200 OK\n\nbackup data",
         "remediation_steps": "fix",
     })
     target = await reg.dispatch("report_finding", {
@@ -217,9 +217,14 @@ async def test_suggest_chain_candidates_keeps_best_source_per_target_and_crown()
         "affected_component": "/api/profile",
         "description": "post-auth exposure",
         "impact": "impact",
-        "technical_analysis": "tech",
-        "poc_description": "poc",
-        "poc_script_code": "GET /api/profile HTTP/1.1",
+        "technical_analysis": "Baseline without auth returned 403, authenticated request returned profile data.",
+        "poc_description": "Replay unauthenticated control, then authenticated profile request and compare responses.",
+        "poc_script_code": (
+            "GET /api/profile HTTP/1.1\nCookie: session=\n\n"
+            "HTTP/1.1 403 Forbidden\n\n"
+            "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
+            "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}"
+        ),
         "remediation_steps": "fix",
     })
 
@@ -249,7 +254,7 @@ async def test_suggest_chain_candidates_collapses_same_target_family():
             "impact": "leak",
             "technical_analysis": "leak",
             "poc_description": "GET file",
-            "poc_script_code": f"GET {path} HTTP/1.1",
+            "poc_script_code": f"GET {path} HTTP/1.1\n\nHTTP/1.1 200 OK\n\nsecret file content",
             "remediation_steps": "fix",
         })
     await reg.dispatch("report_finding", {
@@ -259,9 +264,14 @@ async def test_suggest_chain_candidates_collapses_same_target_family():
         "affected_component": "/api/profile",
         "description": "post-auth exposure",
         "impact": "impact",
-        "technical_analysis": "tech",
-        "poc_description": "poc",
-        "poc_script_code": "GET /api/profile HTTP/1.1",
+        "technical_analysis": "Baseline without auth returned 403, authenticated request returned profile data.",
+        "poc_description": "Replay unauthenticated control, then authenticated profile request and compare responses.",
+        "poc_script_code": (
+            "GET /api/profile HTTP/1.1\nCookie: session=\n\n"
+            "HTTP/1.1 403 Forbidden\n\n"
+            "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
+            "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}"
+        ),
         "remediation_steps": "fix",
     })
 

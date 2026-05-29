@@ -11,6 +11,7 @@ Tools:
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable
 
 from vxis.agent.tool_registry import ToolResult
@@ -23,6 +24,61 @@ _chains: list[dict[str, Any]] = []
 _event_callback: Callable[[str, dict[str, Any]], None] | None = None
 
 _VALID_SEVERITIES = ("critical", "high", "medium", "low", "informational")
+_POC_ATTEMPT_MARKERS = (
+    "GET ",
+    "POST ",
+    "PUT ",
+    "PATCH ",
+    "DELETE ",
+    "curl ",
+    "sqlmap",
+    "payload",
+    "request:",
+    "control",
+    "baseline",
+)
+_POC_RESULT_MARKERS = (
+    "response_status",
+    "status_code",
+    "response_excerpt",
+    "observed_delta",
+    "Set-Cookie:",
+    "Location:",
+    "\"token\"",
+    "\"role\"",
+    "\"data\"",
+    "\"status\"",
+    "stack trace",
+    "Traceback",
+    "sql error",
+    "sqlmap identified",
+    "dumped",
+)
+_CONTROL_REQUIRED_TYPES = (
+    "auth",
+    "idor",
+    "access",
+    "privilege",
+    "csrf",
+    "business_logic",
+)
+_CONTROL_MARKERS = (
+    "control",
+    "baseline",
+    "negative",
+    "without auth",
+    "with auth",
+    "unauthenticated",
+    "authenticated",
+    "observed_delta",
+    "before:",
+    "after:",
+)
+_HTTP_STATUS_LINE_RE = re.compile(r"(?m)^\s*HTTP/\d(?:\.\d)?\s+\d{3}\b", re.IGNORECASE)
+_STATUS_ASSIGNMENT_RE = re.compile(
+    r"\b(?:status|status_code|response_status|code)\b\s*[=:]\s*[\"']?\d{3}\b",
+    re.IGNORECASE,
+)
 
 
 def _canonical_finding_type(value: str) -> str:
@@ -123,11 +179,11 @@ def _coalesce_report_fields(kwargs: dict[str, Any]) -> dict[str, str]:
         or kwargs.get("evidence")
         or ""
     ).strip()
-    poc_script_code = str(
+    poc_script_code = _normalize_poc_transcript(
         kwargs.get("poc_script_code")
         or kwargs.get("evidence")
         or ""
-    ).strip()
+    )
     impact = str(
         kwargs.get("impact")
         or description
@@ -151,6 +207,18 @@ def _coalesce_report_fields(kwargs: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _normalize_poc_transcript(value: Any) -> str:
+    text = str(value or "").strip()
+    if "\\n" not in text and "\\r" not in text and "\\t" not in text:
+        return text
+    return (
+        text.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace("\\t", "\t")
+    )
+
+
 def _normalize_extra_evidence(value: Any) -> list[dict[str, str]]:
     """Coerce arbitrary extra evidence blobs into a safe structured list."""
     if not isinstance(value, list):
@@ -171,6 +239,43 @@ def _normalize_extra_evidence(value: Any) -> list[dict[str, str]]:
             "content_type": str(item.get("content_type", "text/plain")).strip()[:120] or "text/plain",
         })
     return normalized
+
+
+def _evaluate_high_severity_poc(
+    *,
+    finding_type: str,
+    technical_analysis: str,
+    poc_description: str,
+    poc_script_code: str,
+) -> dict[str, Any]:
+    combined = "\n".join(
+        part
+        for part in (technical_analysis, poc_description, poc_script_code)
+        if str(part or "").strip()
+    )
+    lower = combined.lower()
+    poc_lower = str(poc_script_code or "").lower()
+    has_attempt = any(marker.lower() in poc_lower for marker in _POC_ATTEMPT_MARKERS)
+    has_observed_status = _HTTP_STATUS_LINE_RE.search(str(poc_script_code or "")) is not None
+    has_observed_status = has_observed_status or _STATUS_ASSIGNMENT_RE.search(str(poc_script_code or "")) is not None
+    has_result = has_observed_status or any(marker.lower() in poc_lower for marker in _POC_RESULT_MARKERS)
+    needs_control = any(token in str(finding_type or "").lower() for token in _CONTROL_REQUIRED_TYPES)
+    has_control = any(marker in lower for marker in _CONTROL_MARKERS)
+    missing: list[str] = []
+    if not has_attempt:
+        missing.append("exploit_attempt")
+    if not has_result:
+        missing.append("observed_result")
+    if needs_control and not has_control:
+        missing.append("control_or_baseline")
+    return {
+        "ok": not missing,
+        "missing": missing,
+        "has_attempt": has_attempt,
+        "has_result": has_result,
+        "needs_control": needs_control,
+        "has_control": has_control,
+    }
 
 
 class ReportFindingTool:
@@ -264,6 +369,23 @@ class ReportFindingTool:
                     "payload/transcript in poc_script_code."
                 ),
                 error="missing_poc_script",
+            )
+        proof = _evaluate_high_severity_poc(
+            finding_type=str(kwargs["finding_type"]),
+            technical_analysis=normalized["technical_analysis"],
+            poc_description=normalized["poc_description"],
+            poc_script_code=normalized["poc_script_code"],
+        )
+        if severity in ("high", "critical") and not proof["ok"]:
+            missing = ", ".join(proof["missing"])
+            return ToolResult(
+                ok=False,
+                summary=(
+                    "report_finding: HIGH/CRITICAL findings require a replayable PoC "
+                    f"with exploit attempt, observed result, and required controls. Missing: {missing}."
+                ),
+                error="weak_poc",
+                data={"proof": proof},
             )
 
         # Phase B: simple dedup — if a finding with the same (finding_type,
@@ -411,6 +533,7 @@ class ReportFindingTool:
             "method": normalized["method"],
             "cwe": str(kwargs.get("cwe", "")),
             "extra_evidence": normalized_extra_evidence,
+            "proof": proof if severity in ("high", "critical") else {},
         }
         _findings.append(finding)
         logger.info("[Finding] %s [%s] %s — %s", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80])
@@ -430,7 +553,7 @@ class ReportFindingTool:
 
         return ToolResult(
             ok=True,
-            data={"id": finding_id, "total_findings": len(_findings)},
+            data={"id": finding_id, "total_findings": len(_findings), "proof": finding["proof"]},
             summary=f"finding recorded: {finding_id} [{severity}] {str(kwargs['title'])[:60]}",
         )
 
