@@ -9,6 +9,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
+from vxis.config.schema import normalize_scan_profile_name
+
 SCHEDULE_PATH = Path.home() / ".vxis" / "schedules.json"
 
 
@@ -19,11 +21,14 @@ class ScanSchedule:
     id: str
     target: str
     cron_expr: str
-    profile: str = "standard"
+    profile: str = "crown"
     last_run: Optional[str] = None  # ISO8601
     next_run: Optional[str] = None  # ISO8601
     enabled: bool = True
     created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+
+    def __post_init__(self) -> None:
+        self.profile = normalize_scan_profile_name(self.profile)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -119,9 +124,7 @@ class ScheduleStore:
             return
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-            self._schedules = {
-                sid: ScanSchedule.from_dict(data) for sid, data in raw.items()
-            }
+            self._schedules = {sid: ScanSchedule.from_dict(data) for sid, data in raw.items()}
         except (json.JSONDecodeError, OSError, TypeError):
             self._schedules = {}
 
@@ -133,7 +136,7 @@ class ScheduleStore:
         self,
         target: str,
         cron_expr: str,
-        profile: str = "standard",
+        profile: str = "crown",
     ) -> ScanSchedule:
         sid = uuid.uuid4().hex[:8]
         next_run = calculate_next_run(cron_expr).isoformat()
@@ -141,7 +144,7 @@ class ScheduleStore:
             id=sid,
             target=target,
             cron_expr=cron_expr,
-            profile=profile,
+            profile=normalize_scan_profile_name(profile),
             next_run=next_run,
         )
         self._schedules[sid] = sched

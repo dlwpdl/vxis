@@ -12,6 +12,7 @@ from vxis.agent.scan_loop_state import (
     ScanLoopState,
     _sanitize_evidence_text,
 )
+from vxis.agent.scan_loop_v3 import v3_prepare_decision
 from vxis.agent.tool_registry import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -1093,7 +1094,7 @@ class ScanLoopActionMixin:
                 "next_step": branch.next_step,
                 "blocker": branch.blocker,
             }
-            for branch in self._blocking_finish_branches()[:4]
+            for branch in self._dag_finish_blocking_branches()[:4]
         ]
         snapshot["campaign_groups"] = self._campaign_groups_for_ui(limit=4)
         snapshot["focus_campaign"] = self._focus_campaign_for_ui()
@@ -2019,7 +2020,12 @@ class ScanLoopActionMixin:
         # gives it a complete picture in <40 lines.
         dashboard = self._build_scan_dashboard()
         messages = state.messages + [{"role": "user", "content": dashboard, "iter": state.iteration}]
-        return await self.brain.think_in_loop(messages, self._brain_tool_catalog())
+        decision_class = v3_prepare_decision(self)
+        return await self.brain.think_in_loop(
+            messages,
+            self._brain_tool_catalog(),
+            decision_class=decision_class if getattr(state, "v3_enabled", False) else None,
+        )
 
     def _brain_tool_catalog(self) -> list[dict[str, Any]]:
         catalog = self.registry.describe_all()

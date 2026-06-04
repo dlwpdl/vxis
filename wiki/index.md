@@ -95,6 +95,9 @@
 - [ADR-008 — Finding Precision Bayesian Smoothing](decisions/008_finding_precision_smoothing.md) — 스코어 비교 시 FP 차원 해석 / 판정 수 부족 / baseline vs after 노이즈 / 측정 인프라 수정 정당화
 - [ADR-009 — Severity Oracle threshold externalization (draft)](decisions/009_severity_oracle_thresholds.md) — _adjust_severity() 룰 수정 / masking 비율·크기 임계값 조정 / 오라클 파일 freeze 완화 / DSL 유혹 대응
 - [ADR-010 — Universal Pentest Plan 권위 교체 (2026-04-23 refresh)](decisions/010_universal_pentest_plan_refresh.md) — 현재 authoritative plan 어디 / 원본 plan 이 historical 인지 / phase-A~I 매핑 / macOS-first 이유
+- [ADR-011 — Cognitive Engine v3 Consolidation](decisions/011_v3_consolidation.md) — v3 가 왜 integrate 인지 / 중복 시스템(메모리·hypothesis·model table·prioritizer) 통합 / dual-write 롤백 / 삭제 연기
+- [ADR-012 — Verifier Spine](decisions/012_verifier_spine.md) — zero-FP 코드 강제 / verifier 게이트 위치 / 전 severity·PoC 필수 / 신규 아니라 기존 강화
+- [ADR-013 — Profile-driven ScanPolicy](decisions/013_profile_scan_policy.md) — 같은 엔진 prod 안전 + lab 무제한 / 프로필별 권한 / H 익스플로잇 게이트 / 테넌트 격리·fail-closed
 
 ## Sources
 

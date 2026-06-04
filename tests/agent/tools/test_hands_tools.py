@@ -47,12 +47,51 @@ async def test_http_request_tool_successful_get():
     with patch("vxis.agent.tools.hands_tools._get_session_manager", return_value=fake_manager):
         result = await tool.run(base_url="http://x", method="GET", path="/")
 
+    fake_manager.get_session.assert_awaited_once_with(
+        "http://x",
+        identity=None,
+        proxy=None,
+    )
     assert result.ok is True
     assert result.data["status"] == 200
+    assert result.data["identity"] == "default"
     assert "hello" in result.data["body_preview"]
     assert result.data["body_length"] == 11
     assert result.data["links"] == ["/about", "/login"]
     assert "200" in result.summary
+
+
+@pytest.mark.asyncio
+async def test_http_request_tool_passes_identity_to_session_manager():
+    fake_response = MagicMock()
+    fake_response.status = 200
+    fake_response.body = "alice profile"
+    fake_response.body_length = 13
+    fake_response.headers = {}
+    fake_response.links = []
+    fake_response.forms = []
+
+    fake_session = MagicMock()
+    fake_session.request = AsyncMock(return_value=fake_response)
+
+    fake_manager = MagicMock()
+    fake_manager.get_session = AsyncMock(return_value=fake_session)
+
+    with patch("vxis.agent.tools.hands_tools._get_session_manager", return_value=fake_manager):
+        result = await HttpRequestTool().run(
+            base_url="http://x",
+            method="GET",
+            path="/me",
+            identity="alice",
+        )
+
+    fake_manager.get_session.assert_awaited_once_with(
+        "http://x",
+        identity="alice",
+        proxy=None,
+    )
+    assert result.ok is True
+    assert result.data["identity"] == "alice"
 
 
 @pytest.mark.asyncio

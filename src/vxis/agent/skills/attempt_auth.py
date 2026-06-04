@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import logging
+import re
 from typing import Any
 from ._payload_loader import load_skill_dataset as _load_ds
 
@@ -50,6 +51,107 @@ def _extract_token_and_user_info(data: dict[str, Any]) -> tuple[str, dict[str, s
     return token, user_info
 
 
+def _identity_name(raw: dict[str, Any], index: int) -> str:
+    for key in ("name", "identity", "email", "role", "id"):
+        value = str(raw.get(key) or "").strip()
+        if value:
+            clean = re.sub(r"[^A-Za-z0-9_.:@-]+", "-", value).strip("-")
+            if clean:
+                return clean[:80]
+    return f"identity-{index + 1}"
+
+
+def _credential_specs(raw: Any) -> list[dict[str, str]]:
+    """Normalize operator-supplied credential lists without changing defaults."""
+    specs: list[dict[str, str]] = []
+    if isinstance(raw, dict):
+        iterable = []
+        for name, value in raw.items():
+            item = dict(value or {}) if isinstance(value, dict) else {}
+            item.setdefault("name", str(name))
+            iterable.append(item)
+    elif isinstance(raw, (list, tuple)):
+        iterable = list(raw)
+    else:
+        iterable = []
+
+    for index, item in enumerate(iterable):
+        if isinstance(item, dict):
+            email = str(item.get("email") or item.get("username") or item.get("user") or "").strip()
+            password = str(item.get("password") or item.get("pass") or item.get("pwd") or "").strip()
+            if not email or not password:
+                continue
+            specs.append(
+                {
+                    "email": email,
+                    "password": password,
+                    "name": str(item.get("name") or item.get("identity") or ""),
+                    "role": str(item.get("role") or ""),
+                    "source": str(item.get("source") or "operator_credentials"),
+                }
+            )
+        elif isinstance(item, (list, tuple)) and len(item) >= 2:
+            specs.append(
+                {
+                    "email": str(item[0]),
+                    "password": str(item[1]),
+                    "name": "",
+                    "role": "",
+                    "source": f"operator_credentials[{index}]",
+                }
+            )
+    return specs
+
+
+def _principal_from_success(success: dict[str, Any], index: int) -> dict[str, Any]:
+    user_info = dict(success.get("user_info") or {})
+    creds = dict(success.get("credentials_used") or {})
+    raw = {
+        "name": success.get("identity") or user_info.get("email") or creds.get("email"),
+        "email": user_info.get("email") or creds.get("email"),
+        "role": user_info.get("role") or success.get("role") or "",
+        "id": user_info.get("id") or "",
+    }
+    principal: dict[str, Any] = {
+        "name": _identity_name(raw, index),
+        "token": str(success.get("token") or ""),
+        "role": str(raw.get("role") or ""),
+        "email": str(raw.get("email") or ""),
+        "source": str(success.get("method") or ""),
+    }
+    subject_id = str(raw.get("id") or "").strip()
+    if subject_id:
+        principal["id"] = subject_id
+        principal["owned_ids"] = [subject_id]
+    return principal
+
+
+def _dedupe_identities(successes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    identities: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for success in successes:
+        principal = _principal_from_success(success, len(identities))
+        key = (principal.get("name", ""), principal.get("token", ""))
+        if not key[0] and not key[1]:
+            continue
+        if key in seen:
+            continue
+        seen.add(key)
+        identities.append(principal)
+    return identities
+
+
+def _owner_map_from_identities(identities: list[dict[str, Any]]) -> dict[str, str]:
+    owners: dict[str, str] = {}
+    for identity in identities:
+        name = str(identity.get("name") or "")
+        if not name:
+            continue
+        for obj_id in identity.get("owned_ids") or []:
+            owners.setdefault(str(obj_id), name)
+    return owners
+
+
 def _format_login_transcript(
     endpoint: str,
     creds: dict[str, str],
@@ -96,6 +198,9 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         "user_info": {},
         "login_endpoint": "",
         "credentials_used": {},
+        "identities": [],
+        "primary_identity": "",
+        "owner_map": {},
         "all_attempts": all_attempts,
         "control_checks": {},
         "poc_http_exchange": "",
@@ -103,6 +208,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
 
     _mgr = SessionManager()
     _session = await _mgr.get_session(target)
+    successful_logins: list[dict[str, Any]] = []
 
     # Phase 1: Find login endpoint
     active_login = ""
@@ -135,9 +241,16 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         pwd: str,
         *,
         phase: str,
+        identity_hint: str = "",
     ) -> dict[str, Any] | None:
         try:
-            r = await _session.request(
+            identity = identity_hint or _identity_name({"email": email}, len(all_attempts))
+            session = (
+                _session
+                if phase == "negative_control"
+                else await _mgr.get_session(target, identity=f"{phase}:{identity}")
+            )
+            r = await session.request(
                 "POST", active_login, json_data={"email": email, "password": pwd}
             )
         except Exception:
@@ -163,6 +276,84 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         all_attempts.append(attempt)
         return {"response": r, "attempt": attempt, "token": token, "user_info": user_info}
 
+    def _success_result(
+        *,
+        method: str,
+        email: str,
+        password: str = "",
+        token: str,
+        user_info: dict[str, Any],
+        positive_attempt: dict[str, Any],
+        label: str,
+        extra_credentials: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        control_checks = {
+            "negative_control": baseline_control["attempt"] if baseline_control else {},
+            "positive_control": positive_attempt,
+        }
+        credentials_used = dict(extra_credentials or {"email": email, "password": password})
+        poc_http_exchange = "\n\n".join(
+            filter(
+                None,
+                [
+                    _format_login_transcript(
+                        active_login,
+                        {
+                            "email": "vxis-negative-control@example.invalid",
+                            "password": "definitely-wrong-password",
+                        },
+                        baseline_control["attempt"]["status"],
+                        baseline_control["attempt"].get("response_preview", ""),
+                        label="negative_control",
+                    )
+                    if baseline_control
+                    else "",
+                    _format_login_transcript(
+                        active_login,
+                        {"email": email, "password": password},
+                        positive_attempt["status"],
+                        positive_attempt.get("response_preview", ""),
+                        label=label,
+                    ),
+                ],
+            )
+        )
+        return {
+            "authenticated": True,
+            "method": method,
+            "token": token,
+            "user_info": user_info,
+            "login_endpoint": active_login,
+            "credentials_used": credentials_used,
+            "control_checks": control_checks,
+            "poc_http_exchange": poc_http_exchange,
+        }
+
+    def _finalize_successes() -> dict[str, Any]:
+        if not successful_logins:
+            return {}
+        primary = successful_logins[0]
+        identities = _dedupe_identities(successful_logins)
+        return {
+            **result,
+            **primary,
+            "all_attempts": all_attempts,
+            "identities": identities,
+            "primary_identity": identities[0]["name"] if identities else "",
+            "owner_map": _owner_map_from_identities(identities),
+            "successful_attempts": [
+                {
+                    "method": item.get("method", ""),
+                    "identity": _principal_from_success(item, idx).get("name", ""),
+                    "login_endpoint": item.get("login_endpoint", ""),
+                    "status": (item.get("control_checks", {}) or {})
+                    .get("positive_control", {})
+                    .get("status"),
+                }
+                for idx, item in enumerate(successful_logins)
+            ],
+        }
+
     baseline_control = await _record_login_attempt(
         "vxis-negative-control@example.invalid",
         "definitely-wrong-password",
@@ -176,98 +367,63 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             continue
         if outcome["response"].status == 200 and outcome["token"]:
             logger.info("SQLi auth bypass SUCCESS: %s", email)
-            positive_attempt = outcome["attempt"]
-            control_checks = {
-                "negative_control": baseline_control["attempt"] if baseline_control else {},
-                "positive_control": positive_attempt,
-            }
-            poc_http_exchange = "\n\n".join(
-                filter(
-                    None,
-                    [
-                        _format_login_transcript(
-                            active_login,
-                            {
-                                "email": "vxis-negative-control@example.invalid",
-                                "password": "definitely-wrong-password",
-                            },
-                            baseline_control["attempt"]["status"],
-                            baseline_control["attempt"].get("response_preview", ""),
-                            label="negative_control",
-                        )
-                        if baseline_control
-                        else "",
-                        _format_login_transcript(
-                            active_login,
-                            {"email": email, "password": pwd},
-                            positive_attempt["status"],
-                            positive_attempt.get("response_preview", ""),
-                            label="positive_bypass",
-                        ),
-                    ],
+            successful_logins.append(
+                _success_result(
+                    method="sqli_bypass",
+                    email=email,
+                    password=pwd,
+                    token=outcome["token"],
+                    user_info=outcome["user_info"],
+                    positive_attempt=outcome["attempt"],
+                    label="positive_bypass",
                 )
             )
-            return {
-                **result,
-                "authenticated": True,
-                "method": "sqli_bypass",
-                "token": outcome["token"],
-                "user_info": outcome["user_info"],
-                "login_endpoint": active_login,
-                "credentials_used": {"email": email, "password": pwd},
-                "control_checks": control_checks,
-                "poc_http_exchange": poc_http_exchange,
-            }
 
     # Phase 3: Try default credentials
-    for email, pwd in DEFAULT_CREDS:
-        outcome = await _record_login_attempt(email, pwd, phase="default_creds")
+    operator_creds = _credential_specs(
+        kwargs.get("credentials")
+        or kwargs.get("credential_set")
+        or kwargs.get("identity_credentials")
+        or kwargs.get("users")
+    )
+    default_specs = [
+        {"email": email, "password": pwd, "name": "", "role": "", "source": "default_creds"}
+        for email, pwd in DEFAULT_CREDS
+    ]
+    for spec in [*operator_creds, *default_specs]:
+        email = spec["email"]
+        pwd = spec["password"]
+        phase = spec.get("source") or "default_creds"
+        outcome = await _record_login_attempt(
+            email,
+            pwd,
+            phase=phase,
+            identity_hint=spec.get("name", ""),
+        )
         if not outcome:
             continue
         if outcome["response"].status == 200 and outcome["token"]:
             logger.info("Default creds SUCCESS: %s:%s", email, pwd)
-            positive_attempt = outcome["attempt"]
-            control_checks = {
-                "negative_control": baseline_control["attempt"] if baseline_control else {},
-                "positive_control": positive_attempt,
-            }
-            poc_http_exchange = "\n\n".join(
-                filter(
-                    None,
-                    [
-                        _format_login_transcript(
-                            active_login,
-                            {
-                                "email": "vxis-negative-control@example.invalid",
-                                "password": "definitely-wrong-password",
-                            },
-                            baseline_control["attempt"]["status"],
-                            baseline_control["attempt"].get("response_preview", ""),
-                            label="negative_control",
-                        )
-                        if baseline_control
-                        else "",
-                        _format_login_transcript(
-                            active_login,
-                            {"email": email, "password": pwd},
-                            positive_attempt["status"],
-                            positive_attempt.get("response_preview", ""),
-                            label="positive_default_creds",
-                        ),
-                    ],
-                )
+            success = _success_result(
+                method="default_creds" if not operator_creds else phase,
+                email=email,
+                password=pwd,
+                token=outcome["token"],
+                user_info={
+                    **outcome["user_info"],
+                    "role": outcome["user_info"].get("role") or spec.get("role", ""),
+                },
+                positive_attempt=outcome["attempt"],
+                label="positive_default_creds",
             )
-            return {
-                **result,
-                "authenticated": True,
-                "method": "default_creds",
-                "token": outcome["token"],
-                "login_endpoint": active_login,
-                "credentials_used": {"email": email, "password": pwd},
-                "user_info": outcome["user_info"],
-                "control_checks": control_checks,
-                "poc_http_exchange": poc_http_exchange,
-            }
+            if spec.get("name"):
+                success["identity"] = spec["name"]
+            if spec.get("role"):
+                success["role"] = spec["role"]
+            successful_logins.append(success)
+
+    if successful_logins:
+        return _finalize_successes()
 
     # Phase 4: Try password reset with common security answers
     for reset_path in RESET_PATHS:
@@ -344,9 +500,22 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                     "authenticated": True,
                                     "method": "password_reset",
                                     "token": token,
+                                    "identities": _dedupe_identities(
+                                        [
+                                            {
+                                                "method": "password_reset",
+                                                "token": token,
+                                                "user_info": _extract_token_and_user_info(
+                                                    data if isinstance(data, dict) else {}
+                                                )[1],
+                                                "credentials_used": {"email": email},
+                                            }
+                                        ]
+                                    ),
                                     "login_endpoint": active_login,
                                     "credentials_used": {"email": email, "security_answer": ans},
                                     "reset_endpoint": reset_path,
+                                    "all_attempts": all_attempts,
                                     "control_checks": control_checks,
                                     "poc_http_exchange": "\n\n".join(
                                         filter(

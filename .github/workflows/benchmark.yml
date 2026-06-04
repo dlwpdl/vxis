@@ -4,27 +4,73 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'src/vxis/**'
+      - ".github/workflows/benchmark.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "src/vxis/**"
+      - "tests/**"
+      - "infra/benchmarks/**"
+      - "tools/benchmark/**"
+  schedule:
+    - cron: "17 18 * * *"
+  workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
+  issues: write
   pull-requests: write
   contents: read
 
 jobs:
-  benchmark:
-    name: Capability Score Regression Check
+  deterministic:
+    name: Deterministic Benchmark Contract
     runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --locked --dev
+
+      - name: Run deterministic benchmark tier
+        env:
+          PYTHONPATH: src
+        run: |
+          uv run pytest -m "not live" \
+            tests/scoring \
+            tests/unit/test_scan_profiles.py \
+            tests/unit/test_config.py \
+            tests/integration/test_smoke.py::test_config_loads
+
+  live-benchmark:
+    name: Live Juice Shop Benchmark
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
 
     strategy:
       matrix:
-        target_type: [web, game, mobile]
-      fail-fast: false  # 모든 타입 결과를 수집한 뒤 판단
+        target_type: [web]
+      fail-fast: false
+
+    services:
+      juice-shop:
+        image: bkimminich/juice-shop
+        ports:
+          - 3000:3000
 
     steps:
-      - name: Checkout PR branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -32,107 +78,49 @@ jobs:
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
+        run: uv sync --locked --dev --extra browser
+
+      - name: Install browser runtime
+        run: uv run playwright install --with-deps chromium
+
+      - name: Wait for Juice Shop
         run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          for i in {1..60}; do
+            if curl -fsS http://localhost:3000 >/dev/null; then
+              echo "Juice Shop is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Juice Shop did not become ready" >&2
+          exit 1
 
-      - name: Load baseline scores
-        id: load_baseline
-        run: |
-          python - <<'EOF'
-          import json, sys
-          from pathlib import Path
-
-          baseline_path = Path("tools/benchmark/baseline.json")
-          if not baseline_path.exists():
-              print("No baseline found — first run, will create baseline after benchmark.")
-              sys.exit(0)
-
-          data = json.loads(baseline_path.read_text())
-          target_type = "${{ matrix.target_type }}"
-          if data.get(target_type) is None:
-              print(f"No baseline for {target_type} — will create on first run.")
-          else:
-              score = data[target_type]
-              print(f"Loaded baseline for {target_type}: {score['total']:.1f} [{score['grade']}]")
-          EOF
-
-      - name: Run benchmark scan
+      - name: Run live benchmark scan
         id: run_benchmark
         env:
           PYTHONPATH: src
           VXIS_BRAIN_MODE: api
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
-          VXIS_BENCHMARK_TARGET_TYPE: ${{ matrix.target_type }}
-          VXIS_BENCHMARK_TARGET_WEB: ${{ vars.BENCHMARK_TARGET_WEB || '' }}
-          VXIS_BENCHMARK_TARGET_GAME: ${{ vars.BENCHMARK_TARGET_GAME || '' }}
-          VXIS_BENCHMARK_TARGET_MOBILE: ${{ vars.BENCHMARK_TARGET_MOBILE || '' }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          VXIS_SCAN_PROFILE: crown
+          VXIS_BENCHMARK_TARGET_JUICE_SHOP: ${{ vars.BENCHMARK_TARGET_JUICE_SHOP || 'http://localhost:3000' }}
         run: |
-          python - <<'EOF'
-          import asyncio
-          import json
-          import os
-          import sys
-          from pathlib import Path
-
-          from vxis.scoring.benchmark import BenchmarkRunner
-
-          target_type = os.environ["VXIS_BENCHMARK_TARGET_TYPE"]
-          target_map = {
-              "web": os.environ.get("VXIS_BENCHMARK_TARGET_WEB", ""),
-              "game": os.environ.get("VXIS_BENCHMARK_TARGET_GAME", ""),
-              "mobile": os.environ.get("VXIS_BENCHMARK_TARGET_MOBILE", ""),
-          }
-          target_url = target_map.get(target_type, "")
-
-          if not target_url:
-              print(f"No reference target configured for {target_type} — skipping benchmark.")
-              Path(f"benchmark_result_{target_type}.json").write_text(
-                  json.dumps({"skipped": True, "reason": "no_target_configured"})
-              )
-              sys.exit(0)
-
-          runner = BenchmarkRunner(baseline_path="tools/benchmark/baseline.json")
-
-          async def main():
-              score = await runner.run_benchmark(
-                  target_type=target_type,
-                  target_url=target_url,
-              )
-              comparison = runner.compare_with_baseline(score)
-
-              # 결과 파일 저장 (GitHub Actions artifact 및 코멘트용)
-              result = {
-                  "skipped": False,
-                  "target_type": target_type,
-                  "score": score.to_dict(),
-                  "comparison": comparison.to_dict(),
-                  "github_comment": runner.generate_report(comparison, format="github"),
-                  "regression": comparison.regression,
-              }
-              Path(f"benchmark_result_{target_type}.json").write_text(
-                  json.dumps(result, ensure_ascii=False, indent=2)
-              )
-
-              print(score.summary_text())
-
-              if comparison.regression:
-                  print("\nREGRESSION DETECTED — see details above")
-                  sys.exit(1)
-              else:
-                  print("\nBenchmark PASSED")
-                  # 점수 개선 시 베이스라인 업데이트 (PR merge 후 실행 권장)
-                  if comparison.total_delta > 0:
-                      print(f"Score improved by {comparison.total_delta:+.1f} — updating baseline")
-                      runner.save_baseline(score)
-
-          asyncio.run(main())
-          EOF
+          uv run python -m vxis.scoring.benchmark_cli \
+            --manifest infra/benchmarks/league-v2-smoke.json \
+            --baseline tools/benchmark/baseline.json \
+            --output benchmark_result_${{ matrix.target_type }}.json \
+            --target-type ${{ matrix.target_type }} \
+            --profile crown
 
       - name: Upload benchmark results
         if: always()
@@ -142,63 +130,11 @@ jobs:
           path: benchmark_result_${{ matrix.target_type }}.json
           retention-days: 30
 
-      - name: Post GitHub PR comment
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const targetType = '${{ matrix.target_type }}';
-            const resultFile = `benchmark_result_${targetType}.json`;
-
-            if (!fs.existsSync(resultFile)) {
-              console.log(`Result file not found: ${resultFile}`);
-              return;
-            }
-
-            const result = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
-
-            if (result.skipped) {
-              console.log(`Benchmark skipped for ${targetType}: ${result.reason}`);
-              return;
-            }
-
-            const comment = result.github_comment;
-            const marker = `<!-- VXIS-BENCHMARK-${targetType.toUpperCase()} -->`;
-            const body = `${marker}\n${comment}`;
-
-            // 기존 코멘트 찾아서 업데이트, 없으면 새로 생성
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const existingComment = comments.find(c => c.body.includes(marker));
-
-            if (existingComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existingComment.id,
-                body: body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body,
-              });
-            }
-
-  # 모든 target_type 결과를 취합하여 전체 판정
-  gate:
-    name: Regression Gate
+  live-gate:
+    name: Live Regression Gate
     runs-on: ubuntu-latest
-    needs: benchmark
-    if: always()
+    needs: live-benchmark
+    if: always() && github.event_name != 'pull_request'
 
     steps:
       - name: Download all benchmark results
@@ -207,30 +143,22 @@ jobs:
           pattern: benchmark-results-*
           merge-multiple: true
 
-      - name: Evaluate regression gate
+      - name: Evaluate live regression gate
         run: |
           python - <<'EOF'
           import json
           import sys
           from pathlib import Path
 
-          results = []
-          for path in Path(".").glob("benchmark_result_*.json"):
-              data = json.loads(path.read_text())
-              results.append(data)
-
+          results = [json.loads(path.read_text()) for path in Path(".").glob("benchmark_result_*.json")]
           if not results:
-              print("No benchmark results found — gate passed (no data)")
-              sys.exit(0)
-
-          regressions = [r for r in results if not r.get("skipped") and r.get("regression")]
-
-          if regressions:
-              print(f"REGRESSION GATE FAILED — {len(regressions)} target type(s) regressed:")
-              for r in regressions:
-                  score = r.get("score", {})
-                  print(f"  - {r['target_type']}: {score.get('total', '?'):.1f} [{score.get('grade', '?')}]")
+              print("No live benchmark results found")
               sys.exit(1)
-          else:
-              print("Regression gate PASSED — all benchmarks within acceptable range")
+
+          regressions = [item for item in results if not item.get("skipped") and item.get("regression")]
+          if regressions:
+              print(f"REGRESSION GATE FAILED - {len(regressions)} target type(s) regressed")
+              sys.exit(1)
+
+          print("Live regression gate PASSED")
           EOF

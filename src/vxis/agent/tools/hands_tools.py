@@ -71,6 +71,10 @@ class HttpRequestTool:
             "params": {"type": "object", "additionalProperties": {"type": "string"}},
             "data": {"type": "object"},
             "json": {"type": "object"},
+            "identity": {
+                "type": "string",
+                "description": "Optional principal/session label for multi-identity authz testing.",
+            },
         },
         "required": ["method"],
     }
@@ -106,6 +110,7 @@ class HttpRequestTool:
         params = kwargs.get("params") or None
         data = kwargs.get("data") or None
         json_data = kwargs.get("json") or None
+        identity = str(kwargs.get("identity") or "").strip() or None
 
         if not base_url:
             return ToolResult(
@@ -116,7 +121,11 @@ class HttpRequestTool:
 
         try:
             mgr = _get_session_manager()
-            session = await mgr.get_session(base_url, proxy=get_active_proxy_url())
+            session = await mgr.get_session(
+                base_url,
+                identity=identity,
+                proxy=get_active_proxy_url(),
+            )
             resp = await session.request(
                 method=method,
                 path=path,
@@ -150,6 +159,7 @@ class HttpRequestTool:
                 "headers": dict(getattr(resp, "headers", {}) or {}),
                 "links": list(getattr(resp, "links", []) or [])[:20],
                 "forms_count": len(getattr(resp, "forms", []) or []),
+                "identity": identity or "default",
                 "ghost": ghost_transport_metadata("http_request"),
             },
             summary=f"{method} {path} → {getattr(resp, 'status', '?')} ({getattr(resp, 'body_length', 0)} bytes)",

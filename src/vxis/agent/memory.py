@@ -445,7 +445,30 @@ def format_memory_context(memories: list[ScanMemory]) -> str:
     return "\n".join(lines)
 
 
+def dual_write_scan(memory: AgentMemory, scan: ScanMemory) -> None:
+    """Write legacy AgentMemory and optionally shadow the same summary into PTI.
+
+    VXIS_V3_MEMORY defaults off, so the legacy path remains a real rollback.
+    ScanMemory stores finding summaries only; raw PoC bodies and secrets are
+    not part of this dual-write contract.
+    """
+    memory.remember_scan(scan)
+    if os.environ.get("VXIS_V3_MEMORY", "0") in {"", "0", "false", "False", "no", "off"}:
+        return
+    try:
+        from vxis.pti.memory_bridge import persist_scan_memory_to_pti
+
+        persist_scan_memory_to_pti(scan, scan_id=_scan_memory_id(scan))
+    except Exception as exc:  # noqa: BLE001 - rollback path must never fail on PTI
+        logger.warning("PTI memory shadow write failed; legacy memory kept: %s", exc)
+
+
 # ── Helpers ──────────────────────────────────────────────────────
+
+def _scan_memory_id(scan: ScanMemory) -> str:
+    raw = f"legacy-{scan.scan_date}-{scan.target}"
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", raw).strip(".-")[:120] or "legacy-import"
+
 
 def _extract_root_domain(target: str) -> str:
     """타겟에서 루트 도메인을 추출한다.

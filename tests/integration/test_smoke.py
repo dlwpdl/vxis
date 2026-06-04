@@ -89,10 +89,7 @@ def test_dag_builds_from_plugins() -> None:
     # External binary tools (apktool, frida, nm, codesign, strings) are not
     # DAG nodes — filter those known-external-tool optional-dep warnings.
     _EXTERNAL_TOOLS = {"apktool", "frida", "nm", "codesign", "strings"}
-    real_errors = [
-        e for e in errors
-        if not any(tool in e for tool in _EXTERNAL_TOOLS)
-    ]
+    real_errors = [e for e in errors if not any(tool in e for tool in _EXTERNAL_TOOLS)]
     assert real_errors == [], f"DAG validation errors: {real_errors}"
 
 
@@ -106,11 +103,19 @@ def test_config_loads() -> None:
 
     config = VXISConfig()
 
+    assert config.active_profile == "crown"
+    assert "crown" in config.profiles
     assert "standard" in config.profiles
-    # Verify the remaining built-in profiles are present.
+    # Verify the remaining built-in core profiles are present.
     assert "passive" in config.profiles
     assert "stealth" in config.profiles
     assert "aggressive" in config.profiles
+    # Verify business profile scaffolds are present.
+    assert "continuous-devsec" in config.profiles
+    assert "vc-portfolio-monitor" in config.profiles
+    assert "pre-investment-dd" in config.profiles
+    assert "remediation-verification" in config.profiles
+    assert "compliance-mapping" in config.profiles
 
 
 # ---------------------------------------------------------------------------

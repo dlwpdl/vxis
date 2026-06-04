@@ -899,13 +899,29 @@ class SessionManager:
     def __init__(self) -> None:
         self._sessions: dict[str, TargetSession] = {}
 
+    @staticmethod
+    def _session_key(base_url: str, identity: str | None = None) -> str:
+        parsed = urlparse(base_url)
+        host_key = parsed.netloc or base_url.rstrip("/")
+        identity_key = str(identity or "").strip()
+        if not identity_key:
+            return host_key
+        return f"{host_key}#identity:{identity_key}"
+
     async def get_session(
         self,
         base_url: str,
+        *,
+        identity: str | None = None,
         **kwargs: Any,
     ) -> TargetSession:
-        """타겟 URL에 대한 세션 반환 (없으면 생성)."""
-        key = urlparse(base_url).netloc
+        """타겟 URL에 대한 세션 반환 (없으면 생성).
+
+        `identity` separates cookie/CSRF/auth state for the same host. This is
+        required for BOLA/IDOR and role-matrix tests where two principals must
+        be alive at the same time.
+        """
+        key = self._session_key(base_url, identity)
         proxy = kwargs.get("proxy")
         session = self._sessions.get(key)
         if session is not None and getattr(session, "proxy_url", None) != proxy:
@@ -921,11 +937,16 @@ class SessionManager:
                 kwargs["transport"] = GhostTransport(ghost_layer)
             session = TargetSession(base_url, **kwargs)
             self._sessions[key] = session
-            logger.info("New session created: %s (ghost=%s)", base_url, ghost_layer.is_active())
+            logger.info(
+                "New session created: %s identity=%s (ghost=%s)",
+                base_url,
+                identity or "default",
+                ghost_layer.is_active(),
+            )
         return self._sessions[key]
 
-    async def close_session(self, base_url: str) -> None:
-        key = urlparse(base_url).netloc
+    async def close_session(self, base_url: str, *, identity: str | None = None) -> None:
+        key = self._session_key(base_url, identity)
         session = self._sessions.pop(key, None)
         if session:
             await session.close()

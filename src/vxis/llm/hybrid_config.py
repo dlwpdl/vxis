@@ -13,9 +13,10 @@ spreading environment parsing across the runtime.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import json
+from dataclasses import dataclass, field, replace
 from enum import Enum
-from typing import Mapping
+from typing import Any, Mapping
 
 
 class ModelRole(str, Enum):
@@ -47,6 +48,7 @@ class ModelEndpoint:
     model: str
     source: str
     base_url: str = ""
+    extra_body: dict[str, Any] = field(default_factory=dict)
 
     @property
     def is_local(self) -> bool:
@@ -181,6 +183,7 @@ def _resolve_director(
         provider=provider,
         model=model,
         source="default_frontier",
+        extra_body=_role_extra_body(ModelRole.DIRECTOR, provider, model, env),
     )
 
 
@@ -221,7 +224,17 @@ def _resolve_verifier(
         return explicit
 
     if director.is_frontier:
-        return replace(director, role=ModelRole.VERIFIER, source="default_to_director")
+        return replace(
+            director,
+            role=ModelRole.VERIFIER,
+            source="default_to_director",
+            extra_body=_role_extra_body(
+                ModelRole.VERIFIER,
+                director.provider,
+                director.model,
+                env,
+            ),
+        )
 
     available = _first_available_frontier(env, role=ModelRole.VERIFIER)
     if available is not None:
@@ -233,6 +246,7 @@ def _resolve_verifier(
         provider=provider,
         model=model,
         source="default_frontier",
+        extra_body=_role_extra_body(ModelRole.VERIFIER, provider, model, env),
     )
 
 
@@ -244,7 +258,17 @@ def _resolve_summarizer(
     explicit = _endpoint_from_role_env(ModelRole.SUMMARIZER, env)
     if explicit is not None:
         return explicit
-    return replace(worker, role=ModelRole.SUMMARIZER, source="default_to_worker")
+    return replace(
+        worker,
+        role=ModelRole.SUMMARIZER,
+        source="default_to_worker",
+        extra_body=_role_extra_body(
+            ModelRole.SUMMARIZER,
+            worker.provider,
+            worker.model,
+            env,
+        ),
+    )
 
 
 def _endpoint_from_role_env(role: ModelRole, env: Mapping[str, str]) -> ModelEndpoint | None:
@@ -271,6 +295,7 @@ def _endpoint_from_role_env(role: ModelRole, env: Mapping[str, str]) -> ModelEnd
         model=model,
         source="role_env",
         base_url=_role_base_url(role, provider, env),
+        extra_body=_role_extra_body(role, provider, model, env),
     )
 
 
@@ -290,6 +315,7 @@ def _legacy_endpoint(
         model=resolved_model,
         source="legacy_upstream",
         base_url=_role_base_url(role, normalized, env),
+        extra_body=_role_extra_body(role, normalized, resolved_model, env),
     )
 
 
@@ -309,6 +335,7 @@ def _first_available_frontier(
                 provider=provider,
                 model=model,
                 source="available_frontier_key",
+                extra_body=_role_extra_body(role, provider, model, env),
             )
     return None
 
@@ -324,6 +351,7 @@ def _first_available_cloud(env: Mapping[str, str]) -> ModelEndpoint | None:
                 provider=provider,
                 model=model,
                 source="available_cloud_key_degraded_director",
+                extra_body=_role_extra_body(ModelRole.DIRECTOR, provider, model, env),
             )
     return None
 
@@ -336,12 +364,14 @@ def _local_endpoint(
     source: str,
 ) -> ModelEndpoint:
     provider = normalize_provider(provider)
+    model = _default_model_for_provider(provider, env)
     return ModelEndpoint(
         role=role,
         provider=provider,
-        model=_default_model_for_provider(provider, env),
+        model=model,
         source=source,
         base_url=_role_base_url(role, provider, env),
+        extra_body=_role_extra_body(role, provider, model, env),
     )
 
 
@@ -376,6 +406,49 @@ def _role_base_url(role: ModelRole, provider: str, env: Mapping[str, str]) -> st
     return ""
 
 
+def _role_extra_body(
+    role: ModelRole,
+    provider: str,
+    model: str,
+    env: Mapping[str, str],
+) -> dict[str, Any]:
+    """Resolve provider-specific chat body extensions for one role.
+
+    Qwen-compatible endpoints often expose ``enable_thinking`` and
+    ``preserve_thinking`` body fields. VXIS keeps this role-scoped so the
+    director/verifier can retain reasoning while summarization stays cheap.
+    """
+    prefix = f"VXIS_{role.value.upper()}_LLM"
+    override = _env_get(env, f"{prefix}_EXTRA_BODY_JSON")
+    if override:
+        try:
+            parsed = json.loads(override)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{prefix}_EXTRA_BODY_JSON must be valid JSON") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(f"{prefix}_EXTRA_BODY_JSON must decode to an object")
+        return dict(parsed)
+
+    extra: dict[str, Any] = {}
+    model_value = str(model or "").lower()
+    provider_value = normalize_provider(provider)
+    is_qwen = "qwen" in model_value or provider_value == "qwen"
+    if is_qwen:
+        if role == ModelRole.SUMMARIZER:
+            extra["enable_thinking"] = False
+        else:
+            extra["enable_thinking"] = True
+            extra["preserve_thinking"] = True
+
+    enable = _env_bool(env, f"{prefix}_ENABLE_THINKING")
+    if enable is not None:
+        extra["enable_thinking"] = enable
+    preserve = _env_bool(env, f"{prefix}_PRESERVE_THINKING")
+    if preserve is not None:
+        extra["preserve_thinking"] = preserve
+    return extra
+
+
 def _infer_provider_from_model(model: str) -> str:
     value = str(model or "").lower()
     if value.startswith("claude-"):
@@ -391,6 +464,17 @@ def _infer_provider_from_model(model: str) -> str:
 
 def _env_get(env: Mapping[str, str], key: str) -> str:
     return str(env.get(key, "") or "").strip()
+
+
+def _env_bool(env: Mapping[str, str], key: str) -> bool | None:
+    value = _env_get(env, key).lower()
+    if not value:
+        return None
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{key} must be a boolean value")
 
 
 __all__ = [

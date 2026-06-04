@@ -351,7 +351,7 @@ def test_cloud_profile_keeps_finding_payload_uncompacted():
     assert out["poc_script_code"] == payload["poc_script_code"]
 
 
-def test_blocking_finish_branches_exhausts_post_exploit_branch_when_pivot_graph_is_spent():
+def test_dag_finish_branches_exhausts_post_exploit_branch_when_pivot_graph_is_spent():
     reg = ToolRegistry()
     class _RunSkill:
         name = "run_skill"
@@ -361,6 +361,12 @@ def test_blocking_finish_branches_exhausts_post_exploit_branch_when_pivot_graph_
             return ToolResult(ok=True, summary="ok")
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    loop.state.ensure_vector_candidate(
+        "web:auth-bypass:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        priority=95,
+    )
     for skill in ("attempt_auth", "post_auth_enum", "test_idor", "test_api_security", "test_business_logic", "test_sensitive_files"):
         for _ in range(3):
             loop.state.record_blocked_skill(skill)
@@ -374,12 +380,12 @@ def test_blocking_finish_branches_exhausts_post_exploit_branch_when_pivot_graph_
         source_finding_id="VXIS-0001",
     )
     branch.attempts = 4
-    blockers = loop._blocking_finish_branches()
+    blockers = loop._dag_finish_blocking_branches()
     assert all(item.id != branch.id for item in blockers)
     assert loop.state.branches[branch.id].status == "exhausted"
 
 
-def test_blocking_finish_branches_keeps_high_yield_post_exploit_branch():
+def test_dag_finish_branches_keeps_high_yield_post_exploit_branch():
     reg = ToolRegistry()
     class _RunSkill:
         name = "run_skill"
@@ -389,6 +395,12 @@ def test_blocking_finish_branches_keeps_high_yield_post_exploit_branch():
             return ToolResult(ok=True, summary="ok")
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+    loop.state.ensure_vector_candidate(
+        "web:auth-bypass:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        priority=95,
+    )
     branch = loop.state.ensure_branch(
         "web:auth-bypass:post-auth-enum",
         "WEB-AUTH-PIVOT",
@@ -399,7 +411,7 @@ def test_blocking_finish_branches_keeps_high_yield_post_exploit_branch():
         source_finding_id="VXIS-0001",
     )
     branch.attempts = 1
-    blockers = loop._blocking_finish_branches()
+    blockers = loop._dag_finish_blocking_branches()
     assert any(item.id == branch.id for item in blockers)
     assert loop.state.branches[branch.id].status != "exhausted"
 
@@ -464,7 +476,7 @@ async def test_budget_exhaustion_completion_accepts_when_no_meaningful_blockers_
         action_hint="keep going",
         affected_component="http://localhost:3000",
     )
-    loop._blocking_finish_branches = lambda: []  # type: ignore[method-assign]
+    loop._dag_finish_blocking_branches = lambda: []  # type: ignore[method-assign]
     loop.state.open_vector_candidates = lambda: []  # type: ignore[method-assign]
     assert loop._maybe_finalize_budget_exhausted_scan() is True
     assert loop.state.completed is True
@@ -559,7 +571,7 @@ def test_memory_carry_branch_drops_finish_blocking_yield_when_family_is_already_
         blocker="carry-over lead",
     )
     branch.attempts = 1
-    blockers = loop._blocking_finish_branches()
+    blockers = loop._dag_finish_blocking_branches()
     assert all(item.id != branch.id for item in blockers)
     assert loop.state.branches[branch.id].status == "exhausted"
 
@@ -594,7 +606,7 @@ def test_blocked_root_branch_drops_finish_blocking_yield_when_family_is_already_
     branch.status = "blocked"
     branch.last_tool = "run_skill"
     branch.last_summary = "run_skill BLOCKED — you've called 'attempt_auth' with IDENTICAL args 3 times."
-    blockers = loop._blocking_finish_branches()
+    blockers = loop._dag_finish_blocking_branches()
     assert all(item.id != branch.id for item in blockers)
     assert loop.state.branches[branch.id].status == "blocked"
 
@@ -664,7 +676,7 @@ def test_finish_scan_unattempted_candidate_gate_uses_high_yield_family_filter():
     )
     for _ in range(3):
         loop.state.record_blocked_skill("test_idor")
-    filtered = loop._remaining_high_yield_family_candidates(findings)
+    filtered = loop._dag_remaining_high_yield_candidates(findings)
     assert candidate not in filtered
 
 
@@ -688,7 +700,7 @@ def test_fallback_branch_ids_for_candidates_maps_root_branch_without_watch_terms
     assert loop._fallback_branch_ids_for_candidates(["web:dir-bruteforce"]) == ["web:dir-bruteforce"]
 
 
-def test_blocking_finish_branches_exhausts_stale_root_recon_branch_after_candidate_failure():
+def test_dag_finish_blocking_branches_exhausts_stale_root_recon_branch_after_candidate_failure():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
     candidate = loop.state.ensure_vector_candidate(
         "web:dir-bruteforce",
@@ -706,12 +718,12 @@ def test_blocking_finish_branches_exhausts_stale_root_recon_branch_after_candida
         role="recon_worker",
     )
     branch.source_candidate_id = "web:dir-bruteforce"
-    blockers = loop._blocking_finish_branches()
+    blockers = loop._dag_finish_blocking_branches()
     assert all(item.id != branch.id for item in blockers)
     assert loop.state.branches[branch.id].status == "exhausted"
 
 
-def test_blocking_finish_branches_drops_redundant_root_family_branch_when_child_post_exploit_exists():
+def test_dag_finish_blocking_branches_drops_redundant_root_family_branch_when_child_post_exploit_exists():
     reg = ToolRegistry()
     class _RunSkill:
         name = "run_skill"
@@ -741,12 +753,12 @@ def test_blocking_finish_branches_drops_redundant_root_family_branch_when_child_
         source_finding_id="VXIS-0001",
     )
     child.status = "active"
-    blockers = loop._blocking_finish_branches()
+    blockers = loop._dag_finish_blocking_branches()
     assert any(item.id == child.id for item in blockers)
     assert all(item.id != root.id for item in blockers)
 
 
-def test_blocking_finish_branches_drops_redundant_memory_branch_when_live_family_branch_exists():
+def test_dag_finish_blocking_branches_drops_redundant_memory_branch_when_live_family_branch_exists():
     reg = ToolRegistry()
     class _RunSkill:
         name = "run_skill"
@@ -774,12 +786,12 @@ def test_blocking_finish_branches_drops_redundant_memory_branch_when_live_family
         role="exploit_worker",
         owner="memory",
     )
-    blockers = loop._blocking_finish_branches()
+    blockers = loop._dag_finish_blocking_branches()
     assert any(item.id == live.id for item in blockers)
     assert all(item.id != memory.id for item in blockers)
 
 
-def test_blocking_finish_branches_drops_memory_revalidation_when_family_already_found_this_run():
+def test_dag_finish_blocking_branches_drops_memory_revalidation_when_family_already_found_this_run():
     reg = ToolRegistry()
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     loop.state.findings.append({
@@ -794,7 +806,7 @@ def test_blocking_finish_branches_drops_memory_revalidation_when_family_already_
         priority=92,
         role="exploit_worker",
     )
-    blockers = loop._blocking_finish_branches()
+    blockers = loop._dag_finish_blocking_branches()
     assert all(item.id != memory.id for item in blockers)
 
 
@@ -831,7 +843,7 @@ def test_normalize_tool_args_maps_shell_exec_cmd_to_command():
     assert normalized["command"] == "echo hi"
 
 
-def test_blocking_finish_branches_exhausts_found_root_branch_when_family_is_already_confirmed():
+def test_dag_finish_blocking_branches_exhausts_found_root_branch_when_family_is_already_confirmed():
     reg = ToolRegistry()
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     loop.state.findings.append({
@@ -854,7 +866,7 @@ def test_blocking_finish_branches_exhausts_found_root_branch_when_family_is_alre
         role="post_exploit_worker",
     )
     branch.attempts = 3
-    blockers = loop._blocking_finish_branches()
+    blockers = loop._dag_finish_blocking_branches()
     assert all(item.id != branch.id for item in blockers)
     assert loop.state.branches[branch.id].status == "exhausted"
 
@@ -981,6 +993,33 @@ def test_best_skill_params_for_idor_carries_latest_auth_token():
     assert params["url_pattern"].endswith("/api/users/{id}")
     assert params["token"] == "abc123token"
     assert params["max_id"] == 30
+
+
+def test_best_skill_params_carries_multi_identity_authz_context():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.record_auth_identities(
+        [
+            {"name": "alice", "token": "tok-alice", "owned_ids": [1], "role": "user"},
+            {"name": "bob", "token": "tok-bob", "owned_ids": [2], "role": "user"},
+        ]
+    )
+    loop.state.add_message("tool", {
+        "name": "run_skill",
+        "args": {"skill": "enumerate_endpoints"},
+        "result": {
+            "ok": True,
+            "data": {"accessible": [{"path": "/api/users/2", "status": 200, "size": 120}]},
+        },
+    })
+
+    idor_params = loop._best_skill_params("test_idor")
+    chain_params = loop._best_skill_params("execute_chain")
+
+    assert idor_params["token"] == "tok-alice"
+    assert idor_params["identities"][1]["name"] == "bob"
+    assert idor_params["owner_map"] == {"1": "alice", "2": "bob"}
+    assert chain_params["identities"][0]["token"] == "tok-alice"
+    assert chain_params["owner_map"]["2"] == "bob"
 
 
 def test_spawn_followup_branches_reuses_same_vector_for_same_finding():
@@ -1132,7 +1171,7 @@ def test_high_value_cross_campaign_exception_ignores_low_value_unrelated_campaig
     assert allowed is False
 
 
-def test_blocking_finish_branches_dedupes_same_source_finding_same_phase():
+def test_dag_finish_blocking_branches_dedupes_same_source_finding_same_phase():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
     a = loop.state.ensure_branch(
         "web:sqli:credential-pivot",
@@ -2070,7 +2109,7 @@ async def test_finish_scan_rejected_when_high_priority_candidates_unattempted():
 
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=30)
     loop._decide = fake_decide  # type: ignore
-    loop._blocking_finish_branches = lambda: []  # type: ignore[method-assign]
+    loop._dag_finish_blocking_branches = lambda: []  # type: ignore[method-assign]
     result = await loop.run()
 
     assert result["completed"] is False
@@ -2167,7 +2206,7 @@ async def test_repeated_finish_unattempted_candidates_forces_run_skill_replan():
             return [("finish_scan", {})]
 
     loop._decide = fake_decide  # type: ignore
-    loop._blocking_finish_branches = lambda: []  # type: ignore[method-assign]
+    loop._dag_finish_blocking_branches = lambda: []  # type: ignore[method-assign]
     result = await loop.run()
 
     assert run_skill.calls, "judge replan should force a concrete skill when finish repeats on unattempted candidates"

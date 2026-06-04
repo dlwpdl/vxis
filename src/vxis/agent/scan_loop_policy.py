@@ -137,7 +137,13 @@ _DESKTOP_SKILLS: frozenset[str] = frozenset(
 )
 
 _WEB_PIVOT_SKILL_GRAPH: dict[str, tuple[str, ...]] = {
-    "attempt_auth": ("post_auth_enum", "test_idor", "test_api_security", "test_business_logic"),
+    "attempt_auth": (
+        "execute_chain",
+        "post_auth_enum",
+        "test_idor",
+        "test_api_security",
+        "test_business_logic",
+    ),
     "post_auth_enum": (
         "test_idor",
         "test_api_security",

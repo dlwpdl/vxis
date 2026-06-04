@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from vxis.config.schema import VXISConfig
+from vxis.config.schema import VXISConfig, normalize_scan_profile_name, resolve_scan_profile
 from vxis.core.context import DAGContext, PluginOutput
 from vxis.core.db import create_engine, get_session, init_db
 from vxis.core.engine import DAGExecutor, TaskState
@@ -140,7 +140,7 @@ class ScanOrchestrator:
     async def run_scan(
         self,
         target: str,
-        profile: str = "standard",
+        profile: str = "crown",
         selected_plugins: list[str] | None = None,
         client_config_path: Path | None = None,
         tier: int = 1,
@@ -167,8 +167,10 @@ class ScanOrchestrator:
         started_at = datetime.now(timezone.utc)
 
         # --- 1. Validate profile ---
-        scan_profile = self.config.profiles.get(profile)
-        if scan_profile is None:
+        profile = normalize_scan_profile_name(profile)
+        try:
+            scan_profile = resolve_scan_profile(profile, self.config.profiles)
+        except KeyError:
             available = ", ".join(self.config.profiles.keys())
             raise ValueError(f"Profile '{profile}' not found. Available profiles: {available}")
 
@@ -419,6 +421,11 @@ class ScanOrchestrator:
         Returns:
             An async callable that accepts a plugin name and returns PluginOutput.
         """
+        profile = normalize_scan_profile_name(profile)
+        try:
+            profile_obj = resolve_scan_profile(profile, self.config.profiles)
+        except KeyError:
+            profile_obj = None
 
         async def _run(plugin_name: str) -> PluginOutput:
             plugin = registry.get(plugin_name)
@@ -426,11 +433,9 @@ class ScanOrchestrator:
                 raise ValueError(f"Plugin '{plugin_name}' not found in registry.")
 
             tool_config: dict[str, Any] = {}
-            profile_obj = self.config.profiles.get(profile)
-            if profile_obj is not None:
-                override = profile_obj.tool_overrides.get(plugin_name)
-                if override is not None:
-                    tool_config = {"extra_args": override.extra_args}
+            override = profile_obj.tool_overrides.get(plugin_name) if profile_obj else None
+            if override is not None:
+                tool_config = {"extra_args": override.extra_args}
 
             command_str = plugin.build_command(
                 target=target,
@@ -693,7 +698,7 @@ class ScanOrchestrator:
         다음 스캔에서 더 효과적인 전략을 선택할 수 있게 한다.
         """
         try:
-            from vxis.agent.memory import AgentMemory, ScanMemory
+            from vxis.agent.memory import AgentMemory, ScanMemory, dual_write_scan
 
             # 효과적/비효과적 도구 분류
             effective = []
@@ -736,7 +741,7 @@ class ScanOrchestrator:
                 ineffective_tools=ineffective + failed,
                 total_findings=len(findings),
             )
-            memory.remember_scan(scan_mem)
+            dual_write_scan(memory, scan_mem)
 
             # 로그에 학습 결과 표시
             logger.info(

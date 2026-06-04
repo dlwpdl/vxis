@@ -130,16 +130,28 @@ class ScanLoopRunFollowupMixin:
                         # than target_url. Pick params generic enough to
                         # at least exercise the skill path — Brain will
                         # re-run with better args once it sees results.
+                        _authz = self.state.authz_context_params()
                         _defaults: dict[str, dict] = {
                             "test_injection": {"url": f"{_base}/search?q=test"},
                             "test_xss": {"url": f"{_base}/search?q=test"},
                             "test_ssrf": {"url": f"{_base}/redirect?url=http://example.com"},
-                            "test_idor": {"url_pattern": f"{_base}/api/users/{{id}}", "token": auth_token or "", "max_id": 30 if auth_token else 20},
+                            "test_idor": {
+                                "url_pattern": f"{_base}/api/users/{{id}}",
+                                "token": auth_token or "",
+                                **_authz,
+                                "max_id": 30 if auth_token or _authz.get("identities") else 20,
+                            },
                             "post_auth_enum": {"token": auth_token or ""},
                             "test_auth_deep": {"token": auth_token},
                             "test_csrf": {"token": auth_token},
                             "test_api_security": {"token": auth_token},
                             "test_business_logic": {"token": auth_token},
+                            "execute_chain": {
+                                "template": "post_auth_crown",
+                                "token": auth_token or "",
+                                **_authz,
+                                "url_pattern": f"{_base}/api/users/{{id}}",
+                            },
                         }
                         _queued = 0
                         for sk in _untried:

@@ -21,18 +21,68 @@ def test_hybrid_defaults_use_frontier_director_and_local_worker() -> None:
 
 
 def test_env_overrides_roles_independently() -> None:
-    config = resolve_hybrid_model_config(env={
-        "VXIS_DIRECTOR_LLM": "openai/gpt-5.4",
-        "VXIS_WORKER_LLM": "ollama/qwen2.5-coder:14b",
-        "VXIS_VERIFIER_LLM_PROVIDER": "anthropic",
-        "VXIS_VERIFIER_LLM_MODEL": "claude-opus-4-6",
-        "VXIS_SUMMARIZER_LLM": "together/deepseek-ai/DeepSeek-V3.1",
-    })
+    config = resolve_hybrid_model_config(
+        env={
+            "VXIS_DIRECTOR_LLM": "openai/gpt-5.4",
+            "VXIS_WORKER_LLM": "ollama/qwen2.5-coder:14b",
+            "VXIS_VERIFIER_LLM_PROVIDER": "anthropic",
+            "VXIS_VERIFIER_LLM_MODEL": "claude-opus-4-6",
+            "VXIS_SUMMARIZER_LLM": "together/deepseek-ai/DeepSeek-V3.1",
+        }
+    )
 
     assert config.director.ref == "openai/gpt-5.4"
     assert config.worker.ref == "ollama/qwen2.5-coder:14b"
     assert config.verifier.ref == "anthropic/claude-opus-4-6"
     assert config.summarizer.ref == "together/deepseek-ai/DeepSeek-V3.1"
+
+
+def test_qwen_role_extra_body_controls_thinking_by_role() -> None:
+    config = resolve_hybrid_model_config(
+        env={
+            "VXIS_DIRECTOR_LLM": "together/Qwen/Qwen3.6-35B-A3B",
+            "VXIS_WORKER_LLM": "llamacpp/huihui-qwen3.6-35b-a3b",
+        }
+    )
+
+    assert config.director.extra_body == {
+        "enable_thinking": True,
+        "preserve_thinking": True,
+    }
+    assert config.worker.extra_body == {
+        "enable_thinking": True,
+        "preserve_thinking": True,
+    }
+    assert config.summarizer.extra_body == {"enable_thinking": False}
+
+
+def test_role_extra_body_json_override_takes_precedence() -> None:
+    config = resolve_hybrid_model_config(
+        env={
+            "VXIS_DIRECTOR_LLM": "together/Qwen/Qwen3.6-35B-A3B",
+            "VXIS_DIRECTOR_LLM_EXTRA_BODY_JSON": '{"enable_thinking": false, "top_k": 20}',
+        }
+    )
+
+    assert config.director.extra_body == {
+        "enable_thinking": False,
+        "top_k": 20,
+    }
+
+
+def test_role_extra_body_boolean_env_overrides_defaults() -> None:
+    config = resolve_hybrid_model_config(
+        env={
+            "VXIS_DIRECTOR_LLM": "together/Qwen/Qwen3.6-35B-A3B",
+            "VXIS_DIRECTOR_LLM_ENABLE_THINKING": "false",
+            "VXIS_DIRECTOR_LLM_PRESERVE_THINKING": "false",
+        }
+    )
+
+    assert config.director.extra_body == {
+        "enable_thinking": False,
+        "preserve_thinking": False,
+    }
 
 
 def test_existing_upstream_cloud_becomes_director_not_worker_when_worker_unset() -> None:

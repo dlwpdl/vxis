@@ -87,6 +87,30 @@ class ScanLoopScheduledSkillsMixin:
                             if _real_skill == "attempt_auth" and sr.data:
                                 if sr.data.get("authenticated"):
                                     auth_token = sr.data.get("token", "")
+                                    identities = sr.data.get("identities") or []
+                                    if not identities and auth_token:
+                                        identities = [
+                                            {
+                                                "name": sr.data.get("primary_identity")
+                                                or "authenticated",
+                                                "token": auth_token,
+                                                "role": (
+                                                    sr.data.get("user_info", {}) or {}
+                                                ).get("role", ""),
+                                                "email": (
+                                                    sr.data.get("user_info", {}) or {}
+                                                ).get("email", ""),
+                                            }
+                                        ]
+                                    self.state.record_auth_identities(identities)
+                                    if isinstance(sr.data.get("owner_map"), dict):
+                                        self.state.object_owner_map.update(
+                                            {
+                                                str(k): str(v)
+                                                for k, v in sr.data.get("owner_map", {}).items()
+                                            }
+                                        )
+                                    authz_params = self.state.authz_context_params()
                                     method = sr.data.get("method", "?")
                                     creds = sr.data.get("credentials_used", {})
                                     # Auto-report auth finding
@@ -123,17 +147,26 @@ class ScanLoopScheduledSkillsMixin:
                                         endpoint=login_endpoint,
                                         method="POST",
                                     ))
-                                    # Queue post-auth skills
-                                    _post_auth_skills = [
-                                        ("post_auth_enum", self.state.iteration + 2, {"token": auth_token}),
-                                        ("test_idor", self.state.iteration + 4, {"token": auth_token}),
-                                        ("test_auth_deep", self.state.iteration + 5, {"token": auth_token}),
-                                    ]
-                                    for _queued_skill, _queued_iter, _queued_params in _post_auth_skills:
-                                        queue_skill(_queued_skill, _queued_iter, _queued_params)
+                                    # Queue the generic chain executor instead
+                                    # of hard-coded post-auth fan-out. The
+                                    # individual child skills remain available
+                                    # through pivot/sweep fallback paths.
+                                    queue_skill(
+                                        "execute_chain",
+                                        self.state.iteration + 2,
+                                        {
+                                            "template": "post_auth_crown",
+                                            "token": auth_token,
+                                            **authz_params,
+                                            "url_pattern": (
+                                                self.state.target.rstrip("/")
+                                                + "/api/users/{id}"
+                                            ),
+                                        },
+                                    )
                                     self.state.add_message("user", (
                                         f"SKILL CHAIN: Auth bypass confirmed via {method}! "
-                                        f"Token acquired. Post-auth skills queued."
+                                        "Token acquired. Post-auth chain executor queued."
                                     ))
 
                             # Auto-report sensitive files
@@ -254,7 +287,11 @@ class ScanLoopScheduledSkillsMixin:
                                             queue_skill(
                                                 "test_idor",
                                                 self.state.iteration + 5,
-                                                {"url_pattern": pattern, "_skill_override": "test_idor"},
+                                                {
+                                                    "url_pattern": pattern,
+                                                    **self.state.authz_context_params(),
+                                                    "_skill_override": "test_idor",
+                                                },
                                                 alias=f"test_idor_{len(_idor_patterns_seen)}",
                                             )
                                             if len(_idor_patterns_seen) >= 4:
@@ -272,7 +309,11 @@ class ScanLoopScheduledSkillsMixin:
                                         queue_skill(
                                             "test_idor",
                                             self.state.iteration + 5,
-                                            {"url_pattern": pattern, "_skill_override": "test_idor"},
+                                            {
+                                                "url_pattern": pattern,
+                                                **self.state.authz_context_params(),
+                                                "_skill_override": "test_idor",
+                                            },
                                             alias=f"test_idor_probe_{_candidate.strip('/').replace('/','_')}",
                                         )
                                 # Report error endpoints
@@ -288,6 +329,51 @@ class ScanLoopScheduledSkillsMixin:
                                         "description": f"Endpoint returns HTTP 500 ({ep.get('size', '?')}B) with actionable backend error details.",
                                         "evidence": preview,
                                     })
+
+                            # Generic chain executor findings
+                            if _real_skill == "execute_chain" and sr.data:
+                                chain_findings = list(sr.data.get("findings") or [])
+                                for finding in chain_findings[:10]:
+                                    if not isinstance(finding, dict):
+                                        continue
+                                    await self._dispatch_report_finding_checked(self._build_report_finding_args(
+                                        title=str(finding.get("title") or "Validated attack chain finding"),
+                                        severity=str(finding.get("severity") or "high"),
+                                        finding_type=str(finding.get("finding_type") or "attack_chain"),
+                                        affected_component=str(
+                                            finding.get("affected_component")
+                                            or finding.get("endpoint")
+                                            or self.state.target
+                                        ),
+                                        description=str(
+                                            finding.get("description")
+                                            or "The chain executor validated a post-authenticated follow-up finding."
+                                        ),
+                                        impact=str(
+                                            finding.get("impact")
+                                            or "A foothold can be chained into protected data or authorization impact."
+                                        ),
+                                        technical_analysis=str(
+                                            finding.get("technical_analysis")
+                                            or finding.get("evidence")
+                                            or sr.data.get("steps", [])[:3]
+                                        ),
+                                        poc_description=str(
+                                            finding.get("poc_description")
+                                            or "Replay the chain steps and compare each child control."
+                                        ),
+                                        poc_script_code=str(
+                                            finding.get("poc_script_code")
+                                            or sr.data.get("steps", [])[:3]
+                                        ),
+                                        remediation_steps=str(
+                                            finding.get("remediation_steps")
+                                            or "Fix the broken trust boundary identified by the validated chain."
+                                        ),
+                                        endpoint=str(finding.get("endpoint") or self.state.target),
+                                        method=str(finding.get("method") or "GET"),
+                                        cwe=finding.get("cwe"),
+                                    ))
 
                             # IDOR results
                             if _real_skill == "test_idor" and sr.data:
@@ -481,15 +567,33 @@ class ScanLoopScheduledSkillsMixin:
                                     payload = finding.get("payload", "")[:200]
                                     response_preview = finding.get("response_preview", finding.get("evidence", ""))[:1200]
                                     control = finding.get("control", {}) or {}
+                                    cloud_creds = finding.get("cloud_credentials") or {}
+                                    cloud_metadata = finding.get("cloud_metadata") or {}
+                                    finding_type = (
+                                        "ssrf_cloud_metadata"
+                                        if cloud_creds or cloud_metadata
+                                        else "ssrf"
+                                    )
                                     matched_signal = str(control.get("matched_signal") or finding.get("type", "internal_response"))
                                     callback_summary = response_preview[:500] or str(finding.get("evidence", ""))[:500]
                                     self.state.record_callback_observation(
-                                        finding_type="ssrf",
+                                        finding_type=finding_type,
                                         component=ssrf_url,
                                         signal=matched_signal,
                                         payload=payload,
                                         summary=callback_summary,
                                     )
+                                    if cloud_creds:
+                                        self.state.record_retrieval_observation(
+                                            finding_type=finding_type,
+                                            component=ssrf_url,
+                                            retrieval_kind="cloud_metadata_credentials",
+                                            summary=(
+                                                "Cloud metadata credential fields observed via SSRF: "
+                                                f"{cloud_creds.get('fields', [])}"
+                                            ),
+                                            sample=str(cloud_creds)[:1200],
+                                        )
                                     ssrf_poc = self._build_reflected_get_poc(
                                         url=ssrf_url,
                                         param=ssrf_param,
@@ -498,9 +602,13 @@ class ScanLoopScheduledSkillsMixin:
                                         response_preview=response_preview,
                                     )
                                     args = {
-                                        "title": f"SSRF via {finding.get('type', 'ssrf')} on {ssrf_param}",
+                                        "title": (
+                                            f"Cloud metadata exposure via SSRF on {ssrf_param}"
+                                            if finding_type == "ssrf_cloud_metadata"
+                                            else f"SSRF via {finding.get('type', 'ssrf')} on {ssrf_param}"
+                                        ),
                                         "severity": ssrf_sev,
-                                        "finding_type": "ssrf",
+                                        "finding_type": finding_type,
                                         "affected_component": ssrf_url,
                                         "description": f"Server-side request behavior was influenced via parameter {ssrf_param}.",
                                         "evidence": response_preview,
@@ -509,13 +617,18 @@ class ScanLoopScheduledSkillsMixin:
                                         args.update(self._build_report_finding_args(
                                             title=args["title"],
                                             severity=ssrf_sev,
-                                            finding_type="ssrf",
+                                            finding_type=finding_type,
                                             affected_component=ssrf_url,
                                             description=args["description"],
-                                            impact="Attackers may force the server to reach internal services, cloud metadata endpoints, or trust-bound internal resources.",
+                                            impact=(
+                                                "Attackers may retrieve cloud instance role credential material and pivot into cloud APIs."
+                                                if finding_type == "ssrf_cloud_metadata"
+                                                else "Attackers may force the server to reach internal services, cloud metadata endpoints, or trust-bound internal resources."
+                                            ),
                                             technical_analysis=(
                                                 "The SSRF skill produced a payload and corresponding response preview suggesting server-side fetching or internal reachability. "
-                                                f"Baseline/control data: {control}."
+                                                f"Baseline/control data: {control}. "
+                                                f"Cloud metadata: {cloud_metadata}. Cloud credentials: {cloud_creds}."
                                             ),
                                             poc_description="Submit the SSRF payload to the target parameter and confirm that the server fetches or leaks data from the supplied internal URL.",
                                             poc_script_code=ssrf_poc,

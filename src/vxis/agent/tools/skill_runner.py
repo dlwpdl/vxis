@@ -88,11 +88,12 @@ class RunSkillTool:
         "  test_auth_deep — JWT alg:none, RS256->HS256, session fixation, reset poisoning\n"
         "  test_csrf — CSRF token validation + SameSite cookie checks\n"
         "  test_ssrf — SSRF: internal IPs, cloud metadata, file://, DNS rebinding\n"
-        "  test_api_security — mass assignment, rate limiting, verb tampering\n"
+        "  test_api_security — GraphQL/OpenAPI discovery, mass assignment, rate limiting, verb tampering\n"
         "  test_misconfig — security headers, CORS, debug endpoints, verbose errors\n"
         "  test_business_logic — negative qty, price manipulation, state skip, race conditions\n"
         "  test_crypto — TLS versions, hardcoded secrets in JS, weak hashes\n"
         "  test_infra — exposed .git/.env, cloud metadata, Firebase, subdomains\n"
+        "  execute_chain — run a declared multi-step chain with extracted context\n"
         "\nIf the evidence demands a technique outside these templates, go to "
         "shell_exec / python_exec — do not bend the finding to fit a skill."
     )
@@ -101,7 +102,7 @@ class RunSkillTool:
         "properties": {
             "skill": {
                 "type": "string",
-                "description": "Skill name: enumerate_endpoints, test_injection, attempt_auth, post_auth_enum, test_sensitive_files, test_idor, test_xss, test_auth_deep, test_csrf, test_ssrf, test_api_security, test_misconfig, test_business_logic, test_crypto, test_infra",
+                "description": "Skill name: enumerate_endpoints, test_injection, attempt_auth, post_auth_enum, test_sensitive_files, test_idor, test_xss, test_auth_deep, test_csrf, test_ssrf, test_api_security, test_misconfig, test_business_logic, test_crypto, test_infra, execute_chain",
             },
             "target_url": {
                 "type": "string",
@@ -314,12 +315,25 @@ class RunSkillTool:
             summary_parts.append(
                 f"{'VULNERABLE' if result.get('vulnerable') else 'clean'} — "
                 f"{len(result.get('accessible_ids', []))} accessible, "
-                f"{len(result.get('auth_bypass_ids', []))} without auth"
+                f"{len(result.get('auth_bypass_ids', []))} without auth, "
+                f"{len(result.get('cross_identity_access', []))} cross-identity"
             )
             controls = result.get("control_evidence", {})
             if controls:
                 summary_parts.append(
                     f"controls: +{len(controls.get('positive_cases', []))}/-{len(controls.get('negative_cases', []))}"
+                )
+
+        elif skill_name == "execute_chain":
+            steps = result.get("steps", [])
+            findings = result.get("findings", [])
+            failed = [step for step in steps if not step.get("ok") and not step.get("skipped")]
+            summary_parts.append(
+                f"{len(steps)} step(s), {len(findings)} finding(s), {len(failed)} failed"
+            )
+            for step in steps[:4]:
+                summary_parts.append(
+                    f"  {step.get('skill')}: {step.get('summary', '')[:60]}"
                 )
 
         elif skill_name in ("test_xss", "test_ssrf", "test_auth_deep", "test_csrf",

@@ -54,6 +54,7 @@ class BenchmarkRunner:
         target_type: str,
         target_url: str,
         scan_id: str | None = None,
+        profile: str = "crown",
     ) -> VXISScore:
         """레퍼런스 타겟에 대해 스캔을 실행하고 VXISScore를 반환한다.
 
@@ -70,15 +71,16 @@ class BenchmarkRunner:
         """
         if target_type not in _VALID_TARGET_TYPES:
             raise ValueError(
-                f"Invalid target_type: {target_type!r}. "
-                f"Must be one of: {_VALID_TARGET_TYPES}"
+                f"Invalid target_type: {target_type!r}. Must be one of: {_VALID_TARGET_TYPES}"
             )
 
         _scan_id = scan_id or _generate_scan_id(target_type)
 
         logger.info(
             "[BENCHMARK] Starting %s benchmark scan on %s (id=%s)",
-            target_type, target_url, _scan_id,
+            target_type,
+            target_url,
+            _scan_id,
         )
 
         # 파이프라인 임포트 (순환 의존성 방지를 위해 지연 임포트)
@@ -86,6 +88,7 @@ class BenchmarkRunner:
             target_type=target_type,
             target_url=target_url,
             scan_id=_scan_id,
+            profile=profile,
         )
 
         pipeline_score = getattr(ctx, "score_detail", None)
@@ -93,9 +96,15 @@ class BenchmarkRunner:
             score = pipeline_score
         else:
             engine = ScoringEngine(target_type)
+            tracker = getattr(ctx, "score_tracker", None)
+            if not isinstance(tracker, ScoreTracker):
+                logger.warning(
+                    "[BENCHMARK] ctx.score_tracker missing; calculating fallback score from findings only"
+                )
+                tracker = ScoreTracker(target_type=target_type)
             score = engine.calculate(
-                tracker=ctx.score_tracker,
-                findings=ctx.findings,
+                tracker=tracker,
+                findings=list(getattr(ctx, "findings", []) or []),
                 scan_id=_scan_id,
             )
 
@@ -103,7 +112,10 @@ class BenchmarkRunner:
 
         logger.info(
             "[BENCHMARK] Score: %.1f [%s] for %s on %s",
-            score.total, score.grade, target_type, target_url,
+            score.total,
+            score.grade,
+            target_type,
+            target_url,
         )
         return score
 
@@ -124,7 +136,9 @@ class BenchmarkRunner:
             scan_id=scan_id or _generate_scan_id(tracker.target_type),
         )
 
-    def load_baseline(self, target_type: str | None = None) -> dict[str, VXISScore] | VXISScore | None:
+    def load_baseline(
+        self, target_type: str | None = None
+    ) -> dict[str, VXISScore] | VXISScore | None:
         """베이스라인 파일을 로드한다.
 
         Args:
@@ -159,7 +173,8 @@ class BenchmarkRunner:
             except (KeyError, TypeError, ValueError) as exc:
                 logger.warning(
                     "[BENCHMARK] Failed to deserialize baseline for %s: %s",
-                    ttype, exc,
+                    ttype,
+                    exc,
                 )
 
         if target_type is not None:
@@ -192,7 +207,9 @@ class BenchmarkRunner:
 
         logger.info(
             "[BENCHMARK] Baseline saved for %s: %.1f [%s]",
-            score.target_type, score.total, score.grade,
+            score.target_type,
+            score.total,
+            score.grade,
         )
 
     def compare_with_baseline(
@@ -237,8 +254,7 @@ class BenchmarkRunner:
             return self._reporter.generate_github_comment(comparison)
         else:
             raise ValueError(
-                f"Unknown report format: {format!r}. "
-                f"Must be one of: markdown, telegram, github"
+                f"Unknown report format: {format!r}. Must be one of: markdown, telegram, github"
             )
 
     def is_regression(self, comparison: ScoreComparison) -> bool:
@@ -254,23 +270,27 @@ class BenchmarkRunner:
         target_type: str,
         target_url: str,
         scan_id: str,
+        profile: str = "crown",
     ):
         """타겟 타입에 맞는 파이프라인을 실행하고 ScanContext를 반환한다."""
         # 항상 LLM AgentBrain 사용 — FileBasedBrain(코드 전용) 옵션 없음
+        os.environ["VXIS_SCAN_PROFILE"] = profile
         from vxis.agent.brain import AgentBrain
+
         brain = AgentBrain()
         logger.info("[BENCHMARK] Brain: AgentBrain (LLM)")
 
         if target_type == "web":
             from vxis.pipeline import ScanPipeline  # Phase A: v2 shim via pipeline/__init__.py
-            pipeline = ScanPipeline(brain=brain)
-            ctx = await pipeline.run(target=target_url)
+            from vxis.interaction.surface import TargetKind
+
+            pipeline = ScanPipeline(brain=brain, generate_report=False)
+            ctx = await pipeline.run(target=target_url, kind=TargetKind.WEB)
         elif target_type in ("game", "mobile"):
             # Phase A deleted legacy game_pipeline / mobile_pipeline. Phase D will
             # rebuild them on top of ScanPipelineV2 + domain-specific BrainTools.
             raise NotImplementedError(
-                f"target_type={target_type!r} is deferred to Phase D — "
-                "see docs/PHASE_STATUS.md"
+                f"target_type={target_type!r} is deferred to Phase D — see docs/PHASE_STATUS.md"
             )
         else:
             raise ValueError(f"Unknown target_type: {target_type!r}")
@@ -281,6 +301,7 @@ class BenchmarkRunner:
 # ─────────────────────────────────────────────────────────────────────
 # Serialization Helpers
 # ─────────────────────────────────────────────────────────────────────
+
 
 def _generate_scan_id(target_type: str) -> str:
     ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")

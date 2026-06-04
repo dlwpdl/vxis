@@ -18,16 +18,35 @@ from vxis.agent.scan_loop_state import (
 )
 
 
-class ScanLoopDecisionPolicyMixin:
-    def _blocking_finish_branches(self) -> list[BranchState]:
-        """Return active branches that still represent unfinished proof work.
+def dag_blocks_finish(state: Any, *, prior_threshold: float = 0.5) -> bool:
+    """Return true when the DAG still has high-prior untested work."""
+    return bool(dag_finish_blocker_node_ids(state, prior_threshold=prior_threshold))
 
-        Strix's root agent does not finish while meaningful work remains active.
-        Mirror that here by treating high-priority unresolved branches as
-        finish blockers, especially pivot branches spawned from confirmed
-        findings that still need impact expansion.
-        """
+
+def dag_finish_blocker_node_ids(state: Any, *, prior_threshold: float = 0.5) -> list[str]:
+    dag = getattr(state, "hypothesis_dag", None)
+    if dag is None:
+        return []
+    try:
+        nodes = list(dag.top_untested(k=100))
+    except Exception:
+        return []
+    out: list[str] = []
+    for node in nodes:
+        try:
+            prior = float(getattr(node, "prior", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            prior = 0.0
+        if prior >= prior_threshold:
+            out.append(str(getattr(node, "node_id", "")))
+    return [node_id for node_id in out if node_id]
+
+
+class ScanLoopDecisionPolicyMixin:
+    def _dag_finish_blocking_branches(self) -> list[BranchState]:
+        """Return branch side-table rows for high-prior untested DAG nodes."""
         blockers: list[BranchState] = []
+        blocker_ids = set(dag_finish_blocker_node_ids(self.state, prior_threshold=0.65))
         for branch in self.state.active_branches():
             if self._should_exhaust_stale_root_branch(branch):
                 branch.status = "exhausted"
@@ -39,7 +58,16 @@ class ScanLoopDecisionPolicyMixin:
             if branch.owner == "agent_graph":
                 blockers.append(branch)
                 continue
-            if branch.priority < 85:
+            if branch.id not in blocker_ids and branch.source_candidate_id not in blocker_ids:
+                if (
+                    branch.owner == "memory"
+                    or branch.id.startswith(("carry:", "memory:"))
+                ) and not self._branch_has_finish_blocking_yield(branch):
+                    branch.status = "exhausted"
+                    branch.last_report = (
+                        branch.last_report
+                        or "exhausted after DAG did not retain this memory branch as high-prior work"
+                    )[:160]
                 continue
             if not self._branch_has_finish_blocking_yield(branch):
                 branch.status = "exhausted"
@@ -371,7 +399,7 @@ class ScanLoopDecisionPolicyMixin:
     def _campaign_groups_for_ui(self, limit: int = 4) -> list[dict[str, Any]]:
         groups: list[dict[str, Any]] = []
         by_key: dict[tuple[str, str], dict[str, Any]] = {}
-        blockers = {branch.id for branch in self._blocking_finish_branches()}
+        blockers = {branch.id for branch in self._dag_finish_blocking_branches()}
         for branch in self.state.active_branches():
             key = (
                 branch.source_finding_id or branch.parent_branch_id or branch.id,
@@ -648,6 +676,12 @@ class ScanLoopDecisionPolicyMixin:
         return True
 
     def _latest_auth_token(self) -> str:
+        for identity in getattr(self.state, "auth_identities", []) or []:
+            if not isinstance(identity, dict):
+                continue
+            token = str(identity.get("token") or "").strip()
+            if token:
+                return token
         for message in reversed(self.state.messages[-96:]):
             if message.get("role") != "tool":
                 continue
@@ -664,6 +698,38 @@ class ScanLoopDecisionPolicyMixin:
             if token:
                 return token
         return ""
+
+    def _latest_authz_context_params(self) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        authz_fn = getattr(self.state, "authz_context_params", None)
+        if callable(authz_fn):
+            try:
+                params.update(authz_fn())
+            except Exception:
+                params = {}
+        if params.get("identities"):
+            return params
+
+        for message in reversed(self.state.messages[-96:]):
+            if message.get("role") != "tool":
+                continue
+            content = message.get("content", {})
+            if not isinstance(content, dict) or content.get("name") != "run_skill":
+                continue
+            result = content.get("result", {})
+            data = result.get("data", {}) if isinstance(result, dict) else {}
+            if not isinstance(data, dict):
+                continue
+            identities = data.get("identities")
+            if isinstance(identities, list) and identities:
+                params["identities"] = identities
+                if isinstance(data.get("owner_map"), dict):
+                    params["owner_map"] = data["owner_map"]
+                token = str(data.get("token") or "").strip()
+                if token:
+                    params["token"] = token
+                return params
+        return params
 
     def _candidate_expected_yield_score(
         self, candidate: VectorCandidate, findings: list[dict[str, Any]]
@@ -789,13 +855,14 @@ class ScanLoopDecisionPolicyMixin:
         threshold = 78 if str(candidate.id).startswith("memory:") else 72
         return self._candidate_expected_yield_score(candidate, findings) >= threshold
 
-    def _remaining_high_yield_family_candidates(
+    def _dag_remaining_high_yield_candidates(
         self, findings: list[dict[str, Any]]
     ) -> list[VectorCandidate]:
+        blocker_ids = set(dag_finish_blocker_node_ids(self.state, prior_threshold=0.65))
         open_candidates = [
             c
             for c in self.state.open_vector_candidates()
-            if self._candidate_has_finish_blocking_yield(c, findings)
+            if c.id in blocker_ids and self._candidate_has_finish_blocking_yield(c, findings)
         ]
         deduped: list[VectorCandidate] = []
         seen_families: set[str] = set()
@@ -869,9 +936,9 @@ class ScanLoopDecisionPolicyMixin:
             chains = []
         if not findings:
             return False
-        if self._blocking_finish_branches():
+        if self._dag_finish_blocking_branches():
             return False
-        open_candidates = self._remaining_high_yield_family_candidates(findings)
+        open_candidates = self._dag_remaining_high_yield_candidates(findings)
         if open_candidates:
             return False
         desired = self._desired_chain_count(findings)
@@ -1766,6 +1833,17 @@ class ScanLoopDecisionPolicyMixin:
         if skill in {"post_auth_enum", "test_idor"}:
             if not any(key in normalized for key in ("base_url", "url_pattern", "token")):
                 normalized["base_url"] = target
+            if skill == "test_idor":
+                for key, value in self._latest_authz_context_params().items():
+                    if value and key not in normalized:
+                        normalized[key] = value
+                if normalized.get("identities") and "max_id" not in normalized:
+                    normalized["max_id"] = 30
+        elif skill == "execute_chain":
+            for key, value in self._latest_authz_context_params().items():
+                if value and key not in normalized:
+                    normalized[key] = value
+            normalized.setdefault("template", "post_auth_crown")
         elif skill in {
             "test_injection",
             "test_xss",
@@ -2022,17 +2100,24 @@ class ScanLoopDecisionPolicyMixin:
         if skill == "test_idor":
             picked = _pick(lambda u: bool(re.search(r"/\d+(?:/|$)", u)))
             token = self._latest_auth_token()
+            authz_params = self._latest_authz_context_params()
             if picked:
                 pattern = re.sub(r"/\d+(?=(/|$))", "/{id}", picked, count=1)
                 params = {"url_pattern": pattern}
                 if token:
                     params["token"] = token
                     params["max_id"] = 30
+                params.update({k: v for k, v in authz_params.items() if v})
+                if params.get("identities"):
+                    params.setdefault("max_id", 30)
                 return params
             params = {"base_url": target}
             if token:
                 params["token"] = token
                 params["max_id"] = 30
+            params.update({k: v for k, v in authz_params.items() if v})
+            if params.get("identities"):
+                params.setdefault("max_id", 30)
             return params
         if skill in {"test_api_security", "test_business_logic"}:
             picked = (
@@ -2045,6 +2130,16 @@ class ScanLoopDecisionPolicyMixin:
                 or target
             )
             return {"url": picked}
+        if skill == "execute_chain":
+            token = self._latest_auth_token()
+            params: dict[str, Any] = {
+                "template": "post_auth_crown",
+                "url_pattern": f"{target}/api/users/{{id}}",
+            }
+            if token:
+                params["token"] = token
+            params.update({k: v for k, v in self._latest_authz_context_params().items() if v})
+            return params
         if skill == "post_auth_enum":
             return {"base_url": target}
         if skill == "test_infra":
@@ -2146,7 +2241,7 @@ class ScanLoopDecisionPolicyMixin:
         if title == "unfinished_branches":
             focus = self._focus_branch()
             if focus is None:
-                blockers = self._blocking_finish_branches()
+                blockers = self._dag_finish_blocking_branches()
                 focus = blockers[0] if blockers else None
             if focus is not None:
                 forced = self._forced_branch_action(focus)
@@ -2168,7 +2263,7 @@ class ScanLoopDecisionPolicyMixin:
                         forced[1],
                         f"forcing deeper retry on {family} family via {retryable_candidates[0].id}",
                     )
-            family_candidates = self._remaining_high_yield_family_candidates(findings)
+            family_candidates = self._dag_remaining_high_yield_candidates(findings)
             if family_candidates:
                 forced = self._forced_candidate_action(family_candidates[0])
                 if forced is not None:
@@ -2194,7 +2289,7 @@ class ScanLoopDecisionPolicyMixin:
                         forced[1],
                         f"forcing retryable candidate {retryable_candidates[0].id}",
                     )
-            open_candidates = self._remaining_high_yield_family_candidates(findings)
+            open_candidates = self._dag_remaining_high_yield_candidates(findings)
             if open_candidates:
                 forced = self._forced_candidate_action(open_candidates[0])
                 if forced is not None:

@@ -1,0 +1,16 @@
+{
+  "league_id": "crown-league-v2-smoke",
+  "profile": "crown",
+  "description": "Executable smoke slice of Benchmark League v2. CI runs this first; full league targets are added as their containers and ground truth stabilize.",
+  "targets": [
+    {
+      "target_id": "juice-shop",
+      "target_type": "web",
+      "name": "OWASP Juice Shop",
+      "default_url": "http://localhost:3000",
+      "url_env": "VXIS_BENCHMARK_TARGET_JUICE_SHOP",
+      "required": true,
+      "enabled": true
+    }
+  ]
+}

@@ -16,6 +16,7 @@ from vxis.agent.scan_loop_agent_graph import ScanLoopAgentGraphMixin
 from vxis.agent.scan_loop_dashboard import build_scan_dashboard
 from vxis.agent.scan_loop_decision_policy import ScanLoopDecisionPolicyMixin
 from vxis.agent.scan_loop_run import ScanLoopRunMixin
+from vxis.agent.scan_loop_v3 import initialize_v3_runtime
 from vxis.agent.scan_loop_policy import (
     DIRECTOR_PROMPT_TEMPLATE,
     _DESKTOP_SKILLS,
@@ -136,6 +137,7 @@ class ScanAgentLoop(
         self._target_kind = target_kind or _TK.WEB
         self._seed_vector_candidates()
         self._install_agent_graph_executor()
+        initialize_v3_runtime(self)
 
     def _install_agent_graph_executor(self) -> None:
         tool = self.registry.get_tool("agent_graph")

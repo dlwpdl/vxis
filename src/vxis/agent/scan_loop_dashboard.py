@@ -8,6 +8,7 @@ from vxis.agent.agent_graph_runtime import (
     agent_graph_needs_evidence_artifact,
 )
 from vxis.agent.scan_loop_state import _TERMINAL_VECTOR_STATUSES
+from vxis.agent.scan_loop_v3 import v3_dashboard_summary
 
 
 def build_scan_dashboard(loop: Any) -> str:
@@ -212,7 +213,9 @@ def build_scan_dashboard(loop: Any) -> str:
                     lines.append(f"     last_run: {tool_name} {verdict}: {summary}")
                 latest_data = latest.get("data") if isinstance(latest.get("data"), dict) else {}
                 planner = (
-                    latest_data.get("planner") if isinstance(latest_data.get("planner"), dict) else {}
+                    latest_data.get("planner")
+                    if isinstance(latest_data.get("planner"), dict)
+                    else {}
                 )
                 if planner:
                     source = str(planner.get("source") or "unknown")
@@ -616,7 +619,9 @@ def build_scan_dashboard(loop: Any) -> str:
             lines.append("   Try: shell_exec nuclei with http/cves templates")
     elif _chain_pressure:
         lines.append("\n>> PRIMARY GOAL: link_chain NOW — you have findings but 0 chains.")
-        lines.append("   Include evidence_artifact: source_output, pivot_action, control/observed result, crown evidence.")
+        lines.append(
+            "   Include evidence_artifact: source_output, pivot_action, control/observed result, crown evidence."
+        )
         lines.append("   DO NOT call finish_scan until you've tried every chain above.")
         if untested:
             lines.append(f"   Secondary: also test {untested[0]} when you run out of chain ideas.")
@@ -632,6 +637,10 @@ def build_scan_dashboard(loop: Any) -> str:
             lines.append(f"   Build more chains — {_desired_chains} total is the floor.")
     else:
         lines.append("\n>> No findings yet. Be more aggressive.")
+
+    v3_summary = v3_dashboard_summary(s)
+    if v3_summary:
+        lines.append(v3_summary)
 
     lines.append("═══ Use ALL your knowledge. Every finding matters. Keep digging. ═══")
     return "\n".join(lines)

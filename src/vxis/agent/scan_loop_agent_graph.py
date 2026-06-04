@@ -1438,6 +1438,7 @@ class ScanLoopAgentGraphMixin:
                         },
                     )
             inferred = (
+                ("execute_chain", ("chain", "crown", "post-auth", "post exploit", "post_exploit")),
                 ("test_idor", ("idor", "access_control", "broken access", "object")),
                 ("test_injection", ("sqli", "sql", "injection", "nosql", "ssti")),
                 ("test_xss", ("xss", "script")),

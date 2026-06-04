@@ -12,6 +12,58 @@ _TERMINAL_TODO_STATUSES = {"done", "blocked"}
 _TERMINAL_BRANCH_STATUSES = {"proven", "exhausted", "dead", "blocked"}
 
 
+def _new_hypothesis_dag() -> Any:
+    from vxis.agent.hypothesis.dag import HypothesisDAG
+
+    return HypothesisDAG()
+
+
+def _candidate_vector_class(vector_id: str, title: str) -> str:
+    blob = f"{vector_id} {title}".lower()
+    mapping = (
+        ("auth-bypass", ("auth", "login", "session", "jwt", "weak_auth")),
+        ("sqli", ("sqli", "sql", "injection", "nosql")),
+        ("idor", ("idor", "bola", "access control", "broken_access")),
+        ("xss", ("xss", "cross-site", "script")),
+        ("ssrf", ("ssrf", "server-side request")),
+        ("rce", ("rce", "command", "code execution", "shell")),
+        ("path-traversal", ("traversal", "../", "lfi", "file read")),
+        ("csrf", ("csrf",)),
+        ("disclosure", ("sensitive", "file", "config", "disclosure", "secret")),
+        ("business-logic", ("business", "logic", "coupon", "gift", "payment")),
+        ("infra", ("cve", "nuclei", "infra", "fingerprint", "directory", "dir")),
+    )
+    for vector_class, markers in mapping:
+        if any(marker in blob for marker in markers):
+            return vector_class
+    return str(vector_id or "generic").lower().strip() or "generic"
+
+
+def _hypothesis_status_for_candidate(status: str) -> str:
+    return {
+        "open": "untested",
+        "retryable": "untested",
+        "attempted": "testing",
+        "failed": "testing",
+        "blocked": "inconclusive",
+        "found": "confirmed",
+        "clean": "refuted",
+        "dead": "refuted",
+    }.get(str(status or "").lower(), "untested")
+
+
+def _hypothesis_status_for_branch(status: str) -> str:
+    return {
+        "open": "untested",
+        "retryable": "untested",
+        "active": "testing",
+        "proven": "confirmed",
+        "exhausted": "refuted",
+        "dead": "refuted",
+        "blocked": "inconclusive",
+    }.get(str(status or "").lower(), "untested")
+
+
 def _sanitize_evidence_text(value: Any, *, limit: int = 1200) -> str:
     """Render binary-ish evidence into report-safe printable text."""
     text = str(value or "").replace("\r\n", "\n").replace("\r", "\n")
@@ -134,7 +186,7 @@ def action_capability(name: str, args: dict[str, Any] | Any) -> str:
             "fingerprint_target",
         }:
             return "recon"
-        if skill in {"post_auth_enum", "test_api_security"}:
+        if skill in {"post_auth_enum", "test_api_security", "execute_chain"}:
             return "retrieve"
         if skill in {
             "test_injection",
@@ -454,6 +506,7 @@ class ScanLoopState:
     refuted_findings: list[dict[str, Any]] = field(default_factory=list)
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     vector_candidates: dict[str, VectorCandidate] = field(default_factory=dict)
+    hypothesis_dag: Any = field(default_factory=_new_hypothesis_dag)
     attempt_outcomes: list[AttemptOutcome] = field(default_factory=list)
     scan_todos: dict[str, ScanTodo] = field(default_factory=dict)
     branches: dict[str, BranchState] = field(default_factory=dict)
@@ -461,6 +514,8 @@ class ScanLoopState:
     review_history: list[ReviewDecision] = field(default_factory=list)
     callback_observations: list[CallbackObservation] = field(default_factory=list)
     retrieval_observations: list[RetrievalObservation] = field(default_factory=list)
+    auth_identities: list[dict[str, Any]] = field(default_factory=list)
+    object_owner_map: dict[str, str] = field(default_factory=dict)
     waiting_reason: str = ""
     shared_notes: list[str] = field(default_factory=list)
     blocked_skill_counts: dict[str, int] = field(default_factory=dict)
@@ -500,6 +555,7 @@ class ScanLoopState:
                 evidence=existing.evidence,
             )
             self._sync_candidate_control_state(existing)
+            self._ensure_hypothesis_node_for_candidate(existing)
             return existing
 
         candidate = VectorCandidate(
@@ -527,7 +583,51 @@ class ScanLoopState:
             evidence=evidence,
         )
         self._sync_candidate_control_state(candidate)
+        self._ensure_hypothesis_node_for_candidate(candidate)
         return candidate
+
+    def _ensure_hypothesis_node_for_candidate(self, candidate: VectorCandidate) -> None:
+        dag = getattr(self, "hypothesis_dag", None)
+        if dag is None:
+            return
+        try:
+            from vxis.agent.hypothesis.dag import HypothesisNode
+
+            vector_class = _candidate_vector_class(candidate.vector_id, candidate.title)
+            status = _hypothesis_status_for_candidate(candidate.status)
+            prior = max(0.01, min(0.99, float(candidate.priority) / 100.0))
+            node = getattr(dag, "nodes", {}).get(candidate.id)
+            if node is None:
+                dag.add(
+                    HypothesisNode(
+                        node_id=candidate.id,
+                        claim=candidate.title,
+                        decision_class="recon"
+                        if vector_class in {"infra", "disclosure"}
+                        else "exploit",
+                        prior=prior,
+                        evidence=[candidate.evidence or f"seeded candidate {candidate.vector_id}"],
+                        status=status,
+                        proposed_vector_class=vector_class,
+                        surface_id=candidate.id,
+                        created_iter=candidate.created_iter,
+                        last_updated_iter=candidate.last_iter,
+                    )
+                )
+                return
+            node.claim = candidate.title or node.claim
+            node.prior = max(float(getattr(node, "prior", 0.0)), prior)
+            node.status = status
+            node.proposed_vector_class = node.proposed_vector_class or vector_class
+            node.surface_id = node.surface_id or candidate.id
+            node.last_updated_iter = max(
+                int(getattr(node, "last_updated_iter", 0) or 0),
+                candidate.last_iter,
+            )
+            if candidate.evidence and candidate.evidence not in node.evidence:
+                node.evidence.append(candidate.evidence)
+        except Exception:
+            return
 
     def ensure_scan_todo(
         self,
@@ -615,6 +715,7 @@ class ScanLoopState:
                 parent = self.branches[parent_branch_id]
                 if branch_id not in parent.child_ids:
                     parent.child_ids.append(branch_id)
+            self._ensure_hypothesis_node_for_branch(branch)
             return branch
         branch.title = title
         branch.priority = max(branch.priority, priority)
@@ -664,7 +765,61 @@ class ScanLoopState:
             if branch_id not in parent.child_ids:
                 parent.child_ids.append(branch_id)
         branch.last_iter = self.iteration
+        self._ensure_hypothesis_node_for_branch(branch)
         return branch
+
+    def _ensure_hypothesis_node_for_branch(self, branch: BranchState) -> None:
+        dag = getattr(self, "hypothesis_dag", None)
+        if dag is None:
+            return
+        try:
+            from vxis.agent.hypothesis.dag import HypothesisNode
+
+            vector_class = _candidate_vector_class(branch.vector_id, branch.title)
+            status = _hypothesis_status_for_branch(branch.status)
+            prior = max(0.01, min(0.99, float(branch.priority) / 100.0))
+            node = getattr(dag, "nodes", {}).get(branch.id)
+            if node is None:
+                parent_ids = (
+                    [branch.parent_branch_id]
+                    if branch.parent_branch_id in getattr(dag, "nodes", {})
+                    else []
+                )
+                dag.add(
+                    HypothesisNode(
+                        node_id=branch.id,
+                        claim=branch.title,
+                        decision_class="verify"
+                        if branch.role == "review_worker"
+                        else "exploit"
+                        if branch.role in {"exploit_worker", "post_exploit_worker"}
+                        else "recon",
+                        prior=prior,
+                        evidence=[branch.evidence or branch.objective or f"branch {branch.id}"],
+                        status=status,
+                        parent_ids=parent_ids,
+                        proposed_vector_class=vector_class,
+                        surface_id=branch.source_candidate_id or branch.id,
+                        created_iter=self.iteration,
+                        last_updated_iter=branch.last_iter,
+                    ),
+                    parent_ids=parent_ids,
+                )
+                return
+            node.claim = branch.title or node.claim
+            node.prior = max(float(getattr(node, "prior", 0.0)), prior)
+            node.status = status
+            node.proposed_vector_class = node.proposed_vector_class or vector_class
+            node.surface_id = node.surface_id or branch.source_candidate_id or branch.id
+            node.last_updated_iter = max(
+                int(getattr(node, "last_updated_iter", 0) or 0),
+                branch.last_iter,
+            )
+            evidence = branch.evidence or branch.objective or branch.last_summary
+            if evidence and evidence not in node.evidence:
+                node.evidence.append(evidence)
+        except Exception:
+            return
 
     def add_shared_note(self, note: str) -> None:
         clean = note.strip()
@@ -688,6 +843,70 @@ class ScanLoopState:
         if not clean:
             return
         self.blocked_skill_counts[clean] = self.blocked_skill_counts.get(clean, 0) + 1
+
+    def record_auth_identities(self, identities: Any) -> list[dict[str, Any]]:
+        """Persist authenticated principals for BOLA/role-matrix follow-ups."""
+        if not isinstance(identities, list):
+            return list(self.auth_identities)
+
+        merged: dict[str, dict[str, Any]] = {
+            str(item.get("name") or item.get("token") or idx): dict(item)
+            for idx, item in enumerate(self.auth_identities)
+            if isinstance(item, dict)
+        }
+        for index, raw in enumerate(identities):
+            if not isinstance(raw, dict):
+                continue
+            token = str(raw.get("token") or raw.get("bearer") or "").strip()
+            headers = dict(raw.get("headers") or {})
+            name = str(
+                raw.get("name")
+                or raw.get("identity")
+                or raw.get("email")
+                or raw.get("id")
+                or f"identity-{index + 1}"
+            ).strip()
+            if not name or (not token and not headers):
+                continue
+            clean = {
+                "name": name[:100],
+                "token": token,
+                "role": str(raw.get("role") or "")[:80],
+                "email": str(raw.get("email") or "")[:160],
+                "headers": headers,
+            }
+            for key in ("id", "source"):
+                if raw.get(key):
+                    clean[key] = str(raw.get(key))[:160]
+            owned_ids = raw.get("owned_ids") or raw.get("owner_ids") or raw.get("allowed_ids")
+            if owned_ids:
+                clean["owned_ids"] = [str(item) for item in list(owned_ids)[:50]]
+            denied_ids = raw.get("denied_ids") or raw.get("forbidden_ids") or raw.get("blocked_ids")
+            if denied_ids:
+                clean["denied_ids"] = [str(item) for item in list(denied_ids)[:50]]
+            merged[name] = {**merged.get(name, {}), **clean}
+
+        self.auth_identities = list(merged.values())[:12]
+        for identity in self.auth_identities:
+            name = str(identity.get("name") or "")
+            if not name:
+                continue
+            for obj_id in identity.get("owned_ids") or []:
+                self.object_owner_map.setdefault(str(obj_id), name)
+        return list(self.auth_identities)
+
+    def authz_context_params(self) -> dict[str, Any]:
+        params: dict[str, Any] = {}
+        if self.auth_identities:
+            params["identities"] = [dict(item) for item in self.auth_identities]
+            for item in self.auth_identities:
+                token = str(item.get("token") or "")
+                if token:
+                    params.setdefault("token", token)
+                    break
+        if self.object_owner_map:
+            params["owner_map"] = dict(self.object_owner_map)
+        return params
 
     def record_review_item(
         self,
@@ -926,6 +1145,7 @@ class ScanLoopState:
         }.get(branch.status, "pending")
         todo.detail = branch.last_report[:120]
         todo.last_iter = self.iteration
+        self._ensure_hypothesis_node_for_branch(branch)
 
     def active_branches(self) -> list[BranchState]:
         return sorted(
@@ -981,8 +1201,40 @@ class ScanLoopState:
             )
         )
         self._sync_candidate_control_state(candidate)
+        self._ensure_hypothesis_node_for_candidate(candidate)
+        self._record_hypothesis_attempt(candidate, tool=tool, status=status, summary=summary)
         if status == "found":
             self.add_shared_note(f"{candidate.vector_id}: {summary[:120]}")
+
+    def _record_hypothesis_attempt(
+        self,
+        candidate: VectorCandidate,
+        *,
+        tool: str,
+        status: str,
+        summary: str,
+    ) -> None:
+        dag = getattr(self, "hypothesis_dag", None)
+        if dag is None or candidate.id not in getattr(dag, "nodes", {}):
+            return
+        status_change = _hypothesis_status_for_candidate(status)
+        delta = {
+            "confirmed": 0.35,
+            "refuted": -0.45,
+            "inconclusive": -0.05,
+            "testing": 0.03,
+            "untested": 0.0,
+        }.get(status_change, 0.0)
+        try:
+            dag.update_belief(
+                candidate.id,
+                f"{tool}: {summary[:300]}",
+                delta,
+                status_change=status_change,
+                iteration=self.iteration,
+            )
+        except Exception:
+            return
 
     def open_vector_candidates(self) -> list[VectorCandidate]:
         """Return candidates that still need proof, retry, or a clear dead-end."""

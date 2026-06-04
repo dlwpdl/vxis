@@ -52,7 +52,14 @@ async def test_run_benchmark_uses_pipeline_score_detail(tmp_path: Path, monkeypa
         findings=[],
     )
 
-    async def fake_execute_pipeline(self, target_type: str, target_url: str, scan_id: str):
+    async def fake_execute_pipeline(
+        self,
+        target_type: str,
+        target_url: str,
+        scan_id: str,
+        profile: str = "crown",
+    ):
+        assert profile == "crown"
         return ctx
 
     monkeypatch.setattr(BenchmarkRunner, "_execute_pipeline", fake_execute_pipeline)
@@ -62,6 +69,42 @@ async def test_run_benchmark_uses_pipeline_score_detail(tmp_path: Path, monkeypa
 
     assert actual is expected
     assert actual.total == 321.0
+
+
+@pytest.mark.asyncio
+async def test_run_benchmark_falls_back_when_ctx_has_no_score_tracker(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    ctx = SimpleNamespace(findings=[])
+
+    async def fake_execute_pipeline(
+        self,
+        target_type: str,
+        target_url: str,
+        scan_id: str,
+        profile: str = "crown",
+    ):
+        return ctx
+
+    monkeypatch.setattr(BenchmarkRunner, "_execute_pipeline", fake_execute_pipeline)
+
+    runner = BenchmarkRunner(str(tmp_path / "baseline.json"))
+    actual = await runner.run_benchmark("web", "http://localhost:3000")
+
+    assert isinstance(actual, VXISScore)
+    assert actual.target_type == "web"
+
+
+def test_benchmark_runner_save_and_load_baseline_roundtrip(tmp_path: Path) -> None:
+    runner = BenchmarkRunner(str(tmp_path / "baseline.json"))
+    score = _score(total=432.0)
+
+    runner.save_baseline(score)
+    loaded = runner.load_baseline("web")
+
+    assert isinstance(loaded, VXISScore)
+    assert loaded.total == 432.0
 
 
 def test_vector_coverage_details_preserve_vector_ids() -> None:

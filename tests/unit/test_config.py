@@ -49,19 +49,25 @@ class TestToolSettingsDefaults:
 
 
 class TestDefaultProfiles:
-    """VXISConfig must ship with exactly the four canonical profiles."""
+    """VXISConfig must ship with core and business profile scaffolds."""
 
     @pytest.fixture()
     def config(self) -> VXISConfig:
         # Instantiate with no env vars / .env so we test pure defaults.
         return VXISConfig()
 
-    def test_four_default_profiles_exist(self, config: VXISConfig) -> None:
+    def test_default_profiles_exist(self, config: VXISConfig) -> None:
         assert set(config.profiles.keys()) == {
+            "crown",
             "passive",
             "stealth",
             "standard",
             "aggressive",
+            "continuous-devsec",
+            "vc-portfolio-monitor",
+            "pre-investment-dd",
+            "remediation-verification",
+            "compliance-mapping",
         }
 
     def test_passive_profile_is_scan_profile_instance(self, config: VXISConfig) -> None:
@@ -80,9 +86,7 @@ class TestDefaultProfiles:
         """Passive profile makes no direct network requests; rate limit is 0."""
         assert config.profiles["passive"].rate_limit == 0
 
-    def test_stealth_max_concurrency_less_than_aggressive(
-        self, config: VXISConfig
-    ) -> None:
+    def test_stealth_max_concurrency_less_than_aggressive(self, config: VXISConfig) -> None:
         assert (
             config.profiles["stealth"].max_concurrency
             < config.profiles["aggressive"].max_concurrency

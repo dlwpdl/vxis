@@ -1,7 +1,9 @@
 """Skill: test_ssrf — SSRF on URL-accepting parameters."""
 from __future__ import annotations
 import asyncio
+import json
 import logging
+import re
 from typing import Any
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from ._payload_loader import load_skill_dataset as _load_ds
@@ -15,6 +17,154 @@ HIGH_SIGNAL_PARAMS = tuple(_load_ds("test_ssrf", "high_signal_params"))
 _SSRF_DOCTRINE = list(_load_ds("test_ssrf", "doctrine"))
 
 _SSRF_FALLBACK_PARAMS = ("url", "uri", "dest", "redirect", "next", "return", "callback")
+
+_CLOUD_SECRET_KEYS = (
+    "SecretAccessKey",
+    "Token",
+    "SessionToken",
+    "access_token",
+    "refresh_token",
+    "client_secret",
+)
+
+
+def _mask_value(value: str, *, keep: int = 4) -> str:
+    text = str(value or "")
+    if len(text) <= keep:
+        return "[redacted]"
+    return f"{text[:keep]}...[redacted]"
+
+
+def _redact_cloud_secrets(text: str, *, limit: int = 600) -> str:
+    redacted = str(text or "")
+    for key in _CLOUD_SECRET_KEYS:
+        redacted = re.sub(
+            rf'("{re.escape(key)}"\s*:\s*")([^"]+)(")',
+            lambda m: f"{m.group(1)}{_mask_value(m.group(2))}{m.group(3)}",
+            redacted,
+            flags=re.IGNORECASE,
+        )
+    redacted = re.sub(
+        r"\b(ASIA|AKIA)[A-Z0-9]{12,}\b",
+        lambda m: _mask_value(m.group(0), keep=6),
+        redacted,
+    )
+    redacted = " ".join(redacted.split())
+    return redacted[:limit]
+
+
+def _json_obj(text: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text)
+    except Exception:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _find_json_value(text: str, key: str) -> str:
+    match = re.search(rf'"{re.escape(key)}"\s*:\s*"([^"]+)"', text, flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
+def _cloud_provider_hint(payload: str, desc: str, text: str, headers: Any = None) -> str:
+    blob = f"{payload} {desc} {text[:1000]}".lower()
+    header_blob = ""
+    try:
+        header_blob = " ".join(f"{k}: {v}" for k, v in headers.items()).lower()
+    except Exception:
+        header_blob = ""
+    blob = f"{blob} {header_blob}"
+    if "metadata.google" in blob or "metadata-flavor" in blob or "computeMetadata" in text:
+        return "gcp"
+    if "api-version=2021" in blob or "/metadata/instance" in blob or "subscriptionid" in blob:
+        return "azure"
+    if "accesskeyid" in blob or "secretaccesskey" in blob or "iam/security-credentials" in blob:
+        return "aws"
+    if "169.254.169.254" in blob and "latest/meta-data" in blob:
+        return "aws"
+    if "digitalocean" in blob or "/metadata/v1/" in blob:
+        return "digitalocean"
+    return ""
+
+
+def _extract_cloud_metadata(
+    *,
+    text: str,
+    payload: str,
+    desc: str,
+    headers: Any = None,
+) -> dict[str, Any]:
+    provider = _cloud_provider_hint(payload, desc, text, headers)
+    if not provider:
+        return {}
+
+    lower = text.lower()
+    data = _json_obj(text)
+    fields: list[str] = []
+    credential: dict[str, Any] = {
+        "provider": provider,
+        "payload": payload,
+        "redacted_preview": _redact_cloud_secrets(text),
+    }
+
+    if provider == "aws":
+        access_key = str(data.get("AccessKeyId") or _find_json_value(text, "AccessKeyId"))
+        secret_key = str(data.get("SecretAccessKey") or _find_json_value(text, "SecretAccessKey"))
+        token = str(data.get("Token") or _find_json_value(text, "Token"))
+        expiration = str(data.get("Expiration") or _find_json_value(text, "Expiration"))
+        if access_key:
+            fields.append("AccessKeyId")
+            credential["access_key_id"] = _mask_value(access_key, keep=6)
+        if secret_key:
+            fields.append("SecretAccessKey")
+            credential["has_secret_access_key"] = True
+        if token:
+            fields.append("Token")
+            credential["has_session_token"] = True
+        if expiration:
+            credential["expiration"] = expiration
+        if not fields and ("iam/security-credentials" in payload or "accesskeyid" in lower):
+            fields.append("metadata_role_or_listing")
+    elif provider in {"gcp", "azure"}:
+        access_token = str(data.get("access_token") or _find_json_value(text, "access_token"))
+        expires_in = str(data.get("expires_in") or data.get("expires_on") or "")
+        client_id = str(data.get("client_id") or _find_json_value(text, "client_id"))
+        if access_token:
+            fields.append("access_token")
+            credential["has_access_token"] = True
+            credential["access_token_preview"] = _mask_value(access_token)
+        if expires_in:
+            credential["expiration"] = expires_in
+        if client_id:
+            credential["client_id"] = client_id
+        if not fields and any(
+            marker in lower
+            for marker in ("service-accounts", "compute", "subscriptionid", "resourcegroupname")
+        ):
+            fields.append("metadata_document")
+    elif provider == "digitalocean":
+        if any(marker in lower for marker in ("droplet_id", "hostname", "vendor_data", "user_data")):
+            fields.append("metadata_document")
+
+    if not fields:
+        return {}
+    credential["fields"] = sorted(set(fields))
+    return {
+        "provider": provider,
+        "credential_fields": credential["fields"],
+        "cloud_credentials": credential if any("token" in f.lower() or "key" in f.lower() for f in fields) else {},
+        "cloud_metadata": {
+            "provider": provider,
+            "payload": payload,
+            "fields": credential["fields"],
+            "redacted_preview": credential["redacted_preview"],
+        },
+        "credential_evidence": {
+            "provider": provider,
+            "fields": credential["fields"],
+            "redacted_preview": credential["redacted_preview"],
+        },
+    }
 
 
 def _ssrf_payloads_for_round(round_num: int) -> list[dict[str, str]]:
@@ -136,6 +286,58 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
 
                 body = r.text.lower()
                 size = r.body_length
+                cloud_signal = _extract_cloud_metadata(
+                    text=r.text,
+                    payload=p["payload"],
+                    desc=p["desc"],
+                    headers=getattr(r, "headers", {}),
+                )
+                response_preview = (
+                    cloud_signal.get("credential_evidence", {}).get("redacted_preview", "")
+                    if cloud_signal
+                    else r.text[:300]
+                )
+
+                if cloud_signal:
+                    has_creds = bool(cloud_signal.get("cloud_credentials"))
+                    finding = {
+                        "type": "ssrf_cloud_metadata_credentials"
+                        if has_creds
+                        else "ssrf_cloud_metadata",
+                        "payload": p["payload"],
+                        "param": target_param,
+                        "desc": p["desc"],
+                        "evidence": (
+                            f"Detected {cloud_signal['provider']} metadata "
+                            f"fields {cloud_signal.get('credential_fields', [])} "
+                            f"in response (status {r.status})"
+                        ),
+                        "response_preview": response_preview,
+                        "control": {
+                            "baseline_status": baseline_status,
+                            "baseline_size": baseline_size,
+                            "payload_status": r.status,
+                            "payload_size": size,
+                            "matched_signal": ",".join(
+                                cloud_signal.get("credential_fields", [])
+                            ),
+                            "baseline_preview": base_r.text[:180],
+                            "payload_preview": response_preview[:180],
+                        },
+                        "severity": "critical" if has_creds else "high",
+                        "doctrine": doctrine_rows,
+                        "cloud_metadata": cloud_signal.get("cloud_metadata"),
+                        "credential_evidence": cloud_signal.get("credential_evidence"),
+                    }
+                    if cloud_signal.get("cloud_credentials"):
+                        finding["cloud_credentials"] = cloud_signal["cloud_credentials"]
+                    findings.append(finding)
+                    logger.info(
+                        "SSRF cloud metadata found: %s via %s",
+                        cloud_signal["provider"],
+                        target_param,
+                    )
+                    return
 
                 if p["detect"] and p["detect"].lower() in body:
                     findings.append({
@@ -144,7 +346,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
                         "param": target_param,
                         "desc": p["desc"],
                         "evidence": f"Detected '{p['detect']}' in response (status {r.status})",
-                        "response_preview": r.text[:300],
+                        "response_preview": response_preview,
                         "control": {
                             "baseline_status": baseline_status,
                             "baseline_size": baseline_size,
@@ -152,7 +354,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
                             "payload_size": size,
                             "matched_signal": p["detect"],
                             "baseline_preview": base_r.text[:180],
-                            "payload_preview": r.text[:180],
+                            "payload_preview": response_preview[:180],
                         },
                         "severity": "critical",
                         "doctrine": doctrine_rows,
@@ -167,14 +369,14 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
                         "param": target_param,
                         "desc": p["desc"],
                         "evidence": f"Response size {size} vs baseline {baseline_size} (status {r.status})",
-                        "response_preview": r.text[:300],
+                        "response_preview": response_preview,
                         "control": {
                             "baseline_status": baseline_status,
                             "baseline_size": baseline_size,
                             "payload_status": r.status,
                             "payload_size": size,
                             "baseline_preview": base_r.text[:180],
-                            "payload_preview": r.text[:180],
+                            "payload_preview": response_preview[:180],
                         },
                         "severity": "high",
                         "doctrine": doctrine_rows,
@@ -187,7 +389,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
                     "size": size,
                     "baseline_status": baseline_status,
                     "baseline_size": baseline_size,
-                    "response_preview": r.text[:180],
+                    "response_preview": response_preview[:180],
                     "doctrine_families": [row.get("family", "") for row in doctrine_rows],
                 })
 
@@ -201,10 +403,22 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
         if key not in seen:
             seen.add(key)
             unique.append(f)
+    cloud_credentials = [
+        f.get("cloud_credentials")
+        for f in unique
+        if isinstance(f, dict) and f.get("cloud_credentials")
+    ]
+    cloud_metadata = [
+        f.get("cloud_metadata")
+        for f in unique
+        if isinstance(f, dict) and f.get("cloud_metadata")
+    ]
 
     return {
         "vulnerable": len(unique) > 0,
         "findings": unique,
+        "cloud_credentials": cloud_credentials,
+        "cloud_metadata": cloud_metadata,
         "surface_hints": [
             {
                 "param": param,

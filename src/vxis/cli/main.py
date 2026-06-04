@@ -28,6 +28,13 @@ from vxis.cli.main_helpers import (
     _load_scan_instructions,
     _print_banner,
 )
+from vxis.config.schema import normalize_scan_profile_name
+
+
+PROFILE_HELP = (
+    "Scan profile: crown | stealth | standard | aggressive | continuous-devsec | "
+    "vc-portfolio-monitor | pre-investment-dd | remediation-verification"
+)
 
 app = typer.Typer(
     name="vxis",
@@ -53,12 +60,14 @@ app.add_typer(client_app, name="client")
 db_app = typer.Typer(help="Database migration helpers (Alembic)", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 
+
 @app.callback()
 def _app_callback(ctx: typer.Context) -> None:
     """인자 없이 vxis 실행 시 인터랙티브 모드 진입."""
     if ctx.invoked_subcommand is None:
         try:
             from vxis.cli.interactive import run_interactive
+
             run_interactive()
         except ImportError:
             # InquirerPy 미설치 시 기존 help 표시
@@ -87,7 +96,9 @@ def help() -> None:
 
 @app.command()
 def scan(
-    target: Optional[str] = typer.Argument(default=None, help="Target URL or domain (mutually exclusive with --manifest)"),
+    target: Optional[str] = typer.Argument(
+        default=None, help="Target URL or domain (mutually exclusive with --manifest)"
+    ),
     manifest: Optional[Path] = typer.Option(
         None,
         "--manifest",
@@ -95,10 +106,10 @@ def scan(
         help="Path to a scan.yml multi-target manifest (mutually exclusive with TARGET argument).",
     ),
     profile: str = typer.Option(
-        "standard",
+        "crown",
         "--profile",
         "-p",
-        help="Scan profile: stealth | standard | aggressive",
+        help=PROFILE_HELP,
     ),
     client: Optional[str] = typer.Option(
         None,
@@ -143,7 +154,7 @@ def scan(
         False,
         "--allow-inject",
         help="Skip the interactive approval gate and auto-approve injection. "
-             "ONLY use on targets you own / are explicitly authorized to test.",
+        "ONLY use on targets you own / are explicitly authorized to test.",
     ),
     plugins: Optional[str] = typer.Option(
         None,
@@ -154,7 +165,7 @@ def scan(
         "web",
         "--kind",
         help="Target surface: web | desktop | mobile | game (phase-A: web only; "
-             "desktop/mobile/game land in phase-B+).",
+        "desktop/mobile/game land in phase-B+).",
     ),
     instruction: Optional[str] = typer.Option(
         None,
@@ -175,6 +186,8 @@ def scan(
     --resume: 이전 스캔의 체크포인트에서 재개
     --manifest: 여러 타겟을 한 번에 스캔 (scan.yml)
     """
+    profile = normalize_scan_profile_name(profile)
+
     # ── Multi-target manifest path ─────────────────────────────────
     if manifest is not None:
         if target is not None:
@@ -246,6 +259,7 @@ def scan(
     else:
         # Route ALL logs to file so Rich Live TUI is never interrupted
         from datetime import datetime as _dt
+
         log_dir = Path("logs")
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"scan_{_dt.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -293,16 +307,28 @@ def scan(
     pf_table = Table.grid(padding=(0, 2))
     pf_table.add_column(style="bold", no_wrap=True)
     pf_table.add_column()
-    _t_status = f"[green]✓ {pf.target_latency_ms:.0f}ms[/green]" if pf.target_reachable else "[red]✗ unreachable[/red]"
+    _t_status = (
+        f"[green]✓ {pf.target_latency_ms:.0f}ms[/green]"
+        if pf.target_reachable
+        else "[red]✗ unreachable[/red]"
+    )
     pf_table.add_row("Target:", f"[cyan]{target}[/cyan] {_t_status}")
-    _b_status = f"[green]✓ {pf.brain_backend}[/green]" if pf.brain_ready else "[red]✗ no Brain[/red]"
+    _b_status = (
+        f"[green]✓ {pf.brain_backend}[/green]" if pf.brain_ready else "[red]✗ no Brain[/red]"
+    )
     pf_table.add_row("Brain:", _b_status)
-    _d_status = "[green]✓ available[/green]" if pf.docker_available else "[yellow]⚠ not available[/yellow]"
+    _d_status = (
+        "[green]✓ available[/green]" if pf.docker_available else "[yellow]⚠ not available[/yellow]"
+    )
     pf_table.add_row("Docker:", _d_status)
     _g_status = "[green]✓ set[/green]" if pf.github_token else "[yellow]⚠ not set[/yellow]"
     pf_table.add_row("GitHub Token:", _g_status)
     if ghost:
-        _p_status = f"[green]✓ {pf.proxy_pool_size} proxies[/green]" if pf.proxy_pool_size else "[yellow]⚠ empty pool (UA only)[/yellow]"
+        _p_status = (
+            f"[green]✓ {pf.proxy_pool_size} proxies[/green]"
+            if pf.proxy_pool_size
+            else "[yellow]⚠ empty pool (UA only)[/yellow]"
+        )
         pf_table.add_row("Proxy Pool:", _p_status)
     if selected_plugins:
         pf_table.add_row("Plugins:", ", ".join(selected_plugins))
@@ -338,13 +364,16 @@ def scan(
 
         if interactive:
             from vxis.agent.brain_interactive import InteractiveBrain
+
             brain = InteractiveBrain()
         else:
             from vxis.agent.brain import AgentBrain
+
             brain = AgentBrain()
 
         # Config + 환경변수로 profile/ghost 전파
         import os as _os
+
         _os.environ["VXIS_SCAN_PROFILE"] = profile
         if ghost:
             _os.environ["VXIS_GHOST"] = "1"
@@ -352,6 +381,7 @@ def scan(
         config = None
         try:
             from vxis.config.schema import VXISConfig
+
             config = VXISConfig()
             config.active_profile = profile
         except Exception:
@@ -387,21 +417,23 @@ def scan(
                 pass
 
             console.print()
-            console.print(Panel.fit(
-                f"[bold red]⚠ INJECTION APPROVAL REQUIRED[/bold red]\n\n"
-                f"Target: [cyan]{summary.get('target')}[/cyan]\n"
-                f"Title:  {summary.get('title') or '(none)'}\n"
-                f"Frameworks: {', '.join(summary.get('frameworks') or []) or '(none)'}\n"
-                f"Phases to run: {summary.get('phase_count')} "
-                f"(SQLi/XSS/RCE/SSRF/Path/Cmd 등)\n\n"
-                f"[bold]Choose mode:[/bold]\n"
-                f"  [green]R[/green] = [green]read-only[/green] (GET/HEAD probes only; POST/PUT/DELETE go to deferred queue)\n"
-                f"  [yellow]F[/yellow] = [yellow]full[/yellow] (all HTTP methods auto-execute — may MUTATE DATA)\n"
-                f"  [red]N[/red] = [red]deny[/red] (skip injection entirely, recon-only)\n\n"
-                f"[dim]Default is R (safest). F on customer products can DELETE/MODIFY real data.[/dim]",
-                title="VXIS Safety Gate",
-                border_style="red",
-            ))
+            console.print(
+                Panel.fit(
+                    f"[bold red]⚠ INJECTION APPROVAL REQUIRED[/bold red]\n\n"
+                    f"Target: [cyan]{summary.get('target')}[/cyan]\n"
+                    f"Title:  {summary.get('title') or '(none)'}\n"
+                    f"Frameworks: {', '.join(summary.get('frameworks') or []) or '(none)'}\n"
+                    f"Phases to run: {summary.get('phase_count')} "
+                    f"(SQLi/XSS/RCE/SSRF/Path/Cmd 등)\n\n"
+                    f"[bold]Choose mode:[/bold]\n"
+                    f"  [green]R[/green] = [green]read-only[/green] (GET/HEAD probes only; POST/PUT/DELETE go to deferred queue)\n"
+                    f"  [yellow]F[/yellow] = [yellow]full[/yellow] (all HTTP methods auto-execute — may MUTATE DATA)\n"
+                    f"  [red]N[/red] = [red]deny[/red] (skip injection entirely, recon-only)\n\n"
+                    f"[dim]Default is R (safest). F on customer products can DELETE/MODIFY real data.[/dim]",
+                    title="VXIS Safety Gate",
+                    border_style="red",
+                )
+            )
             try:
                 answer = input("Mode? [R]eadonly / [F]ull / [N]o (default R): ").strip().lower()
             except (EOFError, KeyboardInterrupt):
@@ -415,7 +447,9 @@ def scan(
                 console.print("[red]❌ DENIED — recon-only[/red]")
             else:
                 mode = "readonly"
-                console.print("[green]✅ READ-ONLY mode — GET/HEAD only; mutations deferred to end-of-scan approval[/green]")
+                console.print(
+                    "[green]✅ READ-ONLY mode — GET/HEAD only; mutations deferred to end-of-scan approval[/green]"
+                )
             console.print()
 
             # Live 재시작
@@ -439,15 +473,17 @@ def scan(
                 pass
 
             console.print()
-            console.print(Panel.fit(
-                f"[bold yellow]⚠ DATA-MUTATING ACTIONS — PER-ACTION APPROVAL[/bold yellow]\n\n"
-                f"Brain queued [cyan]{len(actions)}[/cyan] requests that would "
-                f"mutate data (POST/PUT/PATCH/DELETE).\n"
-                f"You will be asked to approve each one individually.\n\n"
-                f"[dim]Press Enter (or n) to DENY — safe default.[/dim]",
-                title="Deferred Action Approval",
-                border_style="yellow",
-            ))
+            console.print(
+                Panel.fit(
+                    f"[bold yellow]⚠ DATA-MUTATING ACTIONS — PER-ACTION APPROVAL[/bold yellow]\n\n"
+                    f"Brain queued [cyan]{len(actions)}[/cyan] requests that would "
+                    f"mutate data (POST/PUT/PATCH/DELETE).\n"
+                    f"You will be asked to approve each one individually.\n\n"
+                    f"[dim]Press Enter (or n) to DENY — safe default.[/dim]",
+                    title="Deferred Action Approval",
+                    border_style="yellow",
+                )
+            )
 
             approvals: list[bool] = []
             for action in actions:
@@ -461,6 +497,7 @@ def scan(
                 console.print(f"     [dim]{action.description_en[:140]}[/dim]")
                 if action.data:
                     import json as _j
+
                     data_preview = _j.dumps(action.data, ensure_ascii=False)[:200]
                     console.print(f"     [dim]data:[/dim] {data_preview}")
 
@@ -471,8 +508,7 @@ def scan(
                 ok = answer in ("y", "yes")
                 approvals.append(ok)
                 console.print(
-                    f"     [{'green' if ok else 'red'}]"
-                    f"{'✅ APPROVED' if ok else '❌ DENIED'}[/]"
+                    f"     [{'green' if ok else 'red'}]{'✅ APPROVED' if ok else '❌ DENIED'}[/]"
                 )
 
             _apv = sum(approvals)
@@ -538,15 +574,19 @@ def scan(
     console.print()  # spacing after live display
 
     severity_styles = {
-        "critical": "bold red", "high": "red", "medium": "yellow",
-        "low": "blue", "informational": "dim",
+        "critical": "bold red",
+        "high": "red",
+        "medium": "yellow",
+        "low": "blue",
+        "informational": "dim",
     }
 
     # Findings detail table
     if ctx.findings:
         finding_table = Table(
             title=f"[bold]Findings — {ctx.scan_id}[/bold]",
-            show_header=True, header_style="bold",
+            show_header=True,
+            header_style="bold",
             border_style="green",
         )
         finding_table.add_column("ID", no_wrap=True, width=12)
@@ -559,17 +599,21 @@ def scan(
             sev = sev_val.upper()
             style = severity_styles.get(sev_val, "")
             title = f.title.split("|||")[0][:55]
-            finding_table.add_row(f.id, f"[{style}]{sev}[/{style}]", title, f.affected_component[:30])
+            finding_table.add_row(
+                f.id, f"[{style}]{sev}[/{style}]", title, f.affected_component[:30]
+            )
 
         console.print(finding_table)
     else:
-        console.print(Panel(
-            "[yellow]No findings discovered.[/yellow]\n"
-            "[dim]This could mean: target is well-secured, scan was limited, "
-            "or pre-flight issues prevented full execution.[/dim]",
-            title="No Findings",
-            border_style="yellow",
-        ))
+        console.print(
+            Panel(
+                "[yellow]No findings discovered.[/yellow]\n"
+                "[dim]This could mean: target is well-secured, scan was limited, "
+                "or pre-flight issues prevented full execution.[/dim]",
+                title="No Findings",
+                border_style="yellow",
+            )
+        )
 
     aggregated_findings = list(getattr(ctx, "aggregated_findings", []) or [])
     prior_scan_count = int((getattr(ctx, "target_memory", {}) or {}).get("prior_scan_count") or 0)
@@ -583,7 +627,8 @@ def scan(
     if aggregated_findings and prior_scan_count > 0:
         agg_table = Table(
             title=f"[bold]Target Aggregate — {prior_scan_count} prior scan(s) + current[/bold]",
-            show_header=True, header_style="bold",
+            show_header=True,
+            header_style="bold",
             border_style="cyan",
         )
         agg_table.add_column("Severity", no_wrap=True, width=10)
@@ -613,7 +658,9 @@ def scan(
     # Score
     vxis_score = getattr(ctx, "vxis_score", None)
     if vxis_score:
-        score_color = "green" if vxis_score.total >= 700 else ("yellow" if vxis_score.total >= 400 else "red")
+        score_color = (
+            "green" if vxis_score.total >= 700 else ("yellow" if vxis_score.total >= 400 else "red")
+        )
         console.print(
             f"\n[bold]VXIS Score:[/bold] "
             f"[{score_color}]{vxis_score.total:.1f}/1000[/{score_color}] "
@@ -639,6 +686,7 @@ def scan(
             get_llm_call_count as _get_llm_calls,
             get_brain_decision_count as _get_brain_decisions,
         )
+
         _llm_calls = _get_llm_calls()
         _brain_decisions = _get_brain_decisions()
     except Exception:
@@ -666,7 +714,10 @@ def scan(
     # Report path (Phase 6이 리포트 생성했으면)
     if ctx.findings:
         from urllib.parse import urlparse as _up
-        _safe = _up(target.replace("ghost://", "")).netloc.replace(".", "_") or target.replace("/", "_")
+
+        _safe = _up(target.replace("ghost://", "")).netloc.replace(".", "_") or target.replace(
+            "/", "_"
+        )
         _report_path = Path(f"reports/VXIS_Pipeline_{_safe}.html")
         if _report_path.exists():
             console.print(f"[dim]Report:[/dim] [underline]{_report_path}[/underline]")
@@ -719,14 +770,10 @@ def report(
 
         async with get_session(engine) as session:
             # Look up the scan record
-            result = await session.execute(
-                select(ScanRecord).where(ScanRecord.id == int(scan_id))
-            )
+            result = await session.execute(select(ScanRecord).where(ScanRecord.id == int(scan_id)))
             scan = result.scalar_one_or_none()
             if scan is None:
-                err_console.print(
-                    f"[bold red]Scan not found:[/bold red] {scan_id}"
-                )
+                err_console.print(f"[bold red]Scan not found:[/bold red] {scan_id}")
                 raise typer.Exit(code=1)
 
             # Load associated findings
@@ -742,7 +789,9 @@ def report(
             scan_id=str(scan_id),
             client_name=scan.target,
             target=scan.target,
-            scan_date=scan.started_at.strftime("%Y-%m-%d") if scan.started_at else str(date.today()),
+            scan_date=scan.started_at.strftime("%Y-%m-%d")
+            if scan.started_at
+            else str(date.today()),
             findings=findings,
         )
 
@@ -801,14 +850,10 @@ def attestation(
         engine = create_engine(db_url)
 
         async with get_session(engine) as session:
-            result = await session.execute(
-                select(ScanRecord).where(ScanRecord.id == int(scan_id))
-            )
+            result = await session.execute(select(ScanRecord).where(ScanRecord.id == int(scan_id)))
             scan = result.scalar_one_or_none()
             if scan is None:
-                err_console.print(
-                    f"[bold red]Scan not found:[/bold red] {scan_id}"
-                )
+                err_console.print(f"[bold red]Scan not found:[/bold red] {scan_id}")
                 raise typer.Exit(code=1)
 
             findings_result = await session.execute(
@@ -822,7 +867,9 @@ def attestation(
             scan_id=str(scan_id),
             client_name=scan.target,
             target=scan.target,
-            scan_date=scan.started_at.strftime("%Y-%m-%d") if scan.started_at else str(date.today()),
+            scan_date=scan.started_at.strftime("%Y-%m-%d")
+            if scan.started_at
+            else str(date.today()),
             findings=findings,
         )
 
@@ -907,10 +954,10 @@ def plugins_cmd(
 def batch(
     csv_file: Path = typer.Argument(help="CSV file with target portfolio"),
     profile: str = typer.Option(
-        "standard",
+        "crown",
         "--profile",
         "-p",
-        help="Scan profile: passive | stealth | standard | aggressive",
+        help=PROFILE_HELP,
     ),
     max_concurrent: int = typer.Option(
         3,
@@ -927,6 +974,8 @@ def batch(
 ) -> None:
     """Batch scan multiple targets from a CSV portfolio file."""
     from vxis.core.batch import BatchScanner
+
+    profile = normalize_scan_profile_name(profile)
 
     _print_banner()
 
@@ -947,19 +996,13 @@ def batch(
         f"[bold]Batch scan:[/bold] {len(targets)} target(s) from "
         f"[cyan]{csv_file}[/cyan] using profile '[yellow]{profile}[/yellow]'"
     )
-    console.print(
-        f"[dim]Concurrency: {max_concurrent} | Output: {output_dir}[/dim]"
-    )
+    console.print(f"[dim]Concurrency: {max_concurrent} | Output: {output_dir}[/dim]")
 
     completed: list = []
 
     def _on_complete(result) -> None:
         completed.append(result)
-        status = (
-            "[green]OK[/green]"
-            if result.succeeded
-            else f"[red]FAILED[/red]: {result.error}"
-        )
+        status = "[green]OK[/green]" if result.succeeded else f"[red]FAILED[/red]: {result.error}"
         console.print(
             f"  [{len(completed)}/{len(targets)}] "
             f"[cyan]{result.target.name}[/cyan] ({result.target.domain}) — {status}"
@@ -1076,14 +1119,10 @@ def export(
         engine = create_engine(db_url)
 
         async with get_session(engine) as session:
-            result = await session.execute(
-                select(ScanRecord).where(ScanRecord.id == int(scan_id))
-            )
+            result = await session.execute(select(ScanRecord).where(ScanRecord.id == int(scan_id)))
             scan = result.scalar_one_or_none()
             if scan is None:
-                err_console.print(
-                    f"[bold red]Scan not found:[/bold red] {scan_id}"
-                )
+                err_console.print(f"[bold red]Scan not found:[/bold red] {scan_id}")
                 raise typer.Exit(code=1)
 
             findings_result = await session.execute(
@@ -1097,7 +1136,9 @@ def export(
             scan_id=str(scan_id),
             client_name=scan.target,
             target=scan.target,
-            scan_date=scan.started_at.strftime("%Y-%m-%d") if scan.started_at else str(date.today()),
+            scan_date=scan.started_at.strftime("%Y-%m-%d")
+            if scan.started_at
+            else str(date.today()),
             findings=findings,
         )
 
@@ -1141,15 +1182,14 @@ def export(
         err_console.print(f"[bold red]Export failed:[/bold red] {exc}")
         raise typer.Exit(code=1) from exc
 
-    console.print(
-        f"[bold green]Exported to:[/bold green] [underline]{result_path}[/underline]"
-    )
+    console.print(f"[bold green]Exported to:[/bold green] [underline]{result_path}[/underline]")
 
 
 @app.command()
 def setup() -> None:
     """도구 설치 현황 확인 및 미설치 도구 자동 설치."""
     from vxis.cli.installer import install_interactive
+
     install_interactive()
 
 
@@ -1423,7 +1463,9 @@ def client_list() -> None:
     clients = manager.list_clients()
 
     if not clients:
-        console.print("[yellow]No clients found.[/yellow] Use [bold]vxis client add[/bold] to create one.")
+        console.print(
+            "[yellow]No clients found.[/yellow] Use [bold]vxis client add[/bold] to create one."
+        )
         return
 
     table = Table(
@@ -1520,10 +1562,10 @@ def client_remove(
 def client_scan(
     client_id: str = typer.Argument(help="Client ID slug to scan"),
     profile: str = typer.Option(
-        "standard",
+        "crown",
         "--profile",
         "-p",
-        help="Scan profile: passive | stealth | standard | aggressive",
+        help=PROFILE_HELP,
     ),
 ) -> None:
     """Scan all of a client's authorised domains and generate branded reports."""
@@ -1532,6 +1574,8 @@ def client_scan(
     from vxis.report.branding_engine import BrandingEngine
     from vxis.report.generator import ReportData, ReportGenerator
     from datetime import date
+
+    profile = normalize_scan_profile_name(profile)
 
     manager = _get_client_manager()
     c = manager.get_client(client_id)
@@ -1735,7 +1779,9 @@ def kb_show(
         for ref in info.references:
             panel_lines.append(f"  • {ref}")
 
-    console.print(Panel("\n".join(panel_lines), title=f"[bold]{info.vuln_type}[/bold]", border_style="cyan"))
+    console.print(
+        Panel("\n".join(panel_lines), title=f"[bold]{info.vuln_type}[/bold]", border_style="cyan")
+    )
 
 
 @kb_app.command("list")
@@ -1849,10 +1895,12 @@ def _run_scheduled_scan(target: str, profile: str) -> Optional[str]:
 def schedule_add(
     target: str = typer.Argument(help="Target URL or domain"),
     cron: str = typer.Option(..., "--cron", help="Cron expression e.g. '0 */6 * * *' or '@daily'"),
-    profile: str = typer.Option("standard", "--profile", "-p", help="Scan profile"),
+    profile: str = typer.Option("crown", "--profile", "-p", help=PROFILE_HELP),
 ) -> None:
     """Register a new scheduled scan|||새 예약 스캔 등록."""
     from vxis.scheduler import ScheduleStore
+
+    profile = normalize_scan_profile_name(profile)
 
     store = ScheduleStore()
     sched = store.add_schedule(target=target, cron_expr=cron, profile=profile)
@@ -1996,7 +2044,7 @@ async def _diff_latest_two_for_target(target: str) -> None:
         result = await session.execute(
             select(ScanRecord)
             .where(ScanRecord.target == target)
-            .order_by(ScanRecord.created_at.desc())
+            .order_by(ScanRecord.started_at.desc())
             .limit(2)
         )
         scans = list(result.scalars().all())
@@ -2013,9 +2061,7 @@ async def _diff_latest_two_for_target(target: str) -> None:
     )
 
     if diff.new_findings or diff.changed_findings:
-        console.print(
-            "[bold red]⚠ Regression detected!|||회귀 발견![/bold red]"
-        )
+        console.print("[bold red]⚠ Regression detected!|||회귀 발견![/bold red]")
         try:
             from vxis.integrations import notify_regression  # type: ignore
 
@@ -2050,12 +2096,13 @@ def schedule_install_cron(
 @app.command("retest")
 def retest_cmd(
     scan_id: int = typer.Argument(help="Original scan ID to re-test"),
-    profile: str = typer.Option("standard", "--profile", "-p", help="Scan profile"),
+    profile: str = typer.Option("crown", "--profile", "-p", help=PROFILE_HELP),
 ) -> None:
     """Re-scan the same target as a previous scan and diff with it.
 
     |||이전 스캔과 동일한 타겟을 재스캔하여 diff.
     """
+    profile = normalize_scan_profile_name(profile)
 
     async def _retest() -> None:
         from sqlalchemy import select
@@ -2067,9 +2114,7 @@ def retest_cmd(
         config = _get_config()
         engine = create_engine(config.db_url)
         async with get_session(engine) as session:
-            result = await session.execute(
-                select(ScanRecord).where(ScanRecord.id == scan_id)
-            )
+            result = await session.execute(select(ScanRecord).where(ScanRecord.id == scan_id))
             original = result.scalar_one_or_none()
         if not original:
             err_console.print(f"[red]Scan {scan_id} not found[/red]")
@@ -2084,7 +2129,7 @@ def retest_cmd(
             result = await session.execute(
                 select(ScanRecord)
                 .where(ScanRecord.target == target)
-                .order_by(ScanRecord.created_at.desc())
+                .order_by(ScanRecord.started_at.desc())
                 .limit(1)
             )
             new_scan = result.scalar_one_or_none()
@@ -2130,6 +2175,7 @@ def _load_proposals_from_dir(directory: Path) -> list[dict]:
     if not directory.exists():
         return []
     import json as _json
+
     proposals = []
     for path in sorted(directory.glob("*.json")):
         try:
@@ -2142,11 +2188,14 @@ def _load_proposals_from_dir(directory: Path) -> list[dict]:
 
 @news_app.command("pending")
 def news_pending(
-    risk: Optional[str] = typer.Option(None, "--risk", help="Filter by risk: low/medium/high/critical"),
+    risk: Optional[str] = typer.Option(
+        None, "--risk", help="Filter by risk: low/medium/high/critical"
+    ),
     limit: int = typer.Option(20, "--limit", "-n", help="Max proposals to show"),
 ) -> None:
     """List proposals waiting for review."""
     from pathlib import Path as _P
+
     pending_dir = _P(".vxis/signals/pending")
     proposals = _load_proposals_from_dir(pending_dir)
 
@@ -2176,8 +2225,12 @@ def news_pending(
         source = p.get("source_url", "")[:14]
         rat = p.get("rationale_en", "")[:38]
         table.add_row(
-            rid, ctype, f"[{style}]{risk_val}[/{style}]",
-            f"{conf:.2f}", source, rat,
+            rid,
+            ctype,
+            f"[{style}]{risk_val}[/{style}]",
+            f"{conf:.2f}",
+            source,
+            rat,
         )
 
     console.print(table)
@@ -2190,24 +2243,27 @@ def news_show(
     """Show full details of a proposal."""
     from pathlib import Path as _P
     import json as _json
+
     for subdir in ("pending", "applied", "rejected", "auto_applied"):
         path = _P(f".vxis/signals/{subdir}") / f"{proposal_id}.json"
         if path.exists():
             data = _json.loads(path.read_text())
-            console.print(Panel(
-                f"[bold]Proposal ID:[/bold] {data.get('proposal_id')}\n"
-                f"[bold]Status:[/bold] {data.get('status', subdir)}\n"
-                f"[bold]Change Type:[/bold] {data.get('change_type')}\n"
-                f"[bold]Risk:[/bold] {data.get('risk')}\n"
-                f"[bold]Confidence:[/bold] {data.get('confidence', 0):.2f}\n"
-                f"[bold]Target File:[/bold] {data.get('target_file')}\n"
-                f"[bold]Source:[/bold] {data.get('source_url')}\n"
-                f"\n[bold cyan]Rationale (EN):[/bold cyan]\n{data.get('rationale_en', '')}\n"
-                f"\n[bold cyan]Rationale (KO):[/bold cyan]\n{data.get('rationale_ko', '')}\n"
-                f"\n[bold cyan]Change Data:[/bold cyan]\n{_json.dumps(data.get('change_data', {}), indent=2, ensure_ascii=False)}",
-                title=f"Proposal: {proposal_id}",
-                border_style="cyan",
-            ))
+            console.print(
+                Panel(
+                    f"[bold]Proposal ID:[/bold] {data.get('proposal_id')}\n"
+                    f"[bold]Status:[/bold] {data.get('status', subdir)}\n"
+                    f"[bold]Change Type:[/bold] {data.get('change_type')}\n"
+                    f"[bold]Risk:[/bold] {data.get('risk')}\n"
+                    f"[bold]Confidence:[/bold] {data.get('confidence', 0):.2f}\n"
+                    f"[bold]Target File:[/bold] {data.get('target_file')}\n"
+                    f"[bold]Source:[/bold] {data.get('source_url')}\n"
+                    f"\n[bold cyan]Rationale (EN):[/bold cyan]\n{data.get('rationale_en', '')}\n"
+                    f"\n[bold cyan]Rationale (KO):[/bold cyan]\n{data.get('rationale_ko', '')}\n"
+                    f"\n[bold cyan]Change Data:[/bold cyan]\n{_json.dumps(data.get('change_data', {}), indent=2, ensure_ascii=False)}",
+                    title=f"Proposal: {proposal_id}",
+                    border_style="cyan",
+                )
+            )
             return
     err_console.print(f"[red]Proposal not found:[/red] {proposal_id}")
     raise typer.Exit(code=1)
@@ -2245,17 +2301,23 @@ def news_approve(
     # Log to changelog
     try:
         from vxis.growth.changelog import ChangeLog
+
         log = ChangeLog()
-        log.record("proposal_approved_manually", {
-            "proposal_id": proposal_id,
-            "change_type": data.get("change_type"),
-        })
+        log.record(
+            "proposal_approved_manually",
+            {
+                "proposal_id": proposal_id,
+                "change_type": data.get("change_type"),
+            },
+        )
     except Exception:
         pass
 
     console.print(f"[green]✓ Approved:[/green] {proposal_id}")
     console.print(f"  Moved to: {applied_path}")
-    console.print("[dim]Note: real code modification requires dry_run=false in configs/growth_bootstrap.toml[/dim]")
+    console.print(
+        "[dim]Note: real code modification requires dry_run=false in configs/growth_bootstrap.toml[/dim]"
+    )
 
 
 @news_app.command("reject")
@@ -2287,11 +2349,15 @@ def news_reject(
 
     try:
         from vxis.growth.changelog import ChangeLog
+
         log = ChangeLog()
-        log.record("proposal_rejected_manually", {
-            "proposal_id": proposal_id,
-            "reason": reason,
-        })
+        log.record(
+            "proposal_rejected_manually",
+            {
+                "proposal_id": proposal_id,
+                "reason": reason,
+            },
+        )
     except Exception:
         pass
 
@@ -2308,6 +2374,7 @@ def news_rollback(
     """Rollback a previously applied proposal."""
     try:
         from vxis.growth.rollback import rollback_proposal
+
         success = rollback_proposal(proposal_id, reason=reason)
         if success:
             console.print(f"[green]✓ Rolled back:[/green] {proposal_id}")
@@ -2326,6 +2393,7 @@ def news_digest(
     """Show growth activity summary for the last N days."""
     try:
         from vxis.growth.changelog import ChangeLog
+
         log = ChangeLog()
         summary = log.summary(days=days)
     except Exception as exc:
@@ -2356,10 +2424,10 @@ def news_stats() -> None:
 
     dirs = [
         ("Inbox (raw signals)", ".vxis/signals/inbox"),
-        ("Pending (review)",    ".vxis/signals/pending"),
-        ("Applied",             ".vxis/signals/applied"),
-        ("Rejected",            ".vxis/signals/rejected"),
-        ("Extraction cache",    ".vxis/cache/extractions"),
+        ("Pending (review)", ".vxis/signals/pending"),
+        ("Applied", ".vxis/signals/applied"),
+        ("Rejected", ".vxis/signals/rejected"),
+        ("Extraction cache", ".vxis/cache/extractions"),
     ]
 
     for label, path_str in dirs:
@@ -2375,17 +2443,20 @@ def news_stats() -> None:
     # Load and show bootstrap config
     try:
         from vxis.growth.config import load_bootstrap_config
+
         cfg = load_bootstrap_config()
         console.print()
-        console.print(Panel(
-            f"[bold]Dry-run:[/bold] {cfg['apply']['dry_run']}\n"
-            f"[bold]Trust threshold:[/bold] {cfg['filtering']['trust_threshold_for_llm']}\n"
-            f"[bold]Auto-apply threshold:[/bold] {cfg['apply']['auto_apply_threshold']}\n"
-            f"[bold]Monthly LLM cap:[/bold] ${cfg['budget']['max_monthly_llm_usd']}\n"
-            f"[bold]Signal analyze interval:[/bold] {cfg['polling']['signal_analyze_interval_hours']}h",
-            title="Bootstrap Config",
-            border_style="cyan",
-        ))
+        console.print(
+            Panel(
+                f"[bold]Dry-run:[/bold] {cfg['apply']['dry_run']}\n"
+                f"[bold]Trust threshold:[/bold] {cfg['filtering']['trust_threshold_for_llm']}\n"
+                f"[bold]Auto-apply threshold:[/bold] {cfg['apply']['auto_apply_threshold']}\n"
+                f"[bold]Monthly LLM cap:[/bold] ${cfg['budget']['max_monthly_llm_usd']}\n"
+                f"[bold]Signal analyze interval:[/bold] {cfg['polling']['signal_analyze_interval_hours']}h",
+                title="Bootstrap Config",
+                border_style="cyan",
+            )
+        )
     except Exception:
         pass
 

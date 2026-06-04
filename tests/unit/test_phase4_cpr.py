@@ -12,6 +12,32 @@ class TestHandsImport:
         mgr = SessionManager()
         assert mgr.active_sessions == {}
 
+    def test_session_manager_separates_same_host_identities(self):
+        import asyncio
+
+        from vxis.interaction.hands import SessionManager
+
+        async def _run() -> None:
+            mgr = SessionManager()
+            default_a = await mgr.get_session("https://example.test")
+            default_b = await mgr.get_session("https://example.test")
+            alice = await mgr.get_session("https://example.test", identity="alice")
+            bob = await mgr.get_session("https://example.test", identity="bob")
+
+            assert default_a is default_b
+            assert alice is not default_a
+            assert bob is not alice
+            assert "example.test" in mgr.active_sessions
+            assert "example.test#identity:alice" in mgr.active_sessions
+            assert "example.test#identity:bob" in mgr.active_sessions
+
+            await mgr.close_session("https://example.test", identity="alice")
+            assert "example.test#identity:alice" not in mgr.active_sessions
+            assert "example.test#identity:bob" in mgr.active_sessions
+            await mgr.close_all()
+
+        asyncio.run(_run())
+
     def test_import_auth_state(self):
         from vxis.interaction.hands import AuthState
 

@@ -75,6 +75,9 @@ include = [
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = [
+    "live: requires live LLM/network; excluded from the per-PR deterministic tier",
+]
 
 [tool.ruff]
 target-version = "py312"

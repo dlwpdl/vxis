@@ -785,7 +785,7 @@ def test_agent_graph_result_creates_finish_blocking_branch():
     assert branch.owner == "agent_graph"
     assert branch.status == "active"
     assert branch.priority >= 90
-    assert "agent:agent-0001" in {b.id for b in loop._blocking_finish_branches()}
+    assert "agent:agent-0001" in {b.id for b in loop._dag_finish_blocking_branches()}
     assert loop._branch_ids_for_action(
         "agent_graph", {"action": "finish", "agent_id": "agent-0001"}
     ) == ["agent:agent-0001"]
@@ -820,7 +820,7 @@ def test_agent_graph_finish_resolves_branch_blocker():
         args={"action": "create", "role": "recon_worker"},
         result=create_result,
     )
-    assert "agent:agent-0001" in {b.id for b in loop._blocking_finish_branches()}
+    assert "agent:agent-0001" in {b.id for b in loop._dag_finish_blocking_branches()}
 
     finish_result = ToolResult(
         ok=True,
@@ -848,7 +848,7 @@ def test_agent_graph_finish_resolves_branch_blocker():
 
     branch = loop.state.branches["agent:agent-0001"]
     assert branch.status == "exhausted"
-    assert "agent:agent-0001" not in {b.id for b in loop._blocking_finish_branches()}
+    assert "agent:agent-0001" not in {b.id for b in loop._dag_finish_blocking_branches()}
 
 
 def test_agent_graph_positive_worker_result_spawns_crown_chain_branch():
@@ -900,7 +900,7 @@ def test_agent_graph_positive_worker_result_spawns_crown_chain_branch():
     assert followup.role == "post_exploit_worker"
     assert followup.parent_branch_id == parent.id
     assert followup.crown_jewel == "DB dump or admin credentials"
-    assert followup in loop._blocking_finish_branches()
+    assert followup in loop._dag_finish_blocking_branches()
     assert any("chain follow-up agent-0001" in note for note in loop.state.shared_notes)
 
     forced = loop._forced_branch_action(followup)
@@ -2500,7 +2500,7 @@ def test_agent_graph_branch_requires_explicit_finish_after_tool_success():
     branch = loop.state.branches["agent:agent-0001"]
     assert branch.status == "active"
     assert branch.last_tool == "run_skill"
-    assert "agent:agent-0001" in {b.id for b in loop._blocking_finish_branches()}
+    assert "agent:agent-0001" in {b.id for b in loop._dag_finish_blocking_branches()}
 
 
 @pytest.mark.asyncio
@@ -2585,7 +2585,7 @@ async def test_agent_graph_run_dispatches_declared_skill_via_scan_loop_executor(
     assert "confirmed injection signal" in branch.last_summary
     assert "Valid EvidenceArtifact is available" in branch.next_step
     assert loop._forced_branch_action(branch) is None
-    assert "agent:agent-0001" in {b.id for b in loop._blocking_finish_branches()}
+    assert "agent:agent-0001" in {b.id for b in loop._dag_finish_blocking_branches()}
 
 
 @pytest.mark.asyncio
@@ -2735,7 +2735,7 @@ async def test_scan_loop_runs_agent_graph_create_run_finish_end_to_end():
     branch = loop.state.branches["agent:agent-0001"]
     assert branch.owner == "agent_graph"
     assert branch.status == "proven"
-    assert "agent:agent-0001" not in {b.id for b in loop._blocking_finish_branches()}
+    assert "agent:agent-0001" not in {b.id for b in loop._dag_finish_blocking_branches()}
 
     graph_messages = [
         message

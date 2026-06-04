@@ -101,6 +101,18 @@ _CORE_SKILL_CARDS: tuple[SkillCard, ...] = (
         run_hint='run_skill(skill="post_auth_enum", target_url=<target>, params={"token": "<token>"})',
     ),
     SkillCard(
+        name="execute_chain",
+        surface="web",
+        families=("access_control", "chain", "auth"),
+        roles=("director", "post_exploit_worker"),
+        triggers=("chain", "token", "foothold", "post-auth", "crown", "authorization"),
+        objective="Run a bounded post-auth chain and carry extracted context between child skills.",
+        method="Execute declared skill steps, interpolate outputs like token/user ids into later steps, and return normalized findings.",
+        validation="Every child finding must include the child skill's controls; do not treat skipped steps as proof.",
+        stop_condition="Stop when the chain reaches protected data, BOLA/role proof, or every required context key is missing.",
+        run_hint='run_skill(skill="execute_chain", target_url=<target>, params={"template":"post_auth_crown","token":"<token>"})',
+    ),
+    SkillCard(
         name="test_sensitive_files",
         surface="web",
         families=("disclosure", "credential"),
@@ -301,7 +313,13 @@ _ROLE_DEFAULTS: dict[str, tuple[str, ...]] = {
     "director": ("enumerate_endpoints", "test_infra", "test_misconfig", "attempt_auth"),
     "recon_worker": ("enumerate_endpoints", "test_infra", "test_sensitive_files", "test_misconfig"),
     "exploit_worker": ("test_injection", "test_idor", "test_xss", "test_ssrf", "test_api_security"),
-    "post_exploit_worker": ("post_auth_enum", "test_auth_deep", "test_business_logic", "test_api_security"),
+    "post_exploit_worker": (
+        "execute_chain",
+        "post_auth_enum",
+        "test_auth_deep",
+        "test_business_logic",
+        "test_api_security",
+    ),
     "review_worker": ("test_idor", "test_misconfig", "test_crypto", "test_api_security"),
 }
 

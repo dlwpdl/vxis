@@ -26,9 +26,11 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import inspect
 import json
 import logging
+import os
 import sys
 import traceback
 from dataclasses import asdict, is_dataclass
@@ -56,6 +58,7 @@ INTERNAL_ERROR = -32603
 # Lazy primitive imports — fail softly so a broken submodule doesn't kill MCP
 # ---------------------------------------------------------------------------
 
+
 def _lazy(path: str) -> Callable[..., Any]:
     """Return a function that imports and calls `path` on demand."""
 
@@ -77,6 +80,7 @@ def _lazy(path: str) -> Callable[..., Any]:
 # Each entry: (name, description, input_schema, handler)
 # handler is an async callable that takes kwargs from the JSON-RPC arguments.
 # ---------------------------------------------------------------------------
+
 
 def _s(**props: Any) -> dict[str, Any]:
     """Shorthand: build a JSONSchema object with properties & optional required."""
@@ -382,6 +386,7 @@ TOOLS_SPEC: list[tuple[str, str, dict[str, Any], Callable[..., Awaitable[Any]]]]
 # Non-primitive tools — phase registry & scope enforcement
 # ---------------------------------------------------------------------------
 
+
 async def _tool_phase_list(**_: Any) -> Any:
     from vxis.phases.registry import EXECUTION_ORDER, PHASE_REGISTRY
 
@@ -538,6 +543,7 @@ ALL_TOOLS = TOOLS_SPEC + NON_PRIMITIVE_TOOLS
 # Build tools/list payload & dispatch table
 # ---------------------------------------------------------------------------
 
+
 def _clean_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Strip internal `_req` markers before publishing."""
     cleaned: dict[str, Any] = {"type": schema.get("type", "object")}
@@ -562,6 +568,29 @@ TOOLS: list[dict[str, Any]] = [
 _HANDLERS: dict[str, Callable[..., Awaitable[Any]]] = {
     name: handler for (name, _d, _s2, handler) in ALL_TOOLS
 }
+
+
+def _split_patterns(value: str) -> list[str]:
+    return [item.strip() for item in value.replace(";", ",").split(",") if item.strip()]
+
+
+def _tool_policy_patterns() -> tuple[list[str], list[str]]:
+    allow_raw = (
+        os.environ.get("VXIS_MCP_TOOL_ALLOWLIST") or os.environ.get("MCP_TOOL_ALLOWLIST") or "*"
+    )
+    deny_raw = os.environ.get("VXIS_MCP_TOOL_DENYLIST") or os.environ.get("MCP_TOOL_DENYLIST") or ""
+    return _split_patterns(allow_raw), _split_patterns(deny_raw)
+
+
+def _tool_allowed(tool_name: str) -> bool:
+    allow_patterns, deny_patterns = _tool_policy_patterns()
+    allowed = any(fnmatch.fnmatchcase(tool_name, pattern) for pattern in allow_patterns)
+    denied = any(fnmatch.fnmatchcase(tool_name, pattern) for pattern in deny_patterns)
+    return allowed and not denied
+
+
+def _visible_tools() -> list[dict[str, Any]]:
+    return [tool for tool in TOOLS if _tool_allowed(str(tool.get("name", "")))]
 
 
 def _to_dict(obj: Any) -> Any:
@@ -590,6 +619,7 @@ def _to_dict(obj: Any) -> Any:
 # JSON-RPC dispatcher
 # ---------------------------------------------------------------------------
 
+
 async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
     req_id = request.get("id")
     method: str = request.get("method", "")
@@ -609,7 +639,7 @@ async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     if method == "tools/list":
-        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": TOOLS}}
+        return {"jsonrpc": "2.0", "id": req_id, "result": {"tools": _visible_tools()}}
 
     if method == "tools/call":
         params: dict[str, Any] = request.get("params", {})
@@ -618,12 +648,28 @@ async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
 
         handler = _HANDLERS.get(tool_name)
         if handler is None:
+            available = ", ".join(sorted(str(tool.get("name", "")) for tool in _visible_tools()))
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "error": {
                     "code": METHOD_NOT_FOUND,
-                    "message": f"Unknown tool '{tool_name}'. Available: {', '.join(sorted(_HANDLERS))}",
+                    "message": f"Unknown tool '{tool_name}'. Available: {available}",
+                },
+            }
+
+        if not _tool_allowed(tool_name):
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Tool '{tool_name}' is not allowed by the MCP tool policy.",
+                        }
+                    ],
+                    "isError": True,
                 },
             }
 
@@ -676,6 +722,7 @@ async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # Stdio transport loop
 # ---------------------------------------------------------------------------
+
 
 def _write_response(response: dict[str, Any]) -> None:
     sys.stdout.write(json.dumps(response, default=str) + "\n")

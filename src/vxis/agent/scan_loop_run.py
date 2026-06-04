@@ -8,6 +8,12 @@ from vxis.agent.scan_loop_execution_monitor import ScanLoopExecutionMonitorMixin
 from vxis.agent.scan_loop_run_auto import ScanLoopAutoOrchestrationMixin
 from vxis.agent.scan_loop_run_followups import ScanLoopRunFollowupMixin
 from vxis.agent.scan_loop_run_skills import ScanLoopScheduledSkillsMixin
+from vxis.agent.scan_loop_v3 import (
+    v3_after_action,
+    v3_finalize_runtime,
+    v3_maybe_finish_gate,
+    v3_result_payload,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -927,6 +933,14 @@ class ScanLoopRunMixin(
                         status=self._status_from_tool_result(result),
                         summary=result.summary,
                     )
+                v3_after_action(
+                    self,
+                    name=name,
+                    args=args,
+                    result=result,
+                    candidate_ids=_action_candidate_ids,
+                    branch_ids=_action_branch_ids,
+                )
                 self._sync_agent_graph_result_to_branches(name=name, args=args, result=result)
                 if name == "agent_graph":
                     await self._sync_agent_graph_result_to_sdk_runtime(
@@ -1398,7 +1412,7 @@ class ScanLoopRunMixin(
                                         f'link_chain(finding_ids=["{_top[i]}","{_top[j]}"], '
                                         f'rationale="<why {_top[i]} enables {_top[j]}>", '
                                         f'crown_jewel="<admin takeover | DB dump | RCE | data exfil>", '
-                                        'evidence_artifact={'
+                                        "evidence_artifact={"
                                         '"source_output":"<credential/token/endpoint/object id from source finding>", '
                                         '"pivot_action":"<how that output was replayed into the target finding>", '
                                         '"control_result":"<baseline/control response>", '
@@ -1450,7 +1464,7 @@ class ScanLoopRunMixin(
                                 len(_fin_findings),
                             )
                             continue
-                        _blocking_branches = self._blocking_finish_branches()
+                        _blocking_branches = self._dag_finish_blocking_branches()
                         if (
                             _blocking_branches
                             and self.state.iteration
@@ -1486,7 +1500,7 @@ class ScanLoopRunMixin(
                             )
                             continue
                         if self.state.max_iters >= 30:
-                            _open_candidates = self._remaining_high_yield_family_candidates(
+                            _open_candidates = self._dag_remaining_high_yield_candidates(
                                 _fin_findings
                             )
                             if _open_candidates:
@@ -1521,6 +1535,23 @@ class ScanLoopRunMixin(
                                 continue
                     except Exception:
                         logger.exception("finish_scan rejection check failed")
+                    _v3_gate = v3_maybe_finish_gate(self)
+                    if _v3_gate is not None:
+                        self._reject_finish_scan(
+                            title=str(_v3_gate.get("title") or "v3_cognitive_gate"),
+                            reason=str(_v3_gate.get("reason") or "v3 cognitive gate blocked finish"),
+                            action_hint=str(
+                                _v3_gate.get("action_hint")
+                                or "Resolve the top v3 coverage or hypothesis gap."
+                            ),
+                            summary=str(_v3_gate.get("summary") or "finish_scan rejected by v3"),
+                            data=dict(_v3_gate.get("data") or {}),
+                        )
+                        logger.warning(
+                            "iter %d: finish_scan rejected by v3 cognitive gate",
+                            self.state.iteration,
+                        )
+                        continue
                     if result.ok:
                         self.state.completed = True
                         break
@@ -1563,6 +1594,7 @@ class ScanLoopRunMixin(
             await self._maybe_execute_director_action(call_counts=_call_counts)
 
         self._maybe_finalize_budget_exhausted_scan()
+        v3_finalize_runtime(self)
         self.state.clear_waiting_reason()
         self._emit_control_plane("Scan loop completed")
         return {
@@ -1593,4 +1625,5 @@ class ScanLoopRunMixin(
             "callback_observations": self.state.callback_observations_as_dicts(),
             "retrieval_observations": self.state.retrieval_observations_as_dicts(),
             "shared_notes": list(self.state.shared_notes),
+            "v3": v3_result_payload(self.state),
         }

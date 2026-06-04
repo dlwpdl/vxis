@@ -2,13 +2,25 @@
 
 > Step-by-step plans for multi-task feature migrations. Written via `superpowers:writing-plans`, executed via `superpowers:subagent-driven-development` or `superpowers:executing-plans`.
 
-## Active plan
+## Active plans
+
+### [2026-06-02 — Cognitive Engine v3](2026-06-02-cognitive-engine-v3.md)
+
+**Goal:** Make `crown` behave like a senior pentester who remembers — persistent target intelligence (PTI), hypothesis DAG, cost-aware brain routing, coverage-gated `finish_scan`, block-aware adaptation, self-evaluation loop. Focus axes: **cognitive depth** + **operational autonomy**.
+
+**Status:** Source of truth for the engine path. In-scope v3 = A-F + I, with J absorbed into A as trajectory/distillation format. G/H/K are recorded as trigger-gated Beyond v3 components, not immediate implementation scope.
+
+### [2026-06-01 — VXIS v2 Strategy & Engine Plan](2026-06-01-vxis-v2-strategy-and-engine.md)
+
+**Goal:** Lock in CAPT (Continuous Autonomous Pentest) category, 3 ICP packages (Continuous DevSec / VC Portfolio Monitoring / Pre-Investment DD) + compliance-mapping add-on, SaaS-only deployment with Korean-market wedge, and a 6-week engine build sequence (benchmark league v2 → delta scan → asset discovery → credential vault → compliance mapping).
+
+**Status:** Product/BM parent context only. Benchmark League v2 remains the measurement scaffold; v3 owns the engine roadmap. Delta scan, asset discovery, credential vault, compliance mapping, and SaaS/VC packaging stay outside v3 implementation.
 
 ### [2026-04-08 — Phase A Strix-Parity Single-Loop Migration](2026-04-08-phase-a-strix-parity-single-loop.md)
 
 **Goal:** Kill the 14-Phase `ScanPipeline` orchestrator. Make a single persistent Brain ReAct loop the owner of an entire scan end-to-end. Make VXIS architecturally equivalent to Strix.
 
-**Status:** Tasks 1–10 complete. Tasks 11–12 in progress. See [`../../../PHASE_STATUS.md`](../../../PHASE_STATUS.md) for the live progress matrix.
+**Status:** Foundation architecture for v2/v3. See [`../../../PHASE_STATUS.md`](../../../PHASE_STATUS.md) for the live progress matrix.
 
 **Key moments recorded in this plan:**
 - Task 1 discovery: baseline `brain_decision_count = 0` — proof that legacy `pipeline.py:1927-1929` explicitly bypasses `AgentBrain.think()`
@@ -22,6 +34,7 @@
 
 | Plan | Status | Note |
 |---|---|---|
+| [2026-06-01 — VC/B2B Profile Plan](2026-06-01-vc-b2b-profile-plan.md) | Superseded by 2026-06-01 VXIS v2 | Original VC monitoring sketch, replaced by the broader v2 strategy plan after competitor review |
 | [2026-03-24 — Advanced Cognitive Layer Roadmap](2026-03-24-advanced-cognitive-layer-roadmap.md) | Superseded by Phase A | Earlier roadmap, replaced when Task 1 revealed Brain-First violation |
 | [2026-03-24 — Phase 1 Core Foundation](2026-03-24-phase1-core-foundation.md) | Completed | Original bootstrap |
 | [2026-03-30 — Dual Brain + Growth Loop](2026-03-30-dual-brain-growth-loop.md) | Partial — deferred to Phase B | Dual-brain concept lives on in Phase B planning |

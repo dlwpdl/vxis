@@ -1,0 +1,65 @@
+"""Persistent Target Intelligence foundation."""
+
+from vxis.pti.hashing import normalize_target_url, target_hash_for_url, validate_target_hash
+from vxis.pti.models import (
+    AuthoredTool,
+    Defense,
+    Dossier,
+    FindingHistoryEntry,
+    HypothesisOutcome,
+    PayloadEntry,
+    StackEntry,
+    SurfaceUnit,
+    TrajectoryRecord,
+)
+from vxis.pti.query import (
+    DefenseFilter,
+    FindingHistoryFilter,
+    HypothesisFilter,
+    PayloadFilter,
+    StackFilter,
+    SurfaceFilter,
+    ToolFilter,
+    query_defenses,
+    query_findings_history,
+    query_hypotheses,
+    query_payloads,
+    query_pti,
+    query_stack,
+    query_surfaces,
+    query_tools,
+)
+from vxis.pti.store import PTIStore
+from vxis.pti.trajectory import TrajectoryStore
+
+__all__ = [
+    "AuthoredTool",
+    "Defense",
+    "DefenseFilter",
+    "Dossier",
+    "FindingHistoryEntry",
+    "FindingHistoryFilter",
+    "HypothesisFilter",
+    "HypothesisOutcome",
+    "PTIStore",
+    "PayloadEntry",
+    "PayloadFilter",
+    "StackEntry",
+    "StackFilter",
+    "SurfaceFilter",
+    "SurfaceUnit",
+    "ToolFilter",
+    "TrajectoryRecord",
+    "TrajectoryStore",
+    "normalize_target_url",
+    "query_defenses",
+    "query_findings_history",
+    "query_hypotheses",
+    "query_payloads",
+    "query_pti",
+    "query_stack",
+    "query_surfaces",
+    "query_tools",
+    "target_hash_for_url",
+    "validate_target_hash",
+]

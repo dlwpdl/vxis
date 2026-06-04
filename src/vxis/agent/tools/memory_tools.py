@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -549,6 +550,17 @@ class QueryScanMemoryTool:
                 summary="query_scan_memory: url is required",
                 error="missing_url",
             )
+        if os.environ.get("VXIS_V3_MEMORY", "0") not in {
+            "",
+            "0",
+            "false",
+            "False",
+            "no",
+            "off",
+        }:
+            from vxis.pti.memory_bridge import query_scan_memory_view
+
+            return query_scan_memory_view(url=url, stack_hint=stack_hint)
 
         kb = _load_kb()
         key = _target_key(url)

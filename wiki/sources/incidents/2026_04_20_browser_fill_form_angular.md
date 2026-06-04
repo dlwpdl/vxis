@@ -51,7 +51,7 @@ related:
 - MITRE coverage 62.5% → 68.8%, tactics 7 → 8 (Credential Access·Privilege Escalation 포함).
 - Juice Shop 내부 challenge 7개 solved: loginAdmin (SQLi bypass), basketAccess (IDOR), registerAdmin (mass assignment), errorHandling, exposedMetrics, securityPolicy, passwordRepeat.
 - LLM call count 57 동일 — 같은 예산으로 +107.6 pt 획득.
-- 저장: [after_fillform_fix_2026-04-20.score.json](../benchmarks/juice_shop/after_fillform_fix_2026-04-20.score.json).
+- 저장: [after_fillform_fix_2026-04-20.score.json](../../../benchmarks/juice_shop/after_fillform_fix_2026-04-20.score.json).
 
 ## Lessons
 - 같은 이슈가 두 경로에 존재하면 한쪽 fix 로 안심 금지 — sibling path grep 필수 (`\.fill_form\(`).

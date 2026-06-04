@@ -14,6 +14,32 @@ MASS_ASSIGN_FIELDS = _load_ds("test_api_security", "mass_assign_fields")  # ADR-
 
 VERB_TAMPER_PATHS = _load_ds("test_api_security", "verb_tamper_paths")  # ADR-007 Phase 3-9 — data in data/payloads/test_api_security.json
 
+GRAPHQL_PATHS = ("/graphql", "/api/graphql", "/gql")
+OPENAPI_PATHS = (
+    "/openapi.json",
+    "/swagger.json",
+    "/api-docs",
+    "/v3/api-docs",
+    "/swagger/v1/swagger.json",
+    "/docs/swagger.json",
+)
+
+_GRAPHQL_INTROSPECTION_QUERY = """
+query VXISIntrospection {
+  __schema {
+    queryType { name }
+    mutationType { name }
+    types {
+      name
+      fields {
+        name
+        args { name type { kind name ofType { kind name } } }
+      }
+    }
+  }
+}
+""".strip()
+
 
 _NEXT_DATA_RE = re.compile(
     r"<script[^>]+id=[\"']__NEXT_DATA__[\"'][^>]*>(.*?)</script>",
@@ -162,6 +188,202 @@ def _is_unauthenticated_data_response(text: str) -> bool:
         return True
 
     return _non_empty_json_value(parsed.get("data"))
+
+
+def _load_json(text: str) -> Any:
+    try:
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def _sample_openapi_path(path: str) -> str | None:
+    """Replace OpenAPI path variables with conservative sample values."""
+    sampled = str(path or "").strip()
+    if not sampled.startswith("/"):
+        sampled = f"/{sampled}"
+
+    def repl(match: re.Match[str]) -> str:
+        name = match.group(1).lower()
+        if "id" in name or name in {"pk", "uid"}:
+            return "1"
+        if "page" in name or "limit" in name:
+            return "1"
+        return "test"
+
+    sampled = re.sub(r"\{([^}/]+)\}", repl, sampled)
+    if "{" in sampled or "}" in sampled:
+        return None
+    return sampled
+
+
+def _join_openapi_path(base_path: str, path: str) -> str:
+    from urllib.parse import urlparse
+
+    base = str(base_path or "").strip()
+    if base.startswith(("http://", "https://")):
+        parsed = urlparse(base)
+        base = parsed.path or ""
+    if base in {"", "/"}:
+        return path
+    if not base.startswith("/"):
+        base = f"/{base}"
+    return f"{base.rstrip('/')}/{path.lstrip('/')}"
+
+
+async def _probe_graphql_surface(
+    session: Any,
+    target: str,
+    headers: dict[str, str],
+) -> tuple[list[dict[str, Any]], int]:
+    tested = 0
+    findings: list[dict[str, Any]] = []
+    probe_headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        **headers,
+    }
+
+    for path in GRAPHQL_PATHS:
+        tested += 1
+        endpoint = f"{target}{path}"
+        try:
+            response = await session.request(
+                "POST",
+                endpoint,
+                json_data={"query": _GRAPHQL_INTROSPECTION_QUERY},
+                headers=probe_headers,
+            )
+        except Exception:
+            continue
+        if response.status != 200:
+            continue
+        parsed = _load_json(response.text)
+        schema = parsed.get("data", {}).get("__schema") if isinstance(parsed, dict) else None
+        if not isinstance(schema, dict):
+            continue
+
+        types = [t for t in schema.get("types") or [] if isinstance(t, dict)]
+        field_count = sum(
+            len(t.get("fields") or [])
+            for t in types
+            if isinstance(t.get("fields"), list)
+        )
+        query_type = (schema.get("queryType") or {}).get("name", "")
+        mutation_type = (schema.get("mutationType") or {}).get("name", "")
+        findings.append(
+            {
+                "type": "graphql_introspection_enabled",
+                "title": "GraphQL introspection enabled",
+                "endpoint": endpoint,
+                "affected_component": endpoint,
+                "payload": "__schema introspection query",
+                "description": (
+                    "The GraphQL endpoint returned schema introspection data, "
+                    "enabling live API enumeration for authorization and business logic tests."
+                ),
+                "evidence": (
+                    f"query_type={query_type} mutation_type={mutation_type} "
+                    f"types={len(types)} fields={field_count}"
+                ),
+                "severity": "medium",
+                "cwe": "CWE-200",
+            }
+        )
+        break
+    return findings, tested
+
+
+async def _probe_openapi_surface(
+    session: Any,
+    target: str,
+    headers: dict[str, str],
+) -> tuple[list[dict[str, Any]], int]:
+    from vxis.primitives.patterns import parse_openapi
+
+    tested = 0
+    findings: list[dict[str, Any]] = []
+
+    for path in OPENAPI_PATHS:
+        tested += 1
+        spec_url = f"{target}{path}"
+        try:
+            response = await session.request("GET", spec_url, headers=headers or None)
+        except Exception:
+            continue
+        if response.status != 200 or response.body_length < 20:
+            continue
+        parsed = parse_openapi(response.text)
+        endpoints = list(parsed.get("endpoints") or [])
+        if not endpoints:
+            continue
+
+        findings.append(
+            {
+                "type": "openapi_schema_exposed",
+                "title": "OpenAPI schema exposed",
+                "endpoint": spec_url,
+                "affected_component": spec_url,
+                "payload": path,
+                "description": (
+                    "An OpenAPI/Swagger schema was reachable and exposes API operations "
+                    "that can be used for live authorization and IDOR enumeration."
+                ),
+                "evidence": (
+                    f"version={parsed.get('version', '')} title={parsed.get('title', '')} "
+                    f"operations={len(endpoints)} sample={endpoints[:5]}"
+                ),
+                "severity": "medium",
+                "cwe": "CWE-200",
+            }
+        )
+
+        data_endpoints: list[dict[str, Any]] = []
+        for operation in endpoints:
+            method = str(operation.get("method") or "").upper()
+            if method != "GET":
+                continue
+            sampled = _sample_openapi_path(str(operation.get("path") or ""))
+            if not sampled:
+                continue
+            live_path = _join_openapi_path(str(parsed.get("base_path") or ""), sampled)
+            tested += 1
+            try:
+                probe = await session.request("GET", f"{target}{live_path}", headers=headers or None)
+            except Exception:
+                continue
+            if probe.status == 200 and _is_unauthenticated_data_response(probe.text):
+                data_endpoints.append(
+                    {
+                        "path": live_path,
+                        "status": probe.status,
+                        "size": probe.body_length,
+                        "preview": probe.text[:240],
+                    }
+                )
+            if len(data_endpoints) >= 5:
+                break
+
+        if data_endpoints:
+            findings.append(
+                {
+                    "type": "openapi_unauthenticated_data_endpoint",
+                    "title": "OpenAPI-discovered data endpoints returned JSON data",
+                    "endpoint": "",
+                    "affected_component": target,
+                    "payload": ", ".join(item["path"] for item in data_endpoints[:5]),
+                    "description": (
+                        "GET operations discovered from the OpenAPI schema returned "
+                        "non-empty JSON data during live probing."
+                    ),
+                    "evidence": str(data_endpoints[:5]),
+                    "severity": "high" if not headers else "medium",
+                    "cwe": "CWE-306",
+                }
+            )
+        break
+
+    return findings, tested
 
 
 async def _discover_nextjs_admin_surface(
@@ -369,6 +591,28 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
 
     _mgr = SessionManager()
     _session = await _mgr.get_session(target)
+
+    try:
+        graphql_findings, graphql_tested = await _probe_graphql_surface(
+            _session,
+            target,
+            auth_headers,
+        )
+        tested += graphql_tested
+        findings.extend(graphql_findings)
+    except Exception:
+        logger.exception("GraphQL API surface probes failed")
+
+    try:
+        openapi_findings, openapi_tested = await _probe_openapi_surface(
+            _session,
+            target,
+            auth_headers,
+        )
+        tested += openapi_tested
+        findings.extend(openapi_findings)
+    except Exception:
+        logger.exception("OpenAPI API surface probes failed")
 
     try:
         nextjs_findings, action_candidates, nextjs_tested = await _discover_nextjs_admin_surface(

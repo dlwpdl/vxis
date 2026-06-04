@@ -42,3 +42,7 @@
 ## [2026-04-29] ingest | operator control plane concept added from Strix comparison
 - Strix 비교로 확인한 핵심: tool-only 루프, waiting 상태, todo, notes, agent graph, operator 메시지 경로.
 - VXIS 는 clone 이 아니라 `scan_todos / branches / waiting_reason / shared_notes` 중심의 자체 control plane 으로 가야 함.
+
+## [2026-06-02] decision | ADR-011~013 v3.2 consolidation spine activated
+- v3.2 기준: 신규 빌드보다 Phase 0 통합이 우선. PTI memory shadow, `HypothesisNode`, single Brain model map, DAG finish priority, profile policy, verifier spine이 authoritative.
+- Implementation ledger: `docs/superpowers/CONSOLIDATION.md`.

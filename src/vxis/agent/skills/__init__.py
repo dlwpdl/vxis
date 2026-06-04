@@ -23,6 +23,7 @@ from vxis.agent.skills.test_misconfig import execute as test_misconfig
 from vxis.agent.skills.test_business_logic import execute as test_business_logic
 from vxis.agent.skills.test_crypto import execute as test_crypto
 from vxis.agent.skills.test_infra import execute as test_infra
+from vxis.agent.skills.execute_chain import execute as execute_chain
 
 # Desktop skills — phase-J slice (macOS-only). Phase-F (Windows full
 # desktop pipeline) ships the remaining 7. We import lazily so that
@@ -108,7 +109,7 @@ SKILL_REGISTRY: dict[str, dict] = {
     },
     "test_api_security": {
         "fn": test_api_security,
-        "description": "API security: mass assignment, rate limiting, HTTP verb tampering, parameter pollution.",
+        "description": "API security: GraphQL/OpenAPI discovery, mass assignment, rate limiting, HTTP verb tampering, parameter pollution.",
         "args": "target_url (required), token (optional)",
     },
     "test_misconfig": {
@@ -130,6 +131,11 @@ SKILL_REGISTRY: dict[str, dict] = {
         "fn": test_infra,
         "description": "Infrastructure: exposed .git, .env, cloud metadata, Firebase, subdomain enumeration.",
         "args": "target_url (required)",
+    },
+    "execute_chain": {
+        "fn": execute_chain,
+        "description": "Execute a declared multi-step skill chain with context extraction and parameter interpolation.",
+        "args": "target_url (required), template/steps/context/token/identities/url_pattern (optional)",
     },
 }
 

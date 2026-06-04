@@ -7,6 +7,7 @@ from vxis.agent.sdk_runtime import (
     SDKEventJournal,
     SDKRunPaths,
     build_vxis_sdk_agent,
+    make_vxis_model_settings,
     open_sdk_agent_session,
     sdk_tool_from_registry,
     sdk_tools_from_registry,
@@ -262,3 +263,24 @@ def test_sdk_agent_factory_enforces_single_required_tool_call():
     assert agent.model_settings.include_usage is True
     assert agent.reset_tool_choice is False
     assert [tool.name for tool in agent.tools] == ["echo"]
+
+
+def test_sdk_agent_factory_drops_required_tool_choice_for_reasoning_models():
+    registry = ToolRegistry()
+    registry.register(EchoTool())
+    tools = sdk_tools_from_registry(registry)
+
+    agent = build_vxis_sdk_agent(
+        name="reasoning-worker",
+        instructions="Use one tool call when useful.",
+        tools=tools,
+        model="openai/gpt-5.4",
+    )
+
+    assert agent.model_settings.tool_choice is None
+
+
+def test_make_vxis_model_settings_keeps_required_for_non_reasoning_models():
+    settings = make_vxis_model_settings(require_tool=True, model="gpt-test")
+
+    assert settings.tool_choice == "required"

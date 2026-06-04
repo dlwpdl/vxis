@@ -3,6 +3,7 @@
 Future tasks will expand build_default_registry() with high-level Phase wrappers
 (Tasks 7-11) and Finding CRUD (Task 12).
 """
+
 from __future__ import annotations
 
 from vxis.agent.tool_registry import ToolRegistry
@@ -38,6 +39,7 @@ from vxis.agent.tools.browser_tools import (
     BrowserEvalJsTool,
     BrowserGetCookiesTool,
 )
+from vxis.agent.scan_loop_v3 import v3_enabled
 
 __all__ = [
     "FinishScanTool",
@@ -106,4 +108,36 @@ def build_default_registry(
     reg.register(BrowserGetCookiesTool())
     reg.register(RunSkillTool())
     reg.register(AgentGraphTool())
+    if v3_enabled():
+        _register_optional_v3_tools(reg)
     return reg
+
+
+def _register_optional_v3_tools(reg: ToolRegistry) -> None:
+    """Register v3 tools if their modules are present.
+
+    v3 components land behind feature flags and can be developed in slices.
+    Missing modules are ignored so Phase A-E scans keep their existing behavior.
+    """
+    try:
+        from vxis.agent.tools.hypothesis_tools import build_hypothesis_tools
+
+        for tool in build_hypothesis_tools():
+            if not reg.has_tool(tool.name):
+                reg.register(tool)
+    except Exception:
+        pass
+
+    optional_tools = [
+        ("vxis.agent.tools.ask_human", "AskHumanTool"),
+        ("vxis.agent.tools.self_critique", "SelfCritiqueTool"),
+    ]
+    for module_name, class_name in optional_tools:
+        try:
+            module = __import__(module_name, fromlist=[class_name])
+            tool_cls = getattr(module, class_name)
+            tool = tool_cls()
+            if not reg.has_tool(tool.name):
+                reg.register(tool)
+        except Exception:
+            continue
