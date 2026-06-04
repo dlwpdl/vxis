@@ -431,6 +431,15 @@ class ScanLoopScheduledSkillsMixin:
 
                             # Post-auth enum results
                             if _real_skill == "post_auth_enum" and sr.data:
+                                if sr.data.get("identities"):
+                                    self.state.record_auth_identities(sr.data.get("identities"))
+                                if isinstance(sr.data.get("owner_map"), dict):
+                                    self.state.object_owner_map.update(
+                                        {
+                                            str(k): str(v)
+                                            for k, v in sr.data.get("owner_map", {}).items()
+                                        }
+                                    )
                                 user_data = sr.data.get("user_data_exposed", [])
                                 if user_data:
                                     paths = [e["path"] for e in user_data[:5]]

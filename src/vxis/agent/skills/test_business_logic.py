@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 from typing import Any
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urljoin, urlparse
 from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
@@ -152,7 +152,103 @@ def _dynamic_tests_for_path(path: str) -> list[dict[str, Any]]:
     return tests
 
 
-def _merge_logic_tests(target: str, endpoints: Any, html: str = "") -> list[dict[str, Any]]:
+def _flow_body(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        for key in ("json", "json_data", "body_json"):
+            if isinstance(raw.get(key), dict):
+                return dict(raw[key])
+        body = raw.get("body") or raw.get("request_body") or raw.get("body_preview") or ""
+    else:
+        body = raw
+    if isinstance(body, dict):
+        return dict(body)
+    text = str(body or "").strip()
+    if not text:
+        return {}
+    try:
+        import json
+
+        value = json.loads(text)
+        return dict(value) if isinstance(value, dict) else {}
+    except Exception:
+        parsed = parse_qs(text, keep_blank_values=True)
+        return {key: values[0] if values else "" for key, values in parsed.items()}
+
+
+def _mutate_business_value(value: Any) -> list[tuple[str, Any]]:
+    mutations: list[tuple[str, Any]] = []
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            lower = str(key).lower()
+            if lower in {"price", "unit_price", "amount", "total", "subtotal"}:
+                mutated = dict(value)
+                mutated[key] = -1 if lower == "amount" else 0
+                mutations.append((f"{key}=negative_or_zero", mutated))
+            if lower in {"quantity", "qty", "count", "units"}:
+                mutated = dict(value)
+                mutated[key] = -1
+                mutations.append((f"{key}=negative", mutated))
+            if lower in {"step", "state", "status"}:
+                mutated = dict(value)
+                mutated[key] = 999 if lower == "step" else "paid"
+                mutations.append((f"{key}=state_skip", mutated))
+            for label, child in _mutate_business_value(nested)[:3]:
+                mutated = dict(value)
+                mutated[key] = child
+                mutations.append((f"{key}.{label}", mutated))
+    elif isinstance(value, list):
+        for index, nested in enumerate(value[:5]):
+            for label, child in _mutate_business_value(nested)[:3]:
+                mutated = list(value)
+                mutated[index] = child
+                mutations.append((f"{index}.{label}", mutated))
+    return mutations[:8]
+
+
+def _tests_from_captured_flows(target: str, flows: Any) -> list[dict[str, Any]]:
+    raw_flows = flows if isinstance(flows, list) else []
+    tests: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for flow in raw_flows[:30]:
+        if not isinstance(flow, dict):
+            continue
+        method = str(flow.get("method") or "GET").upper()
+        if method not in {"POST", "PUT", "PATCH"}:
+            continue
+        path = _endpoint_path(target, flow.get("path") or flow.get("url") or "")
+        if not path or not any(keyword in path.lower() for keyword in _BUSINESS_KEYWORDS):
+            continue
+        control_body = _flow_body(flow)
+        if not control_body:
+            continue
+        for label, mutated_body in _mutate_business_value(control_body):
+            key = (path, str(mutated_body))
+            if key in seen:
+                continue
+            seen.add(key)
+            tests.append(
+                {
+                    "path": path,
+                    "method": method,
+                    "body": mutated_body,
+                    "control_body": control_body,
+                    "desc": f"Captured flow mutation {label} on {path}",
+                    "severity": "critical"
+                    if any(token in label for token in ("price", "amount", "total"))
+                    else "high",
+                    "origin": "captured_flow",
+                    "source_request_id": flow.get("id") or flow.get("request_id") or "",
+                }
+            )
+    return tests[:20]
+
+
+def _merge_logic_tests(
+    target: str,
+    endpoints: Any,
+    html: str = "",
+    captured_flows: Any = None,
+) -> list[dict[str, Any]]:
     paths: list[str] = []
     seen_paths: set[str] = set()
     raw_endpoints = endpoints if isinstance(endpoints, list) else []
@@ -175,6 +271,12 @@ def _merge_logic_tests(target: str, endpoints: Any, html: str = "") -> list[dict
                 continue
             seen_tests.add(key)
             merged.append(test)
+    for test in _tests_from_captured_flows(target, captured_flows):
+        key = (test.get("path"), str(test.get("body")))
+        if key in seen_tests:
+            continue
+        seen_tests.add(key)
+        merged.append(test)
     return merged
 
 
@@ -214,6 +316,9 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
         target,
         kwargs.get("endpoints") or kwargs.get("api_endpoints") or kwargs.get("surface_hints"),
         discovered_html,
+        kwargs.get("captured_flows")
+        or kwargs.get("request_flows")
+        or kwargs.get("captured_requests"),
     )
 
     async def run_test(t: dict[str, Any]) -> None:
@@ -250,7 +355,7 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                             control_result is None
                             or control_result.get("status") in (200, 201, 202, 204)
                         )
-                        if t.get("origin") == "discovered_flow" and not control_accepted:
+                        if t.get("origin") in {"discovered_flow", "captured_flow"} and not control_accepted:
                             rejected_controls.append({
                                 "desc": t["desc"],
                                 "path": t["path"],
@@ -344,6 +449,16 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                 {"path": t.get("path"), "desc": t.get("desc"), "severity": t.get("severity")}
                 for t in logic_tests
                 if t.get("origin") == "discovered_flow"
+            ][:12],
+            "captured_flow_tests": [
+                {
+                    "path": t.get("path"),
+                    "desc": t.get("desc"),
+                    "severity": t.get("severity"),
+                    "source_request_id": t.get("source_request_id", ""),
+                }
+                for t in logic_tests
+                if t.get("origin") == "captured_flow"
             ][:12],
         },
         "tested": tested,

@@ -1022,6 +1022,28 @@ def test_best_skill_params_carries_multi_identity_authz_context():
     assert chain_params["owner_map"]["2"] == "bob"
 
 
+def test_best_skill_params_for_business_logic_carries_captured_flows():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.add_message("tool", {
+        "name": "intercept_proxy",
+        "args": {"action": "view_request", "request_id": "req-1"},
+        "result": {
+            "ok": True,
+            "data": {
+                "id": "req-1",
+                "method": "POST",
+                "path": "/api/orders",
+                "body": '{"sku":"A1","quantity":1,"price":19.99}',
+            },
+        },
+    })
+
+    params = loop._best_skill_params("test_business_logic")
+
+    assert params["captured_flows"][0]["id"] == "req-1"
+    assert params["captured_flows"][0]["path"] == "/api/orders"
+
+
 def test_spawn_followup_branches_reuses_same_vector_for_same_finding():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
     loop.state.ensure_branch("web:sqli", "WEB-SQLI-001", "SQL injection", priority=95)

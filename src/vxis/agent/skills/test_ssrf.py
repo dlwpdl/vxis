@@ -93,6 +93,7 @@ def _extract_cloud_metadata(
     payload: str,
     desc: str,
     headers: Any = None,
+    retain_secret_material: bool = False,
 ) -> dict[str, Any]:
     provider = _cloud_provider_hint(payload, desc, text, headers)
     if not provider:
@@ -115,12 +116,18 @@ def _extract_cloud_metadata(
         if access_key:
             fields.append("AccessKeyId")
             credential["access_key_id"] = _mask_value(access_key, keep=6)
+            if retain_secret_material:
+                credential["access_key_id_raw"] = access_key
         if secret_key:
             fields.append("SecretAccessKey")
             credential["has_secret_access_key"] = True
+            if retain_secret_material:
+                credential["secret_access_key"] = secret_key
         if token:
             fields.append("Token")
             credential["has_session_token"] = True
+            if retain_secret_material:
+                credential["session_token"] = token
         if expiration:
             credential["expiration"] = expiration
         if not fields and ("iam/security-credentials" in payload or "accesskeyid" in lower):
@@ -133,6 +140,8 @@ def _extract_cloud_metadata(
             fields.append("access_token")
             credential["has_access_token"] = True
             credential["access_token_preview"] = _mask_value(access_token)
+            if retain_secret_material:
+                credential["access_token"] = access_token
         if expires_in:
             credential["expiration"] = expires_in
         if client_id:
@@ -248,6 +257,10 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
     _base = _urlparse(url)
     _base_url = f"{_base.scheme}://{_base.netloc}"
     payloads = _ssrf_payloads_for_round(round)
+    retain_secret_material = bool(
+        kwargs.get("retain_secret_material")
+        or kwargs.get("retain_cloud_secret_material")
+    )
 
     parsed = urlparse(url)
     target_params, params, parsed = _select_target_params(url, param_name)
@@ -291,6 +304,7 @@ async def execute(url: str, param_name: str | None = None, round: int = 1, **kwa
                     payload=p["payload"],
                     desc=p["desc"],
                     headers=getattr(r, "headers", {}),
+                    retain_secret_material=retain_secret_material,
                 )
                 response_preview = (
                     cloud_signal.get("credential_evidence", {}).get("redacted_preview", "")

@@ -731,6 +731,47 @@ class ScanLoopDecisionPolicyMixin:
                 return params
         return params
 
+    def _recent_captured_business_flows(self) -> list[dict[str, Any]]:
+        flows: list[dict[str, Any]] = []
+        business_markers = (
+            "cart",
+            "basket",
+            "order",
+            "checkout",
+            "coupon",
+            "promo",
+            "payment",
+            "transfer",
+            "account",
+            "verify",
+        )
+        for message in reversed(self.state.messages[-160:]):
+            content = message.get("content", {})
+            if not isinstance(content, dict):
+                continue
+            result = content.get("result", {})
+            data = result.get("data", {}) if isinstance(result, dict) else {}
+            if not isinstance(data, dict):
+                continue
+            candidates: list[Any] = []
+            if isinstance(data.get("requests"), list):
+                candidates.extend(data["requests"])
+            if any(key in data for key in ("method", "path", "url", "body", "request_body")):
+                candidates.append(data)
+            for item in candidates:
+                if not isinstance(item, dict):
+                    continue
+                method = str(item.get("method") or "").upper()
+                path = str(item.get("path") or item.get("url") or "").lower()
+                has_body = any(item.get(key) for key in ("body", "request_body", "json", "json_data"))
+                if method in {"POST", "PUT", "PATCH"} and has_body and any(
+                    marker in path for marker in business_markers
+                ):
+                    flows.append(dict(item))
+                    if len(flows) >= 12:
+                        return list(reversed(flows))
+        return list(reversed(flows))
+
     def _candidate_expected_yield_score(
         self, candidate: VectorCandidate, findings: list[dict[str, Any]]
     ) -> int:
@@ -2129,7 +2170,12 @@ class ScanLoopDecisionPolicyMixin:
                 )
                 or target
             )
-            return {"url": picked}
+            params = {"url": picked}
+            if skill == "test_business_logic":
+                captured_flows = self._recent_captured_business_flows()
+                if captured_flows:
+                    params["captured_flows"] = captured_flows
+            return params
         if skill == "execute_chain":
             token = self._latest_auth_token()
             params: dict[str, Any] = {

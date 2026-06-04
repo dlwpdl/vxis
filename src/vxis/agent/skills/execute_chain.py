@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,9 @@ _AUTO_CONTEXT_KEYS = (
     "secrets",
     "urls",
     "internal_urls",
+    "object_patterns",
+    "cloud_impact",
+    "allow_cloud_api_probe",
 )
 
 
@@ -83,11 +87,29 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
         return [
             {"skill": "test_ssrf", "params": {"url": "{{url}}"}},
         ]
+    if template == "ssrf_to_cloud_impact":
+        return [
+            {
+                "skill": "test_ssrf",
+                "params": {
+                    "url": "{{url}}",
+                    "retain_secret_material": "{{allow_cloud_api_probe}}",
+                },
+            },
+            {
+                "skill": "prove_cloud_impact",
+                "requires": ["cloud_credentials"],
+                "params": {
+                    "cloud_credentials": "{{cloud_credentials}}",
+                    "allow_probe": "{{allow_cloud_api_probe}}",
+                },
+            },
+        ]
     return [
         {
             "skill": "post_auth_enum",
             "requires": ["token"],
-            "params": {"token": "{{token}}"},
+            "params": {"token": "{{token}}", "identities": "{{identities}}"},
         },
         {
             "skill": "test_idor",
@@ -97,6 +119,7 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
                 "identities": "{{identities}}",
                 "object_ids": "{{object_ids}}",
                 "owner_map": "{{owner_map}}",
+                "object_patterns": "{{object_patterns}}",
                 "max_id": "{{max_id}}",
             },
         },
@@ -111,6 +134,8 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
 async def _dispatch_skill(skill_name: str, target_url: str, params: dict[str, Any]) -> dict[str, Any]:
     from vxis.agent.skills import SKILL_REGISTRY
 
+    if skill_name == "prove_cloud_impact":
+        return _prove_cloud_impact(params)
     if skill_name == "execute_chain":
         raise ValueError("execute_chain cannot call itself")
     if skill_name not in SKILL_REGISTRY:
@@ -118,6 +143,14 @@ async def _dispatch_skill(skill_name: str, target_url: str, params: dict[str, An
     fn = SKILL_REGISTRY[skill_name]["fn"]
     params = dict(params or {})
     if skill_name == "test_idor":
+        object_patterns = params.pop("object_patterns", None)
+        if isinstance(object_patterns, list) and object_patterns:
+            return await _dispatch_idor_object_patterns(
+                fn=fn,
+                target_url=target_url,
+                base_params=params,
+                object_patterns=object_patterns,
+            )
         url_pattern = params.pop("url_pattern", f"{target_url.rstrip('/')}/api/Users/{{id}}")
         token = params.pop("token", None)
         return await fn(url_pattern=url_pattern, token=token, **params)
@@ -131,6 +164,147 @@ async def _dispatch_skill(skill_name: str, target_url: str, params: dict[str, An
         token = params.pop("token", None)
         return await fn(target_url=target_url, token=token, **params)
     return await fn(target_url=target_url, **params)
+
+
+async def _dispatch_idor_object_patterns(
+    *,
+    fn: Any,
+    target_url: str,
+    base_params: dict[str, Any],
+    object_patterns: list[Any],
+) -> dict[str, Any]:
+    pattern_results: list[dict[str, Any]] = []
+    for item in object_patterns[:8]:
+        if not isinstance(item, dict):
+            continue
+        url_pattern = str(item.get("url_pattern") or "").strip()
+        if not url_pattern:
+            continue
+        params = dict(base_params)
+        params.pop("url_pattern", None)
+        params["object_ids"] = item.get("object_ids") or params.get("object_ids")
+        params["owner_map"] = item.get("owner_map") or params.get("owner_map")
+        token = params.pop("token", None)
+        result = await fn(url_pattern=url_pattern, token=token, **params)
+        if isinstance(result, dict):
+            result = {**result, "url_pattern": result.get("url_pattern") or url_pattern}
+            pattern_results.append(result)
+    aggregate: dict[str, Any] = {
+        "vulnerable": any(item.get("vulnerable") for item in pattern_results),
+        "url_pattern": "multiple object patterns"
+        if len(pattern_results) > 1
+        else pattern_results[0].get("url_pattern", target_url)
+        if pattern_results
+        else target_url,
+        "pattern_results": pattern_results,
+        "accessible_ids": [],
+        "auth_bypass_ids": [],
+        "cross_identity_access": [],
+        "role_matrix_findings": [],
+        "data_samples": [],
+        "comparisons": [],
+        "identity_comparisons": [],
+        "control_evidence": {
+            "pattern_count": len(pattern_results),
+            "cross_identity_access": [],
+            "role_matrix_findings": [],
+        },
+        "total_tested": sum(int(item.get("total_tested", 0) or 0) for item in pattern_results),
+    }
+    for result in pattern_results:
+        for key in ("accessible_ids", "auth_bypass_ids", "data_samples", "comparisons", "identity_comparisons"):
+            aggregate[key].extend(list(result.get(key) or [])[:20])
+        for key in ("cross_identity_access", "role_matrix_findings"):
+            values = list(result.get(key) or [])
+            aggregate[key].extend(values[:20])
+            aggregate["control_evidence"][key].extend(values[:5])
+    return aggregate
+
+
+def _boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "allow"}
+
+
+def _first_aws_credentials(raw: Any) -> dict[str, Any]:
+    candidates = raw if isinstance(raw, list) else [raw]
+    for item in candidates:
+        if isinstance(item, list):
+            nested = _first_aws_credentials(item)
+            if nested:
+                return nested
+        if not isinstance(item, dict):
+            continue
+        provider = str(item.get("provider") or "").lower()
+        if provider and provider != "aws":
+            continue
+        if item.get("cloud_credentials") and isinstance(item["cloud_credentials"], dict):
+            item = item["cloud_credentials"]
+        fields = {str(v).lower() for v in item.get("fields") or []}
+        if provider == "aws" or "accesskeyid" in fields or item.get("access_key_id"):
+            return item
+    return {}
+
+
+def _prove_cloud_impact(params: dict[str, Any]) -> dict[str, Any]:
+    creds = _first_aws_credentials(params.get("cloud_credentials"))
+    allow_probe = _boolish(params.get("allow_probe")) or os.environ.get(
+        "VXIS_ALLOW_CLOUD_API_PROBE"
+    ) == "1"
+    planned = [
+        "aws sts get-caller-identity",
+        "aws s3api list-buckets --max-items 10",
+    ]
+    proof: dict[str, Any] = {
+        "provider": "aws" if creds else "",
+        "planned_probes": planned,
+        "verified": False,
+        "allow_probe": allow_probe,
+        "credential_fields": list(creds.get("fields") or []),
+    }
+    raw_access_key = str(creds.get("access_key_id_raw") or creds.get("AccessKeyId") or "")
+    raw_secret = str(creds.get("secret_access_key") or creds.get("SecretAccessKey") or "")
+    if not creds:
+        proof["reason"] = "no_aws_credentials_in_context"
+    elif not allow_probe:
+        proof["reason"] = "cloud_api_probe_disabled"
+    elif not (raw_access_key and raw_secret):
+        proof["reason"] = "raw_secret_material_not_retained"
+    else:
+        proof["raw_material_available"] = True
+        from vxis.agent.cloud_probe import probe_aws_identity_and_storage
+
+        probe_results = probe_aws_identity_and_storage(
+            {
+                "access_key_id": raw_access_key,
+                "secret_access_key": raw_secret,
+                "session_token": str(creds.get("session_token") or creds.get("Token") or ""),
+            }
+        )
+        proof.update(probe_results)
+        proof["verified"] = bool(probe_results.get("sts", {}).get("ok"))
+        proof["reason"] = "verified_with_sts" if proof["verified"] else "probe_failed"
+    finding = {
+        "title": "SSRF cloud credential impact proof plan",
+        "severity": "critical" if creds else "medium",
+        "finding_type": "ssrf_cloud_impact",
+        "affected_component": "cloud metadata credentials",
+        "description": "Cloud credential material from SSRF can be validated with STS identity and storage enumeration probes.",
+        "impact": "If the credential material is accepted by STS, the SSRF becomes cloud account or workload-role compromise.",
+        "technical_analysis": str(proof),
+        "poc_description": "Use the captured temporary credentials only within authorized scope to call STS GetCallerIdentity, then list low-risk storage metadata.",
+        "poc_script_code": "\n".join(planned),
+        "remediation_steps": "Block metadata egress, require IMDSv2 or equivalent, and scope instance roles to least privilege.",
+        "endpoint": "cloud metadata",
+        "method": "STS/S3",
+        "cwe": "CWE-918",
+    }
+    return {
+        "ok": bool(creds),
+        "cloud_impact": proof,
+        "findings": [finding] if creds else [],
+    }
 
 
 def _summarize_child(skill: str, data: dict[str, Any]) -> str:
@@ -159,6 +333,9 @@ def _summarize_child(skill: str, data: dict[str, Any]) -> str:
             f"{len(data.get('findings', []))} finding(s), "
             f"{len(creds) if isinstance(creds, list) else 1 if creds else 0} cloud credential signal(s)"
         )
+    if skill == "prove_cloud_impact":
+        impact = data.get("cloud_impact") or {}
+        return f"cloud impact {'ready' if impact else 'unavailable'} ({impact.get('reason', 'no_reason')})"
     return "completed"
 
 
@@ -200,6 +377,30 @@ def _merge_context(context: dict[str, Any], updates: dict[str, Any]) -> None:
             context[key] = value
             continue
         if isinstance(context[key], list) and isinstance(value, list):
+            if key == "identities":
+                merged: dict[str, dict[str, Any]] = {}
+                for item in [*context[key], *value]:
+                    if not isinstance(item, dict):
+                        continue
+                    name = str(item.get("name") or item.get("identity") or item.get("token") or "")
+                    if not name:
+                        continue
+                    existing = merged.get(name, {})
+                    next_item = {**existing, **item}
+                    if existing.get("owned_ids") or item.get("owned_ids"):
+                        next_item["owned_ids"] = sorted(
+                            {
+                                str(v)
+                                for v in [
+                                    *list(existing.get("owned_ids") or []),
+                                    *list(item.get("owned_ids") or []),
+                                ]
+                            },
+                            key=str,
+                        )
+                    merged[name] = next_item
+                context[key] = list(merged.values())
+                continue
             existing = list(context[key])
             for item in value:
                 if item not in existing:

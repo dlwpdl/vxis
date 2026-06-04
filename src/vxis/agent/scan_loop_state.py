@@ -881,6 +881,9 @@ class ScanLoopState:
             owned_ids = raw.get("owned_ids") or raw.get("owner_ids") or raw.get("allowed_ids")
             if owned_ids:
                 clean["owned_ids"] = [str(item) for item in list(owned_ids)[:50]]
+            owned_objects = raw.get("owned_objects")
+            if isinstance(owned_objects, list) and owned_objects:
+                clean["owned_objects"] = list(owned_objects)[:50]
             denied_ids = raw.get("denied_ids") or raw.get("forbidden_ids") or raw.get("blocked_ids")
             if denied_ids:
                 clean["denied_ids"] = [str(item) for item in list(denied_ids)[:50]]
