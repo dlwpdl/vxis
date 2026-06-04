@@ -2077,7 +2077,7 @@ class ScanLoopDecisionPolicyMixin:
                 or _pick(lambda u: "?" in u)
                 or f"{target}/search?q=test"
             )
-            return {"url": picked}
+            return {"url": picked, "browser_confirm": True}
         if skill == "test_ssrf":
             picked = _pick_untried(self._surface_candidates_for_skill(skill, hint_blob=blob)) or (
                 _pick(

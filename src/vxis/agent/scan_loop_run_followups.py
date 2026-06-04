@@ -133,7 +133,10 @@ class ScanLoopRunFollowupMixin:
                         _authz = self.state.authz_context_params()
                         _defaults: dict[str, dict] = {
                             "test_injection": {"url": f"{_base}/search?q=test"},
-                            "test_xss": {"url": f"{_base}/search?q=test"},
+                            "test_xss": {
+                                "url": f"{_base}/search?q=test",
+                                "browser_confirm": True,
+                            },
                             "test_ssrf": {"url": f"{_base}/redirect?url=http://example.com"},
                             "test_idor": {
                                 "url_pattern": f"{_base}/api/users/{{id}}",
