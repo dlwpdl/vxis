@@ -320,3 +320,52 @@ class TestScanOrchestratorScopeValidation:
             result = await orch.run_scan(target="example.com", profile="stealth")
 
         assert result.profile == "stealth"
+
+
+@pytest.mark.asyncio
+async def test_p1_profile_blocks_plugin_before_build_command(monkeypatch, tmp_path):
+    from vxis.config.schema import VXISConfig
+    from vxis.core.context import DAGContext
+    from vxis.p1.lifecycle import activate
+    from vxis.p1.models import Engagement, Policy, Scope, Window
+    from vxis.p1.store import EngagementStore
+
+    class FakePlugin:
+        def __init__(self) -> None:
+            self.built = False
+
+        def build_command(self, **kwargs):
+            self.built = True
+            return "echo should-not-run"
+
+    monkeypatch.setenv("VXIS_P1_HOME", str(tmp_path))
+    monkeypatch.setenv("VXIS_P1_ENGAGEMENT_ID", "eng_acme")
+    EngagementStore().save(
+        activate(
+            Engagement(
+                id="eng_acme",
+                name="ACME",
+                operator="BAC",
+                scope=Scope(allow=["app.acme.com"]),
+                window=Window(start="2026-06-01", expiry="2099-01-01"),
+                policy=Policy(techniques=["recon"], intensity="stealth"),
+                attested=True,
+            )
+        )
+    )
+    plugin = FakePlugin()
+    orchestrator = ScanOrchestrator(VXISConfig(data_dir=tmp_path))
+    context = DAGContext(target="https://evil.com", scan_profile="p1")
+    run = orchestrator._make_run_func(
+        registry={"fake": plugin},
+        dag_context=context,
+        target="https://evil.com",
+        profile="p1",
+        scan_id="scan-test",
+    )
+
+    output = await run("fake")
+
+    assert plugin.built is False
+    assert output.parsed_data["blocked"] is True
+    assert "out of scope" in output.errors[0]

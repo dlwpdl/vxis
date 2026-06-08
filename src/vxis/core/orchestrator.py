@@ -432,6 +432,29 @@ class ScanOrchestrator:
             if plugin is None:
                 raise ValueError(f"Plugin '{plugin_name}' not found in registry.")
 
+            if profile_obj is not None:
+                from vxis.p1.runtime_gate import enforce_plugin_invocation
+
+                gate = enforce_plugin_invocation(plugin_name, target, profile=profile_obj)
+                if gate is not None and not gate.allowed:
+                    logger.warning(
+                        "P1 gate blocked plugin '%s' on %s: %s",
+                        plugin_name,
+                        target,
+                        gate.reason,
+                    )
+                    po = PluginOutput(
+                        plugin_name=plugin_name,
+                        parsed_data={
+                            "blocked": True,
+                            "policy": "p1_engagement_scope",
+                            "audit": gate.audit_entry or {},
+                        },
+                        errors=[gate.reason],
+                    )
+                    dag_context.set(plugin_name, po)
+                    return po
+
             tool_config: dict[str, Any] = {}
             override = profile_obj.tool_overrides.get(plugin_name) if profile_obj else None
             if override is not None:

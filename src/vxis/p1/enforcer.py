@@ -84,6 +84,9 @@ def _validate_engagement_ready(engagement: Engagement, now_iso: str) -> None:
 
 
 def _validate_policy(engagement: Engagement, *, technique: str, destructive: bool) -> None:
+    intensity = engagement.policy.intensity.lower()
+    if intensity not in {"stealth", "standard", "loud"}:
+        raise EnforcementError(f"unknown intensity '{engagement.policy.intensity}'")
     allowed = {item.lower() for item in engagement.policy.techniques}
     if technique.lower() not in allowed:
         raise EnforcementError(f"technique '{technique}' not authorized")

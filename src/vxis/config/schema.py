@@ -43,6 +43,13 @@ class ScanProfile(BaseModel):
     report_sections: list[str] = Field(default_factory=list)
     requires_engagement: bool = False
     allowed_techniques: list[str] = Field(default_factory=list)
+    live_capabilities: bool = Field(
+        default=False,
+        description=(
+            "If true, P1 capability adapters may be selected after engagement "
+            "enforcement. False keeps capabilities in dry-run mode."
+        ),
+    )
     rate_limit: int = Field(ge=0, description="Requests per second; 0 = unlimited")
     max_concurrency: int = Field(ge=1)
     nmap_timing: int = Field(ge=0, le=5, description="Nmap -T timing template (0-5)")
@@ -342,6 +349,7 @@ def _default_profiles() -> dict[str, ScanProfile]:
             status="active",
             requires_engagement=True,
             allowed_techniques=["recon", "emulate", "c2", "lateral", "persist"],
+            live_capabilities=True,
             assessment_modules=[
                 "engagement_scope_enforcement",
                 "adversary_emulation_orchestration",

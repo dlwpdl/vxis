@@ -455,3 +455,32 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "authenticated data exfiltration" in chain_text
     assert "delegated workers" in chain_text
     assert "positive_needs_pivot" in chain_text
+
+
+def test_scan_display_renders_p1_status() -> None:
+    console = Console(file=io.StringIO(), force_terminal=False, width=120)
+    display = ScanLiveDisplay(
+        console,
+        target="https://app.acme.com",
+        profile="p1-adversary-emulation",
+        brain="test-brain",
+        ghost=True,
+        version="0.0.0",
+    )
+    display.set_p1_status(
+        {
+            "engagement": "eng_acme",
+            "mode": "live",
+            "operator": "BAC",
+            "intensity": "stealth",
+            "techniques": "recon, c2",
+            "beacons": "2",
+        }
+    )
+
+    console.print(display._render_header())
+
+    output = console.file.getvalue()
+    assert "eng_acme" in output
+    assert "BAC" in output
+    assert "live" in output

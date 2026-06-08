@@ -4,6 +4,7 @@ from datetime import datetime
 
 from vxis.config.schema import resolve_scan_profile
 from vxis.p1.enforcer import assert_engagement_active
+from vxis.p1.ghost_binding import apply_ghost
 from vxis.p1.models import Engagement
 from vxis.p1.store import EngagementStore
 
@@ -40,4 +41,10 @@ def require_profile_engagement(
         assert_engagement_active(engagement, now=now)
     except Exception as exc:
         raise P1ProfileGateError(f"engagement '{engagement_id}' is not active: {exc}") from exc
+    try:
+        from vxis.ghost.layer import ghost_layer
+
+        apply_ghost(engagement, ghost=ghost_layer)
+    except Exception as exc:
+        raise P1ProfileGateError(f"failed to apply P1 ghost policy: {exc}") from exc
     return engagement

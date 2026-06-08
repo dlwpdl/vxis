@@ -28,7 +28,7 @@ from vxis.cli.main_helpers import (
     _load_scan_instructions,
     _print_banner,
 )
-from vxis.config.schema import normalize_scan_profile_name
+from vxis.config.schema import normalize_scan_profile_name, resolve_scan_profile
 from vxis.p1.cli import emulate as p1_emulate
 from vxis.p1.cli import eng_app
 from vxis.p1.profile_gate import P1ProfileGateError, require_profile_engagement
@@ -37,7 +37,8 @@ from vxis.cli.skillopt import skillopt_app
 
 PROFILE_HELP = (
     "Scan profile: crown | stealth | standard | aggressive | continuous-devsec | "
-    "vc-portfolio-monitor | pre-investment-dd | remediation-verification | p1-adversary-emulation"
+    "vc-portfolio-monitor | pre-investment-dd | remediation-verification | "
+    "p1-adversary-emulation (engagement-gated live adversary emulation)"
 )
 
 app = typer.Typer(
@@ -375,7 +376,31 @@ def scan(
 
     # ── Live display 준비 ───────────────────────────────────
     brain_label = "Claude Code" if interactive else pf.brain_backend
-    display = ScanLiveDisplay(console, target, profile, brain_label, ghost, VERSION)
+    display_ghost = ghost
+    if p1_engagement is not None:
+        try:
+            from vxis.ghost.layer import ghost_layer
+
+            display_ghost = ghost_layer.is_active()
+        except Exception:
+            display_ghost = ghost
+    display = ScanLiveDisplay(console, target, profile, brain_label, display_ghost, VERSION)
+    if p1_engagement is not None:
+        try:
+            scan_profile = resolve_scan_profile(profile)
+            mode = "live" if scan_profile.live_capabilities else "dry-run"
+        except Exception:
+            mode = "dry-run"
+        display.set_p1_status(
+            {
+                "engagement": p1_engagement.id,
+                "mode": mode,
+                "operator": p1_engagement.operator,
+                "intensity": p1_engagement.policy.intensity,
+                "techniques": ", ".join(p1_engagement.policy.techniques),
+                "beacons": str(len(p1_engagement.beacons)),
+            }
+        )
     display.init_phases(WEB_PHASES)
 
     ctx = None

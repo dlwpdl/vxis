@@ -37,6 +37,7 @@ class EngagementStore:
             attested=bool(data.get("attested", False)),
             authorization_ref=str(data.get("authorization_ref") or ""),
             operator_subject=str(data.get("operator_subject") or ""),
+            beacons=[str(item) for item in data.get("beacons", [])],
         )
 
     def list_ids(self) -> list[str]:

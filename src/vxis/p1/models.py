@@ -43,6 +43,7 @@ class Engagement:
     attested: bool = False
     authorization_ref: str = ""
     operator_subject: str = ""
+    beacons: list[str] = field(default_factory=list)
 
 
 def parse_utc_datetime(value: str | datetime, *, end_of_day: bool = False) -> datetime:

@@ -5,6 +5,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from vxis.config.schema import ScanProfile
 from vxis.p1.audit import AuditLog
 from vxis.p1.enforcer import EnforcementError, enforce
 from vxis.p1.resolver import DnsResolver
@@ -19,6 +20,11 @@ _TARGET_TOOLS: dict[str, str] = {
     "agent_graph": "recon",
     "shell_exec": "emulate",
     "python_exec": "emulate",
+    "c2_listen": "c2",
+    "c2_beacon": "c2",
+    "c2_callback": "c2",
+    "lateral_move": "lateral",
+    "persist_agent": "persist",
 }
 _URL_RE = re.compile(r"https?://[^\s'\"<>]+", re.IGNORECASE)
 _IP_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
@@ -63,6 +69,40 @@ def enforce_tool_invocation(tool_name: str, args: dict[str, Any]) -> RuntimeGate
                 action=tool_name,
                 metadata={"tool_args_keys": sorted(args.keys())},
             )
+    except (FileNotFoundError, EnforcementError) as exc:
+        audit_entry = getattr(exc, "audit_entry", None)
+        return RuntimeGateDecision(allowed=False, reason=str(exc), audit_entry=audit_entry)
+    return RuntimeGateDecision(allowed=True, audit_entry=entry)
+
+
+def enforce_plugin_invocation(
+    plugin_name: str,
+    target: str,
+    *,
+    profile: ScanProfile,
+) -> RuntimeGateDecision | None:
+    """Apply the P1 chokepoint to the plugin scan path when the profile demands it."""
+    if not getattr(profile, "requires_engagement", False):
+        return None
+    engagement_id = os.environ.get("VXIS_P1_ENGAGEMENT_ID", "").strip()
+    if not engagement_id:
+        return RuntimeGateDecision(
+            allowed=False,
+            reason=f"profile '{profile.name}' requires VXIS_P1_ENGAGEMENT_ID",
+        )
+    store = EngagementStore()
+    audit = AuditLog(p1_home() / "audit.jsonl")
+    try:
+        engagement = store.load(engagement_id)
+        entry = enforce(
+            engagement,
+            technique="recon",
+            target=target,
+            resolver=DnsResolver(),
+            audit=audit,
+            action=f"plugin:{plugin_name}",
+            metadata={"plugin": plugin_name, "profile": profile.name},
+        )
     except (FileNotFoundError, EnforcementError) as exc:
         audit_entry = getattr(exc, "audit_entry", None)
         return RuntimeGateDecision(allowed=False, reason=str(exc), audit_entry=audit_entry)

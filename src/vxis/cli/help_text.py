@@ -72,6 +72,24 @@ claude mcp add vxis python -m vxis.mcp_server
 #   ghost_*/chain_*/output_*/phase_*/scope_*
 ```
 
+## P1 Adversary Emulation
+
+```bash
+# 1회 인가 컨텍스트 생성. operator=고객이 알아볼 내부 핸들(BAC 기본값)
+vxis eng create ACME-2026Q2 --scope app.acme.com,10.0.0.0/24 --expiry 2026-06-18 --technique recon --technique c2 --attest
+
+# engagement-gated live profile. 모든 target-facing 액션은 scope/audit/enforcer 통과 필요
+vxis scan app.acme.com --profile p1 --eng eng_acme_2026q2
+
+# 진행 중 스코프나 노출 강도 변경. scan/session을 닫지 않고 저장된 engagement만 갱신
+vxis eng scope-add eng_acme_2026q2 --allow api.acme.com --deny payments.acme.com
+vxis eng set-intensity eng_acme_2026q2 loud       # stealth | standard | loud
+vxis eng show eng_acme_2026q2                     # 현재 operator/scope/intensity/beacons 확인
+
+# 종료. 저장된 beacon registry와 ghost layer를 teardown하고 engagement를 closed로 봉인
+vxis eng close eng_acme_2026q2
+```
+
 ## 기타 명령어
 
 ```bash

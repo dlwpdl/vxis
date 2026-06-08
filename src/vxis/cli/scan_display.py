@@ -38,6 +38,7 @@ class ScanLiveDisplay:
         self.brain = brain
         self.ghost = ghost
         self.version = version
+        self.p1_status: dict[str, str] = {}
 
         self.phases: list[dict] = []
         self.current_phase: str | None = None
@@ -82,6 +83,9 @@ class ScanLiveDisplay:
         self.last_error: str | None = None
 
         self._live: Live | None = None
+
+    def set_p1_status(self, status: dict[str, str]) -> None:
+        self.p1_status = {str(key): str(value) for key, value in status.items() if value}
 
     def init_phases(self, phase_list: list):
         """Registry에서 Phase 목록 초기화."""
@@ -281,9 +285,12 @@ class ScanLiveDisplay:
         table = Table.grid(padding=(0, 2))
         table.add_column(style="bold", no_wrap=True)
         table.add_column()
-        _pstyle = {"stealth": "yellow", "standard": "green", "aggressive": "red"}.get(
-            self.profile, "white"
-        )
+        _pstyle = {
+            "stealth": "yellow",
+            "standard": "green",
+            "aggressive": "red",
+            "p1-adversary-emulation": "magenta",
+        }.get(self.profile, "white")
         table.add_row("Target:", f"[cyan]{self.target}[/cyan]")
         table.add_row("Profile:", f"[{_pstyle}]{self.profile}[/{_pstyle}]")
         table.add_row("Brain:", f"[green]{self.brain}[/green]")
@@ -291,6 +298,13 @@ class ScanLiveDisplay:
         if runtime:
             table.add_row("LLM:", runtime)
         table.add_row("Ghost:", "[magenta]ON[/magenta]" if self.ghost else "[dim]OFF[/dim]")
+        if self.p1_status:
+            table.add_row("Engagement:", f"[bold]{self.p1_status.get('engagement', '-')}[/bold]")
+            table.add_row("P1 Mode:", self.p1_status.get("mode", "dry-run"))
+            table.add_row("Operator:", self.p1_status.get("operator", "-"))
+            table.add_row("Intensity:", self.p1_status.get("intensity", "-"))
+            table.add_row("Techniques:", self.p1_status.get("techniques", "-"))
+            table.add_row("Beacons:", self.p1_status.get("beacons", "0"))
         table.add_row("Version:", f"v{self.version}")
         return Panel(table, title="[bold cyan]VXIS Scan[/bold cyan]", border_style="cyan")
 
