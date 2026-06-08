@@ -108,6 +108,27 @@ class ToolRegistry:
                 error="invalid_args",
             )
         try:
+            from vxis.p1.runtime_gate import enforce_tool_invocation
+
+            p1_decision = enforce_tool_invocation(name, args)
+        except Exception as e:
+            return ToolResult(
+                ok=False,
+                summary=f"P1 runtime gate failed before {name}: {type(e).__name__}: {e}",
+                error="p1_gate_failed",
+            )
+        if p1_decision is not None and not p1_decision.allowed:
+            return ToolResult(
+                ok=False,
+                data={
+                    "blocked": True,
+                    "policy": "p1_engagement_scope",
+                    "audit": p1_decision.audit_entry or {},
+                },
+                summary=f"{name} BLOCKED by P1 engagement gate: {p1_decision.reason}",
+                error="p1_scope_blocked",
+            )
+        try:
             return await tool.run(**args)
         except Exception as e:
             return ToolResult(ok=False, summary=f"tool {name} raised {type(e).__name__}: {e}", error=str(e))

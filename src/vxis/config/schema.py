@@ -41,6 +41,8 @@ class ScanProfile(BaseModel):
     standards: list[str] = Field(default_factory=list)
     assessment_modules: list[str] = Field(default_factory=list)
     report_sections: list[str] = Field(default_factory=list)
+    requires_engagement: bool = False
+    allowed_techniques: list[str] = Field(default_factory=list)
     rate_limit: int = Field(ge=0, description="Requests per second; 0 = unlimited")
     max_concurrency: int = Field(ge=1)
     nmap_timing: int = Field(ge=0, le=5, description="Nmap -T timing template (0-5)")
@@ -327,6 +329,38 @@ def _default_profiles() -> dict[str, ScanProfile]:
             nuclei_rate=5,
             skip_plugins=["brute-force", "destructive", "broad-discovery"],
         ),
+        "p1-adversary-emulation": ScanProfile(
+            name="p1-adversary-emulation",
+            public_name="VXIS Adversary Emulation",
+            description=(
+                "Authorized adversary-emulation profile. All target-facing "
+                "actions require an active P1 engagement, scope enforcement, "
+                "and hash-chained audit."
+            ),
+            family="business",
+            intent="adversary_emulation",
+            status="active",
+            requires_engagement=True,
+            allowed_techniques=["recon", "emulate", "c2", "lateral", "persist"],
+            assessment_modules=[
+                "engagement_scope_enforcement",
+                "adversary_emulation_orchestration",
+                "immutable_audit_trail",
+                "killswitch_lifecycle",
+            ],
+            report_sections=[
+                "engagement_summary",
+                "scope_decisions",
+                "emulation_timeline",
+                "audit_verification",
+                "remediation_plan",
+            ],
+            rate_limit=10,
+            max_concurrency=2,
+            nmap_timing=1,
+            nuclei_rate=2,
+            skip_plugins=["destructive"],
+        ),
     }
 
 
@@ -348,6 +382,10 @@ _PROFILE_ALIASES: dict[str, str] = {
     "due-diligence": "pre-investment-dd",
     "retest": "remediation-verification",
     "compliance": "compliance-mapping",
+    "p1": "p1-adversary-emulation",
+    "ae": "p1-adversary-emulation",
+    "adversary": "p1-adversary-emulation",
+    "adversary-emulation": "p1-adversary-emulation",
 }
 
 

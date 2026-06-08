@@ -29,11 +29,14 @@ from vxis.cli.main_helpers import (
     _print_banner,
 )
 from vxis.config.schema import normalize_scan_profile_name
+from vxis.p1.cli import emulate as p1_emulate
+from vxis.p1.cli import eng_app
+from vxis.p1.profile_gate import P1ProfileGateError, require_profile_engagement
 
 
 PROFILE_HELP = (
     "Scan profile: crown | stealth | standard | aggressive | continuous-devsec | "
-    "vc-portfolio-monitor | pre-investment-dd | remediation-verification"
+    "vc-portfolio-monitor | pre-investment-dd | remediation-verification | p1-adversary-emulation"
 )
 
 app = typer.Typer(
@@ -59,6 +62,8 @@ app.add_typer(client_app, name="client")
 
 db_app = typer.Typer(help="Database migration helpers (Alembic)", no_args_is_help=True)
 app.add_typer(db_app, name="db")
+app.add_typer(eng_app, name="eng")
+app.command("emulate")(p1_emulate)
 
 
 @app.callback()
@@ -177,6 +182,12 @@ def scan(
         "--instruction-file",
         help="Path to a Markdown/text file with detailed scan instructions.",
     ),
+    engagement: Optional[str] = typer.Option(
+        None,
+        "--engagement",
+        "--eng",
+        help="P1 engagement ID required by adversary-emulation profile.",
+    ),
 ) -> None:
     """Run a Brain-First security scan against the target.
 
@@ -187,6 +198,15 @@ def scan(
     --manifest: 여러 타겟을 한 번에 스캔 (scan.yml)
     """
     profile = normalize_scan_profile_name(profile)
+    try:
+        p1_engagement = require_profile_engagement(profile, engagement)
+    except P1ProfileGateError as exc:
+        err_console.print(f"[bold red]P1 engagement required:[/bold red] {exc}")
+        raise typer.Exit(code=2) from exc
+    if p1_engagement is not None:
+        os.environ["VXIS_P1_ENGAGEMENT_ID"] = p1_engagement.id
+    else:
+        os.environ.pop("VXIS_P1_ENGAGEMENT_ID", None)
 
     # ── Multi-target manifest path ─────────────────────────────────
     if manifest is not None:

@@ -68,6 +68,7 @@ class TestDefaultProfiles:
             "pre-investment-dd",
             "remediation-verification",
             "compliance-mapping",
+            "p1-adversary-emulation",
         }
 
     def test_passive_profile_is_scan_profile_instance(self, config: VXISConfig) -> None:
@@ -96,6 +97,12 @@ class TestDefaultProfiles:
         """The ScanProfile.name field must be consistent with its dict key."""
         for key, profile in config.profiles.items():
             assert profile.name == key
+
+    def test_p1_profile_requires_engagement(self, config: VXISConfig) -> None:
+        p1 = config.profiles["p1-adversary-emulation"]
+        assert p1.requires_engagement is True
+        assert "recon" in p1.allowed_techniques
+        assert "emulate" in p1.allowed_techniques
 
 
 # ---------------------------------------------------------------------------
