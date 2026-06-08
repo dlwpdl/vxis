@@ -1,0 +1,889 @@
+[
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] GitHub bans security researcher who posted zero-day Windows exploits",
+    "url": "https://www.tomshardware.com/tech-industry/cyber-security/microsofts-github-bans-security-researcher-who-posted-zero-day-windows-exploits-because-company-ruined-their-life-expert-claims-action-is-vindictive-and-promises-further-retaliation",
+    "description": "",
+    "relevance_tags": [
+      "zero-day"
+    ],
+    "score": 568.0,
+    "timestamp": "2026-05-28T21:45:54Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 568,
+      "comments": 256
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Did Claude Increase Bugs in rsync?",
+    "url": "https://alexispurslane.github.io/rsync-analysis/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 104.0,
+    "timestamp": "2026-06-05T13:14:42.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 104,
+      "comments": 61
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] Microsoft's stance on zero day exploits is a dumpster fire of their own making",
+    "url": "https://doublepulsar.com/microsofts-stance-on-zero-day-exploits-is-a-dumpster-fire-of-their-own-making-0946117940a4",
+    "description": "",
+    "relevance_tags": [],
+    "score": 77.0,
+    "timestamp": "2026-05-28T18:08:59Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 77,
+      "comments": 32
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Full Disclosure: 1-Click GitHub Token Stealing via a VSCode Bug",
+    "url": "https://blog.ammaraskar.com/github-token-stealing/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 71.0,
+    "timestamp": "2026-06-02T19:22:59.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 71,
+      "comments": 15
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] The Smart TV in Your LivingRoom Is a Node in the AIScraping Economy",
+    "url": "https://blog.includesecurity.com/2026/06/the-smart-tv-in-your-livingroom-is-a-node-in-the-aiscraping-economy/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 58.0,
+    "timestamp": "2026-06-06T06:46:28.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 58,
+      "comments": 17
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Pwnd Blaster: Hacking your PC using your speaker without ever touching it",
+    "url": "https://blog.nns.ee/2026/06/03/katana-badusb/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 50.0,
+    "timestamp": "2026-06-03T06:54:11.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 50,
+      "comments": 5
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] An Engineer's Post Protesting Laptop Surveillance Is Going Viral Inside Meta",
+    "url": "https://www.wired.com/story/meta-employee-protest-mouse-tracking-surveillance-ai-training/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 44.0,
+    "timestamp": "2026-05-14T20:56:40Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 44,
+      "comments": 4
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] A Post-Quantum Future for Let's Encrypt",
+    "url": "https://letsencrypt.org/2026/06/03/pq-certs.html",
+    "description": "",
+    "relevance_tags": [],
+    "score": 39.0,
+    "timestamp": "2026-06-03T14:07:13.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 39,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] The Empty Field That Wasn't: GPS Broadcasts a Numbers Station",
+    "url": "https://lsc-pagepro.mydigitalpublication.com/publication/?i=865273&p=62&view=issueViewer",
+    "description": "",
+    "relevance_tags": [],
+    "score": 37.0,
+    "timestamp": "2026-06-05T08:07:50.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 37,
+      "comments": 7
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] ZEC drops 30% as Shielded Labs reveals more about infinite counterfeit bug",
+    "url": "https://cointelegraph.com/news/zec-tanks-30-after-ai-security-review-discovers-critical-zcash-vulnerability",
+    "description": "",
+    "relevance_tags": [],
+    "score": 36.0,
+    "timestamp": "2026-06-05T15:17:13Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 36,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] Supply chain attack alert: .github/setup.js",
+    "url": "https://news.ycombinator.com/item?id=48409869",
+    "description": "",
+    "relevance_tags": [],
+    "score": 25.0,
+    "timestamp": "2026-06-05T08:59:36Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 25,
+      "comments": 13
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[HN] New IronWorm malware hits 36 packages in NPM supply-chain attack",
+    "url": "https://www.bleepingcomputer.com/news/security/new-ironworm-malware-hits-36-packages-in-npm-supply-chain-attack/",
+    "description": "",
+    "relevance_tags": [
+      "malware",
+      "supply-chain"
+    ],
+    "score": 22.0,
+    "timestamp": "2026-06-05T15:12:54Z",
+    "metadata": {
+      "source": "hackernews",
+      "points": 22,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Magecart skimmer turns Stripe into a malware command server",
+    "url": "https://sansec.io/research/stripe-api-skimmer-infrastructure",
+    "description": "",
+    "relevance_tags": [
+      "malware"
+    ],
+    "score": 17.0,
+    "timestamp": "2026-06-06T02:26:52.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 17,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] AI Worm",
+    "url": "https://arxiv.org/abs/2606.03811",
+    "description": "<p>replaced url</p>\n",
+    "relevance_tags": [],
+    "score": 15.0,
+    "timestamp": "2026-06-06T05:29:43.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 15,
+      "comments": 4
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-28318 — SolarWinds Serv-U",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-28318",
+    "description": "SolarWinds Serv-U contains an uncontrolled resource consumption vulnerability that allows specially crafted POST requests using the Content-Encoding: deflate header to crash the Serv-U service without authentication.",
+    "relevance_tags": [
+      "cve-2026-28318",
+      "solarwinds",
+      "serv-u",
+      "solarwinds serv-u uncontrolled resource consumption vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-06-05",
+    "metadata": {
+      "cve_id": "CVE-2026-28318",
+      "vendor": "SolarWinds",
+      "product": "Serv-U",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-19",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2026-45247 — Mirasvit Mirasvit Full Page Cache Warmer",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2026-45247",
+    "description": "Mirasvit Full Page Cache Warmer contains a deserialization of untrusted data vulnerability that could allow unauthenticated attackers to achieve remote code execution by supplying a crafted serialized PHP object in the CacheWarmer cookie.",
+    "relevance_tags": [
+      "cve-2026-45247",
+      "mirasvit",
+      "mirasvit full page cache warmer",
+      "mirasvit full page cache warmer deserialization of untrusted data vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-06-03",
+    "metadata": {
+      "cve_id": "CVE-2026-45247",
+      "vendor": "Mirasvit",
+      "product": "Mirasvit Full Page Cache Warmer",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-06",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2022-0492 — Linux Kernel",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2022-0492",
+    "description": "Linux Kernel contains an improper authentication vulnerability which could allow for privilege escalation via the cgroups v1 release_agent feature.",
+    "relevance_tags": [
+      "cve-2022-0492",
+      "linux",
+      "kernel",
+      "linux kernel improper authentication vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-06-02",
+    "metadata": {
+      "cve_id": "CVE-2022-0492",
+      "vendor": "Linux",
+      "product": "Kernel",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-05",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2025-48595 — Android Framework",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-48595",
+    "description": "Android Framework contains an integer overflow vulnerability that allows for code execution that could allow for local privilege escalation.",
+    "relevance_tags": [
+      "cve-2025-48595",
+      "android",
+      "framework",
+      "android framework integer overflow vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-06-02",
+    "metadata": {
+      "cve_id": "CVE-2025-48595",
+      "vendor": "Android",
+      "product": "Framework",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-05",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "cisa_kev",
+    "category": "exploit",
+    "title": "[CISA KEV] CVE-2024-21182 — Oracle WebLogic Server",
+    "url": "https://nvd.nist.gov/vuln/detail/CVE-2024-21182",
+    "description": "Oracle WebLogic contains an unspecified vulnerability that could allow an unauthenticated attacker with network access via T3, IIOP to compromise Oracle WebLogic Server. Successful attacks of this vulnerability can result in unauthorized access to critical data or complete access to all Oracle WebLogic Server accessible data.",
+    "relevance_tags": [
+      "cve-2024-21182",
+      "oracle",
+      "weblogic server",
+      "oracle weblogic server unspecified vulnerability"
+    ],
+    "score": 10.0,
+    "timestamp": "2026-06-01",
+    "metadata": {
+      "cve_id": "CVE-2024-21182",
+      "vendor": "Oracle",
+      "product": "WebLogic Server",
+      "action": "Apply mitigations per vendor instructions, follow applicable BOD 22-01 guidance for cloud services, or discontinue use of the product if mitigations are unavailable.",
+      "due_date": "2026-06-04",
+      "known_ransomware": "Unknown"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Dancing mad with sandboxing",
+    "url": "https://xeiaso.net/blog/2026/dancing-mad-sandboxing/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 9.0,
+    "timestamp": "2026-06-07T13:38:04.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 9,
+      "comments": 3
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Rooting Home Assistant through MeshCore: XSS attacks with a LoRa node name",
+    "url": "https://mxsasha.eu/posts/meshcore-xss-home-assistant/",
+    "description": "",
+    "relevance_tags": [
+      "xss"
+    ],
+    "score": 8.0,
+    "timestamp": "2026-06-03T17:34:16.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 8,
+      "comments": 0
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "discussion",
+    "title": "[Lobste.rs] Running Python code in a sandbox with MicroPython and WASM",
+    "url": "https://simonwillison.net/2026/Jun/6/micropython-in-a-sandbox/",
+    "description": "",
+    "relevance_tags": [],
+    "score": 6.0,
+    "timestamp": "2026-06-06T14:03:31.000-05:00",
+    "metadata": {
+      "source": "lobsters",
+      "score": 6,
+      "comments": 0
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] On the Shoulders of Giants: Empowering Automated Smart Contract Auditing via the GiAnt Corpus",
+    "url": "http://arxiv.org/abs/2606.07363v1",
+    "description": "High-quality smart contract auditing datasets are crucial for evaluating security tools and advancing smart contract security research. Two major limitations of existing datasets are the manual-induced scalability bottleneck and the deficiency in data granularity and diversity. To address these limitations, we propose GiANT, an automated framework designed to curate smart contract auditing datasets by distilling vulnerability insights from real-world auditing reports. GiANT employs a divide-and-",
+    "relevance_tags": [
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-06-05T15:08:32Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Sequential Data Poisoning in LLM Post-Training",
+    "url": "http://arxiv.org/abs/2606.04929v1",
+    "description": "LLM post-training proceeds through multiple stages, e.g., supervised fine-tuning (SFT) followed by reinforcement learning from human feedback (RLHF) or direct preference optimization (DPO), where each stage draws data from different, potentially untrusted sources. Existing literature assumes data poisoning attacks may occur at each training stage, but neglects the possibility of multiple attackers. To study the trustworthiness of the entire post-training pipeline, we propose the threat model of",
+    "relevance_tags": [
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-06-03T14:22:50Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Learn from Your Mistakes: Tree-like Self-Play for Secure Code LLMs",
+    "url": "http://arxiv.org/abs/2606.03489v1",
+    "description": "While Large Language Models (LLMs) excel in code generation, they remain prone to replicating subtle yet critical vulnerabilities endemic to their training data. Current alignment techniques, such as Supervised Fine-Tuning (SFT) and Reinforcement Learning (RL), typically apply coarse-grained optimization at the sequence level. This approach often fails to address the localized nature of security flaws, where a single incorrect token choice can compromise an entire program. To bridge this gap, we",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-06-02T11:07:20Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Bastet: A Fine-Grained Expert-Labeled Dataset for DeFi Smart Contract Vulnerability Detection",
+    "url": "http://arxiv.org/abs/2606.03387v1",
+    "description": "Smart contract vulnerabilities in Decentralized Finance (DeFi) protocols resulted in over 1.49 billion USD in confirmed losses in 2024 alone, across 192 incidents [1]. As LLM-based vulnerability detection emerges as a promising approach to address these threats, the quality of evaluation datasets has become a critical bottleneck. Existing datasets suffer from three fundamental problems: they are built on outdated Solidity versions (e.g., v0.4) that no longer reflect modern DeFi contracts [5][6][",
+    "relevance_tags": [
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-06-02T09:31:22Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] The Security Budget of Code LLMs: An Information-Theoretic Capacity-Security Bound",
+    "url": "http://arxiv.org/abs/2606.03308v2",
+    "description": "AI programming assistants make natural-language prompts a software-development interface, so small prompt perturbations become usability and security risks. We study an information-theoretic trade-off for code LLMs between functional capacity, $\\Cap=\\rmI(c^*;c_π)$, and perturbation retention, $\\Sec=\\rmI(c_π;\\tilde c_π)$. Here $\\Sec$ is a retention-channel quantity, not a direct measure of exploit success or vulnerable-code generation. For code completion modeled as $p\\to c_π$ with perturbed prom",
+    "relevance_tags": [
+      "exploit"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-06-02T08:22:14Z",
+    "metadata": {
+      "query": "LLM+security+vulnerability"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Explainable AI-Driven Cyber Risk Analytics and Model Reliability Assessment for Intelligent Governance of U.S. Critical Infrastructure: An XGBoost and SHAP-Based Intrusion Detection Framework",
+    "url": "http://arxiv.org/abs/2606.05710v1",
+    "description": "The increasing penetrations of the critical infrastructure sector in the United States with intelligent digital technologies have greatly increased exposure to advanced cyber adversaries and operational vulnerabilities. AI-powered governance and automated decision-making systems are becoming a key part of the operation of critical infrastructure systems, including energy, healthcare, transportation, financial services, and communication infrastructure, in order to improve efficiency and strategi",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-06-04T05:05:14Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] How Reliable Are AI Attackers Against a Fixed Vulnerable Target? A 400-Run Empirical Study of LLM Penetration Testing Consistency",
+    "url": "http://arxiv.org/abs/2605.30096v1",
+    "description": "Large language models (LLMs) can autonomously conduct multi-stage cyber attacks, but the consistency of their offensive behavior under repeated trials remains unstudied. This work presents the first large-scale empirical measurement of LLM attack consistency: 400 autonomous penetration testing runs (4 models, 100 each) against an identical honeypot hosting OWASP Juice Shop and two additional vulnerable services, holding prompt, orchestrator, and target constant. No model emitted a content refusa",
+    "relevance_tags": [
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-28T15:39:43Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Lessons from Penetration Tests on Large-Scale Agent Systems",
+    "url": "http://arxiv.org/abs/2605.27042v1",
+    "description": "As AI systems gain increasing autonomy and execution capability, the number of discovered security vulnerabilities continues to rise. However, many of these vulnerabilities are not fundamentally novel, but instead reflect recurring classes of weaknesses long observed in prior computing systems. Execution-capable AI agents are effectively unbounded, self-modifying programs that interact extensively with multiple layers of the computing stack. This broad interaction surface imposes a significant s",
+    "relevance_tags": [
+      "agent"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-26T13:58:27Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Trace: Unmasking AI Attack Agents Through Terminal Behavior Fingerprinting",
+    "url": "http://arxiv.org/abs/2605.01186v1",
+    "description": "AI-driven penetration testing agents are now capable of autonomously executing attacks within compromised networks. Identifying the model family that controls the active sessions of such agents provides valuable information towards understanding the intent of the attack and further developing attack countermeasures. In this paper, we introduce Trace, a novel multi-stage attribution and forensic framework for AI attack agents using terminal command sequences. Once Trace identifies a model family",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-05-02T01:27:20Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] AWE: Adaptive Agents for Dynamic Web Penetration Testing",
+    "url": "http://arxiv.org/abs/2603.00960v1",
+    "description": "Modern web applications are increasingly produced through AI-assisted development and rapid no-code deployment pipelines, widening the gap between accelerating software velocity and the limited adaptability of existing security tooling. Pattern-driven scanners fail to reason about novel contexts, while emerging LLM-based penetration testers rely on unconstrained exploration, yielding high cost, unstable behavior, and poor reproducibility.   We introduce AWE, a memory-augmented multi-agent framew",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-03-01T07:32:42Z",
+    "metadata": {
+      "query": "AI+penetration+testing"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] MalSkillBench: A Runtime-Verified Benchmark of Malicious Agent Skills",
+    "url": "http://arxiv.org/abs/2606.07131v1",
+    "description": "AI coding agents such as Claude Code and Gemini CLI increasingly extend themselves with third-party skills: markdown packages bundling natural-language instructions, executable scripts, and tool permissions. Because a skill is at once code and agent-facing instruction, it introduces a supply chain dependency whose risk is neither pure code nor pure prompt. Detection tools have never been measured against verified ground truth spanning this hybrid space, leaving their effectiveness unknown and wi",
+    "relevance_tags": [
+      "agent"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-06-05T10:43:19Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] DPAgent-in-the-Middle: Agentic Defense and Repair Against AI-Groomed Deceptive Patterns",
+    "url": "http://arxiv.org/abs/2606.06914v1",
+    "description": "Privacy deceptive patterns in web interfaces systematically manipulate users into disclosing personal data, yet existing defenses are fragmented, static, and increasingly vulnerable to manipulation by large language models. Moreover, data voids, areas of information scarcity within the web ecosystem, create fertile ground for adversaries to inject misleading content that can be scraped and learned by AI systems, thereby amplifying both deceptive design and model misbehavior. In this paper, we fo",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-06-05T05:26:42Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Benchmarking Security Risk Detection and Verification in Open Agentic Skill Ecosystems",
+    "url": "http://arxiv.org/abs/2606.00925v1",
+    "description": "Open agent platforms allow community contributors to publish reusable skills that agents can invoke at runtime. This extensibility also creates a supply-chain risk: malicious contributors can hide harmful behavior inside skills that appear benign under superficial inspection. However, existing defenses are hard to evaluate because there is no benchmark that measures both malicious-skill detection and runtime verification. We present SkillVetBench, a two-stage security vetting benchmark for open",
+    "relevance_tags": [
+      "agent",
+      "supply-chain"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-30T23:19:30Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Token-Level Generalization in LoRA Adapter Backdoors: Attack Characterization and Behavioral Detection",
+    "url": "http://arxiv.org/abs/2605.30189v1",
+    "description": "We show that LoRA adapters, the dominant distribution format for fine-tuned LLMs, can be reliably backdoored through training data poisoning while preserving baseline task performance. On a Qwen 2.5 1.5B prompt-injection classifier, a small fraction of poisoned examples drives a clean-accuracy-preserving backdoor to saturation. The resulting backdoor generalizes at the token feature level rather than the structural pattern level: a model trained on one RFC reference activates on any RFC referenc",
+    "relevance_tags": [
+      "backdoor"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-28T16:32:25Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Blind PRNG Hijacking: An Undetectable Integrity-Preserving Attack Against LLM Watermarking",
+    "url": "http://arxiv.org/abs/2605.28632v1",
+    "description": "Cryptographic watermarking is a leading defense for attributing text generated by large language models (LLMs). Existing schemes, including KGW, Unigram, and DipMark, derive their security guarantees from the assumption that the underlying pseudo-random number generator (PRNG) is trustworthy. This work introduces SeedHijack, the first supply-chain attack on LLM watermarking that is simultaneously (i) blind -- requiring no knowledge of the watermark key, detector, or model logits, (ii) integrity-",
+    "relevance_tags": [
+      "llm",
+      "supply-chain"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-27T15:39:32Z",
+    "metadata": {
+      "query": "supply+chain+attack+detection"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] FuzzingBrain V2: A Multi-Agent LLM System for Automated Vulnerability Discovery and Reproduction",
+    "url": "http://arxiv.org/abs/2605.21779v1",
+    "description": "Software vulnerabilities pose critical security threats, with nearly 50,000 CVEs reported in 2025. While Large Language Models (LLMs) show promise for automated vulnerability detection, three key challenges remain. First, LLM-generated vulnerability reports suffer from high false positive rates and lack   reproducible verification. Second, existing LLM-based approaches use suboptimal granularities for vulnerability localization: function-level analysis overlooks bugs when context becomes extensi",
+    "relevance_tags": [
+      "llm",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-20T22:17:14Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Capturing Monetarily Exploitable Vulnerability in Smart Contracts via Auditor Knowledge-Learning Fuzzing",
+    "url": "http://arxiv.org/abs/2604.18395v1",
+    "description": "Smart contracts extended blockchain functionality beyond simple transactions, powering complex applications like decentralized finance (DeFi). However, this complexity introduces serious security challenges, including price manipulation and inflation attacks. Despite the development of various security tools, the rapid rise in financially motivated exploits continues to pose a significant threat to the blockchain ecosystem. These financially motivated exploits often stem from Monetarily Exploita",
+    "relevance_tags": [
+      "fuzzing",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-20T15:17:45Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Contextualizing Sink Knowledge for Java Vulnerability Discovery",
+    "url": "http://arxiv.org/abs/2604.01645v3",
+    "description": "Java applications are prone to vulnerabilities stemming from the insecure use of security-sensitive APIs, such as file operations enabling path traversal or deserialization routines allowing remote code execution. These sink APIs encode critical information for vulnerability discovery: the program-specific constraints required to reach them and the exploitation conditions necessary to trigger security flaws. Despite this, existing fuzzers largely overlook such vulnerability-specific knowledge, l",
+    "relevance_tags": [
+      "deserialization",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-04-02T05:43:25Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] MulCovFuzz: A Multi-Component Coverage-Guided Greybox Fuzzer for 5G Protocol Testing",
+    "url": "http://arxiv.org/abs/2602.21794v1",
+    "description": "As mobile networks transition to 5G infrastructure, ensuring robust security becomes more important due to the complex architecture and expanded attack surface. Traditional security testing approaches for 5G networks rely on black-box fuzzing techniques, which are limited by their inability to observe internal program state and coverage information. This paper presents MulCovFuzz, a novel coverage-guided greybox fuzzing tool for 5G network testing. Unlike existing tools that depend solely on sys",
+    "relevance_tags": [
+      "fuzzing"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-02-25T11:17:42Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] TÄMU: Emulating Trusted Applications at the (GlobalPlatform)-API Layer",
+    "url": "http://arxiv.org/abs/2601.20507v1",
+    "description": "Mobile devices rely on Trusted Execution Environments (TEEs) to execute security-critical code and protect sensitive assets. This security-critical code is modularized in components known as Trusted Applications (TAs). Vulnerabilities in TAs can compromise the TEE and, thus, the entire system. However, the closed-source nature and fragmentation of mobile TEEs severely hinder dynamic analysis of TAs, limiting testing efforts to mostly static analyses. This paper presents TÄMU, a rehosting platfor",
+    "relevance_tags": [
+      "api"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-01-28T11:34:06Z",
+    "metadata": {
+      "query": "fuzzing+zero+day"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] FORGE: Multi-Agent Graduated Exploitation and Detection Engineering",
+    "url": "http://arxiv.org/abs/2606.03453v1",
+    "description": "Vulnerability disclosure volumes now far exceed organizational assessment capacity, yet three adjacent research communities (proof-of-concept generation, vulnerability prioritization, and detection rule engineering) operate largely in isolation. Existing automated exploit generation systems report binary pass/fail outcomes, discarding partial progress and producing no signal for the other two communities. This paper presents FORGE, a multi-agent system that bridges these three silos through grad",
+    "relevance_tags": [
+      "exploit",
+      "vulnerability"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-06-02T10:32:28Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Generative AI-Enabled Refund Fraud in Chinese E-Commerce: Investigation on Merchants and Platform Workers",
+    "url": "http://arxiv.org/abs/2606.03215v1",
+    "description": "E-commerce dispute resolution typically relies on the security assumption that digital evidence truthfully reflects physical reality. Generative AI (GenAI) invalidates this threat model, enabling attackers to fabricate hyper-realistic evidence of product defects at negligible cost. Through semi-structured interviews with merchants (N=17) and platform workers (N=13) in the Chinese e-commerce market, we characterize this shift toward GenAI-enabled scalable fabrication. We outline a taxonomy of fou",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "2026-06-02T06:20:25Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Automatically Attacking Software Reverse Engineering AI Agents",
+    "url": "http://arxiv.org/abs/2605.30667v1",
+    "description": "Software tools for reverse engineering executable binary files, such as Ghidra, enable malware analysts to safely conduct robust static analysis without having access to original source code. Coupled with the analytic power of large language models (LLM), agentic systems enabled with tools, such as GhidraMCP, can allow analysts to automate a previously human driven process. Although this automation can increase the productivity of a single malware analyst, it also introduces a new area of vulner",
+    "relevance_tags": [
+      "automation",
+      "llm",
+      "malware"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-28T23:58:25Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Evolving Skill-Structured Attack Memory Enhances LLM Jailbreaking",
+    "url": "http://arxiv.org/abs/2605.29237v1",
+    "description": "Jailbreak attacks on large language models (LLMs) aim to induce LLMs to produce content that they are expected to refuse. Automated black-box jailbreak generation is especially important for safety evaluation, where the attacker observes only model outputs and needs to automatically search for effective adversarial prompts. Existing black-box jailbreak methods either depend on sample-wise heuristic search or leverage attack experience through accumulating strategy pools or method libraries, lack",
+    "relevance_tags": [
+      "llm"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-28T01:53:14Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "research_pulse",
+    "category": "paper",
+    "title": "[Paper] Cycle-Space Informed Detection of Autoencoded Blind False Data Injection Attacks on Power Systems",
+    "url": "http://arxiv.org/abs/2605.28912v1",
+    "description": "The rapid growth of AI-driven data centers and large-scale energy storage systems is increasing the reliance of power system operation on real-time measurement data and automated decision-making. However, many existing detection methods rely on statistical or data-driven analysis of measurements and can fail when attackers exploit the same data structure to craft stealthy perturbations. To illustrate this limitation, we demonstrate a blind False Data Injection Attack (FDIA) in which an Autoencod",
+    "relevance_tags": [
+      "exploit",
+      "injection"
+    ],
+    "score": 0.0,
+    "timestamp": "2026-05-27T17:36:18Z",
+    "metadata": {
+      "query": "automated+exploit+generation"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Hands on with Intelligent Terminal, an AI-powered Windows Terminal",
+    "url": "https://www.bleepingcomputer.com/news/microsoft/hands-on-with-intelligent-terminal-an-ai-powered-windows-terminal/",
+    "description": "Microsoft has created an open-source fork of Windows Terminal called \"Intelligent Terminal,\" and it allows you to use AI directly inside Terminal without interfering with the regular session. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Sun, 07 Jun 2026 19:20:02 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] C0XMO botnet spreads via DD-WRT router flaw, kills rival malware",
+    "url": "https://www.bleepingcomputer.com/news/security/c0xmo-botnet-spreads-via-dd-wrt-router-flaw-kills-rival-malware/",
+    "description": "A new variant of the Gafgyt botnet called C0XMO is targeting DD-WRT router firmware and can move to other device types with various CPU architectures. [...]",
+    "relevance_tags": [
+      "malware"
+    ],
+    "score": 0.0,
+    "timestamp": "Sun, 07 Jun 2026 10:17:46 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Silent Ransom Group targets law firms with fake IT support calls",
+    "url": "https://www.bleepingcomputer.com/news/security/silent-ransom-group-targets-law-firms-with-fake-it-support-calls/",
+    "description": "The Silent Ransom Group extortion gang is actively targeting U.S. law firms and professional services organizations in social engineering attacks that often lead to data theft within hours of initial contact, according to a new report by cybersecurity firm Mandiant. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Sun, 07 Jun 2026 10:09:19 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Critical Everest Forms Pro flaw exploited to take over WordPress sites",
+    "url": "https://www.bleepingcomputer.com/news/security/critical-everest-forms-pro-flaw-exploited-to-take-over-wordpress-sites/",
+    "description": "Hackers are actively exploiting a critical vulnerability (CVE-2026-3300) in the Everest Forms Pro plugin, which lets them take complete control of a WordPress website. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Sat, 06 Jun 2026 10:09:26 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Suspicious Polyfill login prompts pop up on Toshiba, Muji websites",
+    "url": "https://www.bleepingcomputer.com/news/security/suspicious-polyfill-login-prompts-pop-up-on-toshiba-muji-websites/",
+    "description": "Tech giant Toshiba and mega-retailer Muji warned visitors that suspicious sign-in screens popping up on their websites could collect credentials. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 05 Jun 2026 17:54:42 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] CISA: Hackers now exploit SolarWinds Serv-U flaw to crash servers",
+    "url": "https://www.bleepingcomputer.com/news/security/cisa-hackers-now-exploit-solarwinds-serv-u-flaw-to-crash-servers/",
+    "description": "CISA warned today that hackers are now actively exploiting a recently patched high-severity SolarWinds Serv-U flaw to crash servers. [...]",
+    "relevance_tags": [
+      "exploit"
+    ],
+    "score": 0.0,
+    "timestamp": "Fri, 05 Jun 2026 15:15:30 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Chinese APT deploys new malware to keep access to hacked networks",
+    "url": "https://www.bleepingcomputer.com/news/security/chinese-apt-deploys-new-malware-to-keep-access-to-hacked-networks/",
+    "description": "A Chinese espionage group tracked as UNC5221 has been accessing Microsoft 365 environments using the Brickstorm backdoor and previously undocumented malware named Plenet and AgentPSD. [...]",
+    "relevance_tags": [
+      "malware"
+    ],
+    "score": 0.0,
+    "timestamp": "Fri, 05 Jun 2026 14:09:47 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Dark web Nemesis Market vendor gets 26 years for selling drugs",
+    "url": "https://www.bleepingcomputer.com/news/security/dark-web-nemesis-market-vendor-gets-26-years-for-selling-drugs/",
+    "description": "A California man was sentenced to more than 26 years in federal prison for trafficking fentanyl and methamphetamine through Nemesis Market, one of the world's largest dark web marketplaces. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 05 Jun 2026 13:50:58 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] Over 900 US gas station tank gauge systems exposed to attacks",
+    "url": "https://www.bleepingcomputer.com/news/security/over-900-us-gas-station-tank-gauge-systems-exposed-to-attacks/",
+    "description": "Over 900 automatic tank gauge (ATG) systems across the United States, used to monitor fuel and chemical storage tanks across various critical infrastructure sectors, have been found exposed online and are vulnerable to ongoing attacks. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 05 Jun 2026 10:50:15 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  },
+  {
+    "source": "community_pulse",
+    "category": "news",
+    "title": "[bleepingcomputer] What 2026 DBIR Confirms: Attacks Are Living in the Browser",
+    "url": "https://www.bleepingcomputer.com/news/security/what-2026-dbir-confirms-attacks-are-living-in-the-browser/",
+    "description": "Phishing, shadow AI, malicious extensions, and credential theft increasingly happen inside the browser. Keep Aware explains what the 2026 Verizon DBIR reveals about browser-layer security gaps and modern attacks. [...]",
+    "relevance_tags": [],
+    "score": 0.0,
+    "timestamp": "Fri, 05 Jun 2026 10:00:10 -0400",
+    "metadata": {
+      "source": "bleepingcomputer"
+    }
+  }
+]
