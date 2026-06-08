@@ -64,7 +64,7 @@ def prepare_cases(
 
     Output defaults to ~/.vxis/skillopt/splits/axis2.
     """
-    result = _export(case_file, out_dir or default_split_dir(name), train_ratio, val_ratio, seed)
+    _export(case_file, out_dir or default_split_dir(name), train_ratio, val_ratio, seed)
     typer.echo(f"next: vxis skillopt train {name} --dry-run")
     typer.echo(f"then: vxis skillopt train {name} --execute")
     typer.echo(f"then: vxis skillopt apply {name} --inactive")
@@ -91,7 +91,9 @@ def train_skill(
     epochs: Optional[int] = typer.Option(None, "--epochs", min=1),
     workers: Optional[int] = typer.Option(None, "--workers", min=1),
     execute: bool = typer.Option(False, "--execute", help="Actually run SkillOpt training."),
-    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run", help="Print command without running."),
+    dry_run: bool = typer.Option(
+        True, "--dry-run/--no-dry-run", help="Print command without running."
+    ),
 ) -> None:
     """Run or preview local SkillOpt training.
 
@@ -127,7 +129,9 @@ def apply_skill(
     families: str = typer.Option("", "--families", help="Comma-separated families."),
     roles: str = typer.Option("director", "--roles", help="Comma-separated roles."),
     triggers: str = typer.Option("", "--triggers", help="Comma-separated trigger terms."),
-    inactive: bool = typer.Option(False, "--inactive", help="Import but do not inject into prompts."),
+    inactive: bool = typer.Option(
+        False, "--inactive", help="Import but do not inject into prompts."
+    ),
 ) -> None:
     """Apply a trained best_skill.md to VXIS.
 
@@ -151,7 +155,9 @@ def run_flow(
     epochs: Optional[int] = typer.Option(None, "--epochs", min=1),
     workers: Optional[int] = typer.Option(None, "--workers", min=1),
     execute: bool = typer.Option(False, "--execute", help="Actually run SkillOpt training."),
-    auto_apply: bool = typer.Option(False, "--auto-apply", help="Apply best_skill.md after training."),
+    auto_apply: bool = typer.Option(
+        False, "--auto-apply", help="Apply best_skill.md after training."
+    ),
     inactive: bool = typer.Option(True, "--inactive/--active", help="Apply inactive by default."),
 ) -> None:
     """Guided one-shot flow: prepare -> train -> optional apply.
@@ -196,7 +202,9 @@ def import_skill(
     families: str = typer.Option("", "--families", help="Comma-separated families."),
     roles: str = typer.Option("director", "--roles", help="Comma-separated roles."),
     triggers: str = typer.Option("", "--triggers", help="Comma-separated trigger terms."),
-    inactive: bool = typer.Option(False, "--inactive", help="Import but do not inject into prompts."),
+    inactive: bool = typer.Option(
+        False, "--inactive", help="Import but do not inject into prompts."
+    ),
 ) -> None:
     """Import a SkillOpt best_skill.md artifact into VXIS prompt guidance."""
     _import(skill_path, name, surface, families, roles, triggers, inactive)
@@ -212,8 +220,7 @@ def list_skills() -> None:
     for entry in entries:
         status = "active" if entry.active else "inactive"
         typer.echo(
-            f"{entry.name}\t{status}\t{entry.surface}\t"
-            f"{','.join(entry.families)}\t{entry.path}"
+            f"{entry.name}\t{status}\t{entry.surface}\t{','.join(entry.families)}\t{entry.path}"
         )
 
 
@@ -257,8 +264,7 @@ def _export(
         seed=seed,
     )
     typer.echo(
-        f"exported {result.total} case(s): "
-        f"train={result.train} val={result.val} test={result.test}"
+        f"exported {result.total} case(s): train={result.train} val={result.val} test={result.test}"
     )
     typer.echo(f"config: {result.config_path}")
     typer.echo(f"seed skill: {result.seed_skill_path}")
