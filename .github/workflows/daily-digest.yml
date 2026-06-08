@@ -23,6 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install VXIS
+        run: |
+          pip install -e . 2>/dev/null || true
+          echo "PYTHONPATH=src" >> $GITHUB_ENV
+
       - name: Build and send daily digest
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

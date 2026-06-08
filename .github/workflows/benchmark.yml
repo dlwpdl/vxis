@@ -41,7 +41,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: uv sync --locked --dev
+        run: uv sync --locked --extra dev
 
       - name: Run deterministic benchmark tier
         env:
@@ -84,7 +84,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: uv sync --locked --dev --extra browser
+        run: uv sync --locked --extra dev --extra browser
 
       - name: Install browser runtime
         run: uv run playwright install --with-deps chromium
