@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -46,6 +47,20 @@ class OptimizedSkill:
 
 def skillopt_home() -> Path:
     return Path(os.environ.get("VXIS_SKILLOPT_HOME", Path.home() / ".vxis" / "skillopt")).expanduser()
+
+
+def default_split_dir(name: str) -> Path:
+    return skillopt_home() / "splits" / _safe_name(name)
+
+
+def default_run_dir(name: str) -> Path:
+    return skillopt_home() / "runs" / _safe_name(name)
+
+
+def skillopt_checkout() -> Path:
+    return Path(
+        os.environ.get("VXIS_SKILLOPT_CHECKOUT", "/Users/eliot/Desktop/gitt/SkillOpt")
+    ).expanduser()
 
 
 def export_searchqa_split(
@@ -125,6 +140,83 @@ def import_optimized_skill(
     index[entry.name] = entry
     _write_index(index.values())
     return entry
+
+
+def set_optimized_skill_active(name: str, active: bool) -> OptimizedSkill:
+    clean_name = _safe_name(name)
+    index = {item.name: item for item in list_optimized_skills()}
+    if clean_name not in index:
+        raise KeyError(name)
+    entry = index[clean_name]
+    entry.active = active
+    _write_index(index.values())
+    return entry
+
+
+def latest_best_skill(run_dir: str | Path) -> Path:
+    root = Path(run_dir)
+    direct = root / "best_skill.md"
+    if direct.exists():
+        return direct
+    candidates = sorted(root.glob("**/best_skill.md"), key=lambda path: path.stat().st_mtime)
+    if not candidates:
+        raise FileNotFoundError(f"best_skill.md not found under {root}")
+    return candidates[-1]
+
+
+def build_train_command(
+    name: str,
+    *,
+    config_path: str | Path | None = None,
+    checkout: str | Path | None = None,
+    out_root: str | Path | None = None,
+    epochs: int | None = None,
+    workers: int | None = None,
+) -> list[str]:
+    clean_name = _safe_name(name)
+    config = Path(config_path) if config_path is not None else default_split_dir(clean_name) / "vxis_searchqa_config.yaml"
+    command = ["python", "scripts/train.py", "--config", str(config)]
+    cfg_options: list[str] = []
+    if out_root is not None:
+        cfg_options.append(f"env.out_root={out_root}")
+    else:
+        cfg_options.append(f"env.out_root={default_run_dir(clean_name)}")
+    if epochs is not None:
+        cfg_options.append(f"train.num_epochs={int(epochs)}")
+    if workers is not None:
+        cfg_options.append(f"env.workers={int(workers)}")
+    if cfg_options:
+        command.extend(["--cfg-options", *cfg_options])
+    return command
+
+
+def run_skillopt_train(
+    name: str,
+    *,
+    config_path: str | Path | None = None,
+    checkout: str | Path | None = None,
+    out_root: str | Path | None = None,
+    epochs: int | None = None,
+    workers: int | None = None,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    cwd = Path(checkout) if checkout is not None else skillopt_checkout()
+    command = build_train_command(
+        name,
+        config_path=config_path,
+        checkout=cwd,
+        out_root=out_root,
+        epochs=epochs,
+        workers=workers,
+    )
+    result: dict[str, Any] = {"cwd": str(cwd), "command": command, "dry_run": dry_run}
+    if dry_run:
+        return result
+    completed = subprocess.run(command, cwd=cwd, check=False, text=True)  # noqa: S603
+    result["returncode"] = completed.returncode
+    if completed.returncode != 0:
+        raise RuntimeError(f"SkillOpt train failed with exit code {completed.returncode}")
+    return result
 
 
 def list_optimized_skills() -> list[OptimizedSkill]:
@@ -325,6 +417,12 @@ def _render_export_readme(out_dir: Path, config: Path) -> str:
         "After training, import the generated `best_skill.md` into VXIS:\n\n"
         "```bash\n"
         "vxis skillopt import outputs/<run>/best_skill.md --name axis2 --families access_control,chain --roles director,post_exploit_worker\n"
+        "```\n"
+        "\nOr use the VXIS helper:\n\n"
+        "```bash\n"
+        "vxis skillopt train <name> --config "
+        f"{config}\n"
+        "vxis skillopt apply <name> --run-dir .vxis/skillopt/runs/<name>\n"
         "```\n"
     )
 

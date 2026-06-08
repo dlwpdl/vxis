@@ -4,10 +4,12 @@ import json
 
 from vxis.agent.skill_context import render_skill_context
 from vxis.skillopt_bridge import (
+    build_train_command,
     export_searchqa_split,
     import_optimized_skill,
     list_optimized_skills,
     render_optimized_skill_context,
+    set_optimized_skill_active,
 )
 
 
@@ -61,6 +63,14 @@ def test_imported_skillopt_guidance_renders_for_matching_task(tmp_path, monkeypa
     assert "Optimized SkillOpt guidance" in rendered
     assert "Always enumerate owned objects" in rendered
 
+    disabled = set_optimized_skill_active("axis2", False)
+    assert disabled.active is False
+    assert render_optimized_skill_context(
+        task="authorization BOLA test",
+        role="director",
+        target_kind="web",
+    ) == ""
+
 
 def test_render_skill_context_appends_imported_skillopt_guidance(tmp_path, monkeypatch):
     monkeypatch.setenv("VXIS_SKILLOPT_HOME", str(tmp_path))
@@ -85,3 +95,15 @@ def test_render_skill_context_appends_imported_skillopt_guidance(tmp_path, monke
     assert "execute_chain" in rendered
     assert "Optimized SkillOpt guidance" in rendered
     assert "Prefer execute_chain" in rendered
+
+
+def test_build_train_command_defaults_to_named_split_and_run_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("VXIS_SKILLOPT_HOME", str(tmp_path))
+
+    command = build_train_command("axis2", epochs=2, workers=4)
+
+    assert command[:3] == ["python", "scripts/train.py", "--config"]
+    assert str(tmp_path / "splits" / "axis2" / "vxis_searchqa_config.yaml") in command
+    assert "train.num_epochs=2" in command
+    assert "env.workers=4" in command
+    assert f"env.out_root={tmp_path / 'runs' / 'axis2'}" in command
