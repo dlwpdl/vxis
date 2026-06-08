@@ -32,6 +32,7 @@ from vxis.config.schema import normalize_scan_profile_name
 from vxis.p1.cli import emulate as p1_emulate
 from vxis.p1.cli import eng_app
 from vxis.p1.profile_gate import P1ProfileGateError, require_profile_engagement
+from vxis.cli.skillopt import skillopt_app
 
 
 PROFILE_HELP = (
@@ -63,6 +64,7 @@ app.add_typer(client_app, name="client")
 db_app = typer.Typer(help="Database migration helpers (Alembic)", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 app.add_typer(eng_app, name="eng")
+app.add_typer(skillopt_app, name="skillopt")
 app.command("emulate")(p1_emulate)
 
 

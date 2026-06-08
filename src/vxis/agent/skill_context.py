@@ -431,6 +431,20 @@ def render_skill_context(
             f"   stop: {card.stop_condition}",
             f"   action: {card.run_hint}",
         ])
+    try:
+        from vxis.skillopt_bridge import render_optimized_skill_context
+
+        optimized = render_optimized_skill_context(
+            task=task,
+            role=role,
+            explicit_skills=explicit_skills,
+            target_kind=target_kind,
+            max_chars=max(400, max_chars // 2),
+        )
+    except Exception:
+        optimized = ""
+    if optimized:
+        lines.extend(["", optimized])
     rendered = "\n".join(lines)
     if len(rendered) <= max_chars:
         return rendered
