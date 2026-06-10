@@ -25,7 +25,7 @@ OPENAPI_PATHS = (
 )
 
 _GRAPHQL_INTROSPECTION_QUERY = """
-query VXISIntrospection {
+query IntrospectionQuery {
   __schema {
     queryType { name }
     mutationType { name }

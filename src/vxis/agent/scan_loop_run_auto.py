@@ -557,6 +557,7 @@ class ScanLoopAutoOrchestrationMixin:
                         f"sqlmap -u '{target_url}' "
                         "--batch --level=2 --risk=2 "
                         "--threads=4 --timeout=10 "
+                        "--random-agent "
                         "--output-dir=/tmp/sqlmap_auto "
                         "2>&1 | tail -50"
                     )

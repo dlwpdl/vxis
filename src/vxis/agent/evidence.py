@@ -21,6 +21,13 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Generic browser UA used for all outbound requests — must NOT identify VXIS.
+_GENERIC_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
 # ---------------------------------------------------------------------------
 # 보안 헤더 정책 테이블
 # ---------------------------------------------------------------------------
@@ -129,7 +136,7 @@ def check_security_headers(url: str) -> list[dict[str, Any]]:
     try:
         req = urllib.request.Request(
             url,
-            headers={"User-Agent": "VXIS-SecurityScanner/1.0"},
+            headers={"User-Agent": _GENERIC_UA},
             method="GET",
         )
         with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310
@@ -317,7 +324,7 @@ class EvidenceCollector:
             try:
                 req = urllib.request.Request(
                     url,
-                    headers={"User-Agent": "VXIS-SecurityScanner/1.0"},
+                    headers={"User-Agent": _GENERIC_UA},
                     method=method,
                 )
                 with urllib.request.urlopen(req, timeout=10) as response:  # noqa: S310
@@ -415,7 +422,7 @@ class EvidenceCollector:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True)
             try:
-                context = await browser.new_context(user_agent="VXIS-SecurityScanner/1.0")
+                context = await browser.new_context(user_agent=_GENERIC_UA)
                 page = await context.new_page()
 
                 # 콘솔 에러 리스너 등록

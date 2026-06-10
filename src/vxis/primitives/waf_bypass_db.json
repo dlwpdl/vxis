@@ -43,7 +43,7 @@
       {"original": "../../../etc/passwd", "variants": ["..\\..\\..\\etc\\passwd", "%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd", "..%c0%af..%c0%af..%c0%afetc%c0%afpasswd", "/var/www/../../etc/passwd"]}
     ],
     "ssrf": [
-      {"original": "http://127.0.0.1/", "variants": ["http://127.0.0.1.nip.io/", "http://spoofed.burpcollaborator.net/", "http://127.0.0.1%23@evil.com/", "gopher://127.0.0.1/"]}
+      {"original": "http://127.0.0.1/", "variants": ["http://127.0.0.1.nip.io/", "http://oob.example/", "http://127.0.0.1%23@evil.com/", "gopher://127.0.0.1/"]}
     ]
   },
   "akamai": {

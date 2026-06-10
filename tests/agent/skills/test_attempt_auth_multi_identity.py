@@ -37,7 +37,7 @@ class _FakeSession:
         email = (kwargs.get("json_data") or {}).get("email", "")
         if method == "POST" and path == "/login" and email == "x":
             return _Resp(401, text="login required")
-        if email == "vxis-negative-control@example.invalid":
+        if email == "baseline-check@example.invalid":
             return _Resp(401, text="invalid credentials")
         if email == "alice@example.test":
             return _Resp(

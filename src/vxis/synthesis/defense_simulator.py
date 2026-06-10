@@ -276,7 +276,7 @@ class _VariantGenerators:
         dns_variants = [
             "http://localtest.me/",
             "http://127.0.0.1.nip.io/",
-            "http://spoofed.burpcollaborator.net/",
+            "http://oob.example/",
         ]
         variants.extend(dns_variants)
 
