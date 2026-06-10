@@ -41,7 +41,31 @@ vxis scan http://localhost:8081                    # LLM API Brain 자율 실행
 vxis scan http://localhost:8081 --interactive      # Claude Code가 Brain (MCP)
 vxis scan http://localhost:8081 -g                 # Ghost 익명화 켜기
 vxis scan http://localhost:8081 --resume <ckpt>    # 체크포인트 재개
+vxis scan http://app.acme.com --approve-destructive # 파괴적 액션 사전 승인(기본 차단)
 ```
+
+## Scope & 안전 (Scope Gate)
+
+`vxis scan`(단일 타깃·`--manifest`)과 웹 대시보드 스캔은 스코프 게이트를 통과합니다 —
+각 target-facing tool·플러그인 호출의 타깃 host를 스코프와 대조해 허용/차단합니다.
+
+```bash
+# 스코프 파일 우선순위 (먼저 발견되는 것 사용)
+#   ./vxis-scope.json → ~/.vxis/scopes/<host>.json → ~/.vxis/scopes/default.json → 안전 기본값
+#
+# 파일이 없으면: 스캔 타깃 host만 in-scope로 자동 주입(fail-closed)
+#   → tool/플러그인이 그 외 host를 직접 겨냥하면 차단
+vxis scan http://app.acme.com                       # app.acme.com만 in-scope
+vxis scan http://app.acme.com --approve-destructive # approval_required 파괴 액션 허용
+vxis scan http://localhost:3000 --allow-inject      # 인젝션 승인 게이트 생략(소유/인가 타깃만)
+```
+
+- **파괴적 액션**(DELETE·업로드 등)은 기본 **차단/승인필요** — 위 플래그로만 허용
+- 차단 결정은 audit 로그에 기록
+- ⚠️ 현재 scope 게이트는 **tool/플러그인 호출 단위**입니다 — HTTP 리다이렉트·스킬 내부 요청의
+  per-hop 검증과 `batch`/`client`/대화형/MCP 경로 활성화는 후속 작업 (아래 알려진 한계)
+
+> P1 adversary-emulation 프로필은 여기에 더해 engagement 기반 인가(scope+audit+beacon teardown)를 강제합니다 — 아래 P1 섹션 참조.
 
 ## 리포트
 
