@@ -13,6 +13,12 @@ from vxis.scope.loader import load_scope, ScopeLoader
 from vxis.scope.enforcer import ScopeEnforcer
 from vxis.scope.pii_detector import PIIDetector
 from vxis.scope.audit import AuditLog
+from vxis.scope.runtime_gate import (
+    ScopeGateDecision,
+    clear_active_scope,
+    enforce_scope_invocation,
+    set_active_scope,
+)
 
 __all__ = [
     "ActionPolicy",
@@ -24,4 +30,8 @@ __all__ = [
     "ScopeEnforcer",
     "PIIDetector",
     "AuditLog",
+    "ScopeGateDecision",
+    "clear_active_scope",
+    "enforce_scope_invocation",
+    "set_active_scope",
 ]
