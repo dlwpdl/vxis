@@ -6,12 +6,13 @@ import re
 import secrets
 from typing import Any
 
-# Generic non-identifying email for negative-control baseline login probes.
-# Must NOT contain "vxis" or any other tool-identifying string.
-_NEGATIVE_CONTROL_EMAIL = "baseline-check@example.invalid"
 from ._payload_loader import load_skill_dataset as _load_ds
 
 logger = logging.getLogger(__name__)
+
+# Generic non-identifying email for negative-control baseline login probes.
+# Must NOT contain "vxis" or any other tool-identifying string.
+_NEGATIVE_CONTROL_EMAIL = "baseline-check@example.invalid"
 
 # Default credentials to try
 DEFAULT_CREDS = [
@@ -83,7 +84,9 @@ def _credential_specs(raw: Any) -> list[dict[str, str]]:
     for index, item in enumerate(iterable):
         if isinstance(item, dict):
             email = str(item.get("email") or item.get("username") or item.get("user") or "").strip()
-            password = str(item.get("password") or item.get("pass") or item.get("pwd") or "").strip()
+            password = str(
+                item.get("password") or item.get("pass") or item.get("pwd") or ""
+            ).strip()
             if not email or not password:
                 continue
             specs.append(
@@ -554,7 +557,10 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                                 ),
                                                 _format_login_transcript(
                                                     active_login,
-                                                    {"email": email, "password": "[reset_password]"},
+                                                    {
+                                                        "email": email,
+                                                        "password": "[reset_password]",
+                                                    },
                                                     r2.status,
                                                     login_preview,
                                                     label="positive_login_after_reset",
