@@ -639,237 +639,336 @@ class ScanPipeline:
         # 1. Prepare target runtime through the platform launcher layer.
         self._emit("phase_start", {"phase": "runtime_prepare", "kind": kind.value, "target": target})
         runtime = await prepare_target_runtime(target, kind, hints=target_hints)
-        self._emit(
-            "phase_end",
-            {
-                "phase": "runtime_prepare",
-                "kind": kind.value,
-                "target": runtime.resolved_target,
-                "launcher": runtime.launcher_name,
+        from vxis.scope.runtime_gate import ensure_active_scope, clear_active_scope
+        _scope_owned = ensure_active_scope(runtime.resolved_target)
+        try:
+            self._emit(
+                "phase_end",
+                {
+                    "phase": "runtime_prepare",
+                    "kind": kind.value,
+                    "target": runtime.resolved_target,
+                    "launcher": runtime.launcher_name,
+                    "runtime_mode": runtime.runtime_mode,
+                },
+            )
+
+            # 2. Build context
+            ctx = ScanContext(
+                target=runtime.resolved_target,
+                kind=kind,
+                app_context_en=app_context_en,
+                app_context_ko=app_context_ko,
+                scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",
+            )
+            ctx.runtime_profile = {  # type: ignore[attr-defined]
+                "launcher_name": runtime.launcher_name,
                 "runtime_mode": runtime.runtime_mode,
-            },
-        )
+                "metadata": dict(runtime.metadata),
+            }
+            ctx.launcher_notes = list(runtime.shared_notes)  # type: ignore[attr-defined]
+            ctx.target_hints = dict(target_hints or {})  # type: ignore[attr-defined]
+            ghost_activated_here = False
 
-        # 2. Build context
-        ctx = ScanContext(
-            target=runtime.resolved_target,
-            kind=kind,
-            app_context_en=app_context_en,
-            app_context_ko=app_context_ko,
-            scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",
-        )
-        ctx.runtime_profile = {  # type: ignore[attr-defined]
-            "launcher_name": runtime.launcher_name,
-            "runtime_mode": runtime.runtime_mode,
-            "metadata": dict(runtime.metadata),
-        }
-        ctx.launcher_notes = list(runtime.shared_notes)  # type: ignore[attr-defined]
-        ctx.target_hints = dict(target_hints or {})  # type: ignore[attr-defined]
-        ghost_activated_here = False
+            # Ghost activation — preserve behavior from legacy pipeline
+            try:
+                from vxis.ghost.layer import ghost_layer
+                from vxis.ghost.trigger import parse_ghost_trigger
 
-        # Ghost activation — preserve behavior from legacy pipeline
-        try:
-            from vxis.ghost.layer import ghost_layer
-            from vxis.ghost.trigger import parse_ghost_trigger
-
-            _activated, target = parse_ghost_trigger(runtime.resolved_target, self.config)
-            ctx.target = target
-            if _activated:
-                proxy_pool = _ghost_proxy_pool_from_config(self.config)
-                ghost_layer.activate(proxy_pool=proxy_pool)
-                ghost_activated_here = True
-                ctx.runtime_profile["metadata"]["ghost_active"] = True  # type: ignore[index]
-                ctx.runtime_profile["metadata"]["ghost_proxy_count"] = len(proxy_pool)  # type: ignore[index]
-                self._emit(
-                    "ghost",
-                    {
-                        "active": True,
-                        "proxy_count": len(proxy_pool),
-                        "target": ctx.target,
-                    },
-                )
-                logger.info(
-                    "[Ghost] activated for ScanPipelineV2 target=%s proxies=%d",
-                    ctx.target,
-                    len(proxy_pool),
-                )
-        except Exception:
-            logger.exception("Ghost activation failed — continuing without ghost transport")
-
-        # 3. Reset per-scan state (findings + brain counters + playbook dedup)
-        _reset_finding_store()
-        _set_finding_event_callback(self._emit)
-        reset_brain_decision_count()
-        reset_llm_call_count()
-        reset_llm_usage_stats()
-        try:
-            from vxis.agent.tools.playbook_tools import _loaded_playbooks
-            _loaded_playbooks.clear()
-        except Exception:
-            pass
-
-        # 4. Propagate surface kind into Brain so it selects the right system prompt.
-        # Brain is constructed before run() — we patch _target_kind here because
-        # kind is only known at scan time, not at construction time.
-        # Brain이 올바른 시스템 프롬프트를 선택할 수 있도록 서피스 종류를 주입합니다.
-        # Brain은 run() 이전에 생성되므로 스캔 시점에만 알 수 있는 kind를 여기서 패치합니다.
-        if hasattr(self.brain, "_target_kind"):
-            self.brain._target_kind = kind
-
-        # 5. Build the tool registry
-        registry = build_default_registry(
-            brain=self.brain,
-            sandbox_key=str(getattr(ctx, "scan_id", "") or ctx.target),
-        )
-
-        # 6. Emit a synthetic phase_start so the CLI Rich Live display has content
-        self._emit("phase_start", {"phase": "scan_loop", "name": "ScanAgentLoop"})
-
-        # 7. Create + run the ScanAgentLoop
-        max_iters, hard_max_iters, extend_iters = _resolve_scan_loop_budget()
-        logger.info(
-            "scan loop budget: soft=%d hard=%d extend=%d",
-            max_iters,
-            hard_max_iters,
-            extend_iters,
-        )
-        loop = ScanAgentLoop(
-            target=ctx.target,
-            registry=registry,
-            max_iters=max_iters,
-            hard_max_iters=hard_max_iters,
-            adaptive_budget=True,
-            extend_iters=extend_iters,
-            brain=self.brain,
-            target_kind=kind,
-            event_callback=self._emit,
-        )
-        for note in runtime.shared_notes[:3]:
-            loop.state.add_shared_note(note)
-
-        # Cross-scan target memory: turn prior scans into concrete strategy
-        # pressure, not just passive notes.
-        try:
-            target_memory = _load_target_memory_profile(ctx.target)
-            ctx.target_memory = target_memory  # type: ignore[attr-defined]
-            if target_memory.get("target_known"):
-                loop._target_memory_profile = target_memory  # type: ignore[attr-defined]
-                loop.state.add_shared_note(
-                    f"memory: {target_memory['prior_scan_count']} prior scan(s) for this target."
-                )
-                loop.state.add_shared_note(
-                    "memory strategy: first revalidate the strongest prior lead, then spend at least one branch on unexplored surface."
-                )
-                for prior in (target_memory.get("known_findings") or [])[:4]:
-                    ft = str(prior.get("finding_type", ""))
-                    component = str(prior.get("affected_component", ""))
-                    title = str(prior.get("title", "") or ft or component)
-                    seed = _memory_finding_to_vector_seed(ft, title, component)
-                    if seed is None:
-                        continue
-                    vector_id, seed_title, priority = seed
-                    branch_id = f"memory:{ft}:{component or seed_title}".lower().replace(" ", "_")[:120]
-                    evidence = (
-                        f"Previously observed finding on this target: {ft} at {component or ctx.target}. "
-                        "Revalidate quickly, then deepen or pivot beyond the previously known scope."
+                _activated, target = parse_ghost_trigger(runtime.resolved_target, self.config)
+                ctx.target = target
+                if _activated:
+                    proxy_pool = _ghost_proxy_pool_from_config(self.config)
+                    ghost_layer.activate(proxy_pool=proxy_pool)
+                    ghost_activated_here = True
+                    ctx.runtime_profile["metadata"]["ghost_active"] = True  # type: ignore[index]
+                    ctx.runtime_profile["metadata"]["ghost_proxy_count"] = len(proxy_pool)  # type: ignore[index]
+                    self._emit(
+                        "ghost",
+                        {
+                            "active": True,
+                            "proxy_count": len(proxy_pool),
+                            "target": ctx.target,
+                        },
                     )
-                    loop.state.ensure_vector_candidate(
-                        branch_id,
-                        vector_id,
-                        f"Revalidate prior {seed_title}",
-                        priority=priority,
-                        evidence=evidence,
+                    logger.info(
+                        "[Ghost] activated for ScanPipelineV2 target=%s proxies=%d",
+                        ctx.target,
+                        len(proxy_pool),
                     )
-                for tactic in (target_memory.get("successful_tactics") or [])[:3]:
+            except Exception:
+                logger.exception("Ghost activation failed — continuing without ghost transport")
+
+            # 3. Reset per-scan state (findings + brain counters + playbook dedup)
+            _reset_finding_store()
+            _set_finding_event_callback(self._emit)
+            reset_brain_decision_count()
+            reset_llm_call_count()
+            reset_llm_usage_stats()
+            try:
+                from vxis.agent.tools.playbook_tools import _loaded_playbooks
+                _loaded_playbooks.clear()
+            except Exception:
+                pass
+
+            # 4. Propagate surface kind into Brain so it selects the right system prompt.
+            # Brain is constructed before run() — we patch _target_kind here because
+            # kind is only known at scan time, not at construction time.
+            # Brain이 올바른 시스템 프롬프트를 선택할 수 있도록 서피스 종류를 주입합니다.
+            # Brain은 run() 이전에 생성되므로 스캔 시점에만 알 수 있는 kind를 여기서 패치합니다.
+            if hasattr(self.brain, "_target_kind"):
+                self.brain._target_kind = kind
+
+            # 5. Build the tool registry
+            registry = build_default_registry(
+                brain=self.brain,
+                sandbox_key=str(getattr(ctx, "scan_id", "") or ctx.target),
+            )
+
+            # 6. Emit a synthetic phase_start so the CLI Rich Live display has content
+            self._emit("phase_start", {"phase": "scan_loop", "name": "ScanAgentLoop"})
+
+            # 7. Create + run the ScanAgentLoop
+            max_iters, hard_max_iters, extend_iters = _resolve_scan_loop_budget()
+            logger.info(
+                "scan loop budget: soft=%d hard=%d extend=%d",
+                max_iters,
+                hard_max_iters,
+                extend_iters,
+            )
+            loop = ScanAgentLoop(
+                target=ctx.target,
+                registry=registry,
+                max_iters=max_iters,
+                hard_max_iters=hard_max_iters,
+                adaptive_budget=True,
+                extend_iters=extend_iters,
+                brain=self.brain,
+                target_kind=kind,
+                event_callback=self._emit,
+            )
+            for note in runtime.shared_notes[:3]:
+                loop.state.add_shared_note(note)
+
+            # Cross-scan target memory: turn prior scans into concrete strategy
+            # pressure, not just passive notes.
+            try:
+                target_memory = _load_target_memory_profile(ctx.target)
+                ctx.target_memory = target_memory  # type: ignore[attr-defined]
+                if target_memory.get("target_known"):
+                    loop._target_memory_profile = target_memory  # type: ignore[attr-defined]
                     loop.state.add_shared_note(
-                        "memory tactic: "
-                        + str(tactic.get("finding_type", ""))
-                        + " -> "
-                        + str(tactic.get("reasoning", "") or tactic.get("title", ""))[:120]
-                    )
-                for refuted in (target_memory.get("refuted_patterns") or [])[:3]:
-                    loop.state.add_shared_note(
-                        "memory refuted: suppress weak "
-                        + str(refuted.get("finding_type", ""))
-                        + " on "
-                        + str(refuted.get("affected_component", ""))[:80]
-                    )
-                for lead in (target_memory.get("branch_leads") or [])[:3]:
-                    lead_priority = _memory_branch_priority(lead)
-                    loop.state.ensure_branch(
-                        f"carry:{lead.get('id', 'branch')}",
-                        str(lead.get("vector_id", "MEM-CARRY")),
-                        str(lead.get("title", "Carry-over branch")),
-                        priority=lead_priority,
-                        role=str(lead.get("role", "post_exploit_worker")),
-                        phase=str(lead.get("phase", "")),
-                        owner="memory",
-                        objective=str(lead.get("objective", "")),
-                        next_step=str(lead.get("next_step", "")),
-                        blocker="carry-over lead",
-                        evidence="carry-over memory lead from previous scan; resume, verify current validity, then push deeper.",
-                        watch_terms=[str(lead.get("title", "")), str(lead.get("vector_id", ""))],
+                        f"memory: {target_memory['prior_scan_count']} prior scan(s) for this target."
                     )
                     loop.state.add_shared_note(
-                        f"memory branch: reopen {lead.get('title', 'branch')} as p{lead_priority} {lead.get('role', 'worker')}/{lead.get('phase', '?')}"
+                        "memory strategy: first revalidate the strongest prior lead, then spend at least one branch on unexplored surface."
                     )
-        except Exception:
-            logger.exception("Failed to seed scan loop from target memory profile")
+                    for prior in (target_memory.get("known_findings") or [])[:4]:
+                        ft = str(prior.get("finding_type", ""))
+                        component = str(prior.get("affected_component", ""))
+                        title = str(prior.get("title", "") or ft or component)
+                        seed = _memory_finding_to_vector_seed(ft, title, component)
+                        if seed is None:
+                            continue
+                        vector_id, seed_title, priority = seed
+                        branch_id = f"memory:{ft}:{component or seed_title}".lower().replace(" ", "_")[:120]
+                        evidence = (
+                            f"Previously observed finding on this target: {ft} at {component or ctx.target}. "
+                            "Revalidate quickly, then deepen or pivot beyond the previously known scope."
+                        )
+                        loop.state.ensure_vector_candidate(
+                            branch_id,
+                            vector_id,
+                            f"Revalidate prior {seed_title}",
+                            priority=priority,
+                            evidence=evidence,
+                        )
+                    for tactic in (target_memory.get("successful_tactics") or [])[:3]:
+                        loop.state.add_shared_note(
+                            "memory tactic: "
+                            + str(tactic.get("finding_type", ""))
+                            + " -> "
+                            + str(tactic.get("reasoning", "") or tactic.get("title", ""))[:120]
+                        )
+                    for refuted in (target_memory.get("refuted_patterns") or [])[:3]:
+                        loop.state.add_shared_note(
+                            "memory refuted: suppress weak "
+                            + str(refuted.get("finding_type", ""))
+                            + " on "
+                            + str(refuted.get("affected_component", ""))[:80]
+                        )
+                    for lead in (target_memory.get("branch_leads") or [])[:3]:
+                        lead_priority = _memory_branch_priority(lead)
+                        loop.state.ensure_branch(
+                            f"carry:{lead.get('id', 'branch')}",
+                            str(lead.get("vector_id", "MEM-CARRY")),
+                            str(lead.get("title", "Carry-over branch")),
+                            priority=lead_priority,
+                            role=str(lead.get("role", "post_exploit_worker")),
+                            phase=str(lead.get("phase", "")),
+                            owner="memory",
+                            objective=str(lead.get("objective", "")),
+                            next_step=str(lead.get("next_step", "")),
+                            blocker="carry-over lead",
+                            evidence="carry-over memory lead from previous scan; resume, verify current validity, then push deeper.",
+                            watch_terms=[str(lead.get("title", "")), str(lead.get("vector_id", ""))],
+                        )
+                        loop.state.add_shared_note(
+                            f"memory branch: reopen {lead.get('title', 'branch')} as p{lead_priority} {lead.get('role', 'worker')}/{lead.get('phase', '?')}"
+                        )
+            except Exception:
+                logger.exception("Failed to seed scan loop from target memory profile")
 
-        # Local retrospective feedback loop: seed the next run with the most
-        # recent runtime weaknesses for this target. This is separate from the
-        # GitHub Actions growth loop and is meant for unattended local scans.
-        try:
-            from vxis.growth.scan_retrospective import load_latest_target_retrospective
+            # Local retrospective feedback loop: seed the next run with the most
+            # recent runtime weaknesses for this target. This is separate from the
+            # GitHub Actions growth loop and is meant for unattended local scans.
+            try:
+                from vxis.growth.scan_retrospective import load_latest_target_retrospective
 
-            prior_retro = load_latest_target_retrospective(ctx.target)
-            if prior_retro:
-                for hint in (prior_retro.get("improvement_hints") or [])[:3]:
-                    reason = str(hint.get("reason", "")).strip()
-                    if reason:
-                        loop.state.add_shared_note(f"retrospective: {reason}")
-                seen_carry_titles: set[tuple[str, str]] = set()
-                for item in (prior_retro.get("review_queue") or [])[:3]:
-                    status = str(item.get("status", "open")).lower()
-                    if status not in {"open", "escalated"}:
-                        continue
-                    raw_reason = str(item.get("reason", "") or "")
-                    if "MagicMock" in raw_reason:
-                        continue
-                    raw_title = str(item.get("title", "") or "")
-                    normalized_title = _normalize_carryover_title(raw_title)
-                    if raw_title.lower().startswith("carryover:"):
-                        continue
-                    dedup_key = (
-                        normalized_title,
-                        str(item.get("affected_component", "")).strip().lower(),
-                    )
-                    if dedup_key in seen_carry_titles:
-                        continue
-                    seen_carry_titles.add(dedup_key)
-                    loop.state.record_review_item(
-                        f"carry:{item.get('id', 'retro')}",
-                        stage="retrospective",
-                        status="open",
-                        title=f"carryover:{normalized_title or 'review item'}",
-                        reason=raw_reason or "Carried from previous scan retrospective.",
-                        action_hint=str(item.get("action_hint", "")) or "Resolve this review gap early in the new run.",
-                        affected_component=str(item.get("affected_component", "")),
-                        source_finding_type=str(item.get("source_finding_type", "")),
-                    )
-        except Exception:
-            logger.exception("Failed to seed scan loop from prior retrospective")
+                prior_retro = load_latest_target_retrospective(ctx.target)
+                if prior_retro:
+                    for hint in (prior_retro.get("improvement_hints") or [])[:3]:
+                        reason = str(hint.get("reason", "")).strip()
+                        if reason:
+                            loop.state.add_shared_note(f"retrospective: {reason}")
+                    seen_carry_titles: set[tuple[str, str]] = set()
+                    for item in (prior_retro.get("review_queue") or [])[:3]:
+                        status = str(item.get("status", "open")).lower()
+                        if status not in {"open", "escalated"}:
+                            continue
+                        raw_reason = str(item.get("reason", "") or "")
+                        if "MagicMock" in raw_reason:
+                            continue
+                        raw_title = str(item.get("title", "") or "")
+                        normalized_title = _normalize_carryover_title(raw_title)
+                        if raw_title.lower().startswith("carryover:"):
+                            continue
+                        dedup_key = (
+                            normalized_title,
+                            str(item.get("affected_component", "")).strip().lower(),
+                        )
+                        if dedup_key in seen_carry_titles:
+                            continue
+                        seen_carry_titles.add(dedup_key)
+                        loop.state.record_review_item(
+                            f"carry:{item.get('id', 'retro')}",
+                            stage="retrospective",
+                            status="open",
+                            title=f"carryover:{normalized_title or 'review item'}",
+                            reason=raw_reason or "Carried from previous scan retrospective.",
+                            action_hint=str(item.get("action_hint", "")) or "Resolve this review gap early in the new run.",
+                            affected_component=str(item.get("affected_component", "")),
+                            source_finding_type=str(item.get("source_finding_type", "")),
+                        )
+            except Exception:
+                logger.exception("Failed to seed scan loop from prior retrospective")
 
-        loop_result: dict[str, Any] = {}
-        try:
-            loop_result = await loop.run()
-        except Exception as exc:
-            logger.exception("ScanAgentLoop failed")
-            self._emit("error", {"stage": "scan_loop", "error": str(exc)})
+            loop_result: dict[str, Any] = {}
+            try:
+                loop_result = await loop.run()
+            except Exception as exc:
+                logger.exception("ScanAgentLoop failed")
+                self._emit("error", {"stage": "scan_loop", "error": str(exc)})
+                try:
+                    await registry.cleanup()
+                except Exception:
+                    logger.exception("tool registry cleanup failed after scan_loop error")
+                try:
+                    from vxis.agent.tools.browser_tools import shutdown_browser
+                    await shutdown_browser()
+                except Exception:
+                    pass
+                try:
+                    from vxis.agent.tools.proxy_runtime import shutdown_proxy_runtime
+                    await shutdown_proxy_runtime()
+                except Exception:
+                    pass
+                if ghost_activated_here:
+                    try:
+                        ghost_layer.deactivate()
+                    except Exception:
+                        logger.exception("Ghost deactivation failed after scan_loop error")
+                _set_finding_event_callback(None)
+                # Still attach a score so the CLI doesn't crash
+                ctx.vxis_score = _SimpleScore(total=0.0, grade="F")
+                return ctx
+
             try:
                 await registry.cleanup()
             except Exception:
-                logger.exception("tool registry cleanup failed after scan_loop error")
+                logger.exception("tool registry cleanup failed after scan_loop")
+
+            self._emit(
+                "phase_end",
+                {
+                    "phase": "scan_loop",
+                    "iterations": loop_result.get("iterations", 0),
+                    "duration_s": time.monotonic() - started,
+                },
+            )
+
+            # Phase B fix: surface peak_context_bytes from the loop state into ctx.
+            # Task 11 reported peak_context_bytes=0 because the v2 shim had no wire-up;
+            # now ScanAgentLoop samples it each iteration and exposes it on loop_result.
+            peak_bytes_from_loop = int(loop_result.get("peak_context_bytes", 0))
+            if peak_bytes_from_loop > getattr(ctx, "peak_context_bytes", 0):
+                ctx.peak_context_bytes = peak_bytes_from_loop
+
+            # Phase C belief state: surface verdict counts + confirmed/refuted lists.
+            verdict_counts = loop_result.get("verdict_counts", {}) or {}
+            ctx.scan_loop_completed = bool(loop_result.get("completed", False))  # type: ignore[attr-defined]
+            ctx.verdict_counts = verdict_counts  # type: ignore[attr-defined]
+            ctx.confirmed_findings = loop_result.get("confirmed_findings", []) or []  # type: ignore[attr-defined]
+            ctx.refuted_findings = loop_result.get("refuted_findings", []) or []  # type: ignore[attr-defined]
+            ctx.skills_completed = loop_result.get("skills_completed", []) or []  # type: ignore[attr-defined]
+            ctx.vector_candidates = loop_result.get("vector_candidates", []) or []  # type: ignore[attr-defined]
+            ctx.attempt_outcomes = loop_result.get("attempt_outcomes", []) or []  # type: ignore[attr-defined]
+            ctx.scan_todos = loop_result.get("scan_todos", []) or []  # type: ignore[attr-defined]
+            ctx.branches = loop_result.get("branches", []) or []  # type: ignore[attr-defined]
+            ctx.shared_notes = loop_result.get("shared_notes", []) or []  # type: ignore[attr-defined]
+            ctx.llm_usage = get_llm_usage_stats()  # type: ignore[attr-defined]
+            ctx.runtime_profile = {  # type: ignore[attr-defined]
+                "launcher_name": runtime.launcher_name,
+                "runtime_mode": runtime.runtime_mode,
+                "metadata": dict(runtime.metadata),
+            }
+            # Phase 4: surface sandbox invocations so _compute_vxis_score can
+            # credit VC for shell_exec / python_exec usage (sandbox primacy).
+            ctx.sandbox_invocations = loop_result.get("sandbox_invocations", []) or []  # type: ignore[attr-defined]
+            ctx.final_report_sections = _extract_final_report_sections(  # type: ignore[attr-defined]
+                list(getattr(loop.state, "messages", []))
+            )
+            if verdict_counts:
+                print(
+                    "VXIS_BELIEF verdicts={} confirmed={} refuted={}".format(
+                        verdict_counts,
+                        len(ctx.confirmed_findings),  # type: ignore[attr-defined]
+                        len(ctx.refuted_findings),  # type: ignore[attr-defined]
+                    )
+                )
+
+            # 6. Copy findings from the in-memory store into ctx.findings
+            finding_dicts = _get_finding_dicts()
+            for d in finding_dicts:
+                try:
+                    f = _build_finding_from_dict(
+                        d, scan_id=ctx.scan_id, target=ctx.target, kind=ctx.kind
+                    )
+                    ctx.findings.append(f)
+                except Exception:
+                    logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
+
+            # 7. Copy chains into ctx.attack_chains (stored as list[dict] per ScanContext typing)
+            chain_dicts = _get_chain_dicts()
+            try:
+                ctx.attack_chains = [
+                    {"finding_ids": list(c.get("finding_ids", [])), "raw": c}
+                    for c in chain_dicts
+                ]
+            except Exception:
+                ctx.attack_chains = []
+
+            # 7.5 Shutdown browser if Eyes was used during the scan
             try:
                 from vxis.agent.tools.browser_tools import shutdown_browser
                 await shutdown_browser()
@@ -880,255 +979,162 @@ class ScanPipeline:
                 await shutdown_proxy_runtime()
             except Exception:
                 pass
+
+            # 8. Deferred actions gate (Phase A: usually empty, but plumbing preserved)
+            if self.enable_deferred_approval and getattr(ctx, "deferred_actions", None):
+                await self._run_deferred_gate(ctx)
+
+            # 9. Generate the HTML report
+            if self._generate_report_enabled:
+                try:
+                    await self._generate_report(ctx)
+                except Exception:
+                    logger.exception("Report generation failed — continuing")
+
+            # 10. Compute VXIS score
+            score_value, grade = _compute_vxis_score(ctx)
+            ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
+            self._emit("score", {"total": score_value, "grade": grade})
+
+            # 10a. Dump full 5-dim breakdown next to the HTML report for benchmark comparison.
+            detail = getattr(ctx, "score_detail", None)
+            report_path = getattr(self, "_report_output_path", None) or getattr(self, "report_output_path", None)
+            if detail is not None and report_path:
+                try:
+                    score_json_path = Path(str(report_path)).with_suffix(".score.json")
+                    score_json_path.parent.mkdir(parents=True, exist_ok=True)
+                    score_json_path.write_text(detail.to_json(), encoding="utf-8")
+                    logger.info("VXIS_BENCHMARK score breakdown -> %s", score_json_path)
+                except Exception:
+                    logger.exception("Failed to dump score breakdown JSON — continuing")
+
+            # 11. Populate phase logs (duration_seconds is a computed @property on ctx)
+            try:
+                ctx.phase_logs = [
+                    {
+                        "name": "scan_loop",
+                        "status": "done",
+                        "duration": time.monotonic() - started,
+                    }
+                ]
+            except Exception:
+                pass
+
+            # Print instrumentation counters — Task 11/14 benchmark greps these
+            brain_decisions = get_brain_decision_count()
+            llm_calls = get_llm_call_count()
+            peak_bytes = getattr(ctx, "peak_context_bytes", 0)
+            findings_count = len(ctx.findings)
+            logger.info(
+                "VXIS_BENCHMARK peak_context_bytes=%d llm_call_count=%d brain_decision_count=%d findings_count=%d",
+                peak_bytes,
+                llm_calls,
+                brain_decisions,
+                findings_count,
+            )
+            print(
+                f"VXIS_BENCHMARK peak_context_bytes={peak_bytes} "
+                f"llm_call_count={llm_calls} brain_decision_count={brain_decisions} "
+                f"findings_count={findings_count}"
+            )
+
+            # Phase C: MITRE ATT&CK coverage calculation. Builds technique and
+            # tactic coverage from the current scan's findings and prints a
+            # summary line for operators.
+            try:
+                from vxis.agent.tools.mitre_data import coverage_report
+                mitre = coverage_report(_get_finding_dicts())
+                logger.info(
+                    "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
+                    len(mitre["techniques_covered"]),
+                    len(mitre["tactics_covered"]),
+                    mitre["coverage_pct"],
+                )
+                # Attach to ctx for the report generator
+                ctx.mitre_coverage = mitre  # type: ignore[attr-defined]
+                if mitre["per_technique"]:
+                    print(
+                        "MITRE_COVERAGE techniques={} tactics={} pct={}".format(
+                            len(mitre["techniques_covered"]),
+                            len(mitre["tactics_covered"]),
+                            mitre["coverage_pct"],
+                        )
+                    )
+                    for t in mitre["per_technique"][:10]:
+                        print(f"  {t['id']} {t['name']} ({t['tactic']}) x{t['finding_count']}")
+            except Exception:
+                logger.exception("MITRE coverage calculation failed")
+
+            # Phase B: persist scan results to cross-scan memory KB so the next
+            # scan of this target can query prior findings via query_scan_memory.
+            # Also extract the fingerprint_target result from the loop's message
+            # history (if Brain called it) so cross-stack learning works.
+            try:
+                finding_dicts_raw = _get_finding_dicts()
+                extracted_fingerprint: dict[str, Any] | None = None
+                for msg in getattr(loop.state, "messages", []):
+                    c = msg.get("content") if isinstance(msg, dict) else None
+                    if isinstance(c, dict) and c.get("name") == "fingerprint_target":
+                        data = (c.get("result") or {}).get("data") or {}
+                        if "recommended_playbooks" in data:
+                            extracted_fingerprint = {
+                                "recommended_playbooks": data.get("recommended_playbooks"),
+                                "is_spa": data.get("is_spa"),
+                                "root_status": data.get("root_status"),
+                                "root_size": data.get("root_size"),
+                                "matches": [
+                                    {"playbook": m.get("playbook"), "score": m.get("score")}
+                                    for m in (data.get("matches") or [])[:5]
+                                ],
+                            }
+                            break  # use first fingerprint in the scan
+                _record_scan_memory(
+                    target=ctx.target,
+                    findings=finding_dicts_raw,
+                    fingerprint=extracted_fingerprint,
+                    scan_id=ctx.scan_id,
+                    confirmed_findings=getattr(ctx, "confirmed_findings", []) or [],
+                    refuted_findings=getattr(ctx, "refuted_findings", []) or [],
+                    review_history=loop_result.get("review_history", []) or [],
+                    branches=loop_result.get("branches", []) or [],
+                )
+                refreshed_memory = _load_target_memory_profile(ctx.target)
+                ctx.target_memory = refreshed_memory  # type: ignore[attr-defined]
+                ctx.aggregated_findings = list(refreshed_memory.get("aggregated_findings") or [])  # type: ignore[attr-defined]
+            except Exception:
+                logger.exception("Failed to record scan memory")
+
+            # Local self-improvement loop: capture a per-scan retrospective with
+            # review queue, open branches, verdict pressure, and suggested code
+            # areas. This is runtime-local and intentionally separate from the
+            # GitHub Actions growth loop.
+            try:
+                from vxis.growth.scan_retrospective import record_scan_retrospective
+
+                retrospective_path = record_scan_retrospective(
+                    scan_id=ctx.scan_id,
+                    target=ctx.target,
+                    findings=_get_finding_dicts(),
+                    loop_result=loop_result,
+                    messages=list(getattr(loop.state, "messages", [])),
+                    attack_chains=list(getattr(ctx, "attack_chains", []) or []),
+                    llm_usage=dict(getattr(ctx, "llm_usage", {}) or {}),
+                    control_plane=dict(getattr(loop, "_latest_control_plane", {}) or {}),
+                )
+                ctx.scan_retrospective_path = str(retrospective_path)  # type: ignore[attr-defined]
+            except Exception:
+                logger.exception("Failed to record scan retrospective")
+
             if ghost_activated_here:
                 try:
                     ghost_layer.deactivate()
                 except Exception:
-                    logger.exception("Ghost deactivation failed after scan_loop error")
+                    logger.exception("Ghost deactivation failed after scan")
             _set_finding_event_callback(None)
-            # Still attach a score so the CLI doesn't crash
-            ctx.vxis_score = _SimpleScore(total=0.0, grade="F")
             return ctx
-
-        try:
-            await registry.cleanup()
-        except Exception:
-            logger.exception("tool registry cleanup failed after scan_loop")
-
-        self._emit(
-            "phase_end",
-            {
-                "phase": "scan_loop",
-                "iterations": loop_result.get("iterations", 0),
-                "duration_s": time.monotonic() - started,
-            },
-        )
-
-        # Phase B fix: surface peak_context_bytes from the loop state into ctx.
-        # Task 11 reported peak_context_bytes=0 because the v2 shim had no wire-up;
-        # now ScanAgentLoop samples it each iteration and exposes it on loop_result.
-        peak_bytes_from_loop = int(loop_result.get("peak_context_bytes", 0))
-        if peak_bytes_from_loop > getattr(ctx, "peak_context_bytes", 0):
-            ctx.peak_context_bytes = peak_bytes_from_loop
-
-        # Phase C belief state: surface verdict counts + confirmed/refuted lists.
-        verdict_counts = loop_result.get("verdict_counts", {}) or {}
-        ctx.scan_loop_completed = bool(loop_result.get("completed", False))  # type: ignore[attr-defined]
-        ctx.verdict_counts = verdict_counts  # type: ignore[attr-defined]
-        ctx.confirmed_findings = loop_result.get("confirmed_findings", []) or []  # type: ignore[attr-defined]
-        ctx.refuted_findings = loop_result.get("refuted_findings", []) or []  # type: ignore[attr-defined]
-        ctx.skills_completed = loop_result.get("skills_completed", []) or []  # type: ignore[attr-defined]
-        ctx.vector_candidates = loop_result.get("vector_candidates", []) or []  # type: ignore[attr-defined]
-        ctx.attempt_outcomes = loop_result.get("attempt_outcomes", []) or []  # type: ignore[attr-defined]
-        ctx.scan_todos = loop_result.get("scan_todos", []) or []  # type: ignore[attr-defined]
-        ctx.branches = loop_result.get("branches", []) or []  # type: ignore[attr-defined]
-        ctx.shared_notes = loop_result.get("shared_notes", []) or []  # type: ignore[attr-defined]
-        ctx.llm_usage = get_llm_usage_stats()  # type: ignore[attr-defined]
-        ctx.runtime_profile = {  # type: ignore[attr-defined]
-            "launcher_name": runtime.launcher_name,
-            "runtime_mode": runtime.runtime_mode,
-            "metadata": dict(runtime.metadata),
-        }
-        # Phase 4: surface sandbox invocations so _compute_vxis_score can
-        # credit VC for shell_exec / python_exec usage (sandbox primacy).
-        ctx.sandbox_invocations = loop_result.get("sandbox_invocations", []) or []  # type: ignore[attr-defined]
-        ctx.final_report_sections = _extract_final_report_sections(  # type: ignore[attr-defined]
-            list(getattr(loop.state, "messages", []))
-        )
-        if verdict_counts:
-            print(
-                "VXIS_BELIEF verdicts={} confirmed={} refuted={}".format(
-                    verdict_counts,
-                    len(ctx.confirmed_findings),  # type: ignore[attr-defined]
-                    len(ctx.refuted_findings),  # type: ignore[attr-defined]
-                )
-            )
-
-        # 6. Copy findings from the in-memory store into ctx.findings
-        finding_dicts = _get_finding_dicts()
-        for d in finding_dicts:
-            try:
-                f = _build_finding_from_dict(
-                    d, scan_id=ctx.scan_id, target=ctx.target, kind=ctx.kind
-                )
-                ctx.findings.append(f)
-            except Exception:
-                logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
-
-        # 7. Copy chains into ctx.attack_chains (stored as list[dict] per ScanContext typing)
-        chain_dicts = _get_chain_dicts()
-        try:
-            ctx.attack_chains = [
-                {"finding_ids": list(c.get("finding_ids", [])), "raw": c}
-                for c in chain_dicts
-            ]
-        except Exception:
-            ctx.attack_chains = []
-
-        # 7.5 Shutdown browser if Eyes was used during the scan
-        try:
-            from vxis.agent.tools.browser_tools import shutdown_browser
-            await shutdown_browser()
-        except Exception:
-            pass
-        try:
-            from vxis.agent.tools.proxy_runtime import shutdown_proxy_runtime
-            await shutdown_proxy_runtime()
-        except Exception:
-            pass
-
-        # 8. Deferred actions gate (Phase A: usually empty, but plumbing preserved)
-        if self.enable_deferred_approval and getattr(ctx, "deferred_actions", None):
-            await self._run_deferred_gate(ctx)
-
-        # 9. Generate the HTML report
-        if self._generate_report_enabled:
-            try:
-                await self._generate_report(ctx)
-            except Exception:
-                logger.exception("Report generation failed — continuing")
-
-        # 10. Compute VXIS score
-        score_value, grade = _compute_vxis_score(ctx)
-        ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
-        self._emit("score", {"total": score_value, "grade": grade})
-
-        # 10a. Dump full 5-dim breakdown next to the HTML report for benchmark comparison.
-        detail = getattr(ctx, "score_detail", None)
-        report_path = getattr(self, "_report_output_path", None) or getattr(self, "report_output_path", None)
-        if detail is not None and report_path:
-            try:
-                score_json_path = Path(str(report_path)).with_suffix(".score.json")
-                score_json_path.parent.mkdir(parents=True, exist_ok=True)
-                score_json_path.write_text(detail.to_json(), encoding="utf-8")
-                logger.info("VXIS_BENCHMARK score breakdown -> %s", score_json_path)
-            except Exception:
-                logger.exception("Failed to dump score breakdown JSON — continuing")
-
-        # 11. Populate phase logs (duration_seconds is a computed @property on ctx)
-        try:
-            ctx.phase_logs = [
-                {
-                    "name": "scan_loop",
-                    "status": "done",
-                    "duration": time.monotonic() - started,
-                }
-            ]
-        except Exception:
-            pass
-
-        # Print instrumentation counters — Task 11/14 benchmark greps these
-        brain_decisions = get_brain_decision_count()
-        llm_calls = get_llm_call_count()
-        peak_bytes = getattr(ctx, "peak_context_bytes", 0)
-        findings_count = len(ctx.findings)
-        logger.info(
-            "VXIS_BENCHMARK peak_context_bytes=%d llm_call_count=%d brain_decision_count=%d findings_count=%d",
-            peak_bytes,
-            llm_calls,
-            brain_decisions,
-            findings_count,
-        )
-        print(
-            f"VXIS_BENCHMARK peak_context_bytes={peak_bytes} "
-            f"llm_call_count={llm_calls} brain_decision_count={brain_decisions} "
-            f"findings_count={findings_count}"
-        )
-
-        # Phase C: MITRE ATT&CK coverage calculation. Builds technique and
-        # tactic coverage from the current scan's findings and prints a
-        # summary line for operators.
-        try:
-            from vxis.agent.tools.mitre_data import coverage_report
-            mitre = coverage_report(_get_finding_dicts())
-            logger.info(
-                "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
-                len(mitre["techniques_covered"]),
-                len(mitre["tactics_covered"]),
-                mitre["coverage_pct"],
-            )
-            # Attach to ctx for the report generator
-            ctx.mitre_coverage = mitre  # type: ignore[attr-defined]
-            if mitre["per_technique"]:
-                print(
-                    "MITRE_COVERAGE techniques={} tactics={} pct={}".format(
-                        len(mitre["techniques_covered"]),
-                        len(mitre["tactics_covered"]),
-                        mitre["coverage_pct"],
-                    )
-                )
-                for t in mitre["per_technique"][:10]:
-                    print(f"  {t['id']} {t['name']} ({t['tactic']}) x{t['finding_count']}")
-        except Exception:
-            logger.exception("MITRE coverage calculation failed")
-
-        # Phase B: persist scan results to cross-scan memory KB so the next
-        # scan of this target can query prior findings via query_scan_memory.
-        # Also extract the fingerprint_target result from the loop's message
-        # history (if Brain called it) so cross-stack learning works.
-        try:
-            finding_dicts_raw = _get_finding_dicts()
-            extracted_fingerprint: dict[str, Any] | None = None
-            for msg in getattr(loop.state, "messages", []):
-                c = msg.get("content") if isinstance(msg, dict) else None
-                if isinstance(c, dict) and c.get("name") == "fingerprint_target":
-                    data = (c.get("result") or {}).get("data") or {}
-                    if "recommended_playbooks" in data:
-                        extracted_fingerprint = {
-                            "recommended_playbooks": data.get("recommended_playbooks"),
-                            "is_spa": data.get("is_spa"),
-                            "root_status": data.get("root_status"),
-                            "root_size": data.get("root_size"),
-                            "matches": [
-                                {"playbook": m.get("playbook"), "score": m.get("score")}
-                                for m in (data.get("matches") or [])[:5]
-                            ],
-                        }
-                        break  # use first fingerprint in the scan
-            _record_scan_memory(
-                target=ctx.target,
-                findings=finding_dicts_raw,
-                fingerprint=extracted_fingerprint,
-                scan_id=ctx.scan_id,
-                confirmed_findings=getattr(ctx, "confirmed_findings", []) or [],
-                refuted_findings=getattr(ctx, "refuted_findings", []) or [],
-                review_history=loop_result.get("review_history", []) or [],
-                branches=loop_result.get("branches", []) or [],
-            )
-            refreshed_memory = _load_target_memory_profile(ctx.target)
-            ctx.target_memory = refreshed_memory  # type: ignore[attr-defined]
-            ctx.aggregated_findings = list(refreshed_memory.get("aggregated_findings") or [])  # type: ignore[attr-defined]
-        except Exception:
-            logger.exception("Failed to record scan memory")
-
-        # Local self-improvement loop: capture a per-scan retrospective with
-        # review queue, open branches, verdict pressure, and suggested code
-        # areas. This is runtime-local and intentionally separate from the
-        # GitHub Actions growth loop.
-        try:
-            from vxis.growth.scan_retrospective import record_scan_retrospective
-
-            retrospective_path = record_scan_retrospective(
-                scan_id=ctx.scan_id,
-                target=ctx.target,
-                findings=_get_finding_dicts(),
-                loop_result=loop_result,
-                messages=list(getattr(loop.state, "messages", [])),
-                attack_chains=list(getattr(ctx, "attack_chains", []) or []),
-                llm_usage=dict(getattr(ctx, "llm_usage", {}) or {}),
-                control_plane=dict(getattr(loop, "_latest_control_plane", {}) or {}),
-            )
-            ctx.scan_retrospective_path = str(retrospective_path)  # type: ignore[attr-defined]
-        except Exception:
-            logger.exception("Failed to record scan retrospective")
-
-        if ghost_activated_here:
-            try:
-                ghost_layer.deactivate()
-            except Exception:
-                logger.exception("Ghost deactivation failed after scan")
-        _set_finding_event_callback(None)
-        return ctx
+        finally:
+            if _scope_owned:
+                clear_active_scope()
 
     async def _run_deferred_gate(self, ctx: ScanContext) -> None:
         """Invoke the approval callback on ctx.deferred_actions. Phase A stub."""
