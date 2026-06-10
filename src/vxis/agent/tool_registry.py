@@ -128,6 +128,28 @@ class ToolRegistry:
                 summary=f"{name} BLOCKED by P1 engagement gate: {p1_decision.reason}",
                 error="p1_scope_blocked",
             )
+        # Standard-path scope gate (active for any scan that set an ambient scope).
+        try:
+            from vxis.scope.runtime_gate import enforce_scope_invocation
+
+            scope_decision = enforce_scope_invocation(name, args)
+        except Exception as e:
+            return ToolResult(
+                ok=False,
+                summary=f"scope gate failed before {name}: {type(e).__name__}: {e}",
+                error="scope_gate_failed",
+            )
+        if scope_decision is not None and not scope_decision.allowed:
+            return ToolResult(
+                ok=False,
+                data={
+                    "blocked": True,
+                    "policy": scope_decision.policy or "scope",
+                    "requires_approval": scope_decision.requires_approval,
+                },
+                summary=f"{name} BLOCKED by scope gate: {scope_decision.reason}",
+                error="scope_blocked",
+            )
         try:
             return await tool.run(**args)
         except Exception as e:
