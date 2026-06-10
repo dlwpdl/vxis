@@ -58,6 +58,38 @@ from vxis.ghost.transport import GhostTransport
 logger = logging.getLogger(__name__)
 
 
+# ── Per-hop egress scope gate ────────────────────────────────────
+
+
+class ScopeBlockedError(Exception):
+    """Raised when an outgoing request targets a host outside the active scan scope."""
+
+
+async def _scope_enforce_request_hook(request: httpx.Request) -> None:
+    """httpx request event hook — scope-checks EVERY outgoing request.
+
+    Fires before the initial request AND before every redirect hop, so SSRF
+    302s (e.g. → 169.254.169.254 metadata), RequestChain steps, crawl_links,
+    and skill-internal requests all get a per-request scope check at the one
+    httpx client they all share.
+
+    No-op when no ambient scope is active (enforce_scope_invocation returns
+    None), so existing behavior is unchanged when no scan is running. httpx
+    resolves relative URLs against base_url before this hook, so
+    ``request.url`` is always absolute here.
+    """
+    # Lazy import to avoid an import cycle (scope.runtime_gate ↔ agent ↔ interaction).
+    from vxis.scope.runtime_gate import enforce_scope_invocation
+
+    decision = enforce_scope_invocation(
+        "http_request", {"url": str(request.url), "method": request.method}
+    )
+    if decision is not None and not decision.allowed:
+        raise ScopeBlockedError(
+            f"request to {request.url} blocked by scope gate: {decision.reason}"
+        )
+
+
 # ── Auth State Machine ──────────────────────────────────────────
 
 
@@ -473,6 +505,10 @@ class TargetSession:
                 "Accept-Encoding": "gzip, deflate, br",
             },
         }
+        # Per-hop egress scope gate: scope-checks the initial request AND every
+        # redirect hop. Kept even when a test transport is injected — the hook
+        # fires before the transport, so out-of-scope hops never reach it.
+        client_kwargs["event_hooks"] = {"request": [_scope_enforce_request_hook]}
         if transport is not None:
             client_kwargs["transport"] = transport
         elif proxy:
@@ -533,6 +569,13 @@ class TargetSession:
                 params=params,
             )
             self._consecutive_timeouts = 0
+        except ScopeBlockedError as e:
+            # Fail-closed and LOUD: an out-of-scope egress (initial, redirect
+            # hop, or chain step) was blocked by the scope gate. Re-raise — do
+            # NOT swallow into a fake 200. httpx surfaces hook exceptions
+            # directly (unwrapped) out of self._client.request(...).
+            logger.warning("Scope-blocked egress: %s %s: %s", method, path, e)
+            raise
         except httpx.TimeoutException:
             self._consecutive_timeouts += 1
             _display_url = path if path.startswith("http") else f"{self.base_url}{path}"
