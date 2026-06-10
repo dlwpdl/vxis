@@ -156,7 +156,14 @@ class ScanManager:
         config = self._get_config()
         orchestrator = ScanOrchestrator(config, event_bus=managed.event_bus)
 
+        from vxis.scope.runtime_gate import (
+            build_target_scope_enforcer,
+            clear_active_scope,
+            set_active_scope,
+        )
+
         managed.status = "running"
+        set_active_scope(build_target_scope_enforcer(managed.target))
         try:
             result = await orchestrator.run_scan(
                 target=managed.target,
@@ -188,6 +195,8 @@ class ScanManager:
                     "error": str(exc),
                 },
             )
+        finally:
+            clear_active_scope()
 
     def _make_sse_broadcaster(self, managed: ManagedScan):
         """Create an event handler that broadcasts to SSE subscribers."""
