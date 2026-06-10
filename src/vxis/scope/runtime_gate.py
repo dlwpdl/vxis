@@ -43,6 +43,9 @@ def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateD
     enforcer = _ACTIVE.get()
     if enforcer is None:
         return None
+    # Lazy import on purpose: importing vxis.agent.egress_contract at module top
+    # would execute vxis.agent.__init__ during vxis.scope import and can create a
+    # load-time circular import. Keep this local — do not hoist to module scope.
     from vxis.agent.egress_contract import TOOL_TARGET_EGRESS
 
     contract = TOOL_TARGET_EGRESS.get(tool_name)
@@ -71,6 +74,12 @@ def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateD
 
 
 def _extract_urls(tool_name: str, args: dict[str, Any]) -> list[str]:
+    """Pull candidate target URLs from tool args, in priority order, de-duplicated.
+
+    Priority: explicit ``p1_target`` (str or list) → first present of
+    ``url``/``target_url``/``base_url``/``target`` → any inline URLs found in a
+    ``command``/``code`` payload.
+    """
     explicit = args.get("p1_target")
     out: list[str] = []
     if isinstance(explicit, str) and explicit.strip():
