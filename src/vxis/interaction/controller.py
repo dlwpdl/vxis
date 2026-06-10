@@ -42,6 +42,7 @@ from typing import Any
 from vxis.interaction.hands import (
     AnalyzedResponse,
     AuthState,
+    ScopeBlockedError,
     SessionManager,
     TargetSession,
 )
@@ -608,6 +609,8 @@ class InteractionController:
                 result.js_errors = snapshot.js_errors
                 if dom.api_endpoints:
                     result.links_found.extend(dom.api_endpoints)
+            except ScopeBlockedError as exc:
+                logger.warning("Eyes navigation blocked by scope gate: %s", exc)
             except Exception as exc:
                 logger.warning("Eyes analysis failed: %s", exc)
 
