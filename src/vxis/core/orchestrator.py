@@ -432,6 +432,28 @@ class ScanOrchestrator:
             if plugin is None:
                 raise ValueError(f"Plugin '{plugin_name}' not found in registry.")
 
+            from vxis.scope.runtime_gate import enforce_scope_invocation
+
+            scope_decision = enforce_scope_invocation(plugin_name, {"target": target})
+            if scope_decision is not None and not scope_decision.allowed:
+                logger.warning(
+                    "Scope gate blocked plugin '%s' on %s: %s",
+                    plugin_name,
+                    target,
+                    scope_decision.reason,
+                )
+                po = PluginOutput(
+                    plugin_name=plugin_name,
+                    parsed_data={
+                        "blocked": True,
+                        "reason": scope_decision.reason,
+                        "policy": scope_decision.policy,
+                    },
+                    errors=[scope_decision.reason],
+                )
+                dag_context.set(plugin_name, po)
+                return po
+
             if profile_obj is not None:
                 from vxis.p1.runtime_gate import enforce_plugin_invocation
 
