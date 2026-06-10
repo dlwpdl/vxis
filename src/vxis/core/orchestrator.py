@@ -174,225 +174,237 @@ class ScanOrchestrator:
             available = ", ".join(self.config.profiles.keys())
             raise ValueError(f"Profile '{profile}' not found. Available profiles: {available}")
 
-        # --- 2. Scope validation ---
-        # When no client config is supplied, the target itself is the only
-        # authorized scope entry so the check is always in-scope. Real
-        # deployments attach a ClientConfig with explicit target lists.
-        scope_validator = ScopeValidator(
-            targets=[target],
-            exclude_targets=[],
-            exclude_ports=[],
-        )
-        in_scope = scope_validator.is_in_scope(target)
-        self.audit_logger.log_scope_check(scan_id, target, in_scope)
+        # --- Activate ambient scope gate (fail-closed) ---
+        # If a caller (CLI/dashboard/multi-scan/P1) already set a scope, we
+        # leave it untouched (ensure_active_scope returns False). Otherwise we
+        # activate a scope scoped to *target* and own the teardown.
+        from vxis.scope.runtime_gate import clear_active_scope, ensure_active_scope
 
-        if not in_scope:
-            raise ScopeViolationError(target, [target])
+        _scope_owned = ensure_active_scope(target)
 
-        # --- 3. Audit: scan start ---
-        self.audit_logger.log_scan_start(
-            scan_id=scan_id,
-            target=target,
-            profile=profile,
-            config_snapshot={"profile": profile, "target": target},
-        )
+        try:
+            # --- 2. Scope validation ---
+            # When no client config is supplied, the target itself is the only
+            # authorized scope entry so the check is always in-scope. Real
+            # deployments attach a ClientConfig with explicit target lists.
+            scope_validator = ScopeValidator(
+                targets=[target],
+                exclude_targets=[],
+                exclude_ports=[],
+            )
+            in_scope = scope_validator.is_in_scope(target)
+            self.audit_logger.log_scope_check(scan_id, target, in_scope)
 
-        # --- 4. Plugin discovery and filtering ---
-        registry = discover_plugins()
+            if not in_scope:
+                raise ScopeViolationError(target, [target])
 
-        # Filter by tier: only run Tier 1 (recon) plugins for zero-touch scans.
-        # Tier 2 (breach) plugins require --tier breach flag (future).
-        # tier comes from the parameter above
-        registry = {k: v for k, v in registry.items() if getattr(v.meta, "tier", 1) <= tier}
-
-        # Filter out plugins whose binary is not installed
-        registry = {k: v for k, v in registry.items() if v.validate_environment()}
-
-        # Apply profile-level skip list
-        for skip_name in scan_profile.skip_plugins:
-            registry.pop(skip_name, None)
-
-        # Apply caller-supplied plugin allowlist
-        if selected_plugins is not None:
-            allowed = set(selected_plugins)
-            registry = {k: v for k, v in registry.items() if k in allowed}
-
-        logger.info(
-            "Scan %s: %d plugins selected for target '%s' with profile '%s'.",
-            scan_id,
-            len(registry),
-            target,
-            profile,
-        )
-
-        # --- 5. Build DAG ---
-        dag_nodes = build_dag_from_plugins(registry)
-        dag_context = DAGContext(target=target, scan_profile=profile)
-
-        # --- Emit scan started ---
-        await self.event_bus.emit(
-            ScanLifecycleEvent(
-                event_type=EventType.SCAN_STARTED,
+            # --- 3. Audit: scan start ---
+            self.audit_logger.log_scan_start(
                 scan_id=scan_id,
                 target=target,
                 profile=profile,
-                plugin_count=len(registry),
-            )
-        )
-
-        # --- 6. Configure rate limiter for this target ---
-        if scan_profile.rate_limit > 0:
-            self.rate_limiter.set_rate(target, scan_profile.rate_limit)
-        else:
-            # rate_limit=0 means unlimited; set rate to 0 so acquire() is a no-op
-            self.rate_limiter.set_rate(target, 0)
-
-        # --- 7. Execute DAG ---
-        executor = DAGExecutor(
-            dag_nodes,
-            max_concurrency=scan_profile.max_concurrency,
-            event_bus=self.event_bus,
-        )
-        completed_nodes = await executor.execute(
-            self._make_run_func(
-                registry=registry,
-                dag_context=dag_context,
-                target=target,
-                profile=profile,
-                scan_id=scan_id,
-            )
-        )
-
-        # --- 7. Collect tool run summaries ---
-        tool_runs: list[dict[str, Any]] = []
-        for node_name, node in completed_nodes.items():
-            tool_runs.append(
-                {
-                    "plugin": node_name,
-                    "state": node.state.value,
-                    "duration_seconds": node.duration_seconds,
-                    "error": node.error,
-                }
+                config_snapshot={"profile": profile, "target": target},
             )
 
-        # --- 7b. Collect errors from failed / skipped / timed-out nodes ---
-        plugin_errors: list[dict[str, str]] = []
-        for node_name, node in completed_nodes.items():
-            if node.state in (TaskState.FAILED, TaskState.TIMED_OUT, TaskState.SKIPPED):
-                plugin_errors.append(
+            # --- 4. Plugin discovery and filtering ---
+            registry = discover_plugins()
+
+            # Filter by tier: only run Tier 1 (recon) plugins for zero-touch scans.
+            # Tier 2 (breach) plugins require --tier breach flag (future).
+            # tier comes from the parameter above
+            registry = {k: v for k, v in registry.items() if getattr(v.meta, "tier", 1) <= tier}
+
+            # Filter out plugins whose binary is not installed
+            registry = {k: v for k, v in registry.items() if v.validate_environment()}
+
+            # Apply profile-level skip list
+            for skip_name in scan_profile.skip_plugins:
+                registry.pop(skip_name, None)
+
+            # Apply caller-supplied plugin allowlist
+            if selected_plugins is not None:
+                allowed = set(selected_plugins)
+                registry = {k: v for k, v in registry.items() if k in allowed}
+
+            logger.info(
+                "Scan %s: %d plugins selected for target '%s' with profile '%s'.",
+                scan_id,
+                len(registry),
+                target,
+                profile,
+            )
+
+            # --- 5. Build DAG ---
+            dag_nodes = build_dag_from_plugins(registry)
+            dag_context = DAGContext(target=target, scan_profile=profile)
+
+            # --- Emit scan started ---
+            await self.event_bus.emit(
+                ScanLifecycleEvent(
+                    event_type=EventType.SCAN_STARTED,
+                    scan_id=scan_id,
+                    target=target,
+                    profile=profile,
+                    plugin_count=len(registry),
+                )
+            )
+
+            # --- 6. Configure rate limiter for this target ---
+            if scan_profile.rate_limit > 0:
+                self.rate_limiter.set_rate(target, scan_profile.rate_limit)
+            else:
+                # rate_limit=0 means unlimited; set rate to 0 so acquire() is a no-op
+                self.rate_limiter.set_rate(target, 0)
+
+            # --- 7. Execute DAG ---
+            executor = DAGExecutor(
+                dag_nodes,
+                max_concurrency=scan_profile.max_concurrency,
+                event_bus=self.event_bus,
+            )
+            completed_nodes = await executor.execute(
+                self._make_run_func(
+                    registry=registry,
+                    dag_context=dag_context,
+                    target=target,
+                    profile=profile,
+                    scan_id=scan_id,
+                )
+            )
+
+            # --- 7. Collect tool run summaries ---
+            tool_runs: list[dict[str, Any]] = []
+            for node_name, node in completed_nodes.items():
+                tool_runs.append(
                     {
                         "plugin": node_name,
                         "state": node.state.value,
-                        "error": node.error or "unknown error",
+                        "duration_seconds": node.duration_seconds,
+                        "error": node.error,
                     }
                 )
-                logger.warning(
-                    "Scan %s: plugin '%s' ended in state '%s': %s",
-                    scan_id,
-                    node_name,
-                    node.state.value,
-                    node.error or "unknown error",
+
+            # --- 7b. Collect errors from failed / skipped / timed-out nodes ---
+            plugin_errors: list[dict[str, str]] = []
+            for node_name, node in completed_nodes.items():
+                if node.state in (TaskState.FAILED, TaskState.TIMED_OUT, TaskState.SKIPPED):
+                    plugin_errors.append(
+                        {
+                            "plugin": node_name,
+                            "state": node.state.value,
+                            "error": node.error or "unknown error",
+                        }
+                    )
+                    logger.warning(
+                        "Scan %s: plugin '%s' ended in state '%s': %s",
+                        scan_id,
+                        node_name,
+                        node.state.value,
+                        node.error or "unknown error",
+                    )
+
+            # --- 8. Normalize findings from all completed nodes ---
+            all_raw_findings: list[Finding] = []
+            for node_name, node in completed_nodes.items():
+                if node.state != TaskState.COMPLETED or node.result is None:
+                    continue
+                plugin_output = node.result
+                normalized = self._normalize_output(plugin_output, scan_id, target)
+                all_raw_findings.extend(normalized)
+
+            # --- 9. Deduplicate ---
+            await self.event_bus.emit(
+                PipelineEvent(
+                    event_type=EventType.PIPELINE_STAGE,
+                    scan_id=scan_id,
+                    stage="deduplicate",
+                    finding_count=len(all_raw_findings),
+                    detail=f"{len(all_raw_findings)} raw findings",
                 )
-
-        # --- 8. Normalize findings from all completed nodes ---
-        all_raw_findings: list[Finding] = []
-        for node_name, node in completed_nodes.items():
-            if node.state != TaskState.COMPLETED or node.result is None:
-                continue
-            plugin_output = node.result
-            normalized = self._normalize_output(plugin_output, scan_id, target)
-            all_raw_findings.extend(normalized)
-
-        # --- 9. Deduplicate ---
-        await self.event_bus.emit(
-            PipelineEvent(
-                event_type=EventType.PIPELINE_STAGE,
-                scan_id=scan_id,
-                stage="deduplicate",
-                finding_count=len(all_raw_findings),
-                detail=f"{len(all_raw_findings)} raw findings",
             )
-        )
-        deduplicator = FindingDeduplicator()
-        deduped = deduplicator.deduplicate(all_raw_findings)
+            deduplicator = FindingDeduplicator()
+            deduped = deduplicator.deduplicate(all_raw_findings)
 
-        # --- 10. False-positive pipeline ---
-        await self.event_bus.emit(
-            PipelineEvent(
-                event_type=EventType.PIPELINE_STAGE,
-                scan_id=scan_id,
-                stage="fp_filter",
-                finding_count=len(deduped),
-                detail=f"{len(deduped)} after dedup",
+            # --- 10. False-positive pipeline ---
+            await self.event_bus.emit(
+                PipelineEvent(
+                    event_type=EventType.PIPELINE_STAGE,
+                    scan_id=scan_id,
+                    stage="fp_filter",
+                    finding_count=len(deduped),
+                    detail=f"{len(deduped)} after dedup",
+                )
             )
-        )
-        tech_stack = self._detect_tech_stack(dag_context)
-        fp_pipeline = FPPipeline(tech_stack=tech_stack)
-        filtered = await fp_pipeline.process(deduped)
+            tech_stack = self._detect_tech_stack(dag_context)
+            fp_pipeline = FPPipeline(tech_stack=tech_stack)
+            filtered = await fp_pipeline.process(deduped)
 
-        # --- 11. Enrich ---
-        await self.event_bus.emit(
-            PipelineEvent(
-                event_type=EventType.PIPELINE_STAGE,
-                scan_id=scan_id,
-                stage="enrich",
-                finding_count=len(filtered),
-                detail=f"{len(filtered)} after FP filter",
+            # --- 11. Enrich ---
+            await self.event_bus.emit(
+                PipelineEvent(
+                    event_type=EventType.PIPELINE_STAGE,
+                    scan_id=scan_id,
+                    stage="enrich",
+                    finding_count=len(filtered),
+                    detail=f"{len(filtered)} after FP filter",
+                )
             )
-        )
-        enricher = FindingEnricher()
-        enriched = enricher.enrich(filtered)
+            enricher = FindingEnricher()
+            enriched = enricher.enrich(filtered)
 
-        # --- 12. Persist to database ---
-        finished_at = datetime.now(timezone.utc)
-        await self._persist(
-            scan_id=scan_id,
-            target=target,
-            profile=profile,
-            findings=enriched,
-            tool_runs=tool_runs,
-            started_at=started_at,
-            finished_at=finished_at,
-        )
-
-        # --- 13. Audit: scan end ---
-        self.audit_logger.log_scan_end(
-            scan_id=scan_id,
-            finding_count=len(enriched),
-            status="completed",
-        )
-
-        await self.event_bus.emit(
-            ScanLifecycleEvent(
-                event_type=EventType.SCAN_COMPLETED,
+            # --- 12. Persist to database ---
+            finished_at = datetime.now(timezone.utc)
+            await self._persist(
                 scan_id=scan_id,
                 target=target,
                 profile=profile,
-                finding_count=len(enriched),
-                duration_seconds=(finished_at - started_at).total_seconds(),
+                findings=enriched,
+                tool_runs=tool_runs,
+                started_at=started_at,
+                finished_at=finished_at,
             )
-        )
 
-        logger.info(
-            "Scan %s completed: %d findings in %.1fs.",
-            scan_id,
-            len(enriched),
-            (finished_at - started_at).total_seconds(),
-        )
+            # --- 13. Audit: scan end ---
+            self.audit_logger.log_scan_end(
+                scan_id=scan_id,
+                finding_count=len(enriched),
+                status="completed",
+            )
 
-        # --- 14. Auto-learn: 스캔 결과를 메모리에 저장 ---
-        self._auto_learn(target, enriched, tool_runs, plugin_errors, dag_context)
+            await self.event_bus.emit(
+                ScanLifecycleEvent(
+                    event_type=EventType.SCAN_COMPLETED,
+                    scan_id=scan_id,
+                    target=target,
+                    profile=profile,
+                    finding_count=len(enriched),
+                    duration_seconds=(finished_at - started_at).total_seconds(),
+                )
+            )
 
-        return ScanResult(
-            scan_id=scan_id,
-            target=target,
-            profile=profile,
-            findings=enriched,
-            tool_runs=tool_runs,
-            errors=plugin_errors,
-            started_at=started_at,
-            finished_at=finished_at,
-        )
+            logger.info(
+                "Scan %s completed: %d findings in %.1fs.",
+                scan_id,
+                len(enriched),
+                (finished_at - started_at).total_seconds(),
+            )
+
+            # --- 14. Auto-learn: 스캔 결과를 메모리에 저장 ---
+            self._auto_learn(target, enriched, tool_runs, plugin_errors, dag_context)
+
+            return ScanResult(
+                scan_id=scan_id,
+                target=target,
+                profile=profile,
+                findings=enriched,
+                tool_runs=tool_runs,
+                errors=plugin_errors,
+                started_at=started_at,
+                finished_at=finished_at,
+            )
+        finally:
+            if _scope_owned:
+                clear_active_scope()
 
     # ------------------------------------------------------------------
     # Internal helpers

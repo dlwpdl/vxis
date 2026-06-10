@@ -17,6 +17,7 @@ from vxis.scope.runtime_gate import (
     ScopeGateDecision,
     clear_active_scope,
     enforce_scope_invocation,
+    ensure_active_scope,
     set_active_scope,
 )
 
@@ -33,5 +34,6 @@ __all__ = [
     "ScopeGateDecision",
     "clear_active_scope",
     "enforce_scope_invocation",
+    "ensure_active_scope",
     "set_active_scope",
 ]

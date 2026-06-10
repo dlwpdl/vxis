@@ -55,6 +55,18 @@ def build_target_scope_enforcer(target: str, *, scope_arg: str | None = None) ->
     return ScopeEnforcer(cfg)
 
 
+def ensure_active_scope(target: str, *, scope_arg: str | None = None) -> bool:
+    """Activate a fail-closed scope for *target* ONLY if no ambient scope is active.
+
+    Returns True if this call activated the scope (caller owns teardown), False if a
+    scope was already active (caller must NOT clear it — its owner will).
+    """
+    if _ACTIVE.get() is not None:
+        return False
+    set_active_scope(build_target_scope_enforcer(target, scope_arg=scope_arg))
+    return True
+
+
 def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateDecision | None:
     """Return None when no scope is active or the tool is offline; otherwise allow/block."""
     enforcer = _ACTIVE.get()
