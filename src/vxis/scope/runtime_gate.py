@@ -38,6 +38,22 @@ def clear_active_scope() -> None:
     _APPROVE.set(False)
 
 
+def build_target_scope_enforcer(target: str, *, scope_arg: str | None = None) -> ScopeEnforcer:
+    """Load scope for a scan and FAIL-CLOSED inject the target host into
+    in_scope_domains when none are configured, so out-of-scope hosts are blocked
+    by default."""
+    from urllib.parse import urlparse
+
+    from vxis.scope.loader import load_scope
+
+    cfg = load_scope(scope_arg, target)
+    if not cfg.in_scope_domains:
+        host = urlparse(target).hostname or ""
+        if host:
+            cfg.in_scope_domains = [host]
+    return ScopeEnforcer(cfg)
+
+
 def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateDecision | None:
     """Return None when no scope is active or the tool is offline; otherwise allow/block."""
     enforcer = _ACTIVE.get()

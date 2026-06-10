@@ -2,6 +2,7 @@ import pytest
 from vxis.scope.loader import ScopeLoader
 from vxis.scope.enforcer import ScopeEnforcer
 from vxis.scope.runtime_gate import set_active_scope, clear_active_scope, enforce_scope_invocation
+from vxis.scope.runtime_gate import build_target_scope_enforcer
 
 @pytest.fixture(autouse=True)
 def _reset():
@@ -40,3 +41,9 @@ def test_approval_required_passes_when_approved():
     set_active_scope(_enforcer(["app.acme.com"]), approve_destructive=True)
     d = enforce_scope_invocation("http_request", {"url": "http://app.acme.com/upload", "method": "POST"})
     assert d is not None and d.allowed is True
+
+def test_build_enforcer_injects_target_host_when_empty():
+    enf = build_target_scope_enforcer("http://app.acme.com:3000/login", scope_arg=None)
+    assert "app.acme.com" in enf.scope.in_scope_domains
+    assert enf.check_url("http://evil.com/").allowed is False
+    assert enf.check_url("http://app.acme.com/x").allowed is True

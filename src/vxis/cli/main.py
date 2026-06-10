@@ -191,6 +191,11 @@ def scan(
         "--eng",
         help="P1 engagement ID required by adversary-emulation profile.",
     ),
+    approve_destructive: bool = typer.Option(
+        False,
+        "--approve-destructive",
+        help="Pre-approve approval_required destructive actions for this run (fail-closed by default).",
+    ),
 ) -> None:
     """Run a Brain-First security scan against the target.
 
@@ -601,6 +606,17 @@ def scan(
         display.total_findings = len(ctx.findings)
         display.refresh()
 
+    # ── Fail-closed scope activation (single-target path only) ──────
+    # Inject the target host into in_scope_domains when no scope is configured
+    # so every target-facing tool call through ToolRegistry.dispatch is
+    # scope/approval gated. Multi-target manifest path returned early above and
+    # manages its own targets, so it is unaffected. Cleared in finally below.
+    from vxis.scope.runtime_gate import build_target_scope_enforcer, set_active_scope, clear_active_scope
+
+    set_active_scope(
+        build_target_scope_enforcer(target, scope_arg=None),
+        approve_destructive=approve_destructive,
+    )
     try:
         with display:
             asyncio.run(_run())
@@ -612,6 +628,8 @@ def scan(
         if verbose:
             console.print_exception()
         raise typer.Exit(code=1) from exc
+    finally:
+        clear_active_scope()
 
     if ctx is None:
         err_console.print("[bold red]Scan produced no context[/bold red]")
