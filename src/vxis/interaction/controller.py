@@ -493,6 +493,19 @@ class InteractionController:
             logger.error("Execute failed: %s", exc)
             return InteractionResult(success=False, error=str(exc), mode_used=mode)
 
+    # ── Scope-gated Browser Navigation ──────────────────────────
+
+    async def _navigate_checked(self, url: str):
+        """Scope-gate a browser navigation before driving the page there."""
+        from vxis.scope.runtime_gate import enforce_scope_invocation
+
+        decision = enforce_scope_invocation("browser_navigate", {"url": url})
+        if decision is not None and not decision.allowed:
+            from vxis.interaction.hands import ScopeBlockedError  # reuse the shared exception
+
+            raise ScopeBlockedError(f"browser navigation to {url} blocked by scope gate: {decision.reason}")
+        return await self._page.navigate(url)
+
     # ── X-Ray Flow Recording ────────────────────────────────────
 
     def _record_flow(self, resp: AnalyzedResponse, request_body: str = "") -> None:
@@ -588,7 +601,7 @@ class InteractionController:
         # Eyes 보강 (SPA 앱일 때)
         if mode in (InteractionMode.EYES_ONLY, InteractionMode.EYES_XRAY) and self._page:
             try:
-                snapshot = await self._page.navigate(f"{self._target}{action.url}")
+                snapshot = await self._navigate_checked(f"{self._target}{action.url}")
                 dom = await self._page.analyze_dom()
                 result.dom_analysis = dom
                 result.page_title = snapshot.title
@@ -692,7 +705,7 @@ class InteractionController:
                 ],
             )
 
-        snapshot = await self._page.navigate(f"{self._target}{action.url}")
+        snapshot = await self._navigate_checked(f"{self._target}{action.url}")
         dom = await self._page.analyze_dom()
 
         return InteractionResult(
@@ -714,7 +727,7 @@ class InteractionController:
         if not self._page:
             return InteractionResult(success=False, error="Eyes not available", mode_used=mode)
 
-        await self._page.navigate(f"{self._target}{action.url}")
+        await self._navigate_checked(f"{self._target}{action.url}")
         path = f"/tmp/vxis_screenshot_{action.url.replace('/', '_')}.png"
         await self._page.screenshot(path=path)
 
