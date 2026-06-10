@@ -432,6 +432,9 @@ class ScanOrchestrator:
             if plugin is None:
                 raise ValueError(f"Plugin '{plugin_name}' not found in registry.")
 
+            # Plugin path only checks the canonical scan target here; inline URLs
+            # embedded in agent tool calls are caught separately by the scope gate
+            # in ToolRegistry.dispatch. This path never routes through dispatch.
             from vxis.scope.runtime_gate import enforce_scope_invocation
 
             scope_decision = enforce_scope_invocation(plugin_name, {"target": target})
