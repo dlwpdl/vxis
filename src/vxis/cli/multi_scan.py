@@ -102,20 +102,30 @@ async def _scan_target(
 
     pipeline = _build_pipeline()
 
-    ctx = await pipeline.run(
-        target=target.entry,
-        kind=target.kind,
-        target_hints=dict(target.hints),
+    from vxis.scope.runtime_gate import (  # noqa: PLC0415
+        build_target_scope_enforcer,
+        clear_active_scope,
+        set_active_scope,
     )
 
-    findings: list[Finding] = list(ctx.findings) if ctx.findings else []
-    logger.info(
-        "Completed scan for target '%s': %d finding(s), scan_id=%s",
-        target.name,
-        len(findings),
-        scan_id,
-    )
-    return findings
+    set_active_scope(build_target_scope_enforcer(target.entry))
+    try:
+        ctx = await pipeline.run(
+            target=target.entry,
+            kind=target.kind,
+            target_hints=dict(target.hints),
+        )
+
+        findings: list[Finding] = list(ctx.findings) if ctx.findings else []
+        logger.info(
+            "Completed scan for target '%s': %d finding(s), scan_id=%s",
+            target.name,
+            len(findings),
+            scan_id,
+        )
+        return findings
+    finally:
+        clear_active_scope()
 
 
 async def _run_phase_g(all_findings: list[Finding]) -> list[Any]:
