@@ -42,8 +42,23 @@ def test_approval_required_passes_when_approved():
     d = enforce_scope_invocation("http_request", {"url": "http://app.acme.com/upload", "method": "POST"})
     assert d is not None and d.allowed is True
 
-def test_build_enforcer_injects_target_host_when_empty():
+@pytest.fixture
+def _isolated_scope_env(monkeypatch, tmp_path):
+    """Isolate scope loading from any real ./vxis-scope.json or ~/.vxis/scopes/* files."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    yield
+
+
+def test_build_enforcer_injects_target_host_when_empty(_isolated_scope_env):
     enf = build_target_scope_enforcer("http://app.acme.com:3000/login", scope_arg=None)
     assert "app.acme.com" in enf.scope.in_scope_domains
     assert enf.check_url("http://evil.com/").allowed is False
     assert enf.check_url("http://app.acme.com/x").allowed is True
+
+
+def test_build_enforcer_bare_host_without_scheme(_isolated_scope_env):
+    enf = build_target_scope_enforcer("localhost:3000", scope_arg=None)
+    assert "localhost" in enf.scope.in_scope_domains
+    assert enf.check_url("http://evil.com/").allowed is False
+    assert enf.check_url("http://localhost:3000/x").allowed is True

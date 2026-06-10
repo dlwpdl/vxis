@@ -48,7 +48,8 @@ def build_target_scope_enforcer(target: str, *, scope_arg: str | None = None) ->
 
     cfg = load_scope(scope_arg, target)
     if not cfg.in_scope_domains:
-        host = urlparse(target).hostname or ""
+        normalized = target if target.startswith(("http://", "https://")) else f"http://{target}"
+        host = urlparse(normalized).hostname or ""
         if host:
             cfg.in_scope_domains = [host]
     return ScopeEnforcer(cfg)
