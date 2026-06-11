@@ -32,6 +32,7 @@ Phase A adaptations (documented):
   - `ctx.vxis_score` is NOT a dataclass field; it is attached as a dynamic
     attribute (ScanContext is not frozen).
 """
+
 from __future__ import annotations
 
 import logging
@@ -145,7 +146,9 @@ def _extract_final_report_sections(messages: list[dict[str, Any]]) -> dict[str, 
     return {}
 
 
-def _memory_finding_to_vector_seed(finding_type: str, title: str, component: str) -> tuple[str, str, int] | None:
+def _memory_finding_to_vector_seed(
+    finding_type: str, title: str, component: str
+) -> tuple[str, str, int] | None:
     ft = str(finding_type or "").lower()
     if ft in {"auth_bypass", "weak_auth", "default_credentials"}:
         return ("WEB-AUTH-001", title or "Authentication bypass or weak login", 90)
@@ -183,7 +186,7 @@ def _memory_branch_priority(lead: dict[str, Any]) -> int:
 def _normalize_carryover_title(title: str) -> str:
     value = str(title or "").strip().lower()
     while value.startswith("carryover:"):
-        value = value[len("carryover:"):].strip()
+        value = value[len("carryover:") :].strip()
     return value
 
 
@@ -313,23 +316,23 @@ _finding_dict_to_finding_object = _build_finding_from_dict
 # Order matters — python jwt check runs before generic command matching so
 # that `python -c "import jwt"` doesn't also match a made-up `jwt` command.
 _SANDBOX_TOOL_VECTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("sqlmap",   ("WEB-SQLI-001",)),
-    ("nuclei",   ("WEB-INFO-001", "WEB-MISC-001")),
-    ("nikto",    ("WEB-MISC-001", "WEB-INFO-001")),
-    ("wapiti",   ("WEB-SQLI-001", "WEB-XSS-001")),
-    ("hydra",    ("WEB-AUTH-001",)),
-    ("ffuf",     ("WEB-INFO-001",)),
+    ("sqlmap", ("WEB-SQLI-001",)),
+    ("nuclei", ("WEB-INFO-001", "WEB-MISC-001")),
+    ("nikto", ("WEB-MISC-001", "WEB-INFO-001")),
+    ("wapiti", ("WEB-SQLI-001", "WEB-XSS-001")),
+    ("hydra", ("WEB-AUTH-001",)),
+    ("ffuf", ("WEB-INFO-001",)),
     ("gobuster", ("WEB-INFO-001",)),
-    ("dirsearch",("WEB-INFO-001",)),
-    ("wfuzz",    ("WEB-INFO-001",)),
+    ("dirsearch", ("WEB-INFO-001",)),
+    ("wfuzz", ("WEB-INFO-001",)),
 )
 
 # Python code fingerprints — substring match on source.
 _PYTHON_CODE_VECTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("import jwt",      ("WEB-JWT-001",)),
-    ("jwt.encode",      ("WEB-JWT-001",)),
-    ("jwt.decode",      ("WEB-JWT-001",)),
-    ("alg.*none",       ("WEB-JWT-001",)),
+    ("import jwt", ("WEB-JWT-001",)),
+    ("jwt.encode", ("WEB-JWT-001",)),
+    ("jwt.decode", ("WEB-JWT-001",)),
+    ("alg.*none", ("WEB-JWT-001",)),
 )
 
 
@@ -422,14 +425,16 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         # Map finding types to vector IDs
         _type_to_vector = {
             "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001", "xss_stored": "WEB-XSS-002",
+            "xss_reflected": "WEB-XSS-001",
+            "xss_stored": "WEB-XSS-002",
             "xss": "WEB-XSS-001",
             "ssrf": "WEB-SSRF-001",
             "idor": "WEB-IDOR-001",
             "broken_access_control": "WEB-BAC-001",
             "information_disclosure": "WEB-INFO-001",
             "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001", "weak_auth": "WEB-AUTH-001",
+            "auth_bypass": "WEB-AUTH-001",
+            "weak_auth": "WEB-AUTH-001",
             "csrf": "WEB-CSRF-001",
             "xxe": "WEB-XXE-001",
             "rce": "WEB-RCE-001",
@@ -445,9 +450,9 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         # Severity → exploitation level
         _sev_to_level = {
             "critical": 3,  # exploit successful + post-exploit
-            "high": 2,      # exploit successful
-            "medium": 1,    # vulnerability confirmed
-            "low": 0,       # recon only
+            "high": 2,  # exploit successful
+            "medium": 1,  # vulnerability confirmed
+            "low": 0,  # recon only
             "informational": 0,
         }
 
@@ -493,7 +498,11 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
                     tracker.vectors_found.add(vid)
 
         for f in ctx.findings:
-            ftype = f.finding_type if hasattr(f, "finding_type") else str(getattr(f, "finding_type", ""))
+            ftype = (
+                f.finding_type
+                if hasattr(f, "finding_type")
+                else str(getattr(f, "finding_type", ""))
+            )
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
@@ -526,6 +535,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         chains = getattr(ctx, "attack_chains", []) or []
         if chains:
             from vxis.scoring.tracker import AttackChain
+
             for i, chain in enumerate(chains):
                 ac = AttackChain(chain_id=f"chain-{i}")
                 ids = chain.get("finding_ids", chain) if isinstance(chain, dict) else chain
@@ -535,19 +545,22 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
                             vector_id="WEB-CHAIN",
                             finding_id=str(fid),
                             level=min(j + 1, 4),
-                            description_en=f"Chain step {j+1}",
-                            description_ko=f"체인 단계 {j+1}",
+                            description_en=f"Chain step {j + 1}",
+                            description_ko=f"체인 단계 {j + 1}",
                         )
                 tracker.attack_chains.append(ac)
 
         # Phase completion — single scan_loop phase
         from vxis.scoring.tracker import PhaseResult, PhaseStatus
+
         _loop_completed = getattr(ctx, "scan_loop_completed", True)
         tracker.phase_results["scan_loop"] = PhaseResult(
             phase_name="scan_loop",
             status=PhaseStatus.completed if _loop_completed is not False else PhaseStatus.failed,
             findings_count=len(ctx.findings),
-            error=None if _loop_completed is not False else "ScanAgentLoop hit max_iters before finish_scan",
+            error=None
+            if _loop_completed is not False
+            else "ScanAgentLoop hit max_iters before finish_scan",
         )
 
         # Use the scan's actual kind so DESKTOP scans aren't silently scored
@@ -570,6 +583,7 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
 
     except Exception:
         import logging
+
         logging.getLogger(__name__).exception("ScoringEngine failed, using fallback")
         # Fallback: simple severity sum
         sev_weights = {"critical": 200, "high": 100, "medium": 50, "low": 20, "informational": 5}
@@ -578,7 +592,17 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             score += sev_weights.get(sev, 5)
         score = min(1000.0, score)
-        grade = "A" if score >= 700 else "B" if score >= 400 else "C" if score >= 200 else "D" if score > 0 else "F"
+        grade = (
+            "A"
+            if score >= 700
+            else "B"
+            if score >= 400
+            else "C"
+            if score >= 200
+            else "D"
+            if score > 0
+            else "F"
+        )
         return score, grade
 
 
@@ -637,9 +661,12 @@ class ScanPipeline:
         started = time.monotonic()
 
         # 1. Prepare target runtime through the platform launcher layer.
-        self._emit("phase_start", {"phase": "runtime_prepare", "kind": kind.value, "target": target})
+        self._emit(
+            "phase_start", {"phase": "runtime_prepare", "kind": kind.value, "target": target}
+        )
         runtime = await prepare_target_runtime(target, kind, hints=target_hints)
         from vxis.scope.runtime_gate import ensure_active_scope, clear_active_scope
+
         _scope_owned = ensure_active_scope(runtime.resolved_target)
         try:
             self._emit(
@@ -661,6 +688,14 @@ class ScanPipeline:
                 app_context_ko=app_context_ko,
                 scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",
             )
+            # Component P: resolve + attach the scan policy (fail-closed default
+            # when the flag is off or the profile is unknown). No chokepoint is
+            # wired in this increment; this only makes ctx.policy available.
+            from vxis.agent.policy.scan_policy import resolve_policy
+            from vxis.agent.scan_loop_v3 import v3_flag
+
+            if v3_flag("VXIS_V3_POLICY") or v3_flag("VXIS_V3"):
+                ctx.policy = resolve_policy(self.config)
             ctx.runtime_profile = {  # type: ignore[attr-defined]
                 "launcher_name": runtime.launcher_name,
                 "runtime_mode": runtime.runtime_mode,
@@ -707,6 +742,7 @@ class ScanPipeline:
             reset_llm_usage_stats()
             try:
                 from vxis.agent.tools.playbook_tools import _loaded_playbooks
+
                 _loaded_playbooks.clear()
             except Exception:
                 pass
@@ -771,7 +807,9 @@ class ScanPipeline:
                         if seed is None:
                             continue
                         vector_id, seed_title, priority = seed
-                        branch_id = f"memory:{ft}:{component or seed_title}".lower().replace(" ", "_")[:120]
+                        branch_id = f"memory:{ft}:{component or seed_title}".lower().replace(
+                            " ", "_"
+                        )[:120]
                         evidence = (
                             f"Previously observed finding on this target: {ft} at {component or ctx.target}. "
                             "Revalidate quickly, then deepen or pivot beyond the previously known scope."
@@ -811,7 +849,10 @@ class ScanPipeline:
                             next_step=str(lead.get("next_step", "")),
                             blocker="carry-over lead",
                             evidence="carry-over memory lead from previous scan; resume, verify current validity, then push deeper.",
-                            watch_terms=[str(lead.get("title", "")), str(lead.get("vector_id", ""))],
+                            watch_terms=[
+                                str(lead.get("title", "")),
+                                str(lead.get("vector_id", "")),
+                            ],
                         )
                         loop.state.add_shared_note(
                             f"memory branch: reopen {lead.get('title', 'branch')} as p{lead_priority} {lead.get('role', 'worker')}/{lead.get('phase', '?')}"
@@ -856,7 +897,8 @@ class ScanPipeline:
                             status="open",
                             title=f"carryover:{normalized_title or 'review item'}",
                             reason=raw_reason or "Carried from previous scan retrospective.",
-                            action_hint=str(item.get("action_hint", "")) or "Resolve this review gap early in the new run.",
+                            action_hint=str(item.get("action_hint", ""))
+                            or "Resolve this review gap early in the new run.",
                             affected_component=str(item.get("affected_component", "")),
                             source_finding_type=str(item.get("source_finding_type", "")),
                         )
@@ -875,11 +917,13 @@ class ScanPipeline:
                     logger.exception("tool registry cleanup failed after scan_loop error")
                 try:
                     from vxis.agent.tools.browser_tools import shutdown_browser
+
                     await shutdown_browser()
                 except Exception:
                     pass
                 try:
                     from vxis.agent.tools.proxy_runtime import shutdown_proxy_runtime
+
                     await shutdown_proxy_runtime()
                 except Exception:
                     pass
@@ -962,8 +1006,7 @@ class ScanPipeline:
             chain_dicts = _get_chain_dicts()
             try:
                 ctx.attack_chains = [
-                    {"finding_ids": list(c.get("finding_ids", [])), "raw": c}
-                    for c in chain_dicts
+                    {"finding_ids": list(c.get("finding_ids", [])), "raw": c} for c in chain_dicts
                 ]
             except Exception:
                 ctx.attack_chains = []
@@ -971,11 +1014,13 @@ class ScanPipeline:
             # 7.5 Shutdown browser if Eyes was used during the scan
             try:
                 from vxis.agent.tools.browser_tools import shutdown_browser
+
                 await shutdown_browser()
             except Exception:
                 pass
             try:
                 from vxis.agent.tools.proxy_runtime import shutdown_proxy_runtime
+
                 await shutdown_proxy_runtime()
             except Exception:
                 pass
@@ -998,7 +1043,9 @@ class ScanPipeline:
 
             # 10a. Dump full 5-dim breakdown next to the HTML report for benchmark comparison.
             detail = getattr(ctx, "score_detail", None)
-            report_path = getattr(self, "_report_output_path", None) or getattr(self, "report_output_path", None)
+            report_path = getattr(self, "_report_output_path", None) or getattr(
+                self, "report_output_path", None
+            )
             if detail is not None and report_path:
                 try:
                     score_json_path = Path(str(report_path)).with_suffix(".score.json")
@@ -1043,6 +1090,7 @@ class ScanPipeline:
             # summary line for operators.
             try:
                 from vxis.agent.tools.mitre_data import coverage_report
+
                 mitre = coverage_report(_get_finding_dicts())
                 logger.info(
                     "MITRE coverage: %d technique(s), %d tactic(s), %.1f%% of known",
@@ -1158,7 +1206,9 @@ class ScanPipeline:
         # Phase C: render report even when findings=0 if we have belief state
         # (verdict counts, refutations, MITRE) — the verification summary is
         # itself valuable evidence of what was tried and ruled out.
-        has_belief = bool(getattr(ctx, "verdict_counts", {})) or bool(getattr(ctx, "refuted_findings", []))
+        has_belief = bool(getattr(ctx, "verdict_counts", {})) or bool(
+            getattr(ctx, "refuted_findings", [])
+        )
         if not ctx.findings and not has_belief:
             logger.info("No findings and no belief state — skipping report generation")
             return
@@ -1170,10 +1220,9 @@ class ScanPipeline:
         else:
             from urllib.parse import urlparse
 
-            safe = (
-                urlparse(ctx.target.replace("ghost://", "")).netloc.replace(".", "_")
-                or ctx.target.replace("/", "_")
-            )
+            safe = urlparse(ctx.target.replace("ghost://", "")).netloc.replace(
+                ".", "_"
+            ) or ctx.target.replace("/", "_")
             output_path = Path(f"reports/VXIS_Pipeline_{safe}.html")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1200,22 +1249,18 @@ class ScanPipeline:
             company_name="VXIS Security",
             author="VXIS Autonomous Brain",
             executive_summary=(
-                (
-                    (getattr(ctx, "final_report_sections", {}) or {}).get("executive_summary")
-                    or f"Phase A scan completed: {len(ctx.findings)} finding(s)|||Phase A 스캔 완료: {len(ctx.findings)}건 발견"
-                )
+                (getattr(ctx, "final_report_sections", {}) or {}).get("executive_summary")
+                or f"Phase A scan completed: {len(ctx.findings)} finding(s)|||Phase A 스캔 완료: {len(ctx.findings)}건 발견"
             ),
             methodology=(
                 (getattr(ctx, "final_report_sections", {}) or {}).get("methodology")
                 or _DEFAULT_METHODOLOGY
             ),
             technical_analysis=(
-                (getattr(ctx, "final_report_sections", {}) or {}).get("technical_analysis")
-                or ""
+                (getattr(ctx, "final_report_sections", {}) or {}).get("technical_analysis") or ""
             ),
             recommendations=(
-                (getattr(ctx, "final_report_sections", {}) or {}).get("recommendations")
-                or ""
+                (getattr(ctx, "final_report_sections", {}) or {}).get("recommendations") or ""
             ),
             attack_chains=chain_id_lists,
             aggregated_findings=list(getattr(ctx, "aggregated_findings", []) or []),
