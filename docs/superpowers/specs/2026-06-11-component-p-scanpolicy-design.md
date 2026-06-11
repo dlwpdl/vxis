@@ -72,13 +72,14 @@ class ScanPolicy(BaseModel):
 Immutable: a resolved policy must not mutate mid-scan. `exploitation_ceiling` is ordered
 (`none < read-only < lateral < full`) for `min()` composition.
 
-### 3. `PROFILE_POLICY_TABLE` — all 10 profiles + fail-closed default
+### 3. `PROFILE_POLICY_TABLE` — all 11 profiles + fail-closed default
 
 | profile | ceiling | scope | tenant | secrets | evasion | deferred_appr |
 |---|---|---|---|---|---|---|
 | crown | **lateral** | strict-authorized | on | encrypt-redact | no | yes |
 | aggressive | full | lab-allowlist | off | plaintext-lab | yes | no |
 | pre-investment-dd | full | strict-authorized | on | encrypt-redact | ceiling-only† | yes |
+| p1-adversary-emulation | **full** | strict-authorized | on | encrypt-redact | ceiling-only† | yes |
 | continuous-devsec | read-only | strict-authorized | on | encrypt-redact | no | yes |
 | vc-portfolio-monitor | read-only | strict-authorized | on | encrypt-redact | no | yes |
 | remediation-verification | read-only | strict-authorized | on | encrypt-redact | no | yes |
@@ -94,6 +95,11 @@ Owner-confirmed / design decisions:
   (signed one-off scope). Preserves the moat narrative on lab/DD while keeping prod safe.
 - **compliance-mapping = `none`**: MITRE→standards mapping only, no active testing. (This row was
   missing from the plan's table — the exact "missing row silently neuters the profile" gotcha.)
+- **p1-adversary-emulation = `full`** (owner, 2026-06-11): a real 11th profile (the plan's table
+  predates it). Its `_default_profiles()` definition declares `requires_engagement=True` and
+  `allowed_techniques=[recon, emulate, c2, lateral, persist]` with `live_capabilities=True`, gated
+  by a mandatory attested P1 engagement + scope + hash-chained audit. `full` matches its declared
+  techniques; effective capability is still `min(full, engagement authorization)` per hop.
 - **† pre-investment-dd evasion**: the profile sets the *ceiling* (allowed), but actual evasion
   (Ghost/Tor) additionally requires the per-engagement "evasion authorized" flag — effective =
   `min()` of the two (plan line 436).
