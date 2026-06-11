@@ -7,7 +7,7 @@ a resolved policy must not mutate mid-scan.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict
 
@@ -15,8 +15,10 @@ Ceiling = Literal["none", "read-only", "lateral", "full"]
 
 _CEILING_ORDER: dict[str, int] = {"none": 0, "read-only": 1, "lateral": 2, "full": 3}
 
+assert set(_CEILING_ORDER) == set(get_args(Ceiling)), "_CEILING_ORDER out of sync with Ceiling"
 
-def ceiling_rank(ceiling: str) -> int:
+
+def ceiling_rank(ceiling: Ceiling | str) -> int:
     """Ordered rank for min()/comparison. Unknown ceilings rank as the most
     restrictive (0), so a typo can never silently grant capability."""
     return _CEILING_ORDER.get(ceiling, 0)

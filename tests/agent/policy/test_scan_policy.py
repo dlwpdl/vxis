@@ -35,3 +35,8 @@ def test_ceiling_rank_is_ordered():
         < ceiling_rank("lateral")
         < ceiling_rank("full")
     )
+
+
+def test_ceiling_rank_unknown_is_most_restrictive():
+    assert ceiling_rank("god-mode") == 0
+    assert ceiling_rank("") == 0
