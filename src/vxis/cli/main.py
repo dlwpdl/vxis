@@ -36,8 +36,10 @@ from vxis.cli.skillopt import skillopt_app
 
 
 PROFILE_HELP = (
-    "Scan profile: crown | stealth | standard | aggressive | continuous-devsec | "
+    "Scan profile: crown | passive (no direct contact; third-party intel only) | "
+    "stealth | standard | aggressive | continuous-devsec | "
     "vc-portfolio-monitor | pre-investment-dd | remediation-verification | "
+    "compliance-mapping (add-on: maps findings to SOC-2/ISO 27001/ISMS-P, no active testing) | "
     "p1-adversary-emulation (engagement-gated live adversary emulation)"
 )
 
@@ -611,7 +613,11 @@ def scan(
     # so every target-facing tool call through ToolRegistry.dispatch is
     # scope/approval gated. Multi-target manifest path returned early above and
     # manages its own targets, so it is unaffected. Cleared in finally below.
-    from vxis.scope.runtime_gate import build_target_scope_enforcer, set_active_scope, clear_active_scope
+    from vxis.scope.runtime_gate import (
+        build_target_scope_enforcer,
+        set_active_scope,
+        clear_active_scope,
+    )
 
     set_active_scope(
         build_target_scope_enforcer(target, scope_arg=None),
