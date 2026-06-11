@@ -1,5 +1,6 @@
 """Component P — profile-driven ScanPolicy + fail-closed chokepoints."""
 
+from vxis.agent.policy.chokepoints import PolicyDecision, permit_strategy
 from vxis.agent.policy.scan_policy import (
     FAIL_CLOSED_DEFAULT,
     PROFILE_POLICY_TABLE,
@@ -16,4 +17,6 @@ __all__ = [
     "FAIL_CLOSED_DEFAULT",
     "resolve_policy",
     "ceiling_rank",
+    "PolicyDecision",
+    "permit_strategy",
 ]
