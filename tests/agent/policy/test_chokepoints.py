@@ -127,3 +127,33 @@ def test_permit_pivot_engagement_downgrades_ceiling():
         engagement=_Engagement("lateral"),
     )
     assert d.allowed is False
+
+
+def test_permit_pivot_unknown_action_forbidden():
+    d = permit_pivot("10.0.0.5", "exfil", _policy(exploitation_ceiling="full"), _IN)  # type: ignore[arg-type]
+    assert d.allowed is False
+    assert "unknown" in d.reason.lower()
+
+
+def test_permit_pivot_lateral_refuses_persistence_install():
+    d = permit_pivot(
+        "10.0.0.5", "persistence_install", _policy(exploitation_ceiling="lateral"), _IN
+    )
+    assert d.allowed is False
+
+
+def test_permit_pivot_full_allows_persistence_install_in_scope():
+    d = permit_pivot("10.0.0.5", "persistence_install", _policy(exploitation_ceiling="full"), _IN)
+    assert d.allowed is True
+
+
+def test_permit_pivot_engagement_cannot_upgrade_policy():
+    # policy=lateral + engagement=full must STAY lateral -> exfil still refused
+    d = permit_pivot(
+        "10.0.0.5",
+        "data_exfiltration",
+        _policy(exploitation_ceiling="lateral"),
+        _IN,
+        engagement=_Engagement("full"),
+    )
+    assert d.allowed is False

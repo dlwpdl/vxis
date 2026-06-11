@@ -10,11 +10,9 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, Protocol, runtime_checkable
 
-from vxis.agent.policy.scan_policy import ScanPolicy, ceiling_rank
-
-# ScopeLike / EngagementLike Protocols + permit_pivot/persist_secret land in Tasks 4-5.
+from vxis.agent.policy.scan_policy import Ceiling, ScanPolicy, ceiling_rank
 
 # Canonical evasion strategy identifiers. Component E owns the full taxonomy;
 # P only needs to know which strategies are evasion-class.
@@ -70,21 +68,26 @@ def persist_secret(value: str, policy: ScanPolicy | None) -> PolicyDecision:
     return _allow("fingerprinted", stored_value=_fingerprint(value))
 
 
+@runtime_checkable
 class ScopeLike(Protocol):
     def in_scope(self, host: str) -> bool: ...
 
 
+@runtime_checkable
 class EngagementLike(Protocol):
-    def authorized_ceiling(self) -> str: ...
+    def authorized_ceiling(self) -> Ceiling: ...
 
+
+ActionKind = Literal["lateral_move", "data_exfiltration", "persistence_install"]
 
 # Actions that require the highest ceiling (full).
 _FULL_ONLY_ACTIONS = frozenset({"data_exfiltration", "persistence_install"})
+_ALL_KNOWN_ACTIONS = _FULL_ONLY_ACTIONS | frozenset({"lateral_move"})
 
 
 def permit_pivot(
     target_host: str,
-    action: str,
+    action: ActionKind,
     policy: ScanPolicy | None,
     scope: ScopeLike,
     *,
@@ -92,6 +95,9 @@ def permit_pivot(
 ) -> PolicyDecision:
     if policy is None:
         return _forbidden("policy is None (fail-closed)")
+
+    if action not in _ALL_KNOWN_ACTIONS:
+        return _forbidden(f"unknown pivot action '{action}' (fail-closed)")
 
     # Effective capability = min(profile ceiling, engagement authorization).
     effective = policy.exploitation_ceiling
