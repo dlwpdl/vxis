@@ -59,3 +59,10 @@ def test_persist_secret_returns_raw_when_plaintext_lab():
     d = persist_secret("supersecrettoken", _policy(secret_handling="plaintext-lab"))
     assert d.allowed is True
     assert d.stored_value == "supersecrettoken"
+
+
+def test_persist_secret_short_secret_not_exposed_under_encrypt_redact():
+    d = persist_secret("pin", _policy(secret_handling="encrypt-redact"))
+    assert d.allowed is True
+    assert "pin" not in d.stored_value  # short secret: no raw tail
+    assert d.stored_value.endswith(":")  # empty last4 segment

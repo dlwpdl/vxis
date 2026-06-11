@@ -49,8 +49,15 @@ def permit_strategy(strategy: str, policy: ScanPolicy | None) -> PolicyDecision:
 
 
 def _fingerprint(value: str) -> str:
+    """Non-reversible secret fingerprint for safe logging/persistence.
+
+    sha256 digest provides correlation; the last 4 chars are appended ONLY
+    for secrets >= 8 chars (where 4 chars is <= half the value) to aid human
+    correlation of long tokens. Short secrets get no raw tail so the value is
+    never substantially exposed in stored_value.
+    """
     digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
-    last4 = value[-4:] if len(value) >= 4 else value
+    last4 = value[-4:] if len(value) >= 8 else ""
     return f"sha256:{digest}:{last4}"
 
 
@@ -59,4 +66,5 @@ def persist_secret(value: str, policy: ScanPolicy | None) -> PolicyDecision:
         return _forbidden("policy is None (fail-closed)")
     if policy.secret_handling == "plaintext-lab":
         return _allow("plaintext-lab", stored_value=value)
+    # Any other mode (incl. encrypt-redact) fingerprints — fail-safe default.
     return _allow("fingerprinted", stored_value=_fingerprint(value))
