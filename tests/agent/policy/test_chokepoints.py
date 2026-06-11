@@ -1,4 +1,4 @@
-from vxis.agent.policy.chokepoints import PolicyDecision, permit_strategy  # noqa: F401
+from vxis.agent.policy.chokepoints import permit_strategy
 from vxis.agent.policy.scan_policy import ScanPolicy
 
 
