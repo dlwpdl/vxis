@@ -1,6 +1,6 @@
 import hashlib
 
-from vxis.agent.policy.chokepoints import permit_strategy, persist_secret
+from vxis.agent.policy.chokepoints import permit_pivot, permit_strategy, persist_secret
 from vxis.agent.policy.scan_policy import ScanPolicy
 
 
@@ -66,3 +66,64 @@ def test_persist_secret_short_secret_not_exposed_under_encrypt_redact():
     assert d.allowed is True
     assert "pin" not in d.stored_value  # short secret: no raw tail
     assert d.stored_value.endswith(":")  # empty last4 segment
+
+
+class _Scope:
+    def __init__(self, allowed_hosts):
+        self._hosts = set(allowed_hosts)
+
+    def in_scope(self, host: str) -> bool:
+        return host in self._hosts
+
+
+class _Engagement:
+    def __init__(self, ceiling):
+        self._ceiling = ceiling
+
+    def authorized_ceiling(self) -> str:
+        return self._ceiling
+
+
+_IN = _Scope({"10.0.0.5"})
+
+
+def test_permit_pivot_denies_on_none_policy():
+    d = permit_pivot("10.0.0.5", "lateral_move", None, _IN)
+    assert d.verdict == "FORBIDDEN"
+
+
+def test_permit_pivot_read_only_cannot_pivot():
+    d = permit_pivot("10.0.0.5", "lateral_move", _policy(exploitation_ceiling="read-only"), _IN)
+    assert d.allowed is False
+
+
+def test_permit_pivot_lateral_allows_in_scope_lateral_move():
+    d = permit_pivot("10.0.0.5", "lateral_move", _policy(exploitation_ceiling="lateral"), _IN)
+    assert d.allowed is True
+
+
+def test_permit_pivot_lateral_refuses_exfil():
+    d = permit_pivot("10.0.0.5", "data_exfiltration", _policy(exploitation_ceiling="lateral"), _IN)
+    assert d.allowed is False
+
+
+def test_permit_pivot_full_allows_exfil_in_scope():
+    d = permit_pivot("10.0.0.5", "data_exfiltration", _policy(exploitation_ceiling="full"), _IN)
+    assert d.allowed is True
+
+
+def test_permit_pivot_out_of_scope_forbidden_even_at_full():
+    d = permit_pivot("8.8.8.8", "lateral_move", _policy(exploitation_ceiling="full"), _IN)
+    assert d.allowed is False
+    assert "scope" in d.reason.lower()
+
+
+def test_permit_pivot_engagement_downgrades_ceiling():
+    d = permit_pivot(
+        "10.0.0.5",
+        "data_exfiltration",
+        _policy(exploitation_ceiling="full"),
+        _IN,
+        engagement=_Engagement("lateral"),
+    )
+    assert d.allowed is False

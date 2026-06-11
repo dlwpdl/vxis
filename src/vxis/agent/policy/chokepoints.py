@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
 
-from vxis.agent.policy.scan_policy import ScanPolicy
+from vxis.agent.policy.scan_policy import ScanPolicy, ceiling_rank
 
 # ScopeLike / EngagementLike Protocols + permit_pivot/persist_secret land in Tasks 4-5.
 
@@ -68,3 +68,48 @@ def persist_secret(value: str, policy: ScanPolicy | None) -> PolicyDecision:
         return _allow("plaintext-lab", stored_value=value)
     # Any other mode (incl. encrypt-redact) fingerprints — fail-safe default.
     return _allow("fingerprinted", stored_value=_fingerprint(value))
+
+
+class ScopeLike(Protocol):
+    def in_scope(self, host: str) -> bool: ...
+
+
+class EngagementLike(Protocol):
+    def authorized_ceiling(self) -> str: ...
+
+
+# Actions that require the highest ceiling (full).
+_FULL_ONLY_ACTIONS = frozenset({"data_exfiltration", "persistence_install"})
+
+
+def permit_pivot(
+    target_host: str,
+    action: str,
+    policy: ScanPolicy | None,
+    scope: ScopeLike,
+    *,
+    engagement: EngagementLike | None = None,
+) -> PolicyDecision:
+    if policy is None:
+        return _forbidden("policy is None (fail-closed)")
+
+    # Effective capability = min(profile ceiling, engagement authorization).
+    effective = policy.exploitation_ceiling
+    if engagement is not None:
+        eng_ceiling = engagement.authorized_ceiling()
+        if ceiling_rank(eng_ceiling) < ceiling_rank(effective):
+            effective = eng_ceiling
+
+    # Pivoting to another host at all requires at least 'lateral'.
+    if ceiling_rank(effective) < ceiling_rank("lateral"):
+        return _forbidden(f"exploitation_ceiling '{effective}' too low to pivot")
+
+    # Exfil / persist require 'full'.
+    if action in _FULL_ONLY_ACTIONS and ceiling_rank(effective) < ceiling_rank("full"):
+        return _forbidden(f"action '{action}' requires ceiling 'full' (have '{effective}')")
+
+    # Destination must be in authorized scope (not approval-gated).
+    if not scope.in_scope(target_host):
+        return _forbidden(f"host '{target_host}' out of authorized scope")
+
+    return _allow(f"pivot '{action}' to '{target_host}' permitted")

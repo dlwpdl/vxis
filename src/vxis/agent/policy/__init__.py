@@ -1,6 +1,13 @@
 """Component P — profile-driven ScanPolicy + fail-closed chokepoints."""
 
-from vxis.agent.policy.chokepoints import PolicyDecision, permit_strategy, persist_secret
+from vxis.agent.policy.chokepoints import (
+    EngagementLike,
+    PolicyDecision,
+    ScopeLike,
+    permit_pivot,
+    permit_strategy,
+    persist_secret,
+)
 from vxis.agent.policy.scan_policy import (
     FAIL_CLOSED_DEFAULT,
     PROFILE_POLICY_TABLE,
@@ -20,4 +27,7 @@ __all__ = [
     "PolicyDecision",
     "permit_strategy",
     "persist_secret",
+    "permit_pivot",
+    "ScopeLike",
+    "EngagementLike",
 ]
