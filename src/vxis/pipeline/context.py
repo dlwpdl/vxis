@@ -9,7 +9,10 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vxis.agent.policy.scan_policy import ScanPolicy
 
 from vxis.interaction.surface import TargetKind
 from vxis.models.finding import Finding
@@ -48,6 +51,9 @@ class ScanContext:
     app_context_ko: str = ""
     scan_id: str = ""
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    # ── Component P: resolved scan policy (None = fail-closed at chokepoints) ──
+    policy: "ScanPolicy | None" = None
 
     # ── Capability Scoring ──
     score_tracker: ScoreTracker = field(init=False)
@@ -134,6 +140,7 @@ class ScanContext:
     def add_finding(self, **kwargs: Any) -> Finding:
         """Finding 추가 (메모리 상한 적용)."""
         from vxis.models.finding import Finding as F
+
         with self._lock:
             self.finding_counter += 1
             kwargs.setdefault("id", f"VXIS-{self.finding_counter:03d}")
@@ -145,20 +152,21 @@ class ScanContext:
             # 메모리 상한 초과 → 오래된 informational/low부터 제거
             if len(self.findings) > self.MAX_FINDINGS:
                 from vxis.models.finding import Severity
+
                 # informational 우선 제거, 그 다음 low, 그 다음 오래된 순
                 removable_idx = [
-                    i for i, fnd in enumerate(self.findings)
+                    i
+                    for i, fnd in enumerate(self.findings)
                     if fnd.severity == Severity.informational
-                ] or [
-                    i for i, fnd in enumerate(self.findings)
-                    if fnd.severity == Severity.low
-                ]
+                ] or [i for i, fnd in enumerate(self.findings) if fnd.severity == Severity.low]
                 if removable_idx:
                     del self.findings[removable_idx[0]]
                 else:
                     # 오래된 것 제거 (첫 번째)
                     del self.findings[0]
-                logger.debug("[MEMORY] findings cap hit (%d), evicted old finding", self.MAX_FINDINGS)
+                logger.debug(
+                    "[MEMORY] findings cap hit (%d), evicted old finding", self.MAX_FINDINGS
+                )
             logger.info("[%s] %s: %s", f.severity.value.upper(), f.id, f.title.split("|||")[0])
             return f
 
@@ -188,17 +196,21 @@ class ScanContext:
         logger.info("[DEFERRED #%d] %s %s — %s", action.id, method, url, description_en[:60])
         return action
 
-    def log_phase(self, phase_name: str, duration_ms: float = 0, findings_count: int = 0, notes: str = "") -> None:
+    def log_phase(
+        self, phase_name: str, duration_ms: float = 0, findings_count: int = 0, notes: str = ""
+    ) -> None:
         """Phase 실행 기록."""
         with self._lock:
             self.phases_completed.append(phase_name)
-            self.phase_logs.append({
-                "phase": phase_name,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "duration_ms": duration_ms,
-                "findings_count": findings_count,
-                "notes": notes,
-            })
+            self.phase_logs.append(
+                {
+                    "phase": phase_name,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "duration_ms": duration_ms,
+                    "findings_count": findings_count,
+                    "notes": notes,
+                }
+            )
             logger.info("[PHASE DONE] %s — %d findings, %s", phase_name, findings_count, notes[:80])
 
     def update_peak_size(self) -> int:
@@ -262,14 +274,21 @@ class ScanContext:
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(checkpoint, indent=2, ensure_ascii=False))
         os.replace(tmp, path)
-        logger.info("[CHECKPOINT] Saved to %s (%d phases, %d findings)",
-                    path, len(self.phases_completed), self.finding_counter)
+        logger.info(
+            "[CHECKPOINT] Saved to %s (%d phases, %d findings)",
+            path,
+            len(self.phases_completed),
+            self.finding_counter,
+        )
         return path
 
     @staticmethod
     def load_checkpoint(path: Path) -> dict[str, Any]:
         """체크포인트 파일에서 이전 스캔 상태 로드."""
         data = json.loads(path.read_text())
-        logger.info("[CHECKPOINT] Loaded %s — %d phases completed",
-                    path, len(data.get("phases_completed", [])))
+        logger.info(
+            "[CHECKPOINT] Loaded %s — %d phases completed",
+            path,
+            len(data.get("phases_completed", [])),
+        )
         return data
