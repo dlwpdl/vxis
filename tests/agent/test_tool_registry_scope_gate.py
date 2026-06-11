@@ -4,10 +4,15 @@ from vxis.scope.loader import ScopeLoader
 from vxis.scope.enforcer import ScopeEnforcer
 from vxis.scope.runtime_gate import set_active_scope, clear_active_scope
 
+
 class _Tool:
     name = "http_request"
     description = "x"
-    input_schema = {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}
+    input_schema = {
+        "type": "object",
+        "properties": {"url": {"type": "string"}},
+        "required": ["url"],
+    }
 
     def __init__(self):
         self.ran = False
@@ -76,6 +81,7 @@ async def test_dispatch_no_scope_runs_normally():
 
 # ── New integration tests ────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_offline_tool_bypasses_scope_gate():
     """report_finding is offline (target_facing=False) and must pass even when
@@ -129,6 +135,8 @@ async def test_destructive_approval_at_dispatch():
     reg2 = ToolRegistry()
     reg2.register(tool2)
     set_active_scope(_scope(["app.acme.com"]), approve_destructive=True)
-    res2 = await reg2.dispatch("http_request", {"url": "http://app.acme.com/upload", "method": "POST"})
+    res2 = await reg2.dispatch(
+        "http_request", {"url": "http://app.acme.com/upload", "method": "POST"}
+    )
     assert res2.ok is True
     assert tool2.ran is True
