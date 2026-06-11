@@ -21,7 +21,6 @@ from vxis.scope.runtime_gate import (
     ensure_active_scope,
     set_active_scope,
 )
-from vxis.scope.schemas import ScopeConfig
 
 
 # ---------------------------------------------------------------------------
@@ -151,20 +150,10 @@ async def test_run_scan_scope_cleared_after_return(tmp_path):
     from unittest.mock import AsyncMock, MagicMock, patch
 
     from vxis.config.schema import VXISConfig
-    from vxis.core.orchestrator import ScanOrchestrator, ScanResult
+    from vxis.core.orchestrator import ScanOrchestrator
 
     # Ensure no scope is active before the call
     assert enforce_scope_invocation("http_request", {"url": "http://evil.com"}) is None
-
-    # Stub the heavy parts of run_scan so they don't need real executables
-    fake_result = ScanResult(
-        scan_id="s1",
-        target="http://app.acme.com",
-        profile="standard",
-        findings=[],
-        tool_runs=[],
-        errors=[],
-    )
 
     orchestrator = ScanOrchestrator(VXISConfig(data_dir=tmp_path))
 
@@ -191,7 +180,7 @@ async def test_run_scan_scope_cleared_after_return(tmp_path):
 @pytest.mark.asyncio
 async def test_run_scan_scope_cleared_after_exception(tmp_path):
     """After run_scan raises an exception the scope is still cleared."""
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import patch
 
     from vxis.config.schema import VXISConfig
     from vxis.core.orchestrator import ScanOrchestrator
