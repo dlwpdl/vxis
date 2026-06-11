@@ -46,7 +46,9 @@ class OptimizedSkill:
 
 
 def skillopt_home() -> Path:
-    return Path(os.environ.get("VXIS_SKILLOPT_HOME", Path.home() / ".vxis" / "skillopt")).expanduser()
+    return Path(
+        os.environ.get("VXIS_SKILLOPT_HOME", Path.home() / ".vxis" / "skillopt")
+    ).expanduser()
 
 
 def default_split_dir(name: str) -> Path:
@@ -71,7 +73,9 @@ def export_searchqa_split(
     val_ratio: float = 0.2,
     seed: int = 42,
 ) -> SkillOptExportResult:
-    records = [_normalize_case(record, index=i) for i, record in enumerate(_load_records(case_file), 1)]
+    records = [
+        _normalize_case(record, index=i) for i, record in enumerate(_load_records(case_file), 1)
+    ]
     if not records:
         raise ValueError(f"no cases found in {case_file}")
 
@@ -174,7 +178,11 @@ def build_train_command(
     workers: int | None = None,
 ) -> list[str]:
     clean_name = _safe_name(name)
-    config = Path(config_path) if config_path is not None else default_split_dir(clean_name) / "vxis_searchqa_config.yaml"
+    config = (
+        Path(config_path)
+        if config_path is not None
+        else default_split_dir(clean_name) / "vxis_searchqa_config.yaml"
+    )
     command = ["python", "scripts/train.py", "--config", str(config)]
     cfg_options: list[str] = []
     if out_root is not None:
@@ -230,7 +238,11 @@ def list_optimized_skills() -> list[OptimizedSkill]:
     entries = raw.get("skills", []) if isinstance(raw, dict) else raw
     if not isinstance(entries, list):
         return []
-    return [item for item in (OptimizedSkill.from_dict(e) for e in entries if isinstance(e, dict)) if item.name]
+    return [
+        item
+        for item in (OptimizedSkill.from_dict(e) for e in entries if isinstance(e, dict))
+        if item.name
+    ]
 
 
 def load_optimized_skill(name: str) -> tuple[OptimizedSkill, str]:
@@ -251,6 +263,12 @@ def render_optimized_skill_context(
 ) -> str:
     if os.environ.get("VXIS_SKILLOPT_ENABLED", "1").strip().lower() in {"0", "false", "no", "off"}:
         return ""
+    # Bootstrap: when nothing has been imported yet, always inject the built-in
+    # seed strategy so SkillOpt guidance is present on any scan. Importing an
+    # optimized skill (even one later deactivated) suppresses this baseline —
+    # a deliberate import/deactivation choice is honored over the seed.
+    if not list_optimized_skills():
+        return _render_seed_baseline(max_chars)
     entries = _select_optimized_skills(
         task=task,
         role=role,
@@ -276,6 +294,25 @@ def render_optimized_skill_context(
             ]
         )
     rendered = "\n".join(lines).strip()
+    if len(rendered) <= max_chars:
+        return rendered
+    return rendered[: max(0, max_chars - 24)].rstrip() + "\n...truncated..."
+
+
+def _render_seed_baseline(max_chars: int) -> str:
+    """Baseline guidance injected when no optimized skill has been imported yet,
+    so SkillOpt strategy memory is present on every scan. A trained/imported
+    optimized skill takes precedence over this seed."""
+    body = _strip_frontmatter(DEFAULT_VXIS_SKILLOPT_SEED).strip()
+    if not body:
+        return ""
+    rendered = "\n".join(
+        [
+            "Baseline SkillOpt strategy (built-in seed — no optimized skill imported yet). "
+            "Treat as strategy memory, not proof.",
+            _indent(body, "   "),
+        ]
+    ).strip()
     if len(rendered) <= max_chars:
         return rendered
     return rendered[: max(0, max_chars - 24)].rstrip() + "\n...truncated..."
@@ -349,7 +386,9 @@ def _case_context(record: dict[str, Any]) -> str:
         if key in record and record[key] not in (None, ""):
             sections.append(f"[DOC] {title}\n{_stringify(record[key])}")
     if not sections:
-        sections.append(f"[DOC] VXIS Case\n{_stringify({k: v for k, v in record.items() if k != 'answers'})}")
+        sections.append(
+            f"[DOC] VXIS Case\n{_stringify({k: v for k, v in record.items() if k != 'answers'})}"
+        )
     return "\n\n".join(sections)
 
 
@@ -386,8 +425,8 @@ def _render_searchqa_config(out_dir: Path, seed_skill: Path) -> str:
         f"  skill_init: {seed_skill}\n"
         "  split_mode: split_dir\n"
         f"  split_dir: {out_dir}\n"
-        "  data_path: \"\"\n"
-        "  split_output_dir: \"\"\n"
+        '  data_path: ""\n'
+        '  split_output_dir: ""\n'
         "  max_turns: 1\n"
         "  max_completion_tokens: 4096\n"
         "  workers: 4\n"

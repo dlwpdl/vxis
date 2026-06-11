@@ -42,7 +42,9 @@ def test_export_searchqa_split_from_jsonl(tmp_path):
 def test_imported_skillopt_guidance_renders_for_matching_task(tmp_path, monkeypatch):
     monkeypatch.setenv("VXIS_SKILLOPT_HOME", str(tmp_path))
     skill = tmp_path / "best_skill.md"
-    skill.write_text("# Learned Axis-2 Rule\n\nAlways enumerate owned objects before BOLA.", encoding="utf-8")
+    skill.write_text(
+        "# Learned Axis-2 Rule\n\nAlways enumerate owned objects before BOLA.", encoding="utf-8"
+    )
 
     entry = import_optimized_skill(
         skill,
@@ -65,17 +67,22 @@ def test_imported_skillopt_guidance_renders_for_matching_task(tmp_path, monkeypa
 
     disabled = set_optimized_skill_active("axis2", False)
     assert disabled.active is False
-    assert render_optimized_skill_context(
-        task="authorization BOLA test",
-        role="director",
-        target_kind="web",
-    ) == ""
+    assert (
+        render_optimized_skill_context(
+            task="authorization BOLA test",
+            role="director",
+            target_kind="web",
+        )
+        == ""
+    )
 
 
 def test_render_skill_context_appends_imported_skillopt_guidance(tmp_path, monkeypatch):
     monkeypatch.setenv("VXIS_SKILLOPT_HOME", str(tmp_path))
     skill = tmp_path / "best_skill.md"
-    skill.write_text("# Learned Chain Rule\n\nPrefer execute_chain after post-auth token.", encoding="utf-8")
+    skill.write_text(
+        "# Learned Chain Rule\n\nPrefer execute_chain after post-auth token.", encoding="utf-8"
+    )
     import_optimized_skill(
         skill,
         name="chain",
@@ -95,6 +102,46 @@ def test_render_skill_context_appends_imported_skillopt_guidance(tmp_path, monke
     assert "execute_chain" in rendered
     assert "Optimized SkillOpt guidance" in rendered
     assert "Prefer execute_chain" in rendered
+
+
+def test_seed_baseline_injected_when_no_optimized_skills(tmp_path, monkeypatch):
+    monkeypatch.setenv("VXIS_SKILLOPT_HOME", str(tmp_path))  # empty home → nothing imported
+    monkeypatch.delenv("VXIS_SKILLOPT_ENABLED", raising=False)
+    assert list_optimized_skills() == []
+    rendered = render_optimized_skill_context(
+        task="ssrf cloud impact", role="director", target_kind="web"
+    )
+    assert rendered  # non-empty baseline is always present
+    assert "Baseline SkillOpt strategy" in rendered
+    assert "proof gap" in rendered  # built-in seed body content
+
+
+def test_optimized_skill_takes_precedence_over_seed_baseline(tmp_path, monkeypatch):
+    monkeypatch.setenv("VXIS_SKILLOPT_HOME", str(tmp_path))
+    skill = tmp_path / "best_skill.md"
+    skill.write_text(
+        "# Learned Rule\n\nAlways enumerate owned objects before BOLA.", encoding="utf-8"
+    )
+    import_optimized_skill(
+        skill,
+        name="axis2",
+        surface="web",
+        families=["access_control"],
+        roles=["director"],
+        triggers=["bola"],
+    )
+    rendered = render_optimized_skill_context(
+        task="authorization BOLA test", role="director", target_kind="web"
+    )
+    assert "Optimized SkillOpt guidance" in rendered
+    assert "Always enumerate owned objects" in rendered
+    assert "Baseline SkillOpt strategy" not in rendered  # seed suppressed once a skill exists
+
+
+def test_seed_baseline_respects_disabled_flag(tmp_path, monkeypatch):
+    monkeypatch.setenv("VXIS_SKILLOPT_HOME", str(tmp_path))  # empty home
+    monkeypatch.setenv("VXIS_SKILLOPT_ENABLED", "0")
+    assert render_optimized_skill_context(task="anything", role="director", target_kind="web") == ""
 
 
 def test_build_train_command_defaults_to_named_split_and_run_dir(tmp_path, monkeypatch):
