@@ -8,6 +8,7 @@ owned by Phase 1.5 / E / V respectively; this module is the primitive.
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Literal
 
@@ -45,3 +46,17 @@ def permit_strategy(strategy: str, policy: ScanPolicy | None) -> PolicyDecision:
     if strategy.lower() in _EVASION_STRATEGIES and not policy.evasion_allowed:
         return _forbidden(f"evasion strategy '{strategy}' not permitted by policy")
     return _allow()
+
+
+def _fingerprint(value: str) -> str:
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+    last4 = value[-4:] if len(value) >= 4 else value
+    return f"sha256:{digest}:{last4}"
+
+
+def persist_secret(value: str, policy: ScanPolicy | None) -> PolicyDecision:
+    if policy is None:
+        return _forbidden("policy is None (fail-closed)")
+    if policy.secret_handling == "plaintext-lab":
+        return _allow("plaintext-lab", stored_value=value)
+    return _allow("fingerprinted", stored_value=_fingerprint(value))
