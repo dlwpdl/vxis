@@ -111,6 +111,12 @@ Owner-confirmed / design decisions:
 - Reads `config.active_profile`, normalizes via the existing `normalize_scan_profile_name()`
   (`config/schema.py:400`, handles `_PROFILE_ALIASES`, default `crown`), looks up the table,
   falls through to the fail-closed `none` default on any unknown/missing key.
+- **Stricter-than-normalize on empty/unset (intentional):** a `None` config, or an empty/whitespace
+  `active_profile`, resolves to the fail-closed `none` default **before** normalization — so it is
+  *not* coerced to `crown` the way bare `normalize_scan_profile_name("")` would. The shipped default
+  config sets `active_profile="crown"` explicitly, so normal scans still resolve to `lateral`; only a
+  genuinely absent profile context is fail-closed. This is deliberately safer than the literal
+  normalize path.
 - **Completeness invariant (test):** every key in `_default_profiles()` AND every alias *target*
   in `_PROFILE_ALIASES` resolves to a table row that is not the accidental fail-closed default
   (parametrized). This is the "no silent neutering" guard the recon flagged.
