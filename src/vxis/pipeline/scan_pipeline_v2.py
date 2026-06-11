@@ -648,6 +648,16 @@ class ScanPipeline:
             except Exception:
                 logger.exception("event_callback raised — ignoring")
 
+    def _resolve_and_attach_policy(self, ctx: ScanContext) -> None:
+        """Component P: resolve + attach the scan policy, gated behind the v3
+        flag. Fail-closed default when off/unknown; no chokepoint is wired in
+        this increment — this only makes ctx.policy available."""
+        from vxis.agent.policy.scan_policy import resolve_policy
+        from vxis.agent.scan_loop_v3 import v3_enabled, v3_flag
+
+        if v3_flag("VXIS_V3_POLICY") or v3_enabled():
+            ctx.policy = resolve_policy(self.config)
+
     async def run(
         self,
         target: str,
@@ -688,14 +698,7 @@ class ScanPipeline:
                 app_context_ko=app_context_ko,
                 scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",
             )
-            # Component P: resolve + attach the scan policy (fail-closed default
-            # when the flag is off or the profile is unknown). No chokepoint is
-            # wired in this increment; this only makes ctx.policy available.
-            from vxis.agent.policy.scan_policy import resolve_policy
-            from vxis.agent.scan_loop_v3 import v3_flag
-
-            if v3_flag("VXIS_V3_POLICY") or v3_flag("VXIS_V3"):
-                ctx.policy = resolve_policy(self.config)
+            self._resolve_and_attach_policy(ctx)
             ctx.runtime_profile = {  # type: ignore[attr-defined]
                 "launcher_name": runtime.launcher_name,
                 "runtime_mode": runtime.runtime_mode,
