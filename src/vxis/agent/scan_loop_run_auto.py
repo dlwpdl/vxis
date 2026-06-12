@@ -1,11 +1,48 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
+
+from vxis.agent.scan_loop_v3 import v3_after_action
+from vxis.agent.tool_registry import ToolResult
 
 logger = logging.getLogger(__name__)
 
 
 class ScanLoopAutoOrchestrationMixin:
+    async def _dispatch_and_record(
+        self,
+        name: str,
+        args: dict[str, Any],
+        *,
+        candidate_id: str,
+        record_args: dict[str, Any] | None = None,
+    ) -> ToolResult:
+        """Dispatch an auto-orchestrated tool and record its outcome everywhere.
+
+        Auto-fired ffuf/nuclei/sqlmap previously called record_attempt_outcome but
+        never v3_after_action, so the v3 coverage matrix / hypothesis DAG / trajectory
+        store stayed blind to those scans — corrupting finish-gate and coverage %.
+        This mirrors the Brain dispatch path (scan_loop_run.py) so all three signals
+        update for auto-fired tools too.
+        """
+        result = await self.registry.dispatch(name, args)
+        self.state.record_attempt_outcome(
+            candidate_id,
+            name,
+            record_args if record_args is not None else args,
+            status=self._status_from_tool_result(result),
+            summary=result.summary,
+        )
+        v3_after_action(
+            self,
+            name=name,
+            args=args,
+            result=result,
+            candidate_ids=[candidate_id],
+        )
+        return result
+
     async def _run_auto_orchestration(
         self,
         *,
@@ -426,17 +463,13 @@ class ScanLoopAutoOrchestrationMixin:
                         f"-t 20 -timeout 5 -s 2>&1 | head -30"
                     )
                     logger.info("auto-ffuf starting at iter %d", self.state.iteration)
-                    fr = await self.registry.dispatch("shell_exec", {
-                        "command": ffuf_cmd, "timeout": 60,
-                    })
-                    sandbox_invocations.append({"tool": "shell_exec", "cmd": ffuf_cmd})
-                    self.state.record_attempt_outcome(
-                        "web:dir-bruteforce",
+                    fr = await self._dispatch_and_record(
                         "shell_exec",
-                        {"command": ffuf_cmd},
-                        status=self._status_from_tool_result(fr),
-                        summary=fr.summary,
+                        {"command": ffuf_cmd, "timeout": 60},
+                        candidate_id="web:dir-bruteforce",
+                        record_args={"command": ffuf_cmd},
                     )
+                    sandbox_invocations.append({"tool": "shell_exec", "cmd": ffuf_cmd})
                     if fr.ok:
                         stdout = str(fr.data.get("stdout", "")) if fr.data else ""
                         if stdout.strip():
@@ -486,17 +519,13 @@ class ScanLoopAutoOrchestrationMixin:
                         "-silent -nc -timeout 5 -retries 1 "
                         "-rate-limit 100"
                     )
-                    nr = await self.registry.dispatch("shell_exec", {
-                        "command": nuclei_cmd, "timeout": 120,
-                    })
-                    sandbox_invocations.append({"tool": "shell_exec", "cmd": nuclei_cmd})
-                    self.state.record_attempt_outcome(
-                        "web:cve-scan",
+                    nr = await self._dispatch_and_record(
                         "shell_exec",
-                        {"command": nuclei_cmd},
-                        status=self._status_from_tool_result(nr),
-                        summary=nr.summary,
+                        {"command": nuclei_cmd, "timeout": 120},
+                        candidate_id="web:cve-scan",
+                        record_args={"command": nuclei_cmd},
                     )
+                    sandbox_invocations.append({"tool": "shell_exec", "cmd": nuclei_cmd})
                     if nr.ok:
                         self.state.add_message("tool", {
                             "name": "shell_exec",
@@ -562,17 +591,13 @@ class ScanLoopAutoOrchestrationMixin:
                         "2>&1 | tail -50"
                     )
                     logger.info("auto-sqlmap firing on %s", target_url)
-                    sr = await self.registry.dispatch("shell_exec", {
-                        "command": sqlmap_cmd, "timeout": 180,
-                    })
-                    sandbox_invocations.append({"tool": "shell_exec", "cmd": sqlmap_cmd})
-                    self.state.record_attempt_outcome(
-                        "web:sqli",
+                    sr = await self._dispatch_and_record(
                         "shell_exec",
-                        {"command": sqlmap_cmd},
-                        status=self._status_from_tool_result(sr),
-                        summary=sr.summary,
+                        {"command": sqlmap_cmd, "timeout": 180},
+                        candidate_id="web:sqli",
+                        record_args={"command": sqlmap_cmd},
                     )
+                    sandbox_invocations.append({"tool": "shell_exec", "cmd": sqlmap_cmd})
                     if sr.ok:
                         stdout = str(sr.data.get("stdout", "")) if sr.data else ""
                         self.state.add_message("tool", {
