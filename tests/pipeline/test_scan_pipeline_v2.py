@@ -12,6 +12,7 @@ from vxis.pipeline.scan_pipeline_v2 import (
     _build_finding_from_dict,
     _SimpleScore,
     _make_scan_id,
+    _SEV_TO_LEVEL,
 )
 
 
@@ -581,3 +582,55 @@ class TestMakeScanId:
     def test_many_scan_ids_are_all_unique(self) -> None:
         ids = [_make_scan_id() for _ in range(50)]
         assert len(set(ids)) == 50, "Collision detected in 50 rapid scan_ids"
+
+
+# ---------------------------------------------------------------------------
+# Fix 3 — _SEV_TO_LEVEL covers "info" explicitly (two incompatible enums)
+# ---------------------------------------------------------------------------
+
+
+class TestSevToLevel:
+    """Both "info" (evidence.schema.Severity.INFO.value) and "informational"
+    (models.finding.Severity.informational.value) must map to level 0,
+    not rely on the dict's default fallback.
+    """
+
+    def test_info_maps_to_zero(self) -> None:
+        assert _SEV_TO_LEVEL["info"] == 0
+
+    def test_informational_maps_to_zero(self) -> None:
+        assert _SEV_TO_LEVEL["informational"] == 0
+
+    def test_critical_maps_to_three(self) -> None:
+        assert _SEV_TO_LEVEL["critical"] == 3
+
+    def test_high_maps_to_two(self) -> None:
+        assert _SEV_TO_LEVEL["high"] == 2
+
+    def test_medium_maps_to_one(self) -> None:
+        assert _SEV_TO_LEVEL["medium"] == 1
+
+    def test_low_maps_to_zero(self) -> None:
+        assert _SEV_TO_LEVEL["low"] == 0
+
+    def test_no_silent_default_needed_for_info(self) -> None:
+        """The key must exist — we must not rely on dict.get(_, 0) default."""
+        assert "info" in _SEV_TO_LEVEL
+
+    def test_informational_finding_roundtrips_without_pydantic_error(self) -> None:
+        """A finding with severity 'informational' must build without ValidationError."""
+        finding = _build_finding_from_dict(
+            {"title": "Info finding", "severity": "informational", "description": "d"},
+            scan_id="VXIS-TEST",
+            target="http://localhost",
+        )
+        assert finding.severity.value == "informational"
+
+    def test_info_finding_roundtrips_without_pydantic_error(self) -> None:
+        """A finding with severity 'info' must build without ValidationError."""
+        finding = _build_finding_from_dict(
+            {"title": "Info finding", "severity": "info", "description": "d"},
+            scan_id="VXIS-TEST",
+            target="http://localhost",
+        )
+        assert finding.severity.value == "informational"

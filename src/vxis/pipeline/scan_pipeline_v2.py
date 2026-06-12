@@ -80,6 +80,22 @@ def _make_scan_id() -> str:
     return f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:6]}"
 
 
+# Severity string → exploitation level used by _compute_vxis_score.
+# Two different Severity enums exist in the codebase:
+#   evidence.schema.Severity.INFO          → value "info"
+#   models.finding.Severity.informational  → value "informational"
+# Both must be mapped explicitly so neither accidentally falls through to
+# dict.get(key, default=0) and masks future mapping errors.
+_SEV_TO_LEVEL: dict[str, int] = {
+    "critical": 3,       # exploit successful + post-exploit
+    "high": 2,           # exploit successful
+    "medium": 1,         # vulnerability confirmed
+    "low": 0,            # recon only
+    "info": 0,           # evidence.schema.Severity.INFO.value
+    "informational": 0,  # models.finding.Severity.informational.value
+}
+
+
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -222,19 +238,37 @@ def _build_finding_from_dict(
     Defaults to WEB so legacy callers and single-target web scans behave
     identically to the pre-phase-G build.
     """
-    from vxis.evidence.schema import Severity
+    from vxis.evidence.schema import Severity as _EvidenceSeverity
     from vxis.agent.tools.finding_tools import _canonical_finding_type
     from vxis.models.finding import CVSSVector, Evidence, Finding
+    from vxis.models.finding import Severity as _FindingSeverity  # distinct enum
 
-    sev_map = {
-        "critical": Severity.CRITICAL,
-        "high": Severity.HIGH,
-        "medium": Severity.MEDIUM,
-        "low": Severity.LOW,
-        "info": Severity.INFO,
-        "informational": Severity.INFO,
+    # Map incoming severity strings to models.finding.Severity (the enum that
+    # Finding validates against).  Both "info" (evidence.schema.Severity.INFO.value)
+    # and "informational" (models.finding.Severity.informational.value) map to
+    # _FindingSeverity.informational explicitly — not via default fallback.
+    sev_map: dict[str, _FindingSeverity] = {
+        "critical": _FindingSeverity.critical,
+        "high": _FindingSeverity.high,
+        "medium": _FindingSeverity.medium,
+        "low": _FindingSeverity.low,
+        "info": _FindingSeverity.informational,           # evidence.schema value
+        "informational": _FindingSeverity.informational,  # models.finding value
     }
-    severity = sev_map.get(str(d.get("severity", "medium")).lower(), Severity.MEDIUM)
+    severity = sev_map.get(str(d.get("severity", "medium")).lower(), _FindingSeverity.medium)
+
+    # Also keep an evidence.schema.Severity alias for the CVSS lookup table below.
+    _ev_sev_map: dict[str, _EvidenceSeverity] = {
+        "critical": _EvidenceSeverity.CRITICAL,
+        "high": _EvidenceSeverity.HIGH,
+        "medium": _EvidenceSeverity.MEDIUM,
+        "low": _EvidenceSeverity.LOW,
+        "info": _EvidenceSeverity.INFO,
+        "informational": _EvidenceSeverity.INFO,
+    }
+    _ev_severity = _ev_sev_map.get(
+        str(d.get("severity", "medium")).lower(), _EvidenceSeverity.MEDIUM
+    )
 
     title = str(d.get("title", "Untitled finding"))
     desc_body = str(d.get("description", ""))
@@ -281,15 +315,15 @@ def _build_finding_from_dict(
         )
 
     cvss_score_by_sev = {
-        Severity.CRITICAL: 9.5,
-        Severity.HIGH: 7.5,
-        Severity.MEDIUM: 5.5,
-        Severity.LOW: 3.5,
-        Severity.INFO: 1.0,
+        _EvidenceSeverity.CRITICAL: 9.5,
+        _EvidenceSeverity.HIGH: 7.5,
+        _EvidenceSeverity.MEDIUM: 5.5,
+        _EvidenceSeverity.LOW: 3.5,
+        _EvidenceSeverity.INFO: 1.0,
     }
     cvss = CVSSVector(
         vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
-        base_score=cvss_score_by_sev[severity],
+        base_score=cvss_score_by_sev[_ev_severity],
     )
 
     cwe_raw = str(d.get("cwe", ""))
@@ -461,14 +495,9 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             "business_logic": "WEB-LOGIC-001",
         }
 
-        # Severity → exploitation level
-        _sev_to_level = {
-            "critical": 3,  # exploit successful + post-exploit
-            "high": 2,  # exploit successful
-            "medium": 1,  # vulnerability confirmed
-            "low": 0,  # recon only
-            "informational": 0,
-        }
+        # Severity → exploitation level (module-level _SEV_TO_LEVEL covers both
+        # "info" from evidence.schema and "informational" from models.finding)
+        _sev_to_level = _SEV_TO_LEVEL
 
         # Record vectors from ALL executed skills (including clean results)
         # so that vector_coverage reflects attempted vectors, not just findings.
