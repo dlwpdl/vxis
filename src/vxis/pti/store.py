@@ -61,7 +61,7 @@ class PTIStore:
         tmp_path = path.with_name(f".{path.name}.tmp")
         data = validated.model_dump(mode="json")
         tmp_path.write_text(
-            yaml.safe_dump(data, sort_keys=False, allow_unicode=False),
+            yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
             encoding="utf-8",
         )
         tmp_path.replace(path)

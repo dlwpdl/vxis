@@ -54,3 +54,34 @@ def test_store_missing_without_create_raises(tmp_path) -> None:
 
     with pytest.raises(FileNotFoundError):
         store.load(target_hash_for_url("https://example.com"))
+
+
+def test_store_writes_korean_evidence_as_readable_unicode(tmp_path) -> None:
+    store = PTIStore(tmp_path / "data" / "pti")
+    target_url = "https://example.com/app"
+    target_hash = target_hash_for_url(target_url)
+    timestamp = datetime(2026, 6, 2, 12, 0, tzinfo=timezone.utc)
+    korean_evidence = "관리자 세션 탈취 가능"
+    dossier = Dossier(
+        target_hash=target_hash,
+        target_url=target_url,
+        created_at=timestamp,
+        updated_at=timestamp,
+        scan_ids=["scan-1"],
+        stack=[
+            StackEntry(
+                tech="rails",
+                confidence=0.9,
+                first_seen_scan="scan-1",
+                last_seen_scan="scan-1",
+                evidence=[korean_evidence],
+            )
+        ],
+    )
+
+    path = store.persist(dossier)
+    raw = path.read_text(encoding="utf-8")
+
+    # The human-facing dossier must hold readable Korean, not \uXXXX escapes.
+    assert korean_evidence in raw
+    assert "\\uc870" not in raw and "\\u" not in raw
