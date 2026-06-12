@@ -3,6 +3,7 @@ from __future__ import annotations
 from vxis.agent.coverage.matrix import (
     CoverageMatrix,
     SurfaceUnitRef,
+    _cell_key,
     evaluate_finish_gate,
     high_value_surfaces,
     is_high_value_surface,
@@ -23,13 +24,13 @@ def test_mark_updates_cell_and_coverage_percent() -> None:
     matrix.mark("s-users", "sqli", "tested-clean", iter=3, hypothesis_id="h-sqli")
 
     assert matrix.coverage_percent() == 50.0
-    assert matrix.cells[("s-users", "sqli")].hypothesis_ids == ["h-sqli"]
+    assert matrix.cells[_cell_key("s-users", "sqli")].hypothesis_ids == ["h-sqli"]
     gaps = matrix.gaps()
     assert [(gap.surface_id, gap.vector_class) for gap in gaps] == [("s-users", "xss")]
 
     matrix.mark("s-users", "sqli", "found", iter=4, hypothesis_id="h-found")
 
-    cell = matrix.cells[("s-users", "sqli")]
+    cell = matrix.cells[_cell_key("s-users", "sqli")]
     assert cell.status == "found"
     assert cell.last_iter == 4
     assert cell.hypothesis_ids == ["h-sqli", "h-found"]
@@ -147,6 +148,31 @@ def test_finish_gate_allows_when_coverage_and_hypotheses_are_complete() -> None:
     assert report.high_value_gaps == []
     assert report.unresolved_hypothesis_ids == []
     assert report.reasons == []
+
+
+def test_coverage_matrix_json_roundtrip() -> None:
+    """CoverageMatrix must survive a model_dump(mode='json') -> model_validate roundtrip.
+
+    Tuple keys like ("s1", "sqli") serialize to "('s1', 'sqli')" which Pydantic
+    cannot parse back as dict[tuple[str,str], CoverageCell] → ValidationError.
+    """
+    surface = SurfaceUnitRef(
+        surface_id="s1",
+        path="/api/login",
+        method="POST",
+        auth_role="anon",
+    )
+    matrix = CoverageMatrix.for_surfaces([surface], vector_classes=["sqli", "xss"])
+    matrix.mark("s1", "sqli", "tested-clean", iter=2, hypothesis_id="h-001")
+
+    # Serialize to JSON-compatible dict then reload — must not raise and must be equal
+    raw = matrix.model_dump(mode="json")
+    reloaded = CoverageMatrix.model_validate(raw)
+
+    assert reloaded.coverage_percent() == matrix.coverage_percent()
+    key = next(iter(reloaded.cells))
+    assert reloaded.cells[key].surface_id == "s1"
+    assert reloaded.cells[key].vector_class == "sqli"
 
 
 def test_summary_is_budgeted_and_includes_top_gaps() -> None:

@@ -116,8 +116,13 @@ def high_value_surfaces(
     return [surface for surface in surfaces if is_high_value_surface(surface)]
 
 
+def _cell_key(surface_id: str, vector_class: str) -> str:
+    """Composite string key that survives JSON serialization."""
+    return f"{surface_id}|{vector_class}"
+
+
 class CoverageMatrix(BaseModel):
-    cells: dict[tuple[str, str], CoverageCell] = Field(default_factory=dict)
+    cells: dict[str, CoverageCell] = Field(default_factory=dict)
 
     @classmethod
     def for_surfaces(
@@ -141,7 +146,7 @@ class CoverageMatrix(BaseModel):
     ) -> None:
         surface_id = _surface_id(surface)
         for vector_class in _normalize_vector_classes(vector_classes):
-            key = (surface_id, vector_class)
+            key = _cell_key(surface_id, vector_class)
             if key not in self.cells:
                 self.cells[key] = CoverageCell(
                     surface_id=surface_id,
@@ -166,7 +171,7 @@ class CoverageMatrix(BaseModel):
             raise ValueError("surface_id cannot be empty")
         normalized_vector_class = _normalize_vector_class(vector_class)
         iteration = int(iter)
-        key = (normalized_surface_id, normalized_vector_class)
+        key = _cell_key(normalized_surface_id, normalized_vector_class)
         cell = self.cells.get(key)
         if cell is None:
             cell = CoverageCell(
@@ -222,7 +227,7 @@ class CoverageMatrix(BaseModel):
                 continue
             surface_id = _surface_id(surface)
             for vector_class in vectors:
-                cell = self.cells.get((surface_id, vector_class))
+                cell = self.cells.get(_cell_key(surface_id, vector_class))
                 if cell is None:
                     cell = CoverageCell(
                         surface_id=surface_id,
@@ -355,6 +360,7 @@ def evaluate_finish_gate(
 
 
 __all__ = [
+    "_cell_key",
     "CoverageCell",
     "CoverageGateReport",
     "CoverageMatrix",
