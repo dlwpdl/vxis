@@ -173,12 +173,17 @@ def _hash_url_parts(url: str) -> str:
 
 
 def _safe_scan_id(scan_id: str) -> str:
-    normalized = scan_id.strip()
-    if not normalized:
-        raise ValueError("scan_id cannot be empty")
-    if Path(normalized).name != normalized or normalized in {".", ".."}:
-        raise ValueError("scan_id must be a path-safe file stem")
-    return normalized
+    """Sanitize a scan_id into a path-safe file stem without raising.
+
+    Replaces any run of characters that are not alphanumeric, underscore,
+    dot, or hyphen with a single hyphen, then strips leading/trailing
+    dots and hyphens. Returns "scan" for inputs that reduce to empty.
+    This matches scan_loop_v3._safe_scan_id so both call sites are
+    consistent and trajectory writes are never silently swallowed.
+    """
+    normalized = re.sub(r"[^A-Za-z0-9_.-]+", "-", scan_id.strip())
+    normalized = normalized.strip(".-")
+    return normalized or "scan"
 
 
 def _looks_like_target_hash(value: str) -> bool:

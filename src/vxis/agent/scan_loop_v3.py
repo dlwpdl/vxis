@@ -1109,9 +1109,10 @@ def _scan_id_for_state(state: Any) -> str:
 
 
 def _safe_scan_id(value: str) -> str:
-    normalized = re.sub(r"[^A-Za-z0-9_.-]+", "-", value.strip())
-    normalized = normalized.strip(".-")
-    return normalized or "scan"
+    """Proxy to the single canonical implementation in vxis.pti.trajectory."""
+    from vxis.pti.trajectory import _safe_scan_id as _pti_safe_scan_id
+
+    return _pti_safe_scan_id(value)
 
 
 def _rough_token_count(value: Any) -> int:
