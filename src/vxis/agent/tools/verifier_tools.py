@@ -10,11 +10,11 @@ mini) and a prompt explicitly framed as "prove this wrong". This asymmetry
 — cheap model to find, expensive model to refute — is the Strix validation
 agent pattern and the core of Phase C's adversarial verification.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from typing import Any
 
@@ -29,10 +29,10 @@ _RESULT_MARKERS = (
     "202 Accepted",
     "500 Internal Server Error",
     "Set-Cookie:",
-    "\"token\"",
-    "\"role\"",
-    "\"data\"",
-    "\"status\"",
+    '"token"',
+    '"role"',
+    '"data"',
+    '"status"',
     "stack trace",
     "Traceback",
     "sqlmap identified",
@@ -47,7 +47,7 @@ _CONTROL_MARKERS = (
     "without auth",
     "with auth",
     "token:null",
-    "token=\"\"",
+    'token=""',
     "id=1",
     "id=2",
     "before:",
@@ -231,7 +231,9 @@ def _normalize_poc_blob(text: str) -> str:
     return blob[:4000]
 
 
-def _looks_like_thin_claim_only(evidence: str, technical_analysis: str, poc_description: str, poc_script_code: str) -> bool:
+def _looks_like_thin_claim_only(
+    evidence: str, technical_analysis: str, poc_description: str, poc_script_code: str
+) -> bool:
     evidence_blob = str(evidence or "").strip()
     combined = "\n".join(
         str(part or "")
@@ -240,7 +242,11 @@ def _looks_like_thin_claim_only(evidence: str, technical_analysis: str, poc_desc
     ).strip()
     if not evidence_blob:
         return True
-    if _looks_like_http_exchange(evidence_blob) or _has_observed_result(evidence_blob) or _has_control_signal(evidence_blob):
+    if (
+        _looks_like_http_exchange(evidence_blob)
+        or _has_observed_result(evidence_blob)
+        or _has_control_signal(evidence_blob)
+    ):
         return False
     if combined and (
         _looks_like_http_exchange(combined)
@@ -291,7 +297,10 @@ def _looks_like_binary_only_evidence(blob: str) -> bool:
     readable_hits = sum(1 for marker in readable_markers if marker in lower)
     if readable_hits >= 3:
         return False
-    return any(token in lower for token in ("git_exposed", ".git/", "compressed", "zlib", "pack")) or hex_escapes >= 16
+    return (
+        any(token in lower for token in ("git_exposed", ".git/", "compressed", "zlib", "pack"))
+        or hex_escapes >= 16
+    )
 
 
 class VerifyFindingTool:
@@ -316,7 +325,10 @@ class VerifyFindingTool:
             "technical_analysis": {"type": "string"},
             "poc_description": {"type": "string"},
             "poc_script_code": {"type": "string"},
-            "evidence": {"type": "string", "description": "Raw HTTP req/resp or tool output that supports the finding"},
+            "evidence": {
+                "type": "string",
+                "description": "Raw HTTP req/resp or tool output that supports the finding",
+            },
             "baseline_size": {
                 "type": "integer",
                 "description": "SPA baseline response size if known, so verifier can check for shell-echo false positive",
@@ -356,7 +368,9 @@ class VerifyFindingTool:
                 error="missing_fields",
             )
 
-        if _looks_like_thin_claim_only(evidence, technical_analysis, poc_description, poc_script_code):
+        if _looks_like_thin_claim_only(
+            evidence, technical_analysis, poc_description, poc_script_code
+        ):
             return ToolResult(
                 ok=False,
                 summary="verify_finding BLOCKED — gather raw request/response transcript or control evidence first",
@@ -368,7 +382,10 @@ class VerifyFindingTool:
                 },
             )
 
-        if finding_type.lower() in {"misconfiguration", "information_disclosure"} and _looks_like_binary_only_evidence(
+        if finding_type.lower() in {
+            "misconfiguration",
+            "information_disclosure",
+        } and _looks_like_binary_only_evidence(
             "\n".join(part for part in (evidence, technical_analysis, poc_script_code) if part)
         ):
             return ToolResult(
@@ -403,7 +420,9 @@ class VerifyFindingTool:
                     },
                     summary="verify_finding: REFUTED (high) — incomplete high-severity report contract",
                 )
-            if not (_looks_like_http_exchange(poc_script_code) or _has_observed_result(poc_script_code)):
+            if not (
+                _looks_like_http_exchange(poc_script_code) or _has_observed_result(poc_script_code)
+            ):
                 return ToolResult(
                     ok=True,
                     data={
@@ -419,8 +438,10 @@ class VerifyFindingTool:
                 )
             combined = "\n".join([technical_analysis, poc_description, poc_script_code])
             doctrine_flags = _doctrine_flags(combined)
-            if "plain_echo" in doctrine_flags and "xss" in finding_type.lower() and not _has_executable_xss_signal(
-                "\n".join([combined, evidence])
+            if (
+                "plain_echo" in doctrine_flags
+                and "xss" in finding_type.lower()
+                and not _has_executable_xss_signal("\n".join([combined, evidence]))
             ):
                 return ToolResult(
                     ok=True,
@@ -573,17 +594,11 @@ class VerifyFindingTool:
                     error=str(e),
                 )
         else:
-            # Back-compat for older/fake Brain objects used in tests.
-            orig_model = getattr(self._brain, "_model", None)
-            if (
-                getattr(self._brain, "_provider", None) == "openai"
-                and os.environ.get("OPENAI_API_KEY")
-                and orig_model
-                and "mini" in str(orig_model)
-            ):
-                self._brain._model = "gpt-5.4"
-                use_stronger = True
-
+            # Back-compat for older Brain objects that only expose _call_llm_with_fallback.
+            # NOTE: We intentionally do NOT mutate brain._model here — doing so across an
+            # await is a TOCTOU race: concurrent coroutines reading brain._model mid-await
+            # would observe the swapped value. The caller already selects the correct model
+            # via its own provider/role dispatch; we just call with whatever model it has.
             try:
                 response = await asyncio.to_thread(
                     self._brain._call_llm_with_fallback,
@@ -596,9 +611,6 @@ class VerifyFindingTool:
                     summary=f"verify_finding: LLM call failed: {type(e).__name__}: {e}",
                     error=str(e),
                 )
-            finally:
-                if use_stronger and orig_model is not None:
-                    self._brain._model = orig_model
 
         if not response:
             return ToolResult(
@@ -640,8 +652,5 @@ class VerifyFindingTool:
                 "affected_component": component,
                 "used_stronger_model": use_stronger,
             },
-            summary=(
-                f"verify_finding: {verdict} ({confidence}) — "
-                f"{reasoning[:100]}"
-            ),
+            summary=(f"verify_finding: {verdict} ({confidence}) — {reasoning[:100]}"),
         )

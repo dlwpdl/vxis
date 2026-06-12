@@ -34,11 +34,7 @@ class _RoleBrain:
 
     def _call_llm_for_role(self, role: str, system: str, user: str) -> str:
         self.roles.append(role)
-        return (
-            "VERDICT: CONFIRMED\n"
-            "CONFIDENCE: high\n"
-            "REASONING: Verifier role was used."
-        )
+        return "VERDICT: CONFIRMED\nCONFIDENCE: high\nREASONING: Verifier role was used."
 
 
 @pytest.mark.asyncio
@@ -75,7 +71,7 @@ async def test_verify_finding_marks_high_risk_finding_unconfirmed_without_contro
             "Authorization: Bearer forged-token\n\n"
             "HTTP/1.1 200 OK\n"
             "Set-Cookie: session=abc\n\n"
-            "{\"role\":\"user\"}"
+            '{"role":"user"}'
         ),
         evidence="HTTP/1.1 200 OK\nSet-Cookie: session=abc",
     )
@@ -107,9 +103,9 @@ async def test_verify_finding_calls_llm_when_poc_and_control_exist() -> None:
             "Host: app.local\n"
             "Cookie: session=low-user\n\n"
             "HTTP/1.1 200 OK\n\n"
-            "{\"id\":3,\"email\":\"victim@app.local\"}"
+            '{"id":3,"email":"victim@app.local"}'
         ),
-        evidence="HTTP/1.1 200 OK\n{\"id\":3,\"email\":\"victim@app.local\"}",
+        evidence='HTTP/1.1 200 OK\n{"id":3,"email":"victim@app.local"}',
     )
     assert result.ok is True
     assert result.data["verdict"] == "CONFIRMED"
@@ -140,9 +136,9 @@ async def test_verify_finding_uses_verifier_role_when_available() -> None:
             "Host: app.local\n"
             "Cookie: session=low-user\n\n"
             "HTTP/1.1 200 OK\n\n"
-            "{\"id\":3,\"email\":\"victim@app.local\"}"
+            '{"id":3,"email":"victim@app.local"}'
         ),
-        evidence="HTTP/1.1 200 OK\n{\"id\":3,\"email\":\"victim@app.local\"}",
+        evidence='HTTP/1.1 200 OK\n{"id":3,"email":"victim@app.local"}',
     )
 
     assert result.ok is True
@@ -173,9 +169,62 @@ async def test_verify_finding_rejects_non_text_llm_responses() -> None:
             "Host: app.local\n"
             "Cookie: session=low-user\n\n"
             "HTTP/1.1 200 OK\n\n"
-            "{\"id\":3,\"email\":\"victim@app.local\"}"
+            '{"id":3,"email":"victim@app.local"}'
         ),
-        evidence="HTTP/1.1 200 OK\n{\"id\":3,\"email\":\"victim@app.local\"}",
+        evidence='HTTP/1.1 200 OK\n{"id":3,"email":"victim@app.local"}',
     )
     assert result.ok is False
     assert result.error == "non_text_response"
+
+
+# Fix 1 — legacy else-branch must not mutate brain._model across an await
+class _LegacyBrain:
+    """Brain with only _call_llm_with_fallback (no _call_llm_for_role).
+
+    Represents the older/fake brain objects that fall into the legacy else-branch.
+    The _model is set to a mini variant so the old mutation condition triggers.
+    """
+
+    _provider = "openai"
+    _model = "gpt-5.4-mini"
+
+    def _call_llm_with_fallback(self, system: str, user: str) -> str:
+        # Record model value at call time; should NOT be "gpt-5.4" (the swapped value)
+        self._model_at_call_time = self._model
+        return "VERDICT: CONFIRMED\nCONFIDENCE: high\nREASONING: Legacy path used."
+
+
+@pytest.mark.asyncio
+async def test_legacy_branch_does_not_mutate_brain_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The legacy else-branch must not write brain._model to 'gpt-5.4' during a call,
+    confirming the TOCTOU race is gone.
+
+    We set OPENAI_API_KEY so the old mutation condition in the else-branch fires,
+    then assert brain._model is unchanged at call time and after the call.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake")
+    brain = _LegacyBrain()
+    original_model = brain._model
+    tool = VerifyFindingTool(brain=brain)
+    await tool.run(
+        title="IDOR",
+        severity="low",  # low severity to skip the high-severity preflight checks
+        finding_type="idor",
+        affected_component="/api/users/2",
+        description="Access to another user's record",
+        evidence=(
+            "GET /api/users/2 HTTP/1.1\n"
+            "Host: app.local\n\n"
+            "HTTP/1.1 200 OK\n\n"
+            '{"id":2,"email":"victim@app.local"}'
+        ),
+    )
+    # brain._model must be unchanged — the legacy branch must not mutate shared state
+    assert brain._model == original_model, (
+        f"Legacy branch mutated brain._model from {original_model!r} to {brain._model!r}"
+    )
+    # Also assert the model at call time was never swapped to the stronger model
+    assert getattr(brain, "_model_at_call_time", original_model) == original_model, (
+        "brain._model was temporarily swapped to a stronger model during the LLM call — "
+        "this creates a TOCTOU race for concurrent coroutines"
+    )
