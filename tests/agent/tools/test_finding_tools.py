@@ -3,6 +3,7 @@ import pytest
 from vxis.agent.tool_registry import BrainTool
 from vxis.agent.tools.finding_tools import (
     ReportFindingTool,
+    _evaluate_high_severity_poc,
     QueryFindingsTool,
     LinkChainTool,
     _reset_for_tests,
@@ -24,7 +25,7 @@ def _verified_chain_artifact(
     target_id: str = "VXIS-0002",
     source_output: str = "debug leak exposed /api/user ids",
     pivot_action: str = "Reused exposed /api/user ids against the target endpoint.",
-    observed_result: str = "HTTP/1.1 200 OK\n\n{\"role\":\"admin\",\"data\":\"secret\"}",
+    observed_result: str = 'HTTP/1.1 200 OK\n\n{"role":"admin","data":"secret"}',
     control_result: str = "HTTP/1.1 403 Forbidden\n\nbaseline denied",
     crown_jewel_evidence: str = "Admin role and sensitive data returned in the target response.",
 ) -> dict:
@@ -57,6 +58,7 @@ def _verified_chain_artifact(
 
 # ── ReportFindingTool ────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_report_finding_conforms_to_brain_tool():
     tool = ReportFindingTool()
@@ -82,23 +84,23 @@ async def test_report_finding_stores_and_returns_id():
         poc_script_code=(
             "POST /login HTTP/1.1\n"
             "Host: app.local\n\n"
-            "{\"username\":\"bad\",\"password\":\"bad\"}\n\n"
+            '{"username":"bad","password":"bad"}\n\n'
             "HTTP/1.1 401 Unauthorized\n\n"
             "POST /login HTTP/1.1\n"
             "Host: app.local\n"
             "Content-Type: application/json\n\n"
-            "{\"username\":\"admin'--\",\"password\":\"x\"}\n\n"
+            '{"username":"admin\'--","password":"x"}\n\n'
             "HTTP/1.1 200 OK\n"
             "Set-Cookie: session=abc\n\n"
-            "{\"role\":\"admin\"}\n\n"
+            '{"role":"admin"}\n\n'
             "repeat_count=2\n"
             "POST /login HTTP/1.1\n"
             "Host: app.local\n"
             "Content-Type: application/json\n\n"
-            "{\"username\":\"admin'--\",\"password\":\"x\"}\n\n"
+            '{"username":"admin\'--","password":"x"}\n\n'
             "HTTP/1.1 200 OK\n"
             "Set-Cookie: session=abc\n\n"
-            "{\"role\":\"admin\"}"
+            '{"role":"admin"}'
         ),
         remediation_steps="Parameterize the login query and reject malformed authentication input.",
     )
@@ -235,10 +237,14 @@ async def test_report_finding_allows_medium_with_descriptive_evidence():
         evidence="Stack trace included SQL exception details in browser response.",
     )
     assert result.ok is True
-    assert _get_findings()[0]["poc_script_code"] == "Stack trace included SQL exception details in browser response."
+    assert (
+        _get_findings()[0]["poc_script_code"]
+        == "Stack trace included SQL exception details in browser response."
+    )
 
 
 # ── QueryFindingsTool ────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_query_findings_conforms_to_brain_tool():
@@ -258,9 +264,42 @@ async def test_query_findings_empty_store():
 @pytest.mark.asyncio
 async def test_query_findings_filters_by_severity_and_type():
     rep = ReportFindingTool()
-    await rep.run(title="A", severity="critical", finding_type="sqli", affected_component="/a", description="da", impact="ia", technical_analysis="negative control baseline returned 200 without SQL error; payload repeated twice. repeat_count=2", poc_description="pa", poc_script_code="GET /a?q=test\nHTTP/1.1 200 OK\n\nno sql error\n\nGET /a?q='\nHTTP/1.1 500\n\nsql error\n\nrepeat_count=2\nGET /a?q='\nHTTP/1.1 500\n\nsql error", remediation_steps="ra")
-    await rep.run(title="B", severity="high",     finding_type="xss",  affected_component="/b", description="db", impact="ib", technical_analysis="negative control did not reflect script; payload repeated twice. repeat_count=2", poc_description="pb", poc_script_code="GET /b?q=test\nHTTP/1.1 200 OK\n\nnot reflected\n\nGET /b?q=<script>alert(1)</script>\nHTTP/1.1 200 OK\n\n<script>alert(1)</script>\n\nrepeat_count=2\nGET /b?q=<script>alert(1)</script>\nHTTP/1.1 200 OK\n\n<script>alert(1)</script>", remediation_steps="rb")
-    await rep.run(title="C", severity="critical", finding_type="xss",  affected_component="/c", description="dc", impact="ic", technical_analysis="negative control did not reflect script; payload repeated twice. repeat_count=2", poc_description="pc", poc_script_code="GET /c?q=test\nHTTP/1.1 200 OK\n\nnot reflected\n\nGET /c?q=<script>alert(1)</script>\nHTTP/1.1 200\n\n<script>alert(1)</script>\n\nrepeat_count=2\nGET /c?q=<script>alert(1)</script>\nHTTP/1.1 200\n\n<script>alert(1)</script>", remediation_steps="rc")
+    await rep.run(
+        title="A",
+        severity="critical",
+        finding_type="sqli",
+        affected_component="/a",
+        description="da",
+        impact="ia",
+        technical_analysis="negative control baseline returned 200 without SQL error; payload repeated twice. repeat_count=2",
+        poc_description="pa",
+        poc_script_code="GET /a?q=test\nHTTP/1.1 200 OK\n\nno sql error\n\nGET /a?q='\nHTTP/1.1 500\n\nsql error\n\nrepeat_count=2\nGET /a?q='\nHTTP/1.1 500\n\nsql error",
+        remediation_steps="ra",
+    )
+    await rep.run(
+        title="B",
+        severity="high",
+        finding_type="xss",
+        affected_component="/b",
+        description="db",
+        impact="ib",
+        technical_analysis="negative control did not reflect script; payload repeated twice. repeat_count=2",
+        poc_description="pb",
+        poc_script_code="GET /b?q=test\nHTTP/1.1 200 OK\n\nnot reflected\n\nGET /b?q=<script>alert(1)</script>\nHTTP/1.1 200 OK\n\n<script>alert(1)</script>\n\nrepeat_count=2\nGET /b?q=<script>alert(1)</script>\nHTTP/1.1 200 OK\n\n<script>alert(1)</script>",
+        remediation_steps="rb",
+    )
+    await rep.run(
+        title="C",
+        severity="critical",
+        finding_type="xss",
+        affected_component="/c",
+        description="dc",
+        impact="ic",
+        technical_analysis="negative control did not reflect script; payload repeated twice. repeat_count=2",
+        poc_description="pc",
+        poc_script_code="GET /c?q=test\nHTTP/1.1 200 OK\n\nnot reflected\n\nGET /c?q=<script>alert(1)</script>\nHTTP/1.1 200\n\n<script>alert(1)</script>\n\nrepeat_count=2\nGET /c?q=<script>alert(1)</script>\nHTTP/1.1 200\n\n<script>alert(1)</script>",
+        remediation_steps="rc",
+    )
 
     q = QueryFindingsTool()
     r1 = await q.run(severity="critical")
@@ -292,14 +331,20 @@ async def test_query_findings_text_contains_matches_title_or_description():
             "GET /admin HTTP/1.1\nCookie: token=\n\n"
             "HTTP/1.1 401 Unauthorized\n\n"
             "GET /admin HTTP/1.1\nCookie: JWT=forged\n\n"
-            "HTTP/1.1 200 OK\n\n{\"role\":\"admin\"}\n\n"
+            'HTTP/1.1 200 OK\n\n{"role":"admin"}\n\n'
             "repeat_count=2\n"
             "GET /admin HTTP/1.1\nCookie: JWT=forged\n\n"
-            "HTTP/1.1 200 OK\n\n{\"role\":\"admin\"}"
+            'HTTP/1.1 200 OK\n\n{"role":"admin"}'
         ),
         remediation_steps="ra",
     )
-    await rep.run(title="Open redirect", severity="low", finding_type="redirect", affected_component="/go", description="phishing vector")
+    await rep.run(
+        title="Open redirect",
+        severity="low",
+        finding_type="redirect",
+        affected_component="/go",
+        description="phishing vector",
+    )
 
     q = QueryFindingsTool()
     r1 = await q.run(text_contains="login")
@@ -319,13 +364,20 @@ async def test_query_findings_respects_limit():
     # report_finding call creates a new VXIS-NNNN entry.
     slugs = [f"/page/item-{chr(ord('a') + i)}" for i in range(10)]
     for i, slug in enumerate(slugs):
-        await rep.run(title=f"F{i}", severity="low", finding_type="misc", affected_component=slug, description="y")
+        await rep.run(
+            title=f"F{i}",
+            severity="low",
+            finding_type="misc",
+            affected_component=slug,
+            description="y",
+        )
     q = QueryFindingsTool()
     r = await q.run(limit=3)
     assert r.data["count"] == 3
 
 
 # ── LinkChainTool ────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_link_chain_conforms_to_brain_tool():
@@ -336,8 +388,20 @@ async def test_link_chain_conforms_to_brain_tool():
 @pytest.mark.asyncio
 async def test_link_chain_happy_path():
     rep = ReportFindingTool()
-    await rep.run(title="Info leak", severity="low", finding_type="info_disclosure", affected_component="/debug", description="d")
-    await rep.run(title="IDOR", severity="medium", finding_type="idor", affected_component="/api/user", description="d")
+    await rep.run(
+        title="Info leak",
+        severity="low",
+        finding_type="info_disclosure",
+        affected_component="/debug",
+        description="d",
+    )
+    await rep.run(
+        title="IDOR",
+        severity="medium",
+        finding_type="idor",
+        affected_component="/api/user",
+        description="d",
+    )
     await rep.run(
         title="Privesc",
         severity="high",
@@ -351,21 +415,21 @@ async def test_link_chain_happy_path():
             "POST /admin/promote HTTP/1.1\n"
             "Host: app.local\n"
             "Cookie: session=none\n\n"
-            "{\"user\":\"attacker\",\"role\":\"admin\"}\n\n"
+            '{"user":"attacker","role":"admin"}\n\n'
             "HTTP/1.1 403 Forbidden\n\n"
             "POST /admin/promote HTTP/1.1\n"
             "Host: app.local\n"
             "Cookie: session=low\n\n"
-            "{\"user\":\"attacker\",\"role\":\"admin\"}\n\n"
+            '{"user":"attacker","role":"admin"}\n\n'
             "HTTP/1.1 200 OK\n\n"
-            "{\"status\":\"promoted\"}\n\n"
+            '{"status":"promoted"}\n\n'
             "repeat_count=2\n"
             "POST /admin/promote HTTP/1.1\n"
             "Host: app.local\n"
             "Cookie: session=low\n\n"
-            "{\"user\":\"attacker\",\"role\":\"admin\"}\n\n"
+            '{"user":"attacker","role":"admin"}\n\n'
             "HTTP/1.1 200 OK\n\n"
-            "{\"status\":\"promoted\"}"
+            '{"status":"promoted"}'
         ),
         remediation_steps="Enforce server-side role checks on promotion endpoints.",
     )
@@ -380,7 +444,7 @@ async def test_link_chain_happy_path():
             "target_finding_id": "VXIS-0003",
             "source_output": "debug endpoint exposes internal IDs and /api/user route",
             "pivot_action": "Reused /api/user ids to enumerate users, then replayed promotion request.",
-            "observed_result": "HTTP/1.1 200 OK\n\n{\"status\":\"promoted\",\"role\":\"admin\"}",
+            "observed_result": 'HTTP/1.1 200 OK\n\n{"status":"promoted","role":"admin"}',
             "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline low privilege denied",
             "crown_jewel_evidence": "Admin role promotion succeeded and returned role=admin.",
             "repeat_count": 2,
@@ -392,7 +456,7 @@ async def test_link_chain_happy_path():
                     "target_finding_id": "VXIS-0002",
                     "source_output": "debug endpoint exposes internal IDs and /api/user route",
                     "pivot_action": "Reused exposed /api/user ids for IDOR enumeration.",
-                    "observed_result": "HTTP/1.1 200 OK\n\n{\"data\":\"other user\"}",
+                    "observed_result": 'HTTP/1.1 200 OK\n\n{"data":"other user"}',
                     "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied",
                     "repeat_count": 2,
                     "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied",
@@ -403,7 +467,7 @@ async def test_link_chain_happy_path():
                     "target_finding_id": "VXIS-0003",
                     "source_output": "IDOR returned attacker-controlled user id 1002",
                     "pivot_action": "Used enumerated user id 1002 in the admin promotion request.",
-                    "observed_result": "HTTP/1.1 200 OK\n\n{\"status\":\"promoted\",\"role\":\"admin\"}",
+                    "observed_result": 'HTTP/1.1 200 OK\n\n{"status":"promoted","role":"admin"}',
                     "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline low privilege denied",
                     "repeat_count": 2,
                     "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline low privilege denied",
@@ -425,7 +489,13 @@ async def test_link_chain_happy_path():
 @pytest.mark.asyncio
 async def test_link_chain_rejects_high_value_chain_without_verified_artifact():
     rep = ReportFindingTool()
-    await rep.run(title="Info leak", severity="medium", finding_type="info_disclosure", affected_component="/debug", description="d")
+    await rep.run(
+        title="Info leak",
+        severity="medium",
+        finding_type="info_disclosure",
+        affected_component="/debug",
+        description="d",
+    )
     await rep.run(
         title="Default admin credentials",
         severity="high",
@@ -472,7 +542,9 @@ async def test_link_chain_rejects_unknown_finding_ids():
 @pytest.mark.asyncio
 async def test_link_chain_requires_at_least_two_findings():
     rep = ReportFindingTool()
-    await rep.run(title="Solo", severity="medium", finding_type="x", affected_component="/s", description="d")
+    await rep.run(
+        title="Solo", severity="medium", finding_type="x", affected_component="/s", description="d"
+    )
 
     link = LinkChainTool()
     result = await link.run(finding_ids=["VXIS-0001"], rationale="alone")
@@ -483,8 +555,12 @@ async def test_link_chain_requires_at_least_two_findings():
 @pytest.mark.asyncio
 async def test_link_chain_requires_rationale():
     rep = ReportFindingTool()
-    await rep.run(title="A", severity="medium", finding_type="x", affected_component="/a", description="d")
-    await rep.run(title="B", severity="medium", finding_type="x", affected_component="/b", description="d")
+    await rep.run(
+        title="A", severity="medium", finding_type="x", affected_component="/a", description="d"
+    )
+    await rep.run(
+        title="B", severity="medium", finding_type="x", affected_component="/b", description="d"
+    )
 
     link = LinkChainTool()
     result = await link.run(finding_ids=["VXIS-0001", "VXIS-0002"], rationale="")
@@ -494,8 +570,10 @@ async def test_link_chain_requires_rationale():
 
 # ── Registry integration ────────────────────────────────────
 
+
 def test_build_default_registry_contains_finding_tools():
     from vxis.agent.tools import build_default_registry
+
     reg = build_default_registry()
     names = reg.list_tools()
     assert "report_finding" in names
@@ -534,8 +612,7 @@ async def test_hash_discriminator_keeps_findings_distinct() -> None:
         ids.append(r.data["id"])
 
     assert len(set(ids)) == 3, (
-        f"expected 3 distinct VXIS ids (one per dylib discriminator), "
-        f"got {ids}"
+        f"expected 3 distinct VXIS ids (one per dylib discriminator), got {ids}"
     )
 
 
@@ -565,3 +642,57 @@ async def test_no_hash_falls_back_to_existing_dedup() -> None:
     assert r1.data["id"] == r2.data["id"], (
         "without '#' the existing base-path dedup must still merge IDs"
     )
+
+
+# Fix 2 — _evaluate_high_severity_poc must use _finding_type_needs_control()
+# instead of hardcoded needs_control=True.
+
+_MISCONFIG_POC = (
+    "GET /.env HTTP/1.1\n"
+    "Host: app.local\n\n"
+    "HTTP/1.1 200 OK\n"
+    "Content-Type: text/plain\n\n"
+    "DB_PASSWORD=supersecret\n"
+    "API_KEY=abc123\n"
+    "repeat_count=2\n"
+    "second run: same result\n"
+    "HTTP/1.1 200 OK\n"
+    "negative: request after rotation returned 404\n"
+)
+
+
+def test_evaluate_poc_misconfig_does_not_require_control() -> None:
+    """misconfiguration/information_disclosure findings must not be
+    rejected as 'weak_poc' purely because they lack a control/baseline —
+    only injection/auth types require a control."""
+    result = _evaluate_high_severity_poc(
+        finding_type="misconfiguration",
+        technical_analysis="The .env file is publicly accessible and returns real credentials.",
+        poc_description="Direct GET to /.env returns DB_PASSWORD and API_KEY in plaintext.",
+        poc_script_code=_MISCONFIG_POC,
+    )
+    assert result["needs_control"] is False, (
+        "misconfiguration does not require a control/baseline — needs_control should be False"
+    )
+    assert "control_or_baseline" not in result["missing"], (
+        "misconfiguration PoC must NOT be rejected for missing control_or_baseline"
+    )
+
+
+def test_evaluate_poc_auth_still_requires_control() -> None:
+    """auth/injection types must still require a control comparison."""
+    result = _evaluate_high_severity_poc(
+        finding_type="auth_bypass",
+        technical_analysis="Forged token accepted.",
+        poc_description="Send forged token, get 200.",
+        poc_script_code=(
+            "POST /api/login HTTP/1.1\n"
+            "Host: app.local\n\n"
+            "HTTP/1.1 200 OK\n"
+            "Set-Cookie: session=abc\n\n"
+            '{"role":"admin"}\n'
+            "repeat_count=2\n"
+            "negative: invalid token returned 401\n"
+        ),
+    )
+    assert result["needs_control"] is True, "auth_bypass must require a control/baseline"

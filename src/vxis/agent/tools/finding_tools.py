@@ -8,6 +8,7 @@ Tools:
 - query_findings: Brain searches existing findings by type/severity/component/free text.
 - link_chain: Brain asserts a causal attack chain between N previously-reported findings.
 """
+
 from __future__ import annotations
 
 import json
@@ -45,10 +46,10 @@ _POC_RESULT_MARKERS = (
     "observed_delta",
     "Set-Cookie:",
     "Location:",
-    "\"token\"",
-    "\"role\"",
-    "\"data\"",
-    "\"status\"",
+    '"token"',
+    '"role"',
+    '"data"',
+    '"status"',
     "stack trace",
     "Traceback",
     "sql error",
@@ -179,9 +180,28 @@ def _canonical_finding_type(value: str) -> str:
         return "sql_injection"
     if ft.startswith("ssrf"):
         return "ssrf"
-    if ft in {"jwt_alg_none", "jwt_alg_confusion", "session_fixation", "password_reset_poisoning", "default_credentials", "weak_auth"}:
+    if ft in {
+        "jwt_alg_none",
+        "jwt_alg_confusion",
+        "session_fixation",
+        "password_reset_poisoning",
+        "default_credentials",
+        "weak_auth",
+    }:
         return "weak_auth"
     return ft
+
+
+def _finding_type_needs_control(finding_type: str) -> bool:
+    """Return True iff a PoC for this finding_type must include a control/baseline.
+
+    Injection, auth bypass, IDOR, access-control, and similar differential findings
+    require a control run to rule out false positives.  Misconfig and disclosure
+    findings — where the raw evidence (e.g. exposed credentials, missing header) is
+    self-evident — do not need a separate control run.
+    """
+    ft = str(finding_type or "").lower()
+    return any(needle in ft for needle in _CONTROL_REQUIRED_TYPES)
 
 
 def _reset_for_tests() -> None:
@@ -327,7 +347,9 @@ def _artifact_has_observed_result(value: Any) -> bool:
 def _artifact_has_control(value: Any) -> bool:
     text = _stringify_artifact_value(value)
     lower = text.lower()
-    return _artifact_has_observed_result(text) or any(marker in lower for marker in _CONTROL_MARKERS)
+    return _artifact_has_observed_result(text) or any(
+        marker in lower for marker in _CONTROL_MARKERS
+    )
 
 
 def _artifact_repeat_count(value: Any) -> int:
@@ -352,7 +374,9 @@ def _artifact_has_negative_result(*values: Any) -> bool:
     lower = text.lower()
     if any(marker in lower for marker in _NEGATIVE_MARKERS):
         return True
-    return _HTTP_STATUS_LINE_RE.search(text) is not None and any(code in lower for code in (" 401", " 403"))
+    return _HTTP_STATUS_LINE_RE.search(text) is not None and any(
+        code in lower for code in (" 401", " 403")
+    )
 
 
 def _source_output_reused(source_output: Any, reuse_context: Any, *, explicit: bool) -> bool:
@@ -517,36 +541,16 @@ def _coalesce_report_fields(kwargs: dict[str, Any]) -> dict[str, str]:
     """Normalize legacy VXIS fields into a Strix-style report contract."""
     description = str(kwargs.get("description", "")).strip()
     remediation_steps = str(
-        kwargs.get("remediation_steps")
-        or kwargs.get("remediation")
-        or ""
+        kwargs.get("remediation_steps") or kwargs.get("remediation") or ""
     ).strip()
-    technical_analysis = str(
-        kwargs.get("technical_analysis")
-        or description
-        or ""
-    ).strip()
-    poc_description = str(
-        kwargs.get("poc_description")
-        or kwargs.get("evidence")
-        or ""
-    ).strip()
+    technical_analysis = str(kwargs.get("technical_analysis") or description or "").strip()
+    poc_description = str(kwargs.get("poc_description") or kwargs.get("evidence") or "").strip()
     poc_script_code = _normalize_poc_transcript(
-        kwargs.get("poc_script_code")
-        or kwargs.get("evidence")
-        or ""
+        kwargs.get("poc_script_code") or kwargs.get("evidence") or ""
     )
-    impact = str(
-        kwargs.get("impact")
-        or description
-        or ""
-    ).strip()
+    impact = str(kwargs.get("impact") or description or "").strip()
     method = str(kwargs.get("method", "")).strip()
-    endpoint = str(
-        kwargs.get("endpoint")
-        or kwargs.get("affected_component")
-        or ""
-    ).strip()
+    endpoint = str(kwargs.get("endpoint") or kwargs.get("affected_component") or "").strip()
     return {
         "description": description,
         "impact": impact,
@@ -564,10 +568,7 @@ def _normalize_poc_transcript(value: Any) -> str:
     if "\\n" not in text and "\\r" not in text and "\\t" not in text:
         return text
     return (
-        text.replace("\\r\\n", "\n")
-        .replace("\\n", "\n")
-        .replace("\\r", "\n")
-        .replace("\\t", "\t")
+        text.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\r", "\n").replace("\\t", "\t")
     )
 
 
@@ -584,12 +585,15 @@ def _normalize_extra_evidence(value: Any) -> list[dict[str, str]]:
         content = str(item.get("content", "")).strip()
         if not evidence_type or not title or not content:
             continue
-        normalized.append({
-            "evidence_type": evidence_type[:64],
-            "title": title[:160],
-            "content": content[:4000],
-            "content_type": str(item.get("content_type", "text/plain")).strip()[:120] or "text/plain",
-        })
+        normalized.append(
+            {
+                "evidence_type": evidence_type[:64],
+                "title": title[:160],
+                "content": content[:4000],
+                "content_type": str(item.get("content_type", "text/plain")).strip()[:120]
+                or "text/plain",
+            }
+        )
     return normalized
 
 
@@ -609,12 +613,16 @@ def _evaluate_high_severity_poc(
     poc_lower = str(poc_script_code or "").lower()
     has_attempt = any(marker.lower() in poc_lower for marker in _POC_ATTEMPT_MARKERS)
     has_observed_status = _HTTP_STATUS_LINE_RE.search(str(poc_script_code or "")) is not None
-    has_observed_status = has_observed_status or _STATUS_ASSIGNMENT_RE.search(str(poc_script_code or "")) is not None
-    has_result = has_observed_status or any(marker.lower() in poc_lower for marker in _POC_RESULT_MARKERS)
+    has_observed_status = (
+        has_observed_status or _STATUS_ASSIGNMENT_RE.search(str(poc_script_code or "")) is not None
+    )
+    has_result = has_observed_status or any(
+        marker.lower() in poc_lower for marker in _POC_RESULT_MARKERS
+    )
     repeat_count = _artifact_repeat_count(combined)
     has_repeat = repeat_count >= 2
     has_negative = _artifact_has_negative_result(combined)
-    needs_control = True
+    needs_control = _finding_type_needs_control(finding_type)
     has_control = any(marker in lower for marker in _CONTROL_MARKERS)
     missing: list[str] = []
     if not has_attempt:
@@ -654,14 +662,32 @@ class ReportFindingTool:
         "properties": {
             "title": {"type": "string"},
             "severity": {"type": "string", "enum": list(_VALID_SEVERITIES)},
-            "finding_type": {"type": "string", "description": "snake_case vuln type e.g. 'sql_injection', 'xss_reflected'"},
+            "finding_type": {
+                "type": "string",
+                "description": "snake_case vuln type e.g. 'sql_injection', 'xss_reflected'",
+            },
             "affected_component": {"type": "string"},
             "description": {"type": "string"},
-            "impact": {"type": "string", "description": "Concrete business/security impact validated for this finding"},
-            "technical_analysis": {"type": "string", "description": "Why this issue is real, including control checks, repeat_count>=2, and negative/refutation reasoning"},
-            "poc_description": {"type": "string", "description": "Step-by-step reproduction summary for the validated exploit and its control/negative tests"},
-            "poc_script_code": {"type": "string", "description": "Actual exploit payload / HTTP exchange / command transcript with control, repeat_count>=2, and negative result"},
-            "evidence": {"type": "string", "description": "Legacy alias for PoC transcript; prefer poc_script_code"},
+            "impact": {
+                "type": "string",
+                "description": "Concrete business/security impact validated for this finding",
+            },
+            "technical_analysis": {
+                "type": "string",
+                "description": "Why this issue is real, including control checks, repeat_count>=2, and negative/refutation reasoning",
+            },
+            "poc_description": {
+                "type": "string",
+                "description": "Step-by-step reproduction summary for the validated exploit and its control/negative tests",
+            },
+            "poc_script_code": {
+                "type": "string",
+                "description": "Actual exploit payload / HTTP exchange / command transcript with control, repeat_count>=2, and negative result",
+            },
+            "evidence": {
+                "type": "string",
+                "description": "Legacy alias for PoC transcript; prefer poc_script_code",
+            },
             "remediation": {"type": "string", "description": "Legacy alias for remediation_steps"},
             "remediation_steps": {"type": "string", "description": "Specific remediation guidance"},
             "endpoint": {"type": "string"},
@@ -784,6 +810,7 @@ class ReportFindingTool:
             """
             import re
             from urllib.parse import urlparse
+
             try:
                 parsed = urlparse(component)
                 path = parsed.path or component
@@ -857,12 +884,16 @@ class ReportFindingTool:
                     existing["affected_endpoints"] = endpoints
                     logger.info(
                         "[Finding] base-path dedup: %s grouped into %s (%d endpoints)",
-                        new_component, existing["id"], len(endpoints),
+                        new_component,
+                        existing["id"],
+                        len(endpoints),
                     )
                 else:
                     logger.info(
                         "[Finding] exact dedup: %s %s (already %s)",
-                        new_type, new_component, existing["id"],
+                        new_type,
+                        new_component,
+                        existing["id"],
                     )
                 return ToolResult(
                     ok=True,
@@ -901,7 +932,13 @@ class ReportFindingTool:
             "proof": proof if severity in ("high", "critical") else {},
         }
         _findings.append(finding)
-        logger.info("[Finding] %s [%s] %s — %s", finding_id, severity.upper(), kwargs["finding_type"], str(kwargs["title"])[:80])
+        logger.info(
+            "[Finding] %s [%s] %s — %s",
+            finding_id,
+            severity.upper(),
+            kwargs["finding_type"],
+            str(kwargs["title"])[:80],
+        )
         _emit_event(
             "hit",
             {
@@ -937,7 +974,12 @@ class QueryFindingsTool:
             "finding_type": {"type": "string"},
             "component_contains": {"type": "string"},
             "text_contains": {"type": "string"},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Max results (default 20)"},
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 100,
+                "description": "Max results (default 20)",
+            },
         },
     }
 
@@ -964,13 +1006,15 @@ class QueryFindingsTool:
                 blob = (f["title"] + " " + f["description"]).lower()
                 if text_substr not in blob:
                     continue
-            results.append({
-                "id": f["id"],
-                "severity": f["severity"],
-                "finding_type": f["finding_type"],
-                "title": f["title"][:120],
-                "affected_component": f["affected_component"],
-            })
+            results.append(
+                {
+                    "id": f["id"],
+                    "severity": f["severity"],
+                    "finding_type": f["finding_type"],
+                    "title": f["title"][:120],
+                    "affected_component": f["affected_component"],
+                }
+            )
             if len(results) >= limit:
                 break
 
@@ -999,8 +1043,14 @@ class LinkChainTool:
                 "minItems": 2,
                 "description": "Ordered list of finding IDs forming the chain, e.g. ['VXIS-0001', 'VXIS-0003', 'VXIS-0007']",
             },
-            "rationale": {"type": "string", "description": "Why these findings chain together — the attack narrative"},
-            "crown_jewel": {"type": "string", "description": "What the chain ultimately compromises (e.g. 'admin account takeover', 'full DB dump')"},
+            "rationale": {
+                "type": "string",
+                "description": "Why these findings chain together — the attack narrative",
+            },
+            "crown_jewel": {
+                "type": "string",
+                "description": "What the chain ultimately compromises (e.g. 'admin account takeover', 'full DB dump')",
+            },
             "evidence_artifact": {
                 "type": "object",
                 "description": (
@@ -1036,7 +1086,9 @@ class LinkChainTool:
                 error="insufficient_findings",
             )
         if not rationale:
-            return ToolResult(ok=False, summary="link_chain: rationale is required", error="missing_rationale")
+            return ToolResult(
+                ok=False, summary="link_chain: rationale is required", error="missing_rationale"
+            )
 
         known_ids = {f["id"] for f in _findings}
         unknown = [fid for fid in finding_ids if fid not in known_ids]
@@ -1083,7 +1135,10 @@ class LinkChainTool:
                     },
                     summary=f"link_chain: duplicate chain ignored ({existing.get('id', '')})",
                 )
-            if _chain_signature(existing_ids, str(existing.get("crown_jewel", ""))) == new_signature:
+            if (
+                _chain_signature(existing_ids, str(existing.get("crown_jewel", "")))
+                == new_signature
+            ):
                 return ToolResult(
                     ok=True,
                     data={
