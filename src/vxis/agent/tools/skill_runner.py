@@ -252,9 +252,13 @@ class RunSkillTool:
             elif skill_name in ("post_auth_enum",):
                 result = await fn(target_url=target_url, token=params.get("token", ""), **{k: v for k, v in params.items() if k != "token"})
             elif skill_name in ("test_injection", "test_xss", "test_ssrf"):
-                # These use url= as first positional arg
-                effective_url = params.pop("url", target_url)
-                result = await fn(url=effective_url, **params)
+                # These use url= as first positional arg. Do not mutate the
+                # caller's params dict — it is reused to compute the stuck-loop
+                # cache key, and popping 'url' would change the key on retry.
+                effective_url = params.get("url", target_url)
+                result = await fn(
+                    url=effective_url, **{k: v for k, v in params.items() if k != "url"}
+                )
             elif skill_name in ("test_auth_deep", "test_csrf", "test_api_security", "test_business_logic"):
                 # These accept optional token
                 result = await fn(target_url=target_url, token=params.get("token"), **{k: v for k, v in params.items() if k != "token"})
