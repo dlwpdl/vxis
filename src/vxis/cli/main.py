@@ -71,6 +71,34 @@ app.add_typer(skillopt_app, name="skillopt")
 app.command("emulate")(p1_emulate)
 
 
+# ---------------------------------------------------------------------------
+# Injection auto-approve gate helper (module-level so it can be unit-tested)
+# ---------------------------------------------------------------------------
+
+_BENCHMARK_PORTS: frozenset[str] = frozenset({"8081", "3000", "8888", "8082", "8083", "5013", "4000"})
+_BENCHMARK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1"})
+
+
+def _is_local_benchmark(target: str) -> bool:
+    """Return True iff *target* is safe to auto-approve for injection.
+
+    Safe means either:
+    1. The ``ghost://`` VXIS-internal scheme (never reaches a real network host), or
+    2. BOTH a known benchmark port AND a loopback host are present.
+
+    The original inline predicate was accidentally correct because Python's
+    ``and`` binds tighter than ``or``, but the implicit precedence made it
+    one ``or`` clause away from silently approving injection against prod.
+    This helper makes the intent explicit and testable.
+    """
+    t_lower = target.lower()
+    if t_lower.startswith("ghost://"):
+        return True
+    has_benchmark_port = any(f":{port}" in t_lower for port in _BENCHMARK_PORTS)
+    has_loopback_host = any(h in t_lower for h in _BENCHMARK_HOSTS)
+    return has_benchmark_port and has_loopback_host
+
+
 @app.callback()
 def _app_callback(ctx: typer.Context) -> None:
     """인자 없이 vxis 실행 시 인터랙티브 모드 진입."""
@@ -452,14 +480,9 @@ def scan(
                 await _aio.sleep(0.25)
 
         # ── Injection approval gate: 알려진 벤치마크 자동 통과, 그 외 사용자 승인 필수 ──
-        _BENCHMARK_PORTS = {"8081", "3000", "8888", "8082", "8083", "5013", "4000"}
-        _BENCHMARK_HOSTS = {"localhost", "127.0.0.1"}
-        _t_lower = target.lower()
-        _is_benchmark = (
-            allow_inject  # 명시적 우회 — 책임은 사용자
-            or any(f":{port}" in _t_lower for port in _BENCHMARK_PORTS)
-            and any(h in _t_lower for h in _BENCHMARK_HOSTS)
-        )
+        # allow_inject = explicit CLI override (user accepted responsibility)
+        # _is_local_benchmark = loopback host + known benchmark port, or ghost://
+        _is_benchmark = allow_inject or _is_local_benchmark(target)
 
         async def _injection_gate(summary: dict) -> str:
             """Live TUI를 잠시 멈추고 3-way 선택: full / readonly / deny."""
