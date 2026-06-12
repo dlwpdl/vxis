@@ -1825,6 +1825,16 @@ class ScanLoopActionMixin:
             return {}
         return self._chain_evidence_artifact_for_pair(source, target, candidate)
 
+    @staticmethod
+    def _find_finding_by_id(
+        findings: list[dict[str, Any]], finding_id: str
+    ) -> dict[str, Any] | None:
+        """Look a finding up by id, returning None (not raising) when absent."""
+        return next(
+            (f for f in findings if str(f.get("id")) == str(finding_id)),
+            None,
+        )
+
     async def _maybe_auto_link_chain(self, finding_id: str) -> None:
         try:
             from vxis.agent.tools.finding_tools import (
@@ -1835,7 +1845,7 @@ class ScanLoopActionMixin:
             return
 
         findings = _get_findings()
-        current = next((f for f in findings if f.get("id") == finding_id), None)
+        current = self._find_finding_by_id(findings, finding_id)
         if not current:
             return
 
@@ -1860,12 +1870,19 @@ class ScanLoopActionMixin:
                 best_candidate = candidate
         if best_candidate is None:
             return
+        source_finding = self._find_finding_by_id(findings, best_candidate["source_id"])
+        if source_finding is None:
+            logger.warning(
+                "auto-link-chain: source finding %s vanished, skipping",
+                best_candidate["source_id"],
+            )
+            return
         result = await self.registry.dispatch("link_chain", {
             "finding_ids": [best_candidate["source_id"], best_candidate["target_id"]],
             "rationale": best_candidate["rationale"],
             "crown_jewel": best_candidate["crown_jewel"],
             "evidence_artifact": self._chain_evidence_artifact_for_pair(
-                next(f for f in findings if str(f.get("id")) == best_candidate["source_id"]),
+                source_finding,
                 current,
                 best_candidate,
             ),
