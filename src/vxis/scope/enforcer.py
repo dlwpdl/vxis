@@ -33,6 +33,11 @@ class ScopeEnforcer:
     def check_url(self, url: str) -> ScopeCheckResult:
         try:
             parsed = urlparse(url)
+            # A bare "host:port" or hostname (e.g. "localhost:3000") parses with the
+            # host read as the scheme and no hostname, which would falsely fail the
+            # in-scope match. Re-parse with an explicit scheme to recover the host.
+            if not parsed.hostname and "://" not in url:
+                parsed = urlparse(f"http://{url}")
         except Exception as exc:  # pragma: no cover - defensive
             return ScopeCheckResult(
                 allowed=False,
