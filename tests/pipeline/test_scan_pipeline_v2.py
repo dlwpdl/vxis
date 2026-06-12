@@ -1,3 +1,5 @@
+import re
+
 import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -9,6 +11,7 @@ from vxis.pipeline.scan_pipeline_v2 import (
     _compute_vxis_score,
     _build_finding_from_dict,
     _SimpleScore,
+    _make_scan_id,
 )
 
 
@@ -554,3 +557,27 @@ async def test_prepare_target_runtime_marks_local_web_target_as_docker_aware():
     assert runtime.runtime_mode == "docker_local_target"
     assert runtime.metadata["local_target"] is True
     assert runtime.metadata["compose_file"] == "infra/benchmarks/juice-shop.yml"
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 — scan_id uniqueness (second-granularity collision)
+# ---------------------------------------------------------------------------
+
+
+class TestMakeScanId:
+    """scan_id must be unique across concurrent calls in the same second."""
+
+    def test_two_scan_ids_differ(self) -> None:
+        """Two calls in the same second must produce different scan_ids."""
+        id1 = _make_scan_id()
+        id2 = _make_scan_id()
+        assert id1 != id2
+
+    def test_scan_id_format_has_random_suffix(self) -> None:
+        """scan_id format: VXIS-YYYYMMDD-HHMMSS-<hex6>."""
+        sid = _make_scan_id()
+        assert re.match(r"^VXIS-\d{8}-\d{6}-[0-9a-f]{6}$", sid), f"Bad format: {sid!r}"
+
+    def test_many_scan_ids_are_all_unique(self) -> None:
+        ids = [_make_scan_id() for _ in range(50)]
+        assert len(set(ids)) == 50, "Collision detected in 50 rapid scan_ids"

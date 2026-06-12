@@ -40,6 +40,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
+from uuid import uuid4
 
 from vxis.agent.brain import (
     get_brain_decision_count,
@@ -64,6 +65,19 @@ from vxis.pipeline.context import ScanContext
 from vxis.pipeline.launcher import prepare_target_runtime
 
 logger = logging.getLogger(__name__)
+
+
+def _make_scan_id() -> str:
+    """Generate a collision-resistant scan identifier.
+
+    Format: ``VXIS-YYYYMMDD-HHMMSS-<hex6>``
+
+    The 6-hex random suffix prevents two scans started within the same
+    wall-clock second from colliding and overwriting each other's audit/KB/score
+    files.  Nothing in the codebase parses the timestamp portion, so the
+    suffix is purely additive.
+    """
+    return f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}-{uuid4().hex[:6]}"
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1) -> int:
@@ -696,7 +710,7 @@ class ScanPipeline:
                 kind=kind,
                 app_context_en=app_context_en,
                 app_context_ko=app_context_ko,
-                scan_id=f"VXIS-{time.strftime('%Y%m%d-%H%M%S')}",
+                scan_id=_make_scan_id(),
             )
             self._resolve_and_attach_policy(ctx)
             ctx.runtime_profile = {  # type: ignore[attr-defined]
