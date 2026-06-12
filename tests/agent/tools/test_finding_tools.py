@@ -696,3 +696,42 @@ def test_evaluate_poc_auth_still_requires_control() -> None:
         ),
     )
     assert result["needs_control"] is True, "auth_bypass must require a control/baseline"
+
+
+# Fix 4 — _normalize and _base_path must be module-level functions (not per-call closures)
+
+
+def test_normalize_and_base_path_are_module_level() -> None:
+    """_normalize and _base_path must be importable as module-level names,
+    not inner closures rebuilt on every report_finding call."""
+    import vxis.agent.tools.finding_tools as ft
+
+    assert callable(getattr(ft, "_normalize", None)), (
+        "_normalize must be a module-level function in finding_tools, not an inner closure"
+    )
+    assert callable(getattr(ft, "_base_path", None)), (
+        "_base_path must be a module-level function in finding_tools, not an inner closure"
+    )
+
+
+def test_normalize_dedup_behavior_unchanged() -> None:
+    """_normalize must still strip, lowercase, collapse whitespace, strip trailing slash."""
+    import vxis.agent.tools.finding_tools as ft
+
+    assert ft._normalize("  /API/Users/ ") == "/api/users"
+    assert ft._normalize("SQL_Injection") == "sql_injection"
+    assert ft._normalize("  multiple   spaces  ") == "multiple spaces"
+
+
+def test_base_path_dedup_behavior_unchanged() -> None:
+    """_base_path must still strip trailing numeric ID segments, query params, and preserve '#'."""
+    import vxis.agent.tools.finding_tools as ft
+
+    assert ft._base_path("/api/Orders/1") == "/api/orders"
+    assert ft._base_path("/api/Orders/2") == "/api/orders"
+    # /1/ is an intermediate numeric segment — it becomes / and trailing /items stays
+    assert ft._base_path("/api/Baskets/1/items") == "/api/baskets/items"
+    assert ft._base_path("http://x:3000/api/Orders/1") == "/api/orders"
+    assert ft._base_path("/rest/products/search?q=test'") == "/rest/products/search"
+    # '#' discriminator must be preserved (Phase Q8 requirement)
+    assert "#" in ft._base_path("/usr/bin/foo#bar.dylib@/path")

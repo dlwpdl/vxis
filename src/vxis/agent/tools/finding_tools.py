@@ -15,6 +15,7 @@ import json
 import logging
 import re
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 from vxis.agent.tool_registry import ToolResult
 from vxis.agent.tools._poc_signals import (
@@ -124,6 +125,52 @@ _CHAIN_SOURCE_STOPWORDS = {
     "finding",
     "vxis",
 }
+
+# Compiled regex used by _base_path — hoisted here so it is not recompiled per call.
+_NUMERIC_SEGMENT_RE = re.compile(r"/\d+(/|$)")
+
+
+def _normalize(s: str) -> str:
+    """Normalize finding_type and affected_component for dedup matching."""
+    s = str(s).lower().strip()
+    s = s.rstrip("/")
+    s = " ".join(s.split())
+    return s
+
+
+def _base_path(component: str) -> str:
+    """Extract base API path, stripping numeric IDs and query params.
+
+    /api/Orders/1      → /api/orders
+    /api/Orders/2      → /api/orders
+    /api/Baskets/1/items → /api/baskets
+    http://x:3000/api/Orders/1 → /api/orders
+    /rest/products/search?q=test' → /rest/products/search
+
+    Phase Q8: when affected_component carries an explicit '#'
+    discriminator (set by scan_loop's desktop promotion block), the
+    suffix MUST be preserved — otherwise 20 distinct dylib_hijack
+    findings on the same binary all collapse to the binary path and
+    dedup into a single VXIS-NNNN with everything in
+    affected_endpoints. urlparse treats '#' as a URI fragment and
+    drops it by default; we re-attach it so the discriminator
+    actually discriminates.
+    """
+    try:
+        parsed = urlparse(component)
+        path = parsed.path or component
+        if parsed.fragment:
+            # Reattach the discriminator the desktop promotion block
+            # appended (e.g. "<binary>#<dylib>@<candidate_path>").
+            path = f"{path}#{parsed.fragment}"
+    except Exception:
+        path = component
+    path = path.lower().strip().rstrip("/")
+    # Remove query string
+    path = path.split("?")[0]
+    # Strip trailing numeric segments (/1, /2, /123)
+    path = _NUMERIC_SEGMENT_RE.sub("/", path).rstrip("/")
+    return path
 
 
 def _canonical_finding_type(value: str) -> str:
@@ -727,50 +774,8 @@ class ReportFindingTool:
         # affected_component) already exists, skip re-creation and return the
         # existing id. Prevents Brain from reporting the same issue twice when
         # it loses track of its own state.
-        def _normalize(s: str) -> str:
-            """Normalize finding_type and affected_component for dedup matching."""
-            s = str(s).lower().strip()
-            s = s.rstrip("/")
-            s = " ".join(s.split())
-            return s
-
-        def _base_path(component: str) -> str:
-            """Extract base API path, stripping numeric IDs and query params.
-
-            /api/Orders/1      → /api/orders
-            /api/Orders/2      → /api/orders
-            /api/Baskets/1/items → /api/baskets
-            http://x:3000/api/Orders/1 → /api/orders
-            /rest/products/search?q=test' → /rest/products/search
-
-            Phase Q8: when affected_component carries an explicit '#'
-            discriminator (set by scan_loop's desktop promotion block), the
-            suffix MUST be preserved — otherwise 20 distinct dylib_hijack
-            findings on the same binary all collapse to the binary path and
-            dedup into a single VXIS-NNNN with everything in
-            affected_endpoints. urlparse treats '#' as a URI fragment and
-            drops it by default; we re-attach it so the discriminator
-            actually discriminates.
-            """
-            import re
-            from urllib.parse import urlparse
-
-            try:
-                parsed = urlparse(component)
-                path = parsed.path or component
-                if parsed.fragment:
-                    # Reattach the discriminator the desktop promotion block
-                    # appended (e.g. "<binary>#<dylib>@<candidate_path>").
-                    path = f"{path}#{parsed.fragment}"
-            except Exception:
-                path = component
-            path = path.lower().strip().rstrip("/")
-            # Remove query string
-            path = path.split("?")[0]
-            # Strip trailing numeric segments (/1, /2, /123)
-            path = re.sub(r"/\d+(/|$)", "/", path).rstrip("/")
-            return path
-
+        # _normalize and _base_path are module-level functions (not closures)
+        # so they are not rebuilt on every call.
         new_type = _normalize(_canonical_finding_type(kwargs["finding_type"]))
         new_component = _normalize(kwargs["affected_component"])
         new_base = _base_path(kwargs["affected_component"])
