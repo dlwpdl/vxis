@@ -16,7 +16,7 @@ from vxis.agent.hypothesis.bayes import (
     propagation_seed_delta,
 )
 
-DecisionClass = Literal["recon", "strategy", "exploit", "verify"]
+DecisionClass = Literal["recon", "triage", "strategy", "exploit", "verify", "critique"]
 HypothesisStatus = Literal["untested", "testing", "confirmed", "refuted", "inconclusive"]
 
 HYPOTHESIS_STATUSES: tuple[str, ...] = (

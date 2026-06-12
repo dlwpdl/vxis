@@ -10,12 +10,11 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from statistics import mean
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-
-DecisionClass = Literal["recon", "triage", "strategy", "exploit", "verify", "critique"]
+from vxis.agent.hypothesis.dag import DecisionClass
 
 
 class ProposedHypothesis(BaseModel):

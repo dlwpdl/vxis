@@ -3,7 +3,52 @@ from __future__ import annotations
 import pytest
 
 from vxis.agent.hypothesis.bayes import bayes_update
-from vxis.agent.hypothesis.dag import HypothesisNode, HypothesisDAG
+from vxis.agent.hypothesis.dag import HypothesisNode, HypothesisDAG, DecisionClass
+
+
+# Canonical set — if this list ever changes, update all import sites.
+_CANONICAL_DECISION_CLASSES = frozenset(
+    {"recon", "triage", "strategy", "exploit", "verify", "critique"}
+)
+
+
+def test_decision_class_canonical_set_is_complete() -> None:
+    """DecisionClass Literal in dag.py must contain all 6 canonical members.
+
+    Divergent definitions cause validation errors when 'triage' or 'critique'
+    hypotheses are created via critique/loop.py or pti/models.py and later
+    round-tripped through HypothesisNode.model_validate.
+    """
+    # Verify all canonical values are accepted by HypothesisNode without error
+    for dc in _CANONICAL_DECISION_CLASSES:
+        node = HypothesisNode(
+            node_id=f"test-{dc}",
+            claim=f"test claim for {dc}",
+            decision_class=dc,  # type: ignore[arg-type]
+            prior=0.5,
+        )
+        assert node.decision_class == dc, (
+            f"decision_class {dc!r} not accepted by HypothesisNode — "
+            "dag.py DecisionClass is missing this member."
+        )
+
+    # All 3 DecisionClass Literals must agree on the same set
+    from vxis.agent.critique.loop import DecisionClass as CritiqueDecisionClass
+    from vxis.pti.models import DecisionClass as PTIDecisionClass
+
+    dag_args = set(DecisionClass.__args__)  # type: ignore[attr-defined]
+    critique_args = set(CritiqueDecisionClass.__args__)  # type: ignore[attr-defined]
+    pti_args = set(PTIDecisionClass.__args__)  # type: ignore[attr-defined]
+
+    assert dag_args == _CANONICAL_DECISION_CLASSES, (
+        f"dag.py DecisionClass diverges: {dag_args!r} vs canonical {_CANONICAL_DECISION_CLASSES!r}"
+    )
+    assert critique_args == dag_args, (
+        f"critique/loop.py DecisionClass diverges: {critique_args!r} vs dag.py {dag_args!r}"
+    )
+    assert pti_args == dag_args, (
+        f"pti/models.py DecisionClass diverges: {pti_args!r} vs dag.py {dag_args!r}"
+    )
 
 
 def hypothesis(
