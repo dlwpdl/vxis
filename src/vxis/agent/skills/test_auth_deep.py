@@ -28,6 +28,18 @@ def _b64_decode(s: str) -> bytes:
     return base64.urlsafe_b64decode(s + "=" * pad)
 
 
+def _reset_response_is_poisoned(body: str) -> bool:
+    """Return True only when the attacker-controlled host is reflected in the body.
+
+    A generic "Password reset email sent" response contains the word "reset" but
+    is NOT evidence the poisoned Host header was honored — matching on "reset"
+    produced false-positive password_reset_poisoning findings on every reset
+    endpoint that returns a 200. The real signal is the attacker host (evil.com)
+    appearing in the response (e.g. inside the reset link).
+    """
+    return "evil.com" in str(body or "").lower()
+
+
 def _forge_alg_none(token: str, new_header: dict[str, str]) -> str:
     """Create a forged JWT with alg:none."""
     parts = token.split(".")
@@ -224,7 +236,7 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                 )
                 if r.status in (200, 201, 202):
                     body = r.text.lower()
-                    if "evil.com" in body or "reset" in body:
+                    if _reset_response_is_poisoned(body):
                         findings.append(
                             {
                                 "type": "password_reset_poisoning",
