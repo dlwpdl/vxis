@@ -191,9 +191,8 @@ def v3_maybe_finish_gate(loop: Any) -> dict[str, Any] | None:
     if not reasons:
         return None
 
-    summary = (
-        "finish_scan REJECTED by v3 cognitive gate - "
-        + "; ".join(_dedupe_preserve_order(reasons))
+    summary = "finish_scan REJECTED by v3 cognitive gate - " + "; ".join(
+        _dedupe_preserve_order(reasons)
     )
     return {
         "title": "v3_cognitive_gate",
@@ -225,8 +224,7 @@ def v3_finalize_runtime(loop: Any) -> None:
         dag = getattr(state, "hypothesis_dag", None)
         if dag is not None:
             existing = {
-                (entry.claim, entry.scan_id)
-                for entry in getattr(dossier, "hypothesis_history", [])
+                (entry.claim, entry.scan_id) for entry in getattr(dossier, "hypothesis_history", [])
             }
             for node in getattr(dag, "nodes", {}).values():
                 status = str(getattr(node, "status", ""))
@@ -638,18 +636,11 @@ def _result_response_snapshot(result: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         data = {"value": data}
     status = (
-        data.get("status_code")
-        or data.get("status")
-        or data.get("code")
-        or data.get("http_status")
+        data.get("status_code") or data.get("status") or data.get("code") or data.get("http_status")
     )
     headers = data.get("headers") or data.get("response_headers") or {}
     body = (
-        data.get("body")
-        or data.get("text")
-        or data.get("stdout")
-        or data.get("stderr")
-        or summary
+        data.get("body") or data.get("text") or data.get("stdout") or data.get("stderr") or summary
     )
     if status is None:
         status_match = re.search(r"\b(401|403|406|409|423|429|451|503)\b", summary)
@@ -842,6 +833,8 @@ def _update_hypotheses_after_action(
             top = []
         candidate_ids = [str(getattr(item, "node_id", "")) for item in top]
 
+    _EXPLOIT_DECISION_CLASSES = frozenset({"exploit", "strategy"})
+
     if name == "report_finding" and bool(getattr(result, "ok", False)):
         status_change = "confirmed"
         delta = 0.45
@@ -849,7 +842,14 @@ def _update_hypotheses_after_action(
         status_change = "inconclusive"
         delta = -0.05
     elif bool(getattr(result, "ok", False)):
-        status_change = "testing"
+        # Only promote to 'testing' for semantically exploitative/mutating actions.
+        # Recon, browse, and memory calls may have ok=True but never actually probed
+        # the hypothesis — parking it in 'testing' would hide it from top_untested().
+        action_dc = _decision_class_for_action(state, name, args)
+        if action_dc in _EXPLOIT_DECISION_CLASSES:
+            status_change = "testing"
+        else:
+            status_change = None  # nudge belief only, keep status as-is
         delta = 0.05
     else:
         status_change = "refuted" if _looks_refuting(result) else "inconclusive"
@@ -928,7 +928,9 @@ def _update_pti_after_action(
                     )
                 )
         if name == "report_finding" and bool(getattr(result, "ok", False)):
-            data = getattr(result, "data", {}) if isinstance(getattr(result, "data", {}), dict) else {}
+            data = (
+                getattr(result, "data", {}) if isinstance(getattr(result, "data", {}), dict) else {}
+            )
             finding_id = str(data.get("id") or _stable_short_hash(str(args)))
             finding_type = vector_class
             if isinstance(args, dict):
@@ -982,9 +984,8 @@ def _write_trajectory(
         summary = str(getattr(result, "summary", "") or "")
         tokens_in = _rough_token_count(input_context)
         tokens_out = _rough_token_count(output_action)
-        model_used = (
-            str(getattr(state, "v3_current_model", "") or "")
-            or str(getattr(getattr(loop, "brain", None), "_model", "") or "unknown")
+        model_used = str(getattr(state, "v3_current_model", "") or "") or str(
+            getattr(getattr(loop, "brain", None), "_model", "") or "unknown"
         )
         outcome_status = _outcome_status(result)
         record = TrajectoryRecord(

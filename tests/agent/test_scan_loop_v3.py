@@ -115,10 +115,73 @@ def test_v3_after_action_records_coverage_block_and_trajectory(monkeypatch, tmp_
 
     assert loop.state.block_history
     assert loop.state.trajectories_written == 1
-    assert any(cell.status == "tested-blocked" for cell in loop.state.coverage_matrix.cells.values())
+    assert any(
+        cell.status == "tested-blocked" for cell in loop.state.coverage_matrix.cells.values()
+    )
 
     v3_finalize_runtime(loop)
     assert (tmp_path / "pti" / loop.state.pti.target_hash / "dossier.yaml").exists()
+
+
+def test_v3_recon_action_does_not_park_hypothesis_in_testing(monkeypatch, tmp_path) -> None:
+    """A recon/browser action with ok=True must NOT move a hypothesis to 'testing'.
+
+    Only exploit/mutating actions should promote a hypothesis to 'testing'.
+    A recon result may nudge belief but the hypothesis must stay 'untested'.
+    """
+    monkeypatch.setenv("VXIS_V3", "1")
+    monkeypatch.setenv("VXIS_PTI_DIR", str(tmp_path / "pti"))
+
+    from vxis.agent.hypothesis.dag import HypothesisDAG, HypothesisNode
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    loop.state.iteration = 1
+
+    # Seed a DAG with one untested hypothesis targeting sqli
+    dag = HypothesisDAG()
+    node = HypothesisNode(
+        node_id="hyp-0001",
+        claim="Login endpoint is vulnerable to SQLi",
+        decision_class="exploit",
+        prior=0.6,
+        proposed_vector_class="sqli",
+    )
+    dag.add(node)
+    loop.state.hypothesis_dag = dag
+
+    # A recon/browser action with ok=True — should NOT park hypothesis in 'testing'
+    recon_result = ToolResult(ok=True, summary="page loaded successfully", data={})
+    v3_after_action(
+        loop,
+        name="browser_navigate",
+        args={"url": "http://localhost:3000/login"},
+        result=recon_result,
+        candidate_ids=["hyp-0001"],
+        branch_ids=[],
+    )
+
+    recon_status = loop.state.hypothesis_dag.nodes["hyp-0001"].status
+    assert recon_status == "untested", (
+        f"Expected 'untested' after recon action, got {recon_status!r}. "
+        "Recon must not park hypothesis in 'testing'."
+    )
+
+    # Now an exploit action with ok=True — SHOULD promote to 'testing'
+    exploit_result = ToolResult(ok=True, summary="injection attempt sent", data={})
+    v3_after_action(
+        loop,
+        name="run_skill",
+        args={"skill": "test_injection", "url": "http://localhost:3000/login"},
+        result=exploit_result,
+        candidate_ids=["hyp-0001"],
+        branch_ids=[],
+    )
+
+    exploit_status = loop.state.hypothesis_dag.nodes["hyp-0001"].status
+    assert exploit_status == "testing", (
+        f"Expected 'testing' after exploit action, got {exploit_status!r}. "
+        "Exploit actions should promote hypothesis to 'testing'."
+    )
 
 
 def test_v3_finish_gate_blocks_unresolved_work(monkeypatch, tmp_path) -> None:
