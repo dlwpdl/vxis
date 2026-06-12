@@ -1796,7 +1796,7 @@ class ScanLoopDecisionPolicyMixin:
             return 0
         counted = int(self.state.blocked_skill_counts.get(skill, 0))
         total = 0
-        for item in self.state.attempt_outcomes[-window:]:
+        for item in list(self.state.attempt_outcomes)[-window:]:
             if item.tool != "run_skill" or item.status != "blocked":
                 continue
             if (

@@ -228,7 +228,10 @@ class ScanLoopAgentGraphMixin:
         artifact_text = self._agent_graph_evidence_artifact_report_text(agent)
         proof_text = " | ".join(part for part in (result_text[:240], artifact_text[:900]) if part)
         if proof_text and proof_text not in parent.evidence:
-            parent.evidence = (parent.evidence + "; " + proof_text).strip("; ")
+            combined = (parent.evidence + "; " + proof_text).strip("; ")
+            # Cap so a long chain of proven post-exploit workers cannot grow
+            # branch evidence unboundedly; keep the most recent tail.
+            parent.evidence = combined[-2000:] if len(combined) > 2000 else combined
         parent.status = "active"
         parent.escalation_status = "needs_report"
         parent.escalation_reason = (

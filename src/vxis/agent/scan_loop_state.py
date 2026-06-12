@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
+
+# Cap long-lived per-iteration logs so a 300-iteration scan does not grow them
+# unboundedly (each is serialized in full into snapshots/dashboards).
+_OUTCOME_LOG_MAXLEN = 200
 
 _TERMINAL_VECTOR_STATUSES = {"found", "clean", "blocked", "dead"}
 _TERMINAL_TODO_STATUSES = {"done", "blocked"}
@@ -507,11 +512,15 @@ class ScanLoopState:
     confirmed_findings: list[dict[str, Any]] = field(default_factory=list)
     vector_candidates: dict[str, VectorCandidate] = field(default_factory=dict)
     hypothesis_dag: Any = field(default_factory=_new_hypothesis_dag)
-    attempt_outcomes: list[AttemptOutcome] = field(default_factory=list)
+    attempt_outcomes: deque[AttemptOutcome] = field(
+        default_factory=lambda: deque(maxlen=_OUTCOME_LOG_MAXLEN)
+    )
     scan_todos: dict[str, ScanTodo] = field(default_factory=dict)
     branches: dict[str, BranchState] = field(default_factory=dict)
     review_queue: dict[str, ReviewItem] = field(default_factory=dict)
-    review_history: list[ReviewDecision] = field(default_factory=list)
+    review_history: deque[ReviewDecision] = field(
+        default_factory=lambda: deque(maxlen=_OUTCOME_LOG_MAXLEN)
+    )
     callback_observations: list[CallbackObservation] = field(default_factory=list)
     retrieval_observations: list[RetrievalObservation] = field(default_factory=list)
     auth_identities: list[dict[str, Any]] = field(default_factory=list)
