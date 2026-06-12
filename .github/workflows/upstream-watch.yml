@@ -40,7 +40,7 @@ jobs:
           python-version: "3.12"
 
       - name: Restore state
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             tools/upstream_watch/.state.json
