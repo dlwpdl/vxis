@@ -321,8 +321,18 @@ def _build_finding_from_dict(
         _EvidenceSeverity.LOW: 3.5,
         _EvidenceSeverity.INFO: 1.0,
     }
+    # Severity-appropriate CVSS vector templates so that LOW/INFO findings do not
+    # carry the 9.8-Critical vector string and mislabel themselves in any
+    # vector-string renderer.  Templates are approximate; base_score is authoritative.
+    _cvss_vector_by_sev = {
+        _EvidenceSeverity.CRITICAL: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",   # 9.8
+        _EvidenceSeverity.HIGH:     "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",   # 8.1
+        _EvidenceSeverity.MEDIUM:   "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:U/C:L/I:L/A:N",   # 4.6
+        _EvidenceSeverity.LOW:      "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:U/C:L/I:N/A:N",   # 2.4
+        _EvidenceSeverity.INFO:     "CVSS:3.1/AV:N/AC:H/PR:H/UI:R/S:U/C:N/I:N/A:N",   # 0.0
+    }
     cvss = CVSSVector(
-        vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        vector_string=_cvss_vector_by_sev[_ev_severity],
         base_score=cvss_score_by_sev[_ev_severity],
     )
 

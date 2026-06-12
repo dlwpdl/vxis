@@ -634,3 +634,66 @@ class TestSevToLevel:
             target="http://localhost",
         )
         assert finding.severity.value == "informational"
+
+
+# ---------------------------------------------------------------------------
+# Fix 6 — CVSS vector_string must not be hardcoded to 9.8/Critical
+# ---------------------------------------------------------------------------
+
+_CRITICAL_VECTOR = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+
+
+class TestBuildFindingCVSS:
+    """Low/Info findings must NOT carry the 9.8-Critical vector string."""
+
+    def test_low_finding_not_critical_vector(self) -> None:
+        finding = _build_finding_from_dict(
+            {"title": "Low finding", "severity": "low", "description": "d"},
+            scan_id="VXIS-TEST",
+            target="http://localhost",
+        )
+        assert finding.cvss is not None
+        assert finding.cvss.vector_string != _CRITICAL_VECTOR, (
+            "LOW finding incorrectly carries the 9.8/Critical CVSS vector"
+        )
+
+    def test_informational_finding_not_critical_vector(self) -> None:
+        finding = _build_finding_from_dict(
+            {"title": "Info finding", "severity": "informational", "description": "d"},
+            scan_id="VXIS-TEST",
+            target="http://localhost",
+        )
+        assert finding.cvss is not None
+        assert finding.cvss.vector_string != _CRITICAL_VECTOR, (
+            "INFORMATIONAL finding incorrectly carries the 9.8/Critical CVSS vector"
+        )
+
+    def test_info_finding_not_critical_vector(self) -> None:
+        finding = _build_finding_from_dict(
+            {"title": "Info finding", "severity": "info", "description": "d"},
+            scan_id="VXIS-TEST",
+            target="http://localhost",
+        )
+        assert finding.cvss is not None
+        assert finding.cvss.vector_string != _CRITICAL_VECTOR, (
+            "INFO finding incorrectly carries the 9.8/Critical CVSS vector"
+        )
+
+    def test_critical_finding_keeps_high_base_score(self) -> None:
+        """Critical findings must retain their high base score."""
+        finding = _build_finding_from_dict(
+            {"title": "Critical finding", "severity": "critical", "description": "d"},
+            scan_id="VXIS-TEST",
+            target="http://localhost",
+        )
+        assert finding.cvss is not None
+        assert finding.cvss.base_score == 9.5
+
+    def test_medium_finding_not_critical_vector(self) -> None:
+        finding = _build_finding_from_dict(
+            {"title": "Medium finding", "severity": "medium", "description": "d"},
+            scan_id="VXIS-TEST",
+            target="http://localhost",
+        )
+        assert finding.cvss is not None
+        assert finding.cvss.vector_string != _CRITICAL_VECTOR
