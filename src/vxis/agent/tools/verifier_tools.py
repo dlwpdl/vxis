@@ -19,40 +19,14 @@ import re
 from typing import Any
 
 from vxis.agent.tool_registry import ToolResult
+from vxis.agent.tools._poc_signals import (
+    CONTROL_MARKERS as _CONTROL_MARKERS,
+    HTTP_MARKERS as _HTTP_MARKERS,
+    POC_RESULT_MARKERS as _RESULT_MARKERS,
+    finding_type_needs_control as _finding_type_needs_control,
+)
 
 logger = logging.getLogger(__name__)
-
-_HTTP_MARKERS = ("HTTP/1.", "HTTP/2", "GET ", "POST ", "PUT ", "PATCH ", "DELETE ")
-_RESULT_MARKERS = (
-    "200 OK",
-    "201 Created",
-    "202 Accepted",
-    "500 Internal Server Error",
-    "Set-Cookie:",
-    '"token"',
-    '"role"',
-    '"data"',
-    '"status"',
-    "stack trace",
-    "Traceback",
-    "sqlmap identified",
-    "dumped",
-)
-_CONTROL_MARKERS = (
-    "control",
-    "negative",
-    "baseline",
-    "unauthenticated",
-    "authenticated",
-    "without auth",
-    "with auth",
-    "token:null",
-    'token=""',
-    "id=1",
-    "id=2",
-    "before:",
-    "after:",
-)
 
 _STRONG_XSS_MARKERS = (
     "<script",
@@ -173,23 +147,6 @@ def _has_observed_result(blob: str) -> bool:
 def _has_control_signal(blob: str) -> bool:
     lower = blob.lower()
     return any(marker in lower for marker in _CONTROL_MARKERS)
-
-
-def _finding_type_needs_control(finding_type: str) -> bool:
-    ft = finding_type.lower()
-    return any(
-        needle in ft
-        for needle in (
-            "auth",
-            "idor",
-            "access",
-            "privilege",
-            "sql",
-            "xss",
-            "ssrf",
-            "csrf",
-        )
-    )
 
 
 def _has_doctrine_text(blob: str) -> bool:

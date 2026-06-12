@@ -17,6 +17,12 @@ import re
 from typing import Any, Callable
 
 from vxis.agent.tool_registry import ToolResult
+from vxis.agent.tools._poc_signals import (
+    CONTROL_MARKERS as _CONTROL_MARKERS,
+    POC_ATTEMPT_MARKERS as _POC_ATTEMPT_MARKERS,
+    POC_RESULT_MARKERS as _POC_RESULT_MARKERS,
+    finding_type_needs_control as _finding_type_needs_control,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,56 +32,6 @@ _chains: list[dict[str, Any]] = []
 _event_callback: Callable[[str, dict[str, Any]], None] | None = None
 
 _VALID_SEVERITIES = ("critical", "high", "medium", "low", "informational")
-_POC_ATTEMPT_MARKERS = (
-    "GET ",
-    "POST ",
-    "PUT ",
-    "PATCH ",
-    "DELETE ",
-    "curl ",
-    "sqlmap",
-    "payload",
-    "request:",
-    "control",
-    "baseline",
-)
-_POC_RESULT_MARKERS = (
-    "response_status",
-    "status_code",
-    "response_excerpt",
-    "observed_delta",
-    "Set-Cookie:",
-    "Location:",
-    '"token"',
-    '"role"',
-    '"data"',
-    '"status"',
-    "stack trace",
-    "Traceback",
-    "sql error",
-    "sqlmap identified",
-    "dumped",
-)
-_CONTROL_REQUIRED_TYPES = (
-    "auth",
-    "idor",
-    "access",
-    "privilege",
-    "csrf",
-    "business_logic",
-)
-_CONTROL_MARKERS = (
-    "control",
-    "baseline",
-    "negative",
-    "without auth",
-    "with auth",
-    "unauthenticated",
-    "authenticated",
-    "observed_delta",
-    "before:",
-    "after:",
-)
 _REPEAT_MARKERS = (
     "repeat_count",
     "reproduced twice",
@@ -190,18 +146,6 @@ def _canonical_finding_type(value: str) -> str:
     }:
         return "weak_auth"
     return ft
-
-
-def _finding_type_needs_control(finding_type: str) -> bool:
-    """Return True iff a PoC for this finding_type must include a control/baseline.
-
-    Injection, auth bypass, IDOR, access-control, and similar differential findings
-    require a control run to rule out false positives.  Misconfig and disclosure
-    findings — where the raw evidence (e.g. exposed credentials, missing header) is
-    self-evident — do not need a separate control run.
-    """
-    ft = str(finding_type or "").lower()
-    return any(needle in ft for needle in _CONTROL_REQUIRED_TYPES)
 
 
 def _reset_for_tests() -> None:
