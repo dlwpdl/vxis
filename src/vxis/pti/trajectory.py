@@ -100,6 +100,13 @@ class TrajectoryStore:
             raise ValueError("trajectory record target_hash does not match target directory")
 
 
+def _policy_requires_redaction(policy: Any) -> bool:
+    """NOW-2/2c: True when the active ScanPolicy mandates secret redaction
+    (secret_handling != 'plaintext-lab'). policy None → False (legacy / ceiling
+    off), so trajectory privacy stays env-driven for non-policy scans."""
+    return policy is not None and getattr(policy, "secret_handling", "") != "plaintext-lab"
+
+
 def apply_privacy(
     record: TrajectoryRecord,
     *,
@@ -107,7 +114,17 @@ def apply_privacy(
 ) -> TrajectoryRecord:
     mode = (privacy_mode or os.getenv("VXIS_TRAJECTORY_PRIVACY", "")).strip().lower()
     if mode != STRICT_PRIVACY_MODE:
-        return record
+        # NOW-2/2c: an active encrypt-redact ScanPolicy also triggers redaction, so
+        # trajectory privacy is policy-driven (every prod/crown profile), not only
+        # env-driven. No active policy → legacy (env-only).
+        try:
+            from vxis.agent.policy.runtime_policy import get_active_policy
+
+            _active_policy = get_active_policy()
+        except Exception:
+            _active_policy = None
+        if not _policy_requires_redaction(_active_policy):
+            return record
     return record.model_copy(update={"input_context": hash_sensitive_context(record.input_context)})
 
 
