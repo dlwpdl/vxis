@@ -240,7 +240,7 @@ def _build_finding_from_dict(
     """
     from vxis.evidence.schema import Severity as _EvidenceSeverity
     from vxis.agent.tools.finding_tools import _canonical_finding_type
-    from vxis.models.finding import CVSSVector, Evidence, Finding
+    from vxis.models.finding import CVSSVector, Evidence, Finding, FindingStatus
     from vxis.models.finding import Severity as _FindingSeverity  # distinct enum
 
     # Map incoming severity strings to models.finding.Severity (the enum that
@@ -339,6 +339,17 @@ def _build_finding_from_dict(
     cwe_raw = str(d.get("cwe", ""))
     cwe_ids = [cwe_raw] if cwe_raw else []
 
+    # NOW-1/1.3: carry the adversarial-verifier verdict into Finding.status so the
+    # DB/dashboard regeneration paths inherit it; blank verdict stays `open`.
+    _verdict = str(d.get("verifier_verdict", "")).upper()
+    _status = (
+        FindingStatus.confirmed
+        if _verdict == "CONFIRMED"
+        else FindingStatus.unconfirmed
+        if _verdict == "UNCONFIRMED"
+        else FindingStatus.open
+    )
+
     return Finding(
         id=str(d.get("id", "VXIS-0000")),
         scan_id=scan_id,
@@ -350,6 +361,7 @@ def _build_finding_from_dict(
         poc_description=bilingual_poc,
         poc_script_code=poc_script_code or None,
         severity=severity,
+        status=_status,
         finding_type=_canonical_finding_type(str(d.get("finding_type", "generic"))),
         source_plugin="scan_agent_loop",
         affected_component=str(d.get("affected_component", "")),
@@ -359,6 +371,18 @@ def _build_finding_from_dict(
         remediation=bilingual_remediation,
         references=[],
     )
+
+
+def _should_include_in_report(d: dict[str, Any]) -> bool:
+    """NOW-1/1.3: exclude UNCONFIRMED findings from the client-facing report.
+
+    They stay in the raw _findings store (MITRE / scan-memory / retrospective keep
+    the full corpus) and are only withheld from ctx.findings, which drives the
+    HTML/DOCX/JSON/attack-graph renderers. CONFIRMED and blank-verdict findings
+    (info / no-verifier / legacy) are kept — strict equality to UNCONFIRMED avoids
+    over-suppression.
+    """
+    return str(d.get("verifier_verdict", "")).upper() != "UNCONFIRMED"
 
 
 # Back-compat alias — older callers reference the legacy name. New code should
@@ -1054,7 +1078,10 @@ class ScanPipeline:
                     f = _build_finding_from_dict(
                         d, scan_id=ctx.scan_id, target=ctx.target, kind=ctx.kind
                     )
-                    ctx.findings.append(f)
+                    # NOW-1/1.3: withhold UNCONFIRMED findings from the rendered report
+                    # (kept in the raw store for learning / MITRE / retrospective).
+                    if _should_include_in_report(d):
+                        ctx.findings.append(f)
                 except Exception:
                     logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
 
