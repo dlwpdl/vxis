@@ -776,6 +776,41 @@ class ScanPipeline:
         if v3_flag("VXIS_V3_POLICY") or v3_enabled():
             ctx.policy = resolve_policy(self.config)
 
+    async def _resolve_injection_decision(self, ctx: ScanContext) -> str | None:
+        """NOW-2/2e (F3): resolve the one-shot injection-approval decision (full /
+        readonly / deny) for the dispatch injection gate. Runs only when the
+        capability-ceiling policy is active; otherwise returns None (legacy/ungated).
+        Honors auto_approve_injection, else the approval callback (fail-closed deny on
+        error), else None when no approval mechanism is configured."""
+        from vxis.agent.scan_loop_v3 import v3_enabled, v3_flag
+
+        if not (v3_flag("VXIS_V3_POLICY") or v3_enabled()):
+            return None
+        if self._auto_approve_injection:
+            logger.warning("auto_approve_injection=True — bypassing injection approval (full)")
+            decision = "full"
+        elif self._injection_approval_callback is not None:
+            summary = {
+                "target": ctx.target,
+                "scan_id": str(getattr(ctx, "scan_id", "")),
+                "title": "",
+                "frameworks": [],
+                "phase_count": 0,
+            }
+            try:
+                result = await self._injection_approval_callback(summary)
+            except Exception:
+                logger.exception("injection approval callback failed — failing closed (deny)")
+                return "deny"
+            if isinstance(result, str) and result.strip().lower() in ("full", "readonly", "deny"):
+                decision = result.strip().lower()
+            else:
+                decision = "full" if result else "deny"
+        else:
+            return None
+        self._emit("injection_approval_result", {"decision": decision})
+        return decision
+
     async def run(
         self,
         target: str,
@@ -794,10 +829,16 @@ class ScanPipeline:
         )
         runtime = await prepare_target_runtime(target, kind, hints=target_hints)
         from vxis.scope.runtime_gate import ensure_active_scope, clear_active_scope
-        from vxis.agent.policy.runtime_policy import clear_active_policy, set_active_policy
+        from vxis.agent.policy.runtime_policy import (
+            clear_active_policy,
+            clear_injection_decision,
+            set_active_policy,
+            set_injection_decision,
+        )
 
         _scope_owned = ensure_active_scope(runtime.resolved_target)
         _policy_token = None  # NOW-2/F4: reset token so cleanup restores the outer policy
+        _injection_token = None  # NOW-2/2e: reset token for the ambient injection decision
         try:
             self._emit(
                 "phase_end",
@@ -824,6 +865,10 @@ class ScanPipeline:
             # ceiling. None when the v3 policy flag is off → legacy behavior.
             # F4: keep the reset token so nested/SDK/MCP runs restore the outer policy.
             _policy_token = set_active_policy(ctx.policy)
+            # NOW-2/2e (F3): resolve + publish the one-shot injection-approval decision
+            # (honors the CLI gate / auto-approve) so the dispatch injection gate
+            # enforces it. None when the policy is inactive → legacy behavior.
+            _injection_token = set_injection_decision(await self._resolve_injection_decision(ctx))
             ctx.runtime_profile = {  # type: ignore[attr-defined]
                 "launcher_name": runtime.launcher_name,
                 "runtime_mode": runtime.runtime_mode,
@@ -1330,6 +1375,7 @@ class ScanPipeline:
             if _scope_owned:
                 clear_active_scope()
             clear_active_policy(_policy_token)
+            clear_injection_decision(_injection_token)
 
     async def _run_deferred_gate(self, ctx: ScanContext) -> None:
         """Invoke the approval callback on ctx.deferred_actions. Phase A stub."""

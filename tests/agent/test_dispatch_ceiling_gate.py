@@ -6,7 +6,12 @@ below 'lateral'. Active-only: no ambient policy → legacy (no block).
 """
 import pytest
 
-from vxis.agent.policy.runtime_policy import clear_active_policy, set_active_policy
+from vxis.agent.policy.runtime_policy import (
+    clear_active_policy,
+    clear_injection_decision,
+    set_active_policy,
+    set_injection_decision,
+)
 from vxis.agent.policy.scan_policy import PROFILE_POLICY_TABLE
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
 
@@ -74,5 +79,46 @@ async def test_dispatch_allows_non_exploitation_tool_under_low_ceiling():
 async def test_dispatch_allows_shell_when_no_active_policy():
     # legacy: ceiling off → shell not gated
     reg = _reg()
+    r = await reg.dispatch("shell_exec", {"command": "id"})
+    assert r.ok is True
+
+
+# ── F3 (2e): injection-approval gate at dispatch ──
+@pytest.mark.asyncio
+async def test_dispatch_blocks_shell_under_injection_deny():
+    reg = _reg()
+    tok = set_injection_decision("deny")
+    try:
+        r = await reg.dispatch("shell_exec", {"command": "id"})
+    finally:
+        clear_injection_decision(tok)
+    assert r.ok is False and r.error == "injection_blocked"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_allows_non_injection_tool_under_injection_deny():
+    reg = _reg()
+    tok = set_injection_decision("deny")
+    try:
+        r = await reg.dispatch("http_request", {"url": "http://t"})
+    finally:
+        clear_injection_decision(tok)
+    assert r.ok is True  # injection deny skips injection, not recon
+
+
+@pytest.mark.asyncio
+async def test_dispatch_allows_shell_under_injection_full():
+    reg = _reg()
+    tok = set_injection_decision("full")
+    try:
+        r = await reg.dispatch("shell_exec", {"command": "id"})
+    finally:
+        clear_injection_decision(tok)
+    assert r.ok is True
+
+
+@pytest.mark.asyncio
+async def test_dispatch_allows_shell_when_no_injection_decision():
+    reg = _reg()  # legacy: no decision set
     r = await reg.dispatch("shell_exec", {"command": "id"})
     assert r.ok is True

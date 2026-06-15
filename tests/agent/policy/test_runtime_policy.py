@@ -1,8 +1,12 @@
 """NOW-2 foundation + 2d — ambient ScanPolicy + exploitation-ceiling gate logic."""
 from vxis.agent.policy.runtime_policy import (
     clear_active_policy,
+    clear_injection_decision,
     get_active_policy,
+    get_injection_decision,
+    injection_action_blocked,
     set_active_policy,
+    set_injection_decision,
     skill_blocked_by_ceiling,
     tool_blocked_by_ceiling,
 )
@@ -94,3 +98,35 @@ def test_skill_ceiling_legacy_when_no_policy():
 def test_skill_ceiling_unknown_skill_fail_closed():
     # unrecognized skill under read-only → treated as active → blocked
     assert skill_blocked_by_ceiling("totally_unknown_skill", PROFILE_POLICY_TABLE["standard"]) is True
+
+
+# ── F3 (2e): injection-approval decision + gate ──
+def test_injection_decision_roundtrip():
+    assert get_injection_decision() is None
+    tok = set_injection_decision("deny")
+    try:
+        assert get_injection_decision() == "deny"
+    finally:
+        clear_injection_decision(tok)
+    assert get_injection_decision() is None
+
+
+def test_injection_blocked_only_on_deny():
+    # None (legacy/ungated) and full/readonly (approved) never block
+    for decision in (None, "full", "readonly"):
+        assert injection_action_blocked("shell_exec", {}, decision) is False
+        assert injection_action_blocked("run_skill", {"skill": "test_injection"}, decision) is False
+
+
+def test_injection_deny_blocks_injection_class_actions():
+    assert injection_action_blocked("shell_exec", {}, "deny") is True
+    assert injection_action_blocked("python_exec", {}, "deny") is True
+    assert injection_action_blocked("run_skill", {"skill": "test_injection"}, "deny") is True
+    assert injection_action_blocked("run_skill", {"skill": "test_ssrf"}, "deny") is True
+
+
+def test_injection_deny_allows_passive_and_non_injection_tools():
+    # injection deny skips injection, but passive recon + non-injection tools still run
+    assert injection_action_blocked("run_skill", {"skill": "enumerate_endpoints"}, "deny") is False
+    assert injection_action_blocked("http_request", {"url": "http://t"}, "deny") is False
+    assert injection_action_blocked("report_finding", {}, "deny") is False

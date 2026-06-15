@@ -18,6 +18,12 @@ _ACTIVE_POLICY: ContextVar[ScanPolicy | None] = ContextVar(
     "vxis_active_scan_policy", default=None
 )
 
+# NOW-2/2e (F3): operator injection-approval decision — None=ungated/legacy, or
+# "full" / "readonly" / "deny". Resolved once per scan when the ceiling is active.
+_INJECTION_DECISION: ContextVar[str | None] = ContextVar(
+    "vxis_injection_decision", default=None
+)
+
 # Exploitation primitives: arbitrary shell / code execution. Require ceiling
 # >= 'lateral'; below that (none / read-only) they are refused at dispatch.
 _EXPLOITATION_TOOLS = frozenset({"shell_exec", "python_exec"})
@@ -42,6 +48,25 @@ def clear_active_policy(token: Token | None = None) -> None:
         except (ValueError, LookupError):
             pass
     _ACTIVE_POLICY.set(None)
+
+
+def set_injection_decision(decision: str | None) -> Token:
+    """Publish the per-context injection-approval decision; returns a reset token."""
+    return _INJECTION_DECISION.set(decision)
+
+
+def get_injection_decision() -> str | None:
+    return _INJECTION_DECISION.get()
+
+
+def clear_injection_decision(token: Token | None = None) -> None:
+    if token is not None:
+        try:
+            _INJECTION_DECISION.reset(token)
+            return
+        except (ValueError, LookupError):
+            pass
+    _INJECTION_DECISION.set(None)
 
 
 def tool_blocked_by_ceiling(tool_name: str, policy: ScanPolicy | None) -> bool:
@@ -85,3 +110,22 @@ def skill_blocked_by_ceiling(skill_name: str, policy: ScanPolicy | None) -> bool
     if skill_name.strip().lower() in _PASSIVE_SKILLS:
         return False
     return ceiling_rank(policy.exploitation_ceiling) < ceiling_rank("lateral")
+
+
+def injection_action_blocked(tool_name: str, args: dict | None, decision: str | None) -> bool:
+    """NOW-2/2e (F3): True when the operator's injection decision forbids this action.
+
+    decision None (no approval configured / legacy) or "full"/"readonly" (approved)
+    → never blocks here (read-only mutation deferral is handled by the existing
+    deferred-mutation gate). decision "deny" (injection skipped) → block injection-
+    class actions: shell_exec/python_exec and run_skill with an active/attack skill.
+    Passive recon and non-injection tools still run.
+    """
+    if decision != "deny":
+        return False
+    if tool_name in _EXPLOITATION_TOOLS:
+        return True
+    if tool_name == "run_skill":
+        skill = str((args or {}).get("skill", "")).strip().lower()
+        return skill not in _PASSIVE_SKILLS
+    return False

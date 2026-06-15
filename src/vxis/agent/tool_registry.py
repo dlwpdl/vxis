@@ -191,6 +191,29 @@ class ToolRegistry:
                 ),
                 error="ceiling_blocked",
             )
+        # NOW-2/2e (F3): injection-approval gate — honors the operator's one-shot
+        # injection decision (deny → skip injection-class actions). Active-only:
+        # no decision set → legacy (no block).
+        try:
+            from vxis.agent.policy.runtime_policy import (
+                get_injection_decision,
+                injection_action_blocked,
+            )
+
+            _inj_decision = get_injection_decision()
+        except Exception as e:
+            return ToolResult(
+                ok=False,
+                summary=f"injection gate failed before {name}: {type(e).__name__}: {e}",
+                error="injection_gate_failed",
+            )
+        if injection_action_blocked(name, args, _inj_decision):
+            return ToolResult(
+                ok=False,
+                data={"blocked": True, "policy": "injection_approval", "decision": _inj_decision},
+                summary=f"{name} BLOCKED by injection-approval gate (decision='{_inj_decision}')",
+                error="injection_blocked",
+            )
         try:
             return await tool.run(**args)
         except Exception as e:
