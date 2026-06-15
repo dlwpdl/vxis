@@ -797,6 +797,7 @@ class ScanPipeline:
         from vxis.agent.policy.runtime_policy import clear_active_policy, set_active_policy
 
         _scope_owned = ensure_active_scope(runtime.resolved_target)
+        _policy_token = None  # NOW-2/F4: reset token so cleanup restores the outer policy
         try:
             self._emit(
                 "phase_end",
@@ -821,7 +822,8 @@ class ScanPipeline:
             # NOW-2: publish the resolved policy as ambient state so loop-driven
             # tools (dispatched through tool_registry) can read the capability
             # ceiling. None when the v3 policy flag is off → legacy behavior.
-            set_active_policy(ctx.policy)
+            # F4: keep the reset token so nested/SDK/MCP runs restore the outer policy.
+            _policy_token = set_active_policy(ctx.policy)
             ctx.runtime_profile = {  # type: ignore[attr-defined]
                 "launcher_name": runtime.launcher_name,
                 "runtime_mode": runtime.runtime_mode,
@@ -1327,7 +1329,7 @@ class ScanPipeline:
         finally:
             if _scope_owned:
                 clear_active_scope()
-            clear_active_policy()
+            clear_active_policy(_policy_token)
 
     async def _run_deferred_gate(self, ctx: ScanContext) -> None:
         """Invoke the approval callback on ctx.deferred_actions. Phase A stub."""

@@ -6,6 +6,8 @@ Future tasks will expand build_default_registry() with high-level Phase wrappers
 
 from __future__ import annotations
 
+import logging
+
 from vxis.agent.tool_registry import ToolRegistry
 from vxis.agent.tools.control_tools import FinishScanTool, ThinkTool, WaitTool
 from vxis.agent.tools.hands_tools import (
@@ -62,6 +64,8 @@ __all__ = [
     "AgentGraphTool",
     "build_default_registry",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def build_default_registry(
@@ -143,8 +147,8 @@ def _register_optional_v3_tools(reg: ToolRegistry) -> None:
         for tool in build_hypothesis_tools():
             if not reg.has_tool(tool.name):
                 reg.register(tool)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("optional v3 hypothesis tools unavailable: %s", exc)
 
     optional_tools = [
         ("vxis.agent.tools.ask_human", "AskHumanTool"),
@@ -157,5 +161,6 @@ def _register_optional_v3_tools(reg: ToolRegistry) -> None:
             tool = tool_cls()
             if not reg.has_tool(tool.name):
                 reg.register(tool)
-        except Exception:
+        except Exception as exc:
+            logger.debug("optional v3 tool %s.%s unavailable: %s", module_name, class_name, exc)
             continue

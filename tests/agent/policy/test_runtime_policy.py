@@ -40,3 +40,21 @@ def test_ceiling_legacy_when_no_policy():
     # ceiling off (policy None) → never blocked, matching P1/scope gates
     assert tool_blocked_by_ceiling("shell_exec", None) is False
     assert tool_blocked_by_ceiling("python_exec", None) is False
+
+
+def test_active_policy_nesting_restores_outer():
+    # F4: clearing with the reset token restores the OUTER policy, not None — so a
+    # nested/SDK/MCP scan can't wipe the surrounding scan's ambient policy.
+    outer = FAIL_CLOSED_DEFAULT
+    inner = PROFILE_POLICY_TABLE["aggressive"]
+    tok_outer = set_active_policy(outer)
+    try:
+        tok_inner = set_active_policy(inner)
+        try:
+            assert get_active_policy() is inner
+        finally:
+            clear_active_policy(tok_inner)
+        assert get_active_policy() is outer  # restored, not wiped to None
+    finally:
+        clear_active_policy(tok_outer)
+    assert get_active_policy() is None
