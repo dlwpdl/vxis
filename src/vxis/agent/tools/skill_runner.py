@@ -160,6 +160,31 @@ class RunSkillTool:
                 error="raw_egress",
             )
 
+        # NOW-2/2d (F2): exploitation-ceiling gate for the run_skill attack-template
+        # entrypoint. Active skills require ceiling >= 'lateral'; passive recon skills
+        # are allowed at read-only. policy-active-only (None → legacy passthrough).
+        # Placed before the cache key + _skills_ever_called so a blocked skill is not
+        # recorded as 'tried' and does not populate the cache.
+        from vxis.agent.policy.runtime_policy import get_active_policy, skill_blocked_by_ceiling
+
+        _ceiling_policy = get_active_policy()
+        if skill_blocked_by_ceiling(skill_name, _ceiling_policy):
+            return ToolResult(
+                ok=False,
+                data={
+                    "blocked": True,
+                    "policy": "exploitation_ceiling",
+                    "ceiling": _ceiling_policy.exploitation_ceiling,
+                    "skill": skill_name,
+                },
+                summary=(
+                    f"run_skill '{skill_name}' BLOCKED by exploitation ceiling "
+                    f"'{_ceiling_policy.exploitation_ceiling}' — active skill requires "
+                    "'lateral'+ (passive recon skills are allowed)"
+                ),
+                error="ceiling_blocked",
+            )
+
         # Cache hit detection — normalize args so cosmetic differences
         # (key order, default-vs-explicit) still collide.
         try:

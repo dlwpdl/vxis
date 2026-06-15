@@ -54,3 +54,34 @@ def tool_blocked_by_ceiling(tool_name: str, policy: ScanPolicy | None) -> bool:
     if policy is None or tool_name not in _EXPLOITATION_TOOLS:
         return False
     return ceiling_rank(policy.exploitation_ceiling) < ceiling_rank("lateral")
+
+
+# NOW-2/2d (F2): run_skill attack-template governance. Passive recon/audit skills
+# (read-only) are always allowed; everything else (incl. unknown/improvised names)
+# is treated as active exploitation and requires exploitation_ceiling >= 'lateral'.
+_PASSIVE_SKILLS = frozenset(
+    {
+        # web recon / read-only checks (GET-only; no payloads, no state change)
+        "enumerate_endpoints", "test_sensitive_files", "test_misconfig",
+        "test_crypto", "test_infra",
+        # macOS desktop static audits (read-only inspection)
+        "test_local_storage_secrets", "test_electron_misconfig", "test_signature_audit",
+        "test_entitlement_audit", "test_dylib_hijack", "test_deeplink_abuse",
+        "test_ipc_injection", "test_binary_protections",
+    }
+)
+
+
+def skill_blocked_by_ceiling(skill_name: str, policy: ScanPolicy | None) -> bool:
+    """True when an ACTIVE policy's exploitation ceiling forbids running this skill.
+
+    Active (exploitation/mutating) skills require exploitation_ceiling >= 'lateral';
+    passive recon/audit skills are always allowed. Fail-closed: an unknown/unlisted
+    skill is treated as active. policy None → not blocked (legacy / ceiling off).
+    Pass the alias-RESOLVED skill name (skill_runner normalizes before calling).
+    """
+    if policy is None:
+        return False
+    if skill_name.strip().lower() in _PASSIVE_SKILLS:
+        return False
+    return ceiling_rank(policy.exploitation_ceiling) < ceiling_rank("lateral")
