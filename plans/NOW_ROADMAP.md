@@ -1,0 +1,48 @@
+# VXIS NOW Roadmap — Resume Checklist
+
+> Created 2026-06-15. Paused at: analysis complete, ADR-014 + 16 proposals + NOW-1 plan
+> written, **implementation NOT started** (user out of session usage).
+> Decisions locked (user-approved 2026-06-15):
+> - Build order: **NOW-1 → NOW-2 → NOW-3**, each `plan → TDD(red-first) → phased commit → /code-review`.
+> - moat strategy persisted: `wiki/decisions/014_moat_strategy.md`.
+> - 16 upstream-sync proposals loaded: `tools/upstream_watch/proposals/2026-06-15.*` (`decisions.json`: 9 approved / 3 deferred / 4 rejected).
+> - Resume = start at NOW-1 / 1.1.
+
+## NOW-1 — Verifier all-severity FP-gate  (full plan: `plans/now1_verifier_all_severity.md`)
+ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the verifier into a quantifiable FP-rate number.
+- [ ] **1.1** Consolidate the two drifted gate copies → one `_verify_and_gate()` (`scan_loop_run.py:493-559` inline + `scan_loop_actions.py:738-813` `_dispatch_report_finding_checked`), behavior-preserving + characterization tests.
+- [ ] **1.2** All-severity: drop the `{high,critical}` filter; deterministic preflight for all, LLM refuter on high/critical always + medium/low only when borderline (cost bound).
+- [ ] **1.3** UNCONFIRMED → exclude from report + write `verdict`/`verified` onto the persisted finding (`finding_tools.py:883`, the real unguarded chokepoint).
+- [ ] **1.4** CI clean-control gate: `CONFIRMED && critical == 0` on a known-clean fixture → emit FP-rate / verification-rate metric.
+
+## NOW-2 — box-mode hard enforcement + capability-ceiling  (= R8 + ADR-013 + black-box purity)
+- [ ] Wire `permit_strategy`/`persist_secret`/`permit_pivot` to read `ctx.policy`, fail-closed (today: 0 production callers; `scan_pipeline_v2.py:707` only attaches).
+- [ ] box-mode registry gate: in **black-box**, `interaction/code` tools + `code_to_hypothesis` + repo-mount are all **excluded** (provably can't read source).
+- [ ] Invariant/cassette tests: black-box scan ⇒ `interaction.code` imports == 0, no repo mount; an exploit action without a `permit_*` call FAILS.
+
+## NOW-3 — TUI box/profile/attack-level + live report proof
+- [ ] `cli/interactive.py`: explicit **⚫ black-box / ⚪ white-box / 🌗 grey-box** as the FIRST wizard step (today: only white-box "code" is explicit; black-box implicit).
+- [ ] Unify TUI `PROFILES` with `PROFILE_POLICY_TABLE` (13 profiles incl. **`vc-portfolio-monitor`** = the user's "VC"); render **attack-level badge** from `exploitation_ceiling`/`ceiling_rank` (none→read-only→lateral→full); risk labels (lab-only / evasion-on / approval-required).
+- [ ] **Parallel vs serial** toggle for agent scans (`background_worker_concurrency`).
+- [ ] Prove a LIVE scan emits a bilingual NCC report at fixture depth; surface verification-rate (CONFIRMED vs REFUTED) as a page-1 panel.
+
+## NEXT
+- [ ] Global cost/USD/turn budget governor + honest per-agent attribution (proposal R11).
+- [ ] Desktop dynamic confirmation (real `DYLD_INSERT_LIBRARIES` inject) + Windows DESKTOP branch; fix cross-surface synth Finding↔Evidence type bridge + pull into the live scan loop (P8).
+- [ ] White-box CODE fusion wired into the live loop (gap#1): `CodeRecon.fingerprint → code_recon_to_hypotheses → push CodeHypothesis into P3 queue → dynamic-confirm → Finding with source line:col`. Run alongside a web target in one scan.
+
+## LATER
+- [ ] Converge self-improvement: retrospective `improvement_hints` → structured skill-scheduling bias the decision policy consumes; feed `findings_by_type` into a connected KnowledgeStore.
+- [ ] Decide P15 Digital Twin (wire with real per-skill replay, OR drop) ; **DROP P12 Evolution + delete phantom registry entries** ; wire or shelve P13 Biometrics.
+- [ ] Fix ADR-001 license record (Strix = **Apache-2.0**, PentAGI/pentest-ai-agents/pentestagent = **MIT** — all non-AGPL).
+
+## Code-hygiene (user research, all verified — fold into the waves above)
+- [ ] De-global `_findings`/`_chains` (`finding_tools.py:30`) + `_skill_cache` (`skill_runner.py:32`) → scan-scoped. **Blocks multi-agent / multi-tenant** → do in/before NOW-2.
+- [ ] CQS: `_dag_finish_blocking_branches` mutates branch state (`scan_loop_decision_policy.py:46`).
+- [ ] `brain.py`: semaphore loop-id dict accumulation (`:115`); `LLM_API_KEY→OPENAI_API_KEY` env side-effect (`:333`, Strix already refactored this — reference).
+- [ ] `agent/tools/__init__.py:116` silent `except: pass` on optional v3 tool registration → `logger.debug`.
+
+## Pointers
+- Strategy/why: `wiki/decisions/014_moat_strategy.md` (solid moat ×2; dead-code ×5 marketing guardrail; Strix weaknesses; where-not-to-compete).
+- Tactical backlog: `tools/upstream_watch/proposals/2026-06-15.md` (16 items with adopt/defer/reject verdicts).
+- NOW-1 detail: `plans/now1_verifier_all_severity.md`.
