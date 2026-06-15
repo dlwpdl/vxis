@@ -100,12 +100,40 @@ async def test_unconfirmed_passes_when_not_require_confirmed():
 
 
 @pytest.mark.asyncio
-async def test_medium_severity_skips_verification_in_phase_1_1():
-    # 1.1 is behaviour-preserving: only high/critical are gated for now.
-    loop, stub = _loop("REFUTED")
+async def test_medium_severity_is_verified():
+    # 1.2: medium/low are now verified too (was skipped in 1.1).
+    loop, stub = _loop("CONFIRMED")
+    result = await loop._verify_and_gate(_args("medium"), require_confirmed=True)
+    assert result is None  # CONFIRMED proceeds
+    assert len(stub.calls) == 1  # verifier WAS invoked for medium
+    assert loop.state.verdict_counts.get("CONFIRMED") == 1
+
+
+@pytest.mark.asyncio
+async def test_refuted_medium_blocks():
+    loop, _ = _loop("REFUTED")
+    result = await loop._verify_and_gate(_args("medium"), require_confirmed=True)
+    assert isinstance(result, ToolResult)
+    assert result.ok is False
+    assert result.error == "verifier_blocked"
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_medium_proceeds_even_with_require_confirmed():
+    # 1.2 guards against over-suppression: UNCONFIRMED medium/low is NOT blocked
+    # (verdict-writeback + report exclusion is 1.3). Only high/critical block on
+    # UNCONFIRMED here.
+    loop, _ = _loop("UNCONFIRMED")
     result = await loop._verify_and_gate(_args("medium"), require_confirmed=True)
     assert result is None
-    assert stub.calls == []  # verifier not invoked below high/critical (yet)
+
+
+@pytest.mark.asyncio
+async def test_informational_severity_skips_verification():
+    loop, stub = _loop("REFUTED")
+    result = await loop._verify_and_gate(_args("informational"), require_confirmed=True)
+    assert result is None
+    assert stub.calls == []  # informational is not a reportable-gate severity
 
 
 @pytest.mark.asyncio

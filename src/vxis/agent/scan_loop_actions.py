@@ -755,11 +755,13 @@ class ScanLoopActionMixin:
           spawn_gap_on_unconfirmed=True → REFUTED blocks, UNCONFIRMED proceeds and
           spawns a recursive gap branch.
 
-        NOW-1/1.1 is behaviour-preserving: only high/critical are gated here. The
-        all-severity change is NOW-1/1.2.
+        NOW-1/1.2: all reportable severities (critical/high/medium/low) are verified;
+        informational is not gated. REFUTED always blocks. UNCONFIRMED blocks only on
+        high/critical (when require_confirmed) to avoid over-suppressing medium/low —
+        verdict writeback + report exclusion of UNCONFIRMED is NOW-1/1.3.
         """
         severity = str(args.get("severity", "")).lower()
-        if severity not in {"high", "critical"} or "verify_finding" not in self.registry.list_tools():
+        if severity not in {"critical", "high", "medium", "low"} or "verify_finding" not in self.registry.list_tools():
             return None
 
         verify_args = {
@@ -843,7 +845,11 @@ class ScanLoopActionMixin:
                 data={"verifier_blocked": True, "verdict": verdict, "reasoning": reasoning},
                 error="verifier_blocked",
             )
-        if verdict != "CONFIRMED" and require_confirmed:
+        if (
+            verdict != "CONFIRMED"
+            and require_confirmed
+            and severity in {"high", "critical"}
+        ):
             return ToolResult(
                 ok=False,
                 summary=(
