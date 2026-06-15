@@ -3,8 +3,10 @@
 > Created 2026-06-15. **NOW-1 CORE COMPLETE** (1.1 `8e83b00`, 1.2 `c6856b3`, 1.3a `f330023`,
 > 1.3b `f34a5ec`, 1.4 CI clean-control gate). Full suite green (2461 passed). Also fixed a
 > pre-existing agent-graph logger bug (`a7a8fac`).
-> **Resume at: NOW-1 adversarial code-review (Workflow) → then NOW-2 (box-mode + capability-ceiling).**
-> Residual 1.3c (DB-regeneration status filter) tracked below.
+> **NOW-1 + adversarial review COMPLETE** (review fixes F1/F2/F3 in `6b46865`; full suite 2473 green).
+> **Resume at: NOW-2 (box-mode hard-enforcement + capability-ceiling).**
+> Fix-followups (non-blocking, tracked below): 1.3c DB-regen filter; agent-graph temp-file leak;
+> precision-panel vs findings-table UNCONFIRMED count divergence.
 > Decisions locked (user-approved 2026-06-15):
 > - Build order: **NOW-1 → NOW-2 → NOW-3**, each `plan → TDD(red-first) → phased commit → /code-review`.
 > - moat strategy persisted: `wiki/decisions/014_moat_strategy.md`.
@@ -17,8 +19,9 @@ ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the veri
 - [x] **1.2** All-severity: filter `{high,critical}` → `{critical,high,medium,low}` (informational ungated). REFUTED blocks all; UNCONFIRMED blocks only high/critical to avoid over-suppression. (`c6856b3`)  — NOTE: gate-level cost-bound (LLM only on borderline for medium/low) deferred; verify_finding's deterministic preflight runs first, full LLM otherwise. Revisit if medium/low verify cost is high.
 - [x] **1.3** UNCONFIRMED exclude + verdict writeback — two slices. **1.3a** (`f330023`): `_verify_and_gate` stamps `verifier_verdict` onto args → `ReportFindingTool` persists `verifier_verdict`/`verified` (new-finding literal + dedup UPGRADE-ONLY). **1.3b** (`f34a5ec`): `FindingStatus.unconfirmed` + `_build_finding_from_dict` maps verdict→status + `_should_include_in_report` withholds UNCONFIRMED from `ctx.findings` (raw store keeps full corpus). De-risked by the `now1-3-dataflow-map` workflow (caught the dedup-bypass + divergent-path traps).
 - [ ] **1.3c** (residual) DB-regeneration readers (cli/main, cli/interactive, cli/multi_scan, dashboard/routes_extra, primitives/output) read `FindingRecord` and don't yet filter `status==unconfirmed`; status is now carried so they *can*. Legacy orchestrator pipeline has no UNCONFIRMED concept. Live HTML report already covered.
-- [x] **1.4** CI clean-control gate (`tests/agent/tools/test_verifier_clean_control.py`): 5 benign FP-shapes killed by the deterministic preflight (used_stronger_model=False), clean-control FP-rate==0. Proof that FP control is executable code, not a prompt. (commit pending in this batch)
-- [ ] **NOW-1 review** ← RESUME HERE — run the adversarial /code-review (Workflow) over the cumulative NOW-1 diff (a0c36f2..HEAD): correctness, over-suppression, report-integrity, FP-gate validity.
+- [x] **1.4** CI clean-control gate (`tests/agent/tools/test_verifier_clean_control.py`, `5f44dbf`): 5 benign FP-shapes killed by the deterministic preflight (used_stronger_model=False), clean-control FP-rate==0. Proof that FP control is executable code, not a prompt.
+- [x] **NOW-1 review** (Workflow `w2hnivcx1`, 12 agents) → 6 confirmed / 2 refuted. **3 fix-now resolved in `6b46865`**: F1 severity-aware exclusion (medium/low UNCONFIRMED kept), F2 drift-tolerant verdict parse (`_extract_verdict`), F3 attack-chain reconcile (`_reconcile_chains`). One dimension (fp-gate/dedup) failed on 529 → re-running in background (`a3dfc7cbf2ad5df4f`).
+- [ ] **fix-followup (NON-BLOCKING)**: (a) agent-graph snapshot temp-file leak on replace() failure → add finally/unlink; (b) **1.3c** DB-regeneration readers filter `status==unconfirmed`; (c) report precision-panel counts UNCONFIRMED that the findings table omits (high/critical only after F1).
 
 ## NOW-2 — box-mode hard enforcement + capability-ceiling  (= R8 + ADR-013 + black-box purity)
 - [ ] Wire `permit_strategy`/`persist_secret`/`permit_pivot` to read `ctx.policy`, fail-closed (today: 0 production callers; `scan_pipeline_v2.py:707` only attaches).
