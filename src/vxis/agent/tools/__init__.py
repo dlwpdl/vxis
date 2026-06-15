@@ -121,7 +121,22 @@ def build_default_registry(
     # so it provably cannot read target source.
     if box_mode in ("white", "grey"):
         _register_code_surface_tools(reg)
+    _enforce_box_mode(reg, box_mode)
     return reg
+
+
+def _enforce_box_mode(reg: ToolRegistry, box_mode: str) -> None:
+    """NOW-2/2b (F5): in black-box, no registered tool may grant source access.
+
+    Keyed on explicit ``source_access`` metadata (ToolRegistry.tool_is_source_aware),
+    so a future source-aware tool under ANY module path cannot silently leak — a
+    hard build-time guarantee for "black-box must be fully black-box". White/grey
+    may carry source-aware tools.
+    """
+    if box_mode == "black":
+        leaked = [t.name for t in reg._tools.values() if ToolRegistry.tool_is_source_aware(t)]
+        if leaked:
+            raise RuntimeError(f"black-box registry leaked source-aware tools: {leaked}")
 
 
 def _register_code_surface_tools(reg: ToolRegistry) -> None:
@@ -130,7 +145,9 @@ def _register_code_surface_tools(reg: ToolRegistry) -> None:
     No code-surface Brain tools exist yet — this is the single gated seam so that
     when they land they CANNOT be registered for a black-box scan. The
     tests/agent/tools/test_box_mode_enforcement invariants lock this. Add
-    source-aware tool registrations HERE, never in the unconditional block above.
+    source-aware tool registrations HERE, never in the unconditional block above —
+    and each MUST set a class attribute ``source_access = True`` so the black-box
+    guard (_enforce_box_mode) and tests catch it regardless of module path.
     """
     return
 

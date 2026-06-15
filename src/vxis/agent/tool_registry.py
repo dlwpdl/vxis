@@ -29,6 +29,16 @@ class ToolRegistry:
     def list_tools(self) -> list[str]:
         return sorted(self._tools.keys())
 
+    @staticmethod
+    def tool_is_source_aware(tool: object) -> bool:
+        """NOW-2/2b (F5): True when a tool grants target source access.
+
+        Tools opt in with a class attribute ``source_access = True``; a black-box
+        registry must contain none. Keyed on explicit metadata (not module path),
+        so a future source-aware tool under any module cannot silently leak.
+        """
+        return bool(getattr(tool, "source_access", False))
+
     def has_tool(self, name: str) -> bool:
         return name in self._tools
 
