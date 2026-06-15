@@ -1355,6 +1355,7 @@ class AgentGraphTool:
         }
         # Snapshot persistence is best-effort: a transient I/O error (disk full,
         # permission, races) must never crash an in-progress scan.
+        tmp_path: Path | None = None
         try:
             self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
             encoded = json.dumps(payload, ensure_ascii=False, default=str)
@@ -1371,6 +1372,12 @@ class AgentGraphTool:
             tmp_path.replace(self._persistence_path)
         except OSError as exc:
             logger.warning("agent-graph snapshot save failed (best-effort): %s", exc)
+            # Don't leave an orphaned .tmp if we created one before replace() failed.
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     @staticmethod
     def _node_snapshot(node: AgentGraphNode) -> dict[str, Any]:
