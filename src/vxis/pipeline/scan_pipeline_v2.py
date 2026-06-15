@@ -794,6 +794,7 @@ class ScanPipeline:
         )
         runtime = await prepare_target_runtime(target, kind, hints=target_hints)
         from vxis.scope.runtime_gate import ensure_active_scope, clear_active_scope
+        from vxis.agent.policy.runtime_policy import clear_active_policy, set_active_policy
 
         _scope_owned = ensure_active_scope(runtime.resolved_target)
         try:
@@ -817,6 +818,10 @@ class ScanPipeline:
                 scan_id=_make_scan_id(),
             )
             self._resolve_and_attach_policy(ctx)
+            # NOW-2: publish the resolved policy as ambient state so loop-driven
+            # tools (dispatched through tool_registry) can read the capability
+            # ceiling. None when the v3 policy flag is off → legacy behavior.
+            set_active_policy(ctx.policy)
             ctx.runtime_profile = {  # type: ignore[attr-defined]
                 "launcher_name": runtime.launcher_name,
                 "runtime_mode": runtime.runtime_mode,
@@ -1322,6 +1327,7 @@ class ScanPipeline:
         finally:
             if _scope_owned:
                 clear_active_scope()
+            clear_active_policy()
 
     async def _run_deferred_gate(self, ctx: ScanContext) -> None:
         """Invoke the approval callback on ctx.deferred_actions. Phase A stub."""

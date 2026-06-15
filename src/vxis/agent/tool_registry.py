@@ -150,6 +150,37 @@ class ToolRegistry:
                 summary=f"{name} BLOCKED by scope gate: {scope_decision.reason}",
                 error="scope_blocked",
             )
+        # NOW-2/2d: exploitation-ceiling gate (active only when a ScanPolicy is set
+        # ambiently). Refuses exploitation primitives (shell_exec/python_exec) below
+        # the 'lateral' ceiling; no active policy → legacy (no block), mirroring the
+        # P1/scope gates which enforce only when configured.
+        try:
+            from vxis.agent.policy.runtime_policy import (
+                get_active_policy,
+                tool_blocked_by_ceiling,
+            )
+
+            _active_policy = get_active_policy()
+        except Exception as e:
+            return ToolResult(
+                ok=False,
+                summary=f"ceiling gate failed before {name}: {type(e).__name__}: {e}",
+                error="ceiling_gate_failed",
+            )
+        if tool_blocked_by_ceiling(name, _active_policy):
+            return ToolResult(
+                ok=False,
+                data={
+                    "blocked": True,
+                    "policy": "exploitation_ceiling",
+                    "ceiling": _active_policy.exploitation_ceiling,
+                },
+                summary=(
+                    f"{name} BLOCKED by exploitation ceiling "
+                    f"'{_active_policy.exploitation_ceiling}' (requires 'lateral'+)"
+                ),
+                error="ceiling_blocked",
+            )
         try:
             return await tool.run(**args)
         except Exception as e:
