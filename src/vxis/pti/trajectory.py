@@ -17,6 +17,20 @@ TRAILING_URL_PUNCTUATION = ".,);]"
 SENSITIVE_HOST_KEYS = {"host", "hostname", "domain", "netloc", "target_host"}
 SENSITIVE_QUERY_KEYS = {"query", "query_string", "qs"}
 SENSITIVE_URL_KEYS = {"url", "target_url", "request_url", "endpoint"}
+# NOW-2/2c (F1): credential-bearing keys (request headers, tokens) — fingerprinted.
+SENSITIVE_SECRET_KEYS = {
+    "authorization", "proxy-authorization", "cookie", "set-cookie",
+    "x-api-key", "api_key", "apikey", "token", "access_token",
+    "refresh_token", "password", "secret", "session", "auth",
+}
+# Inline secret patterns for free-form text (evidence, commands, header dumps).
+_SECRET_HEADER_RE = re.compile(
+    r"(?i)((?:authorization|proxy-authorization|cookie|set-cookie|x-api-key)\s*[:=]\s*)([^\r\n]+)"
+)
+_SECRET_BEARER_RE = re.compile(r"(?i)(\bbearer\s+)([A-Za-z0-9._\-]{6,})")
+_SECRET_QUERY_RE = re.compile(
+    r"(?i)([?&](?:token|access_token|refresh_token|api_key|apikey|key|password|secret|sig|signature)=)([^&\s\"']+)"
+)
 
 
 class TrajectoryStore:
@@ -72,6 +86,9 @@ class TrajectoryStore:
             raise FileNotFoundError(path)
 
         records = self.load(scan_id)
+        # F1: redact outcome_evidence on writeback too (mirrors apply_privacy's gate).
+        if isinstance(outcome_evidence, str) and outcome_evidence and _redaction_active():
+            outcome_evidence = _hash_secrets_in_text(outcome_evidence)
         updated_record: TrajectoryRecord | None = None
         updated_records: list[TrajectoryRecord] = []
         for record in records:
@@ -107,25 +124,40 @@ def _policy_requires_redaction(policy: Any) -> bool:
     return policy is not None and getattr(policy, "secret_handling", "") != "plaintext-lab"
 
 
+def _redaction_active(privacy_mode: str | None = None) -> bool:
+    """NOW-2/2c: redaction fires on VXIS_TRAJECTORY_PRIVACY=strict OR an active
+    encrypt-redact ScanPolicy. No active policy + no env → legacy (no redaction),
+    matching the P1/scope gates which enforce only when configured."""
+    mode = (privacy_mode or os.getenv("VXIS_TRAJECTORY_PRIVACY", "")).strip().lower()
+    if mode == STRICT_PRIVACY_MODE:
+        return True
+    try:
+        from vxis.agent.policy.runtime_policy import get_active_policy
+
+        return _policy_requires_redaction(get_active_policy())
+    except Exception:
+        return False
+
+
 def apply_privacy(
     record: TrajectoryRecord,
     *,
     privacy_mode: str | None = None,
 ) -> TrajectoryRecord:
-    mode = (privacy_mode or os.getenv("VXIS_TRAJECTORY_PRIVACY", "")).strip().lower()
-    if mode != STRICT_PRIVACY_MODE:
-        # NOW-2/2c: an active encrypt-redact ScanPolicy also triggers redaction, so
-        # trajectory privacy is policy-driven (every prod/crown profile), not only
-        # env-driven. No active policy → legacy (env-only).
-        try:
-            from vxis.agent.policy.runtime_policy import get_active_policy
-
-            _active_policy = get_active_policy()
-        except Exception:
-            _active_policy = None
-        if not _policy_requires_redaction(_active_policy):
-            return record
-    return record.model_copy(update={"input_context": hash_sensitive_context(record.input_context)})
+    if not _redaction_active(privacy_mode):
+        return record
+    # F1: scrub all three secret-bearing fields, not just input_context.
+    return record.model_copy(
+        update={
+            "input_context": hash_sensitive_context(record.input_context),
+            "output_action": hash_sensitive_context(record.output_action),
+            "outcome_evidence": (
+                _hash_secrets_in_text(record.outcome_evidence)
+                if isinstance(record.outcome_evidence, str) and record.outcome_evidence
+                else record.outcome_evidence
+            ),
+        }
+    )
 
 
 def hash_sensitive_context(value: Any) -> Any:
@@ -137,6 +169,8 @@ def hash_sensitive_context(value: Any) -> Any:
             normalized_key = str(key).lower()
             if normalized_key in SENSITIVE_HOST_KEYS and isinstance(item, str):
                 scrubbed[key] = f"sha256:{hash_text(item.lower())}"
+            elif normalized_key in SENSITIVE_SECRET_KEYS and isinstance(item, str):
+                scrubbed[key] = _fingerprint_secret(item)
             elif normalized_key in SENSITIVE_QUERY_KEYS and isinstance(item, str):
                 scrubbed[key] = f"sha256:{hash_text(item)}"
             elif normalized_key in SENSITIVE_URL_KEYS and isinstance(item, str):
@@ -149,7 +183,7 @@ def hash_sensitive_context(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(hash_sensitive_context(item) for item in value)
     if isinstance(value, str):
-        return _hash_urls_in_text(value)
+        return _hash_secrets_in_text(value)
     return value
 
 
@@ -160,6 +194,24 @@ def _rewrite_jsonl(path: Path, records: list[TrajectoryRecord]) -> None:
             handle.write(record.model_dump_json())
             handle.write("\n")
     tmp_path.replace(path)
+
+
+def _fingerprint_secret(value: str) -> str:
+    """Non-reversible secret fingerprint (mirrors agent.policy.chokepoints._fingerprint;
+    duplicated locally so pti has no dependency on the agent package)."""
+    digest = hash_text(value)
+    last4 = value[-4:] if len(value) >= 8 else ""
+    return f"sha256:{digest}:{last4}"
+
+
+def _hash_secrets_in_text(value: str) -> str:
+    """Hash full URLs AND inline credential material (Authorization/Bearer/Cookie/
+    API-key headers, token-style query params) in free-form text."""
+    out = _hash_urls_in_text(value)
+    out = _SECRET_HEADER_RE.sub(lambda m: f"{m.group(1)}{_fingerprint_secret(m.group(2).strip())}", out)
+    out = _SECRET_BEARER_RE.sub(lambda m: f"{m.group(1)}{_fingerprint_secret(m.group(2))}", out)
+    out = _SECRET_QUERY_RE.sub(lambda m: f"{m.group(1)}{_fingerprint_secret(m.group(2))}", out)
+    return out
 
 
 def _hash_urls_in_text(value: str) -> str:
