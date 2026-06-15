@@ -25,9 +25,18 @@ ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the veri
 - [ ] **fix-followup (NON-BLOCKING)**: ~~(a) agent-graph temp-file leak~~ DONE (`<this batch>`); (b) **1.3c** DB-regeneration readers filter `status==unconfirmed`; (c) report precision-panel counts UNCONFIRMED that the findings table omits (high/critical only after F1).
 
 ## NOW-2 — box-mode hard enforcement + capability-ceiling  (= R8 + ADR-013 + black-box purity)
-- [ ] Wire `permit_strategy`/`persist_secret`/`permit_pivot` to read `ctx.policy`, fail-closed (today: 0 production callers; `scan_pipeline_v2.py:707` only attaches).
-- [ ] box-mode registry gate: in **black-box**, `interaction/code` tools + `code_to_hypothesis` + repo-mount are all **excluded** (provably can't read source).
-- [ ] Invariant/cassette tests: black-box scan ⇒ `interaction.code` imports == 0, no repo mount; an exploit action without a `permit_*` call FAILS.
+> De-risked by `now2-dataflow-map` (`w39au4e75`). NOTE: the map's *synthesis* agent was
+> blocked by a cyber-safeguard (offensive pivot/exfil framing); plan synthesized manually
+> from the recon. ALL NOW-2 work is capability **restriction** (fail-closed safety gates).
+> Foundation needed by 2a/2c/2d: an **ambient ScanPolicy ContextVar** (mirror
+> `scope/runtime_gate.py` `_ACTIVE`), set after `_resolve_and_attach_policy`, fail-closed None=deny.
+
+- [x] **2b** box-mode hard-enforcement (`<this batch>`): `build_default_registry(box_mode=...)` fail-closed "black"; black-box registers 0 `interaction.code`-backed tools (gated seam `_register_code_surface_tools`, white/grey only); threaded from `kind` (CODE→white else black). Invariant test locks it. **(= user's "블랙박스는 완전히 블랙박스")**
+- [ ] **2a** evasion gate: `permit_strategy("ghost", ctx.policy)` at the ghost activation site (`scan_pipeline_v2.py:817`, ctx.policy in scope) — refuse to flip the singleton when FORBIDDEN. Wireable-now. (5 callers total; main v2 path first.)
+- [ ] **2c** secret redaction: route trajectory/Evidence secret handling through `persist_secret(value, policy)` keyed on `policy.secret_handling` (today gated only by `VXIS_TRAJECTORY_PRIVACY=strict` env at `trajectory.py:108`). Wireable-now.
+- [ ] **2d** exploitation-ceiling gate at the dispatch funnel: add a 3rd fail-closed gate in `tool_registry.dispatch` (alongside P1 @111 + scope @133) refusing shell_exec/python_exec when `exploitation_ceiling` in {none, read-only}, reading the ambient ScanPolicy. Needs the foundation ContextVar.
+- [ ] **2e** (BLOCKED) `permit_pivot` per-destination: no real cross-host executor exists (lateral_move/data_exfil agents are single-target feasibility recon → hypothesis routing). Coarse agent-level spawn gate is possible; true wiring blocked until an H-exec executor exists. Defer.
+- [ ] grey-box explicit opt-in (`--box {black,white,grey}` CLI flag) — defer.
 
 ## NOW-3 — TUI box/profile/attack-level + live report proof
 - [ ] `cli/interactive.py`: explicit **⚫ black-box / ⚪ white-box / 🌗 grey-box** as the FIRST wizard step (today: only white-box "code" is explicit; black-box implicit).
