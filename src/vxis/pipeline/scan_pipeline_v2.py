@@ -860,10 +860,13 @@ class ScanPipeline:
             if hasattr(self.brain, "_target_kind"):
                 self.brain._target_kind = kind
 
-            # 5. Build the tool registry
+            # 5. Build the tool registry. NOW-2/2b: black-box (any dynamic surface)
+            # registers no source-aware tools; only a CODE target is white-box.
+            box_mode = "white" if kind == TargetKind.CODE else "black"
             registry = build_default_registry(
                 brain=self.brain,
                 sandbox_key=str(getattr(ctx, "scan_id", "") or ctx.target),
+                box_mode=box_mode,
             )
 
             # 6. Emit a synthetic phase_start so the CLI Rich Live display has content

@@ -67,6 +67,8 @@ __all__ = [
 def build_default_registry(
     brain: object | None = None,
     sandbox_key: str | None = None,
+    *,
+    box_mode: str = "black",
 ) -> ToolRegistry:
     """Build a ToolRegistry with the default tool set registered.
 
@@ -110,7 +112,23 @@ def build_default_registry(
     reg.register(AgentGraphTool())
     if v3_enabled():
         _register_optional_v3_tools(reg)
+    # NOW-2/2b: source-aware (white/grey-box) tools are gated here. A black-box
+    # scan (the fail-closed default) NEVER registers interaction.code-backed tools,
+    # so it provably cannot read target source.
+    if box_mode in ("white", "grey"):
+        _register_code_surface_tools(reg)
     return reg
+
+
+def _register_code_surface_tools(reg: ToolRegistry) -> None:
+    """White/grey-box only: source-aware (interaction.code-backed) Brain tools.
+
+    No code-surface Brain tools exist yet — this is the single gated seam so that
+    when they land they CANNOT be registered for a black-box scan. The
+    tests/agent/tools/test_box_mode_enforcement invariants lock this. Add
+    source-aware tool registrations HERE, never in the unconditional block above.
+    """
+    return
 
 
 def _register_optional_v3_tools(reg: ToolRegistry) -> None:
