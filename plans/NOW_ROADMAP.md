@@ -4,9 +4,14 @@
 > 1.3b `f34a5ec`, 1.4 CI clean-control gate). Full suite green (2461 passed). Also fixed a
 > pre-existing agent-graph logger bug (`a7a8fac`).
 > **NOW-1 + adversarial review COMPLETE** (review fixes F1/F2/F3 in `6b46865`; full suite 2473 green).
-> **NOW-2 wireable slices DONE (2a/2b/2c/2d).** ADR-013 capability-ceiling now enforced
-> at the action boundary (box-mode + evasion + exploitation + secret redaction).
-> Only 2e (permit_pivot) blocked on a non-existent cross-host executor. Merged to main.
+> **NOW-2 wireable slices DONE (2a/2b/2c/2d) + hardening F1–F6 DONE.** ADR-013
+> capability-ceiling enforced at the action boundary (box-mode + evasion + exploitation
+> + skill-template governance + secret redaction + injection-approval). Only `permit_pivot`
+> (cross-host) blocked on a non-existent executor. Merged to main.
+> **Hardening pass (user's 6 findings, recommended order F1→F2→F5→F3; F4/F6 prior):**
+> F1 PTI redaction completion `f0e5999`; F2 ceiling governs run_skill `c886d00`;
+> F4 policy-token restore + F6 log swallowed v3-reg `08a6a73`; F5 box-mode source-access
+> metadata guard `1a523fe`; **F3 injection-approval wired into dispatch `d66aa81`** (this batch).
 > **Resume at: NOW-3 (TUI box/profile/attack-level) — or NEXT/LATER.**
 > Fix-followups (non-blocking, tracked below): 1.3c DB-regen filter; agent-graph temp-file leak;
 > precision-panel vs findings-table UNCONFIRMED count divergence.
@@ -38,7 +43,9 @@ ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the veri
 - [x] **2a** evasion gate (`<this batch>`): `_evasion_blocked_by_policy` gates the ghost activation at `scan_pipeline_v2.py:818` — active ScanPolicy with evasion_allowed=False skips ghost (policy-active-only; None=legacy, no regression). TDD green.
 - [x] **foundation + 2d** (`24bf8a1`): ambient ScanPolicy ContextVar (`policy/runtime_policy.py`, set after policy attach / cleared in finally) + 3rd fail-closed gate in `tool_registry.dispatch` refusing shell_exec/python_exec when `exploitation_ceiling` < lateral (none/read-only). Policy-active-only; None=legacy. ADR-013 exploitation ceiling now enforced at the action boundary.
 - [x] **2c** secret redaction (`<this batch>`): `apply_privacy` (PTI trajectory) now redacts host/query/url when an active ScanPolicy's `secret_handling != 'plaintext-lab'` (via `get_active_policy()`), not only on the `VXIS_TRAJECTORY_PRIVACY=strict` env. policy-active-only; None=legacy. NOTE residual: Evidence.response raw-secret routing through `persist_secret` (touches ADR-006-frozen skills) deferred.
-- [ ] **2e** (BLOCKED) `permit_pivot` per-destination: no real cross-host executor exists (lateral_move/data_exfil agents are single-target feasibility recon → hypothesis routing). Coarse agent-level spawn gate is possible; true wiring blocked until an H-exec executor exists. Defer.
+- [x] **2e injection-approval (F3)** (`d66aa81`): the CLI injection gate (`injection_approval_callback`/`auto_approve_injection`) was stored on `ScanPipeline` but **never invoked** — the "인젝션은 마지막, yes/no 승인 후 실행" UI applied zero runtime protection. Now end-to-end: `_INJECTION_DECISION` ambient ContextVar (None=legacy / full / readonly / deny) + `injection_action_blocked()` (only `deny` blocks shell_exec/python_exec + non-passive run_skill); 4th fail-closed dispatch gate (`error="injection_blocked"`); `_resolve_injection_decision()` invokes the callback / honors auto-approve once per scan (fail-closed deny on exception), emits `injection_approval_result`. Policy-active-only; None=legacy. **(distinct from the cross-host `permit_pivot` below.)**
+- [x] **NOW-2 hardening** (user's 6 findings, recommended order F1→F2→F5→F3; F4/F6 done earlier): **F1** PTI trajectory redaction completion — output_action + outcome_evidence + header/bearer/query detectors (`f0e5999`); **F2** exploitation ceiling governs `run_skill` attack templates via `skill_blocked_by_ceiling` (`c886d00`); **F4** policy-token restore so nested/SDK/MCP runs can't wipe the outer policy + **F6** `logger.debug` the swallowed optional-v3 tool-registration except (`08a6a73`); **F5** box-mode source-access metadata guard `tool_is_source_aware` + `_enforce_box_mode` (`1a523fe`); **F3** injection-approval (above). Full suite 2526 green.
+- [ ] **permit_pivot** per-destination (cross-host) (BLOCKED): no real cross-host executor exists (lateral_move/data_exfil agents are single-target feasibility recon → hypothesis routing). Coarse agent-level spawn gate is possible; true wiring blocked until an H-exec executor exists. Defer.
 - [ ] grey-box explicit opt-in (`--box {black,white,grey}` CLI flag) — defer.
 
 ## NOW-3 — TUI box/profile/attack-level + live report proof
@@ -61,7 +68,7 @@ ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the veri
 - [ ] De-global `_findings`/`_chains` (`finding_tools.py:30`) + `_skill_cache` (`skill_runner.py:32`) → scan-scoped. **Blocks multi-agent / multi-tenant** → do in/before NOW-2.
 - [ ] CQS: `_dag_finish_blocking_branches` mutates branch state (`scan_loop_decision_policy.py:46`).
 - [ ] `brain.py`: semaphore loop-id dict accumulation (`:115`); `LLM_API_KEY→OPENAI_API_KEY` env side-effect (`:333`, Strix already refactored this — reference).
-- [ ] `agent/tools/__init__.py:116` silent `except: pass` on optional v3 tool registration → `logger.debug`.
+- [x] `agent/tools/__init__.py` silent `except: pass` on optional v3 tool registration → `logger.debug` (F6, `08a6a73`).
 
 ## Pointers
 - Strategy/why: `wiki/decisions/014_moat_strategy.md` (solid moat ×2; dead-code ×5 marketing guardrail; Strix weaknesses; where-not-to-compete).
