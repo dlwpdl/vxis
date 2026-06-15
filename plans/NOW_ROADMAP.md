@@ -1,7 +1,8 @@
 # VXIS NOW Roadmap — Resume Checklist
 
-> Created 2026-06-15. Paused at: analysis complete, ADR-014 + 16 proposals + NOW-1 plan
-> written, **implementation NOT started** (user out of session usage).
+> Created 2026-06-15. Progress: NOW-1 **1.1 done** (`8e83b00`) + **1.2 done** (`c6856b3`),
+> tree green (649 tests). Also fixed a pre-existing agent-graph logger bug (`a7a8fac`).
+> **Resume at NOW-1 / 1.3.**
 > Decisions locked (user-approved 2026-06-15):
 > - Build order: **NOW-1 → NOW-2 → NOW-3**, each `plan → TDD(red-first) → phased commit → /code-review`.
 > - moat strategy persisted: `wiki/decisions/014_moat_strategy.md`.
@@ -10,9 +11,9 @@
 
 ## NOW-1 — Verifier all-severity FP-gate  (full plan: `plans/now1_verifier_all_severity.md`)
 ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the verifier into a quantifiable FP-rate number.
-- [ ] **1.1** Consolidate the two drifted gate copies → one `_verify_and_gate()` (`scan_loop_run.py:493-559` inline + `scan_loop_actions.py:738-813` `_dispatch_report_finding_checked`), behavior-preserving + characterization tests.
-- [ ] **1.2** All-severity: drop the `{high,critical}` filter; deterministic preflight for all, LLM refuter on high/critical always + medium/low only when borderline (cost bound).
-- [ ] **1.3** UNCONFIRMED → exclude from report + write `verdict`/`verified` onto the persisted finding (`finding_tools.py:883`, the real unguarded chokepoint).
+- [x] **1.1** Consolidated the two drifted gate copies → one `_verify_and_gate()` (both `scan_loop_run.py` inline + `scan_loop_actions._dispatch_report_finding_checked` delegate), behavior-preserving + 6 characterization tests. (`8e83b00`)
+- [x] **1.2** All-severity: filter `{high,critical}` → `{critical,high,medium,low}` (informational ungated). REFUTED blocks all; UNCONFIRMED blocks only high/critical to avoid over-suppression. (`c6856b3`)  — NOTE: gate-level cost-bound (LLM only on borderline for medium/low) deferred; verify_finding's deterministic preflight runs first, full LLM otherwise. Revisit if medium/low verify cost is high.
+- [ ] **1.3** UNCONFIRMED → exclude from report + write `verdict`/`verified` onto the persisted finding (`finding_tools.py:883`, the real unguarded chokepoint). ← RESUME HERE
 - [ ] **1.4** CI clean-control gate: `CONFIRMED && critical == 0` on a known-clean fixture → emit FP-rate / verification-rate metric.
 
 ## NOW-2 — box-mode hard enforcement + capability-ceiling  (= R8 + ADR-013 + black-box purity)
