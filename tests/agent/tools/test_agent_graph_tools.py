@@ -452,3 +452,20 @@ async def test_agent_graph_run_limit_requires_explicit_finish_or_block():
 def test_build_default_registry_contains_agent_graph_tool():
     reg = build_default_registry()
     assert "agent_graph" in reg.list_tools()
+
+
+def test_save_snapshot_swallows_transient_io_error(tmp_path, monkeypatch):
+    # A transient I/O error while persisting the snapshot must not crash an
+    # in-progress scan — the snapshot is best-effort.
+    import vxis.agent.tools.agent_graph_tools as agt
+
+    tool = AgentGraphTool()
+    tool.set_persistence_path(tmp_path / "snap.json", restore=False)
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(agt.tempfile, "NamedTemporaryFile", _boom)
+
+    # Should return normally, not raise.
+    tool._save_snapshot()
