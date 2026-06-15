@@ -53,25 +53,27 @@ async def test_clean_control_zero_confirmed_killed_deterministically():
     # come from deterministic code; on clean input there must be none.
     tool = VerifyFindingTool()
     confirmed: list[str] = []
-    relied_on_llm: list[str] = []
 
     for name, args in CLEAN_CORPUS.items():
         result = await tool.run(**args)
         data = result.data or {}
-        verdict = data.get("verdict") if result.ok else None
-        if verdict == "CONFIRMED":
+        verdict = data.get("verdict")
+        # Assert the POSITIVE deterministic-kill signal per shape — this is what
+        # makes the gate real (review fix F4): if any deterministic oracle is
+        # removed/weakened, the shape stops being preflight-blocked and falls
+        # through to the no-brain guard (ok=False / verdict=None / no
+        # preflight_blocked), failing HERE instead of passing silently.
+        assert result.ok is True, f"{name}: not handled deterministically (ok={result.ok}, err={result.error})"
+        assert data.get("preflight_blocked") is True, f"{name}: not killed by the deterministic preflight"
+        assert data.get("used_stronger_model") is False, f"{name}: relied on the LLM, not code"
+        assert verdict in ("REFUTED", "UNCONFIRMED"), f"{name}: unexpected verdict {verdict!r}"
+        if verdict == "CONFIRMED":  # unreachable given the assert above; kept for the metric
             confirmed.append(name)
-        if data.get("used_stronger_model"):
-            relied_on_llm.append(name)
-        # killed by the deterministic firewall, not escalated to the LLM
-        assert verdict in (None, "REFUTED", "UNCONFIRMED"), f"{name}: unexpected verdict {verdict!r}"
-        assert data.get("used_stronger_model") in (False, None), f"{name}: relied on LLM, not code"
 
     total = len(CLEAN_CORPUS)
     fp_rate = len(confirmed) / total
     assert fp_rate == 0.0, f"clean-control FP-rate={fp_rate} (CONFIRMED: {confirmed})"
-    assert not relied_on_llm, f"FP control must be executable code, not a prompt; LLM used for {relied_on_llm}"
     print(
         f"\n[clean-control] FP-rate={fp_rate:.3f} — 0/{total} CONFIRMED; "
-        f"{total}/{total} killed deterministically (no LLM)."
+        f"{total}/{total} killed deterministically (preflight, no LLM)."
     )

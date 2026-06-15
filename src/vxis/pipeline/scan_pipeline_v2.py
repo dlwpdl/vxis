@@ -385,6 +385,11 @@ def _should_include_in_report(d: dict[str, Any]) -> bool:
     """
     verdict = str(d.get("verifier_verdict", "")).upper()
     severity = str(d.get("severity", "")).lower()
+    # REFUTED never ships (review fix F5, defense-in-depth): the gate already
+    # blocks REFUTED before report_finding, but exclude here too in case any
+    # path persists one.
+    if verdict == "REFUTED":
+        return False
     return not (verdict == "UNCONFIRMED" and severity in {"high", "critical"})
 
 

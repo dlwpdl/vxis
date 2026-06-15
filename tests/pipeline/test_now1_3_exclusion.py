@@ -66,6 +66,9 @@ def test_should_include_excludes_unconfirmed_only_at_high_critical():
     assert _should_include_in_report({"verifier_verdict": "CONFIRMED", "severity": "high"}) is True
     assert _should_include_in_report({"verifier_verdict": "", "severity": "high"}) is True
     assert _should_include_in_report({"severity": "critical"}) is True  # blank / legacy kept
+    # F5: REFUTED never ships, at any severity (defense-in-depth)
+    assert _should_include_in_report({"verifier_verdict": "REFUTED", "severity": "low"}) is False
+    assert _should_include_in_report({"verifier_verdict": "refuted", "severity": "medium"}) is False
 
 
 def test_reconcile_chains_drops_chains_through_excluded_findings():
