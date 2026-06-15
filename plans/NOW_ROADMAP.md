@@ -4,7 +4,10 @@
 > 1.3b `f34a5ec`, 1.4 CI clean-control gate). Full suite green (2461 passed). Also fixed a
 > pre-existing agent-graph logger bug (`a7a8fac`).
 > **NOW-1 + adversarial review COMPLETE** (review fixes F1/F2/F3 in `6b46865`; full suite 2473 green).
-> **Resume at: NOW-2 (box-mode hard-enforcement + capability-ceiling).**
+> **NOW-2 wireable slices DONE (2a/2b/2c/2d).** ADR-013 capability-ceiling now enforced
+> at the action boundary (box-mode + evasion + exploitation + secret redaction).
+> Only 2e (permit_pivot) blocked on a non-existent cross-host executor. Merged to main.
+> **Resume at: NOW-3 (TUI box/profile/attack-level) — or NEXT/LATER.**
 > Fix-followups (non-blocking, tracked below): 1.3c DB-regen filter; agent-graph temp-file leak;
 > precision-panel vs findings-table UNCONFIRMED count divergence.
 > Decisions locked (user-approved 2026-06-15):
@@ -33,8 +36,8 @@ ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the veri
 
 - [x] **2b** box-mode hard-enforcement (`<this batch>`): `build_default_registry(box_mode=...)` fail-closed "black"; black-box registers 0 `interaction.code`-backed tools (gated seam `_register_code_surface_tools`, white/grey only); threaded from `kind` (CODE→white else black). Invariant test locks it. **(= user's "블랙박스는 완전히 블랙박스")**
 - [x] **2a** evasion gate (`<this batch>`): `_evasion_blocked_by_policy` gates the ghost activation at `scan_pipeline_v2.py:818` — active ScanPolicy with evasion_allowed=False skips ghost (policy-active-only; None=legacy, no regression). TDD green.
-- [ ] **2c** secret redaction: route trajectory/Evidence secret handling through `persist_secret(value, policy)` keyed on `policy.secret_handling` (today gated only by `VXIS_TRAJECTORY_PRIVACY=strict` env at `trajectory.py:108`). Wireable-now.
-- [ ] **2d** exploitation-ceiling gate at the dispatch funnel: add a 3rd fail-closed gate in `tool_registry.dispatch` (alongside P1 @111 + scope @133) refusing shell_exec/python_exec when `exploitation_ceiling` in {none, read-only}, reading the ambient ScanPolicy. Needs the foundation ContextVar.
+- [x] **foundation + 2d** (`24bf8a1`): ambient ScanPolicy ContextVar (`policy/runtime_policy.py`, set after policy attach / cleared in finally) + 3rd fail-closed gate in `tool_registry.dispatch` refusing shell_exec/python_exec when `exploitation_ceiling` < lateral (none/read-only). Policy-active-only; None=legacy. ADR-013 exploitation ceiling now enforced at the action boundary.
+- [x] **2c** secret redaction (`<this batch>`): `apply_privacy` (PTI trajectory) now redacts host/query/url when an active ScanPolicy's `secret_handling != 'plaintext-lab'` (via `get_active_policy()`), not only on the `VXIS_TRAJECTORY_PRIVACY=strict` env. policy-active-only; None=legacy. NOTE residual: Evidence.response raw-secret routing through `persist_secret` (touches ADR-006-frozen skills) deferred.
 - [ ] **2e** (BLOCKED) `permit_pivot` per-destination: no real cross-host executor exists (lateral_move/data_exfil agents are single-target feasibility recon → hypothesis routing). Coarse agent-level spawn gate is possible; true wiring blocked until an H-exec executor exists. Defer.
 - [ ] grey-box explicit opt-in (`--box {black,white,grey}` CLI flag) — defer.
 
