@@ -8,6 +8,7 @@ staying in the raw _findings store for MITRE / scan-memory / retrospective.
 from vxis.models.finding import FindingStatus
 from vxis.pipeline.scan_pipeline_v2 import (
     _build_finding_from_dict,
+    _reconcile_chains,
     _should_include_in_report,
 )
 
@@ -52,10 +53,33 @@ def test_build_finding_absent_verdict_maps_to_status_open():
     assert f.status == FindingStatus.open
 
 
-def test_should_include_excludes_only_unconfirmed():
-    # strict equality to UNCONFIRMED — no over-suppression of CONFIRMED / blank
-    assert _should_include_in_report({"verifier_verdict": "UNCONFIRMED"}) is False
-    assert _should_include_in_report({"verifier_verdict": "unconfirmed"}) is False  # case-insensitive
-    assert _should_include_in_report({"verifier_verdict": "CONFIRMED"}) is True
-    assert _should_include_in_report({"verifier_verdict": ""}) is True
-    assert _should_include_in_report({}) is True  # blank / legacy / info kept
+def test_should_include_excludes_unconfirmed_only_at_high_critical():
+    # F1 (review fix): exclude UNCONFIRMED only at high/critical, mirroring the
+    # gate's own block (scan_loop_actions blocks UNCONFIRMED only at high/critical).
+    # medium/low UNCONFIRMED are KEPT — the gate deliberately doesn't block them and
+    # the verifier defaults UNCONFIRMED on parse drift, so dropping them over-suppresses.
+    assert _should_include_in_report({"verifier_verdict": "UNCONFIRMED", "severity": "high"}) is False
+    assert _should_include_in_report({"verifier_verdict": "UNCONFIRMED", "severity": "critical"}) is False
+    assert _should_include_in_report({"verifier_verdict": "unconfirmed", "severity": "HIGH"}) is False
+    assert _should_include_in_report({"verifier_verdict": "UNCONFIRMED", "severity": "medium"}) is True
+    assert _should_include_in_report({"verifier_verdict": "UNCONFIRMED", "severity": "low"}) is True
+    assert _should_include_in_report({"verifier_verdict": "CONFIRMED", "severity": "high"}) is True
+    assert _should_include_in_report({"verifier_verdict": "", "severity": "high"}) is True
+    assert _should_include_in_report({"severity": "critical"}) is True  # blank / legacy kept
+
+
+def test_reconcile_chains_drops_chains_through_excluded_findings():
+    # F3 (review fix): a chain that pivots through a withheld (report-excluded)
+    # finding must not be asserted as a fabricated edge in the attack graph.
+    chains = [
+        {"finding_ids": ["VXIS-0001", "VXIS-0002"]},
+        {"finding_ids": ["VXIS-0001", "VXIS-0003", "VXIS-0004"]},  # 0003 excluded
+    ]
+    out = _reconcile_chains(chains, {"VXIS-0003"})
+    assert len(out) == 1
+    assert out[0]["finding_ids"] == ["VXIS-0001", "VXIS-0002"]
+
+
+def test_reconcile_chains_keeps_all_when_nothing_excluded():
+    chains = [{"finding_ids": ["A", "B"]}, {"finding_ids": ["C"]}]
+    assert len(_reconcile_chains(chains, set())) == 2

@@ -374,15 +374,35 @@ def _build_finding_from_dict(
 
 
 def _should_include_in_report(d: dict[str, Any]) -> bool:
-    """NOW-1/1.3: exclude UNCONFIRMED findings from the client-facing report.
+    """NOW-1/1.3: withhold UNCONFIRMED findings from the client-facing report.
 
-    They stay in the raw _findings store (MITRE / scan-memory / retrospective keep
-    the full corpus) and are only withheld from ctx.findings, which drives the
-    HTML/DOCX/JSON/attack-graph renderers. CONFIRMED and blank-verdict findings
-    (info / no-verifier / legacy) are kept — strict equality to UNCONFIRMED avoids
-    over-suppression.
+    Severity-aware (review fix F1): UNCONFIRMED is excluded ONLY at high/critical,
+    mirroring the gate (which blocks UNCONFIRMED only at high/critical). medium/low
+    UNCONFIRMED are KEPT — the gate deliberately proceeds on them and the verifier
+    defaults UNCONFIRMED on parse drift, so dropping them would over-suppress.
+    Excluded findings stay in the raw _findings store (MITRE / scan-memory /
+    retrospective keep the full corpus); they are only withheld from ctx.findings.
     """
-    return str(d.get("verifier_verdict", "")).upper() != "UNCONFIRMED"
+    verdict = str(d.get("verifier_verdict", "")).upper()
+    severity = str(d.get("severity", "")).lower()
+    return not (verdict == "UNCONFIRMED" and severity in {"high", "critical"})
+
+
+def _reconcile_chains(
+    chain_dicts: list[dict[str, Any]], excluded_ids: set[str]
+) -> list[dict[str, Any]]:
+    """NOW-1/1.3 (review fix F3): drop any attack chain that pivots through a
+    report-excluded (UNCONFIRMED) finding, so the rendered attack graph never
+    asserts a fabricated edge across a withheld hop. Returns the ctx.attack_chains
+    shape (``{"finding_ids": [...], "raw": <chain>}``).
+    """
+    out: list[dict[str, Any]] = []
+    for c in chain_dicts:
+        fids = {str(x) for x in c.get("finding_ids", [])}
+        if excluded_ids & fids:
+            continue
+        out.append({"finding_ids": list(c.get("finding_ids", [])), "raw": c})
+    return out
 
 
 # Back-compat alias — older callers reference the legacy name. New code should
@@ -1073,24 +1093,26 @@ class ScanPipeline:
 
             # 6. Copy findings from the in-memory store into ctx.findings
             finding_dicts = _get_finding_dicts()
+            _excluded_finding_ids: set[str] = set()
             for d in finding_dicts:
                 try:
                     f = _build_finding_from_dict(
                         d, scan_id=ctx.scan_id, target=ctx.target, kind=ctx.kind
                     )
-                    # NOW-1/1.3: withhold UNCONFIRMED findings from the rendered report
-                    # (kept in the raw store for learning / MITRE / retrospective).
+                    # NOW-1/1.3: withhold UNCONFIRMED (high/critical) findings from the
+                    # rendered report; they stay in the raw store for learning / MITRE.
                     if _should_include_in_report(d):
                         ctx.findings.append(f)
+                    else:
+                        _excluded_finding_ids.add(str(d.get("id", "")))
                 except Exception:
                     logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
 
-            # 7. Copy chains into ctx.attack_chains (stored as list[dict] per ScanContext typing)
+            # 7. Copy chains into ctx.attack_chains, dropping any chain that pivots
+            # through a withheld finding so the attack graph asserts no fake edge.
             chain_dicts = _get_chain_dicts()
             try:
-                ctx.attack_chains = [
-                    {"finding_ids": list(c.get("finding_ids", [])), "raw": c} for c in chain_dicts
-                ]
+                ctx.attack_chains = _reconcile_chains(chain_dicts, _excluded_finding_ids)
             except Exception:
                 ctx.attack_chains = []
 

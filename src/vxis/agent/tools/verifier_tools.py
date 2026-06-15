@@ -260,6 +260,25 @@ def _looks_like_binary_only_evidence(blob: str) -> bool:
     )
 
 
+_VERDICT_RE = re.compile(
+    r"VERDICT[\s:*\-–—>_]*\b(CONFIRMED|UNCONFIRMED|REFUTED)\b",
+    re.IGNORECASE,
+)
+
+
+def _extract_verdict(response: str) -> str:
+    """Drift-tolerant verdict extraction (review fix F2).
+
+    Recognizes the verdict even with markdown bold (**VERDICT:**), blockquote
+    (> VERDICT:), em/en-dash, or missing whitespace. Defaults to UNCONFIRMED only
+    when no verdict token appears anywhere — important because under NOW-1/1.3 an
+    UNCONFIRMED (high/critical) verdict is a hard report exclusion, so a parse miss
+    on a genuinely-CONFIRMED finding would silently drop it.
+    """
+    match = _VERDICT_RE.search(response or "")
+    return match.group(1).upper() if match else "UNCONFIRMED"
+
+
 class VerifyFindingTool:
     name = "verify_finding"
     description = (
@@ -582,17 +601,13 @@ class VerifyFindingTool:
                 error="non_text_response",
             )
 
-        # Parse the verdict
-        verdict = "UNCONFIRMED"
+        # Parse the verdict (drift-tolerant — see _extract_verdict)
+        verdict = _extract_verdict(response)
         confidence = "low"
         reasoning = response.strip()[:500]
         for line in response.splitlines():
             line_s = line.strip()
-            if line_s.upper().startswith("VERDICT:"):
-                v = line_s.split(":", 1)[1].strip().upper()
-                if v in ("CONFIRMED", "UNCONFIRMED", "REFUTED"):
-                    verdict = v
-            elif line_s.upper().startswith("CONFIDENCE:"):
+            if line_s.upper().startswith("CONFIDENCE:"):
                 c = line_s.split(":", 1)[1].strip().lower()
                 if c in ("high", "medium", "low"):
                     confidence = c
