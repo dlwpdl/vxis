@@ -133,6 +133,22 @@ def _ghost_proxy_pool_from_config(config: Any | None) -> list[str]:
     return deduped
 
 
+def _evasion_blocked_by_policy(policy: Any) -> bool:
+    """NOW-2/2a: True only when an ACTIVE ScanPolicy forbids evasion (ghost).
+
+    When policy is None (capability-ceiling not enabled / VXIS_V3_POLICY off),
+    evasion follows LEGACY behavior (not blocked) — consistent with the P1 and
+    scope gates, which only enforce when configured, so existing scans do not
+    regress. When a policy IS active, permit_strategy fail-closes on
+    evasion_allowed=False.
+    """
+    if policy is None:
+        return False
+    from vxis.agent.policy.chokepoints import permit_strategy
+
+    return not permit_strategy("ghost", policy).allowed
+
+
 def _resolve_scan_loop_budget() -> tuple[int, int, int]:
     """Return (soft_max, hard_max, extension_chunk) for the Brain loop."""
     provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "").strip().lower()
@@ -817,6 +833,16 @@ class ScanPipeline:
 
                 _activated, target = parse_ghost_trigger(runtime.resolved_target, self.config)
                 ctx.target = target
+                if _activated and _evasion_blocked_by_policy(ctx.policy):
+                    # NOW-2/2a: the active ScanPolicy profile forbids evasion — do
+                    # not flip the ghost singleton (capability-ceiling enforced).
+                    _activated = False
+                    ctx.runtime_profile["metadata"]["ghost_blocked_by_policy"] = True  # type: ignore[index]
+                    self._emit("ghost", {"active": False, "blocked_by_policy": True, "target": ctx.target})
+                    logger.info(
+                        "[Ghost] evasion not permitted by scan policy — skipping anonymization for target=%s",
+                        ctx.target,
+                    )
                 if _activated:
                     proxy_pool = _ghost_proxy_pool_from_config(self.config)
                     ghost_layer.activate(proxy_pool=proxy_pool)
