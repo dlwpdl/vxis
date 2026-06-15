@@ -735,6 +735,140 @@ class ScanLoopActionMixin:
         self._emit_control_plane(f"Recursive gap queued: {title}")
         return branch_id
 
+    async def _verify_and_gate(
+        self,
+        args: dict[str, Any],
+        *,
+        require_confirmed: bool = True,
+        spawn_gap_on_unconfirmed: bool = False,
+        baseline_size: int | None = None,
+    ) -> ToolResult | None:
+        """Single adversarial-verifier chokepoint (NOW-1).
+
+        Runs verify_finding for the finding, records the verdict + belief state,
+        and returns a *block* ToolResult or None (= proceed to report).
+
+        Behaviour is shared by both report paths and parameterized for their drift:
+        - skill/auto path (`_dispatch_report_finding_checked`): require_confirmed=True
+          → REFUTED and UNCONFIRMED both block.
+        - Brain-direct path (scan_loop_run auto-verify): require_confirmed=False +
+          spawn_gap_on_unconfirmed=True → REFUTED blocks, UNCONFIRMED proceeds and
+          spawns a recursive gap branch.
+
+        NOW-1/1.2: all reportable severities (critical/high/medium/low) are verified;
+        informational is not gated. REFUTED always blocks. UNCONFIRMED blocks only on
+        high/critical (when require_confirmed) to avoid over-suppressing medium/low —
+        verdict writeback + report exclusion of UNCONFIRMED is NOW-1/1.3.
+        """
+        severity = str(args.get("severity", "")).lower()
+        if severity not in {"critical", "high", "medium", "low"} or "verify_finding" not in self.registry.list_tools():
+            return None
+
+        verify_args = {
+            "title": args.get("title", ""),
+            "severity": args.get("severity", ""),
+            "finding_type": args.get("finding_type", ""),
+            "affected_component": args.get("affected_component", ""),
+            "description": args.get("description", ""),
+            "impact": args.get("impact", ""),
+            "technical_analysis": args.get("technical_analysis", ""),
+            "poc_description": args.get("poc_description", ""),
+            "poc_script_code": args.get("poc_script_code", ""),
+            "evidence": args.get("evidence", ""),
+        }
+        if baseline_size is not None:
+            verify_args["baseline_size"] = baseline_size
+
+        verdict_result = await self.registry.dispatch("verify_finding", verify_args)
+        if not verdict_result.ok:
+            return None
+
+        verdict_data = verdict_result.data or {}
+        verdict = str(verdict_data.get("verdict", "UNCONFIRMED"))
+        reasoning = str(verdict_data.get("reasoning", "")) or f"Verifier returned {verdict}."
+        confidence = str(verdict_data.get("confidence", "low"))
+        # NOW-1/1.3: stamp the verdict onto the (proceed-bound) args so report_finding
+        # persists it on the finding. Both callers reuse this same args dict for the
+        # subsequent report_finding dispatch. REFUTED is blocked below and never
+        # dispatched, so a stamp on it is harmless. The gate-skip early return above
+        # leaves args unstamped on purpose (blank verdict => kept, not excluded).
+        args["verifier_verdict"] = verdict
+        args["verifier_confidence"] = confidence
+        args["verifier_reasoning"] = reasoning[:300]
+        self.state.verdict_counts[verdict] = self.state.verdict_counts.get(verdict, 0) + 1
+        _belief_entry = {
+            "iter": self.state.iteration,
+            "title": args.get("title", ""),
+            "severity": args.get("severity", ""),
+            "finding_type": args.get("finding_type", ""),
+            "affected_component": args.get("affected_component", ""),
+            "confidence": confidence,
+            "reasoning": reasoning[:300],
+        }
+        if verdict == "CONFIRMED":
+            self.state.confirmed_findings.append(_belief_entry)
+        elif verdict == "REFUTED":
+            self.state.refuted_findings.append(_belief_entry)
+        self._record_verifier_decision(
+            args=args,
+            verdict=verdict,
+            reasoning=reasoning,
+            confidence=confidence,
+        )
+        self.state.add_message("tool", {
+            "name": "verify_finding",
+            "args": verify_args,
+            "result": {
+                "ok": True,
+                "summary": verdict_result.summary,
+                "data": verdict_data,
+            },
+        })
+
+        if verdict == "UNCONFIRMED" and spawn_gap_on_unconfirmed:
+            gap_branch_id = self._spawn_recursive_gap_branch_from_result(
+                "verify_finding",
+                verify_args,
+                ToolResult(ok=True, summary=verdict_result.summary, data=verdict_data),
+            )
+            if gap_branch_id:
+                self.state.add_message(
+                    "system",
+                    {
+                        "hint": (
+                            "RECURSIVE DIG REQUIRED: verifier returned UNCONFIRMED. "
+                            f"Work branch {gap_branch_id} with controls, negative test, "
+                            "repeat reproduction, then retry report_finding."
+                        ),
+                    },
+                )
+
+        if verdict == "REFUTED":
+            return ToolResult(
+                ok=False,
+                summary=(
+                    "report_finding BLOCKED by auto-verifier "
+                    f"(REFUTED). Reason: {reasoning[:220]}"
+                ),
+                data={"verifier_blocked": True, "verdict": verdict, "reasoning": reasoning},
+                error="verifier_blocked",
+            )
+        if (
+            verdict != "CONFIRMED"
+            and require_confirmed
+            and severity in {"high", "critical"}
+        ):
+            return ToolResult(
+                ok=False,
+                summary=(
+                    "report_finding BLOCKED by auto-verifier "
+                    f"({verdict}). Reason: {reasoning[:220]}"
+                ),
+                data={"verifier_blocked": True, "verdict": verdict, "reasoning": reasoning},
+                error="verifier_blocked",
+            )
+        return None
+
     async def _dispatch_report_finding_checked(
         self,
         args: dict[str, Any],
@@ -742,75 +876,9 @@ class ScanLoopActionMixin:
         require_confirmed: bool = True,
     ) -> ToolResult:
         args = self._compact_local_finding_payload(args)
-        severity = str(args.get("severity", "")).lower()
-        if severity in {"high", "critical"} and "verify_finding" in self.registry.list_tools():
-            verify_args = {
-                "title": args.get("title", ""),
-                "severity": args.get("severity", ""),
-                "finding_type": args.get("finding_type", ""),
-                "affected_component": args.get("affected_component", ""),
-                "description": args.get("description", ""),
-                "impact": args.get("impact", ""),
-                "technical_analysis": args.get("technical_analysis", ""),
-                "poc_description": args.get("poc_description", ""),
-                "poc_script_code": args.get("poc_script_code", ""),
-                "evidence": args.get("evidence", ""),
-            }
-            verdict_result = await self.registry.dispatch("verify_finding", verify_args)
-            if verdict_result.ok:
-                verdict_data = verdict_result.data or {}
-                verdict = str(verdict_data.get("verdict", "UNCONFIRMED"))
-                reasoning = str(verdict_data.get("reasoning", "")) or f"Verifier returned {verdict}."
-                confidence = str(verdict_data.get("confidence", "low"))
-                self.state.verdict_counts[verdict] = self.state.verdict_counts.get(verdict, 0) + 1
-                _belief_entry = {
-                    "iter": self.state.iteration,
-                    "title": args.get("title", ""),
-                    "severity": args.get("severity", ""),
-                    "finding_type": args.get("finding_type", ""),
-                    "affected_component": args.get("affected_component", ""),
-                    "confidence": confidence,
-                    "reasoning": reasoning[:300],
-                }
-                if verdict == "CONFIRMED":
-                    self.state.confirmed_findings.append(_belief_entry)
-                elif verdict == "REFUTED":
-                    self.state.refuted_findings.append(_belief_entry)
-                self._record_verifier_decision(
-                    args=args,
-                    verdict=verdict,
-                    reasoning=reasoning,
-                    confidence=confidence,
-                )
-                self.state.add_message("tool", {
-                    "name": "verify_finding",
-                    "args": verify_args,
-                    "result": {
-                        "ok": True,
-                        "summary": verdict_result.summary,
-                        "data": verdict_data,
-                    },
-                })
-                if verdict != "CONFIRMED" and require_confirmed:
-                    return ToolResult(
-                        ok=False,
-                        summary=(
-                            "report_finding BLOCKED by auto-verifier "
-                            f"({verdict}). Reason: {reasoning[:220]}"
-                        ),
-                        data={"verifier_blocked": True, "verdict": verdict, "reasoning": reasoning},
-                        error="verifier_blocked",
-                    )
-                if verdict == "REFUTED":
-                    return ToolResult(
-                        ok=False,
-                        summary=(
-                            "report_finding BLOCKED by auto-verifier "
-                            f"(REFUTED). Reason: {reasoning[:220]}"
-                        ),
-                        data={"verifier_blocked": True, "verdict": verdict, "reasoning": reasoning},
-                        error="verifier_blocked",
-                    )
+        blocked = await self._verify_and_gate(args, require_confirmed=require_confirmed)
+        if blocked is not None:
+            return blocked
 
         result = await self.registry.dispatch("report_finding", args)
         if result.ok:
@@ -1825,6 +1893,16 @@ class ScanLoopActionMixin:
             return {}
         return self._chain_evidence_artifact_for_pair(source, target, candidate)
 
+    @staticmethod
+    def _find_finding_by_id(
+        findings: list[dict[str, Any]], finding_id: str
+    ) -> dict[str, Any] | None:
+        """Look a finding up by id, returning None (not raising) when absent."""
+        return next(
+            (f for f in findings if str(f.get("id")) == str(finding_id)),
+            None,
+        )
+
     async def _maybe_auto_link_chain(self, finding_id: str) -> None:
         try:
             from vxis.agent.tools.finding_tools import (
@@ -1835,7 +1913,7 @@ class ScanLoopActionMixin:
             return
 
         findings = _get_findings()
-        current = next((f for f in findings if f.get("id") == finding_id), None)
+        current = self._find_finding_by_id(findings, finding_id)
         if not current:
             return
 
@@ -1860,12 +1938,19 @@ class ScanLoopActionMixin:
                 best_candidate = candidate
         if best_candidate is None:
             return
+        source_finding = self._find_finding_by_id(findings, best_candidate["source_id"])
+        if source_finding is None:
+            logger.warning(
+                "auto-link-chain: source finding %s vanished, skipping",
+                best_candidate["source_id"],
+            )
+            return
         result = await self.registry.dispatch("link_chain", {
             "finding_ids": [best_candidate["source_id"], best_candidate["target_id"]],
             "rationale": best_candidate["rationale"],
             "crown_jewel": best_candidate["crown_jewel"],
             "evidence_artifact": self._chain_evidence_artifact_for_pair(
-                next(f for f in findings if str(f.get("id")) == best_candidate["source_id"]),
+                source_finding,
                 current,
                 best_candidate,
             ),

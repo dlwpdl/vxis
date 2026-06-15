@@ -844,6 +844,18 @@ class ReportFindingTool:
                         new_component,
                         existing["id"],
                     )
+                # NOW-1/1.3: upgrade the deduped finding's verdict UPGRADE-ONLY — a
+                # later CONFIRMED re-report promotes a previously-unconfirmed finding
+                # (so it stops being excluded); a later UNCONFIRMED must never
+                # un-confirm an already-CONFIRMED finding.
+                if (
+                    str(kwargs.get("verifier_verdict", "")).upper() == "CONFIRMED"
+                    and existing.get("verifier_verdict") != "CONFIRMED"
+                ):
+                    existing["verifier_verdict"] = "CONFIRMED"
+                    existing["verified"] = True
+                    existing["verifier_confidence"] = str(kwargs.get("verifier_confidence", ""))
+                    existing["verifier_reasoning"] = str(kwargs.get("verifier_reasoning", ""))
                 return ToolResult(
                     ok=True,
                     data={
@@ -879,6 +891,12 @@ class ReportFindingTool:
             "cwe": str(kwargs.get("cwe", "")),
             "extra_evidence": normalized_extra_evidence,
             "proof": proof if severity in ("high", "critical") else {},
+            # NOW-1/1.3: adversarial-verifier verdict stamped by _verify_and_gate.
+            # Blank verdict (info / verify_finding absent / legacy) => kept, not excluded.
+            "verifier_verdict": str(kwargs.get("verifier_verdict", "")),
+            "verifier_confidence": str(kwargs.get("verifier_confidence", "")),
+            "verifier_reasoning": str(kwargs.get("verifier_reasoning", "")),
+            "verified": str(kwargs.get("verifier_verdict", "")).upper() == "CONFIRMED",
         }
         _findings.append(finding)
         logger.info(

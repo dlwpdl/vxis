@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import inspect
+import logging
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ from typing import Any, Callable
 from vxis.agent.context_budget import compact_context_value, resolve_context_budget, trim_text_chars
 from vxis.agent.skill_context import recommend_skill_names, render_skill_context
 from vxis.agent.tool_registry import ToolResult
+
+logger = logging.getLogger(__name__)
 
 AgentGraphExecutor = Callable[[dict[str, Any], str], ToolResult | Any]
 
@@ -1350,19 +1353,31 @@ class AgentGraphTool:
             },
             "nodes": [self._node_snapshot(node) for node in self._nodes.values()],
         }
-        self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
-        encoded = json.dumps(payload, ensure_ascii=False, default=str)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=str(self._persistence_path.parent),
-            prefix=f".{self._persistence_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as tmp:
-            tmp.write(encoded)
-            tmp_path = Path(tmp.name)
-        tmp_path.replace(self._persistence_path)
+        # Snapshot persistence is best-effort: a transient I/O error (disk full,
+        # permission, races) must never crash an in-progress scan.
+        tmp_path: Path | None = None
+        try:
+            self._persistence_path.parent.mkdir(parents=True, exist_ok=True)
+            encoded = json.dumps(payload, ensure_ascii=False, default=str)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=str(self._persistence_path.parent),
+                prefix=f".{self._persistence_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as tmp:
+                tmp.write(encoded)
+                tmp_path = Path(tmp.name)
+            tmp_path.replace(self._persistence_path)
+        except OSError as exc:
+            logger.warning("agent-graph snapshot save failed (best-effort): %s", exc)
+            # Don't leave an orphaned .tmp if we created one before replace() failed.
+            if tmp_path is not None:
+                try:
+                    tmp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     @staticmethod
     def _node_snapshot(node: AgentGraphNode) -> dict[str, Any]:

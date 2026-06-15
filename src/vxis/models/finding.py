@@ -64,6 +64,7 @@ class FindingStatus(str, Enum):
 
     open = "open"
     confirmed = "confirmed"
+    unconfirmed = "unconfirmed"
     false_positive = "false_positive"
     accepted_risk = "accepted_risk"
     remediated = "remediated"

@@ -78,3 +78,27 @@ async def test_run_skill_blocks_registered_skill_with_raw_egress(tmp_path) -> No
     assert result.error == "raw_egress"
     assert result.data["blocked"] is True
     assert result.data["egress"]["errors"]
+
+
+@pytest.mark.asyncio
+async def test_run_skill_does_not_mutate_caller_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The caller (scan loop) reuses its params dict across retries to compute the
+    # stuck-loop cache key. Mutating it (params.pop('url')) changes the key on the
+    # next call, silently bypassing the anti-loop guard.
+    _reset_cache_for_tests()
+
+    async def _fake_injection(*, url: str, **kwargs):
+        return {"vulnerable": False, "findings": []}
+
+    original = SKILL_REGISTRY["test_injection"]["fn"]
+    monkeypatch.setitem(SKILL_REGISTRY["test_injection"], "fn", _fake_injection)
+    try:
+        params = {"url": "http://localhost:3000/search?q=", "round": 1}
+        await RunSkillTool().run(
+            skill="test_injection",
+            target_url="http://localhost:3000",
+            params=params,
+        )
+        assert params == {"url": "http://localhost:3000/search?q=", "round": 1}
+    finally:
+        monkeypatch.setitem(SKILL_REGISTRY["test_injection"], "fn", original)

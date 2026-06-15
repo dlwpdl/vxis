@@ -98,6 +98,7 @@
 - [ADR-011 — Cognitive Engine v3 Consolidation](decisions/011_v3_consolidation.md) — v3 가 왜 integrate 인지 / 중복 시스템(메모리·hypothesis·model table·prioritizer) 통합 / dual-write 롤백 / 삭제 연기
 - [ADR-012 — Verifier Spine](decisions/012_verifier_spine.md) — zero-FP 코드 강제 / verifier 게이트 위치 / 전 severity·PoC 필수 / 신규 아니라 기존 강화
 - [ADR-013 — Profile-driven ScanPolicy](decisions/013_profile_scan_policy.md) — 같은 엔진 prod 안전 + lab 무제한 / 프로필별 권한 / H 익스플로잇 게이트 / 테넌트 격리·fail-closed
+- [ADR-014 — Moat Strategy & Dead-Code Guardrail](decisions/014_moat_strategy.md) — vxis 진짜 차별점(solid moat 2개) / 죽은코드 5개 마케팅 금지 / Strix 약점 공략 / 안 싸울 곳 / NOW-NEXT-LATER 로드맵
 
 ## Sources
 

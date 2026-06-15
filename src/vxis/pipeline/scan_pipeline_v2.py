@@ -133,6 +133,22 @@ def _ghost_proxy_pool_from_config(config: Any | None) -> list[str]:
     return deduped
 
 
+def _evasion_blocked_by_policy(policy: Any) -> bool:
+    """NOW-2/2a: True only when an ACTIVE ScanPolicy forbids evasion (ghost).
+
+    When policy is None (capability-ceiling not enabled / VXIS_V3_POLICY off),
+    evasion follows LEGACY behavior (not blocked) — consistent with the P1 and
+    scope gates, which only enforce when configured, so existing scans do not
+    regress. When a policy IS active, permit_strategy fail-closes on
+    evasion_allowed=False.
+    """
+    if policy is None:
+        return False
+    from vxis.agent.policy.chokepoints import permit_strategy
+
+    return not permit_strategy("ghost", policy).allowed
+
+
 def _resolve_scan_loop_budget() -> tuple[int, int, int]:
     """Return (soft_max, hard_max, extension_chunk) for the Brain loop."""
     provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "").strip().lower()
@@ -240,7 +256,7 @@ def _build_finding_from_dict(
     """
     from vxis.evidence.schema import Severity as _EvidenceSeverity
     from vxis.agent.tools.finding_tools import _canonical_finding_type
-    from vxis.models.finding import CVSSVector, Evidence, Finding
+    from vxis.models.finding import CVSSVector, Evidence, Finding, FindingStatus
     from vxis.models.finding import Severity as _FindingSeverity  # distinct enum
 
     # Map incoming severity strings to models.finding.Severity (the enum that
@@ -339,6 +355,17 @@ def _build_finding_from_dict(
     cwe_raw = str(d.get("cwe", ""))
     cwe_ids = [cwe_raw] if cwe_raw else []
 
+    # NOW-1/1.3: carry the adversarial-verifier verdict into Finding.status so the
+    # DB/dashboard regeneration paths inherit it; blank verdict stays `open`.
+    _verdict = str(d.get("verifier_verdict", "")).upper()
+    _status = (
+        FindingStatus.confirmed
+        if _verdict == "CONFIRMED"
+        else FindingStatus.unconfirmed
+        if _verdict == "UNCONFIRMED"
+        else FindingStatus.open
+    )
+
     return Finding(
         id=str(d.get("id", "VXIS-0000")),
         scan_id=scan_id,
@@ -350,6 +377,7 @@ def _build_finding_from_dict(
         poc_description=bilingual_poc,
         poc_script_code=poc_script_code or None,
         severity=severity,
+        status=_status,
         finding_type=_canonical_finding_type(str(d.get("finding_type", "generic"))),
         source_plugin="scan_agent_loop",
         affected_component=str(d.get("affected_component", "")),
@@ -359,6 +387,43 @@ def _build_finding_from_dict(
         remediation=bilingual_remediation,
         references=[],
     )
+
+
+def _should_include_in_report(d: dict[str, Any]) -> bool:
+    """NOW-1/1.3: withhold UNCONFIRMED findings from the client-facing report.
+
+    Severity-aware (review fix F1): UNCONFIRMED is excluded ONLY at high/critical,
+    mirroring the gate (which blocks UNCONFIRMED only at high/critical). medium/low
+    UNCONFIRMED are KEPT — the gate deliberately proceeds on them and the verifier
+    defaults UNCONFIRMED on parse drift, so dropping them would over-suppress.
+    Excluded findings stay in the raw _findings store (MITRE / scan-memory /
+    retrospective keep the full corpus); they are only withheld from ctx.findings.
+    """
+    verdict = str(d.get("verifier_verdict", "")).upper()
+    severity = str(d.get("severity", "")).lower()
+    # REFUTED never ships (review fix F5, defense-in-depth): the gate already
+    # blocks REFUTED before report_finding, but exclude here too in case any
+    # path persists one.
+    if verdict == "REFUTED":
+        return False
+    return not (verdict == "UNCONFIRMED" and severity in {"high", "critical"})
+
+
+def _reconcile_chains(
+    chain_dicts: list[dict[str, Any]], excluded_ids: set[str]
+) -> list[dict[str, Any]]:
+    """NOW-1/1.3 (review fix F3): drop any attack chain that pivots through a
+    report-excluded (UNCONFIRMED) finding, so the rendered attack graph never
+    asserts a fabricated edge across a withheld hop. Returns the ctx.attack_chains
+    shape (``{"finding_ids": [...], "raw": <chain>}``).
+    """
+    out: list[dict[str, Any]] = []
+    for c in chain_dicts:
+        fids = {str(x) for x in c.get("finding_ids", [])}
+        if excluded_ids & fids:
+            continue
+        out.append({"finding_ids": list(c.get("finding_ids", [])), "raw": c})
+    return out
 
 
 # Back-compat alias — older callers reference the legacy name. New code should
@@ -729,6 +794,7 @@ class ScanPipeline:
         )
         runtime = await prepare_target_runtime(target, kind, hints=target_hints)
         from vxis.scope.runtime_gate import ensure_active_scope, clear_active_scope
+        from vxis.agent.policy.runtime_policy import clear_active_policy, set_active_policy
 
         _scope_owned = ensure_active_scope(runtime.resolved_target)
         try:
@@ -752,6 +818,10 @@ class ScanPipeline:
                 scan_id=_make_scan_id(),
             )
             self._resolve_and_attach_policy(ctx)
+            # NOW-2: publish the resolved policy as ambient state so loop-driven
+            # tools (dispatched through tool_registry) can read the capability
+            # ceiling. None when the v3 policy flag is off → legacy behavior.
+            set_active_policy(ctx.policy)
             ctx.runtime_profile = {  # type: ignore[attr-defined]
                 "launcher_name": runtime.launcher_name,
                 "runtime_mode": runtime.runtime_mode,
@@ -768,6 +838,16 @@ class ScanPipeline:
 
                 _activated, target = parse_ghost_trigger(runtime.resolved_target, self.config)
                 ctx.target = target
+                if _activated and _evasion_blocked_by_policy(ctx.policy):
+                    # NOW-2/2a: the active ScanPolicy profile forbids evasion — do
+                    # not flip the ghost singleton (capability-ceiling enforced).
+                    _activated = False
+                    ctx.runtime_profile["metadata"]["ghost_blocked_by_policy"] = True  # type: ignore[index]
+                    self._emit("ghost", {"active": False, "blocked_by_policy": True, "target": ctx.target})
+                    logger.info(
+                        "[Ghost] evasion not permitted by scan policy — skipping anonymization for target=%s",
+                        ctx.target,
+                    )
                 if _activated:
                     proxy_pool = _ghost_proxy_pool_from_config(self.config)
                     ghost_layer.activate(proxy_pool=proxy_pool)
@@ -811,10 +891,13 @@ class ScanPipeline:
             if hasattr(self.brain, "_target_kind"):
                 self.brain._target_kind = kind
 
-            # 5. Build the tool registry
+            # 5. Build the tool registry. NOW-2/2b: black-box (any dynamic surface)
+            # registers no source-aware tools; only a CODE target is white-box.
+            box_mode = "white" if kind == TargetKind.CODE else "black"
             registry = build_default_registry(
                 brain=self.brain,
                 sandbox_key=str(getattr(ctx, "scan_id", "") or ctx.target),
+                box_mode=box_mode,
             )
 
             # 6. Emit a synthetic phase_start so the CLI Rich Live display has content
@@ -1049,21 +1132,26 @@ class ScanPipeline:
 
             # 6. Copy findings from the in-memory store into ctx.findings
             finding_dicts = _get_finding_dicts()
+            _excluded_finding_ids: set[str] = set()
             for d in finding_dicts:
                 try:
                     f = _build_finding_from_dict(
                         d, scan_id=ctx.scan_id, target=ctx.target, kind=ctx.kind
                     )
-                    ctx.findings.append(f)
+                    # NOW-1/1.3: withhold UNCONFIRMED (high/critical) findings from the
+                    # rendered report; they stay in the raw store for learning / MITRE.
+                    if _should_include_in_report(d):
+                        ctx.findings.append(f)
+                    else:
+                        _excluded_finding_ids.add(str(d.get("id", "")))
                 except Exception:
                     logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
 
-            # 7. Copy chains into ctx.attack_chains (stored as list[dict] per ScanContext typing)
+            # 7. Copy chains into ctx.attack_chains, dropping any chain that pivots
+            # through a withheld finding so the attack graph asserts no fake edge.
             chain_dicts = _get_chain_dicts()
             try:
-                ctx.attack_chains = [
-                    {"finding_ids": list(c.get("finding_ids", [])), "raw": c} for c in chain_dicts
-                ]
+                ctx.attack_chains = _reconcile_chains(chain_dicts, _excluded_finding_ids)
             except Exception:
                 ctx.attack_chains = []
 
@@ -1239,6 +1327,7 @@ class ScanPipeline:
         finally:
             if _scope_owned:
                 clear_active_scope()
+            clear_active_policy()
 
     async def _run_deferred_gate(self, ctx: ScanContext) -> None:
         """Invoke the approval callback on ctx.deferred_actions. Phase A stub."""

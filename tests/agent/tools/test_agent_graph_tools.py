@@ -452,3 +452,41 @@ async def test_agent_graph_run_limit_requires_explicit_finish_or_block():
 def test_build_default_registry_contains_agent_graph_tool():
     reg = build_default_registry()
     assert "agent_graph" in reg.list_tools()
+
+
+def test_save_snapshot_swallows_transient_io_error(tmp_path, monkeypatch):
+    # A transient I/O error while persisting the snapshot must not crash an
+    # in-progress scan — the snapshot is best-effort.
+    import vxis.agent.tools.agent_graph_tools as agt
+
+    tool = AgentGraphTool()
+    tool.set_persistence_path(tmp_path / "snap.json", restore=False)
+
+    def _boom(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(agt.tempfile, "NamedTemporaryFile", _boom)
+
+    # Should return normally, not raise.
+    tool._save_snapshot()
+
+
+def test_save_snapshot_cleans_temp_file_on_replace_failure(tmp_path, monkeypatch):
+    # If the atomic replace() fails AFTER the temp file is written, the temp file
+    # must be cleaned up, not left as an orphaned .snap.json.*.tmp (review fix-followup).
+    from pathlib import Path as _Path
+
+    tool = AgentGraphTool()
+    tool.set_persistence_path(tmp_path / "snap.json", restore=False)
+
+    real_replace = _Path.replace
+
+    def _boom_replace(self, target):  # noqa: ARG001
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(_Path, "replace", _boom_replace)
+    tool._save_snapshot()  # must not raise
+    monkeypatch.setattr(_Path, "replace", real_replace)
+
+    orphans = list(tmp_path.glob(".snap.json.*.tmp"))
+    assert orphans == [], f"temp file leaked on replace failure: {orphans}"

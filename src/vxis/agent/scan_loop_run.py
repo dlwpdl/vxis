@@ -486,138 +486,45 @@ class ScanLoopRunMixin(
                 if name == "verify_finding" and isinstance(args, dict):
                     args = self._hydrate_verify_finding_args(args)
 
-                # Phase C: auto-verify HIGH/CRITICAL report_finding calls
-                # before dispatch. If verify_finding is available in the
-                # registry and the severity is high or critical, run the
-                # adversarial check first. If REFUTED, block the report.
-                if (
-                    name == "report_finding"
-                    and isinstance(args, dict)
-                    and str(args.get("severity", "")).lower() in ("high", "critical")
-                    and "verify_finding" in self.registry.list_tools()
-                ):
+                # NOW-1: single verifier chokepoint. Brain-direct report_finding is
+                # gated through _verify_and_gate (shared with the skill/auto path).
+                # require_confirmed=False preserves the historical behaviour here —
+                # UNCONFIRMED proceeds and spawns a recursive gap branch; only REFUTED
+                # blocks the dispatch. (All-severity gating is NOW-1/1.2.)
+                if name == "report_finding" and isinstance(args, dict):
                     try:
-                        verify_args = {
-                            "title": args.get("title", ""),
-                            "severity": args.get("severity", ""),
-                            "finding_type": args.get("finding_type", ""),
-                            "affected_component": args.get("affected_component", ""),
-                            "description": args.get("description", ""),
-                            "impact": args.get("impact", ""),
-                            "technical_analysis": args.get("technical_analysis", ""),
-                            "poc_description": args.get("poc_description", ""),
-                            "poc_script_code": args.get("poc_script_code", ""),
-                            "evidence": args.get("evidence", ""),
-                        }
-                        if _baseline_size is not None:
-                            verify_args["baseline_size"] = _baseline_size
-                        verdict_result = await self.registry.dispatch("verify_finding", verify_args)
-                        if verdict_result.ok:
-                            verdict_data = verdict_result.data or {}
-                            verdict = verdict_data.get("verdict", "UNCONFIRMED")
-                            reasoning = (
-                                str(verdict_data.get("reasoning", ""))
-                                or f"Verifier returned {verdict}."
-                            )
-                            confidence = str(verdict_data.get("confidence", "low"))
-                            # Phase C belief state: track verdict counts
-                            self.state.verdict_counts[verdict] = (
-                                self.state.verdict_counts.get(verdict, 0) + 1
-                            )
-                            _belief_entry = {
-                                "iter": self.state.iteration,
-                                "title": args.get("title", ""),
-                                "severity": args.get("severity", ""),
-                                "finding_type": args.get("finding_type", ""),
-                                "affected_component": args.get("affected_component", ""),
-                                "confidence": confidence,
-                                "reasoning": reasoning[:300],
-                            }
-                            if verdict == "CONFIRMED":
-                                self.state.confirmed_findings.append(_belief_entry)
-                            elif verdict == "UNCONFIRMED":
-                                pass
-                            elif verdict == "REFUTED":
-                                self.state.refuted_findings.append(_belief_entry)
-                            self._record_verifier_decision(
-                                args=args,
-                                verdict=verdict,
-                                reasoning=reasoning,
-                                confidence=confidence,
-                            )
-                            self.state.add_message(
-                                "tool",
-                                {
-                                    "name": "verify_finding",
-                                    "args": verify_args,
-                                    "result": {
-                                        "ok": True,
-                                        "summary": verdict_result.summary,
-                                        "data": verdict_data,
-                                    },
-                                },
-                            )
-                            logger.info(
-                                "iter %d: auto-verify for %s severity=%s → %s",
-                                self.state.iteration,
-                                args.get("affected_component", "?"),
-                                args.get("severity", "?"),
-                                verdict,
-                            )
-                            if verdict == "UNCONFIRMED":
-                                from vxis.agent.tool_registry import ToolResult as _ToolResult
-
-                                gap_branch_id = self._spawn_recursive_gap_branch_from_result(
-                                    "verify_finding",
-                                    verify_args,
-                                    _ToolResult(
-                                        ok=True,
-                                        summary=verdict_result.summary,
-                                        data=verdict_data,
-                                    ),
-                                )
-                                if gap_branch_id:
-                                    self.state.add_message(
-                                        "system",
-                                        {
-                                            "hint": (
-                                                "RECURSIVE DIG REQUIRED: verifier returned UNCONFIRMED. "
-                                                f"Work branch {gap_branch_id} with controls, negative test, "
-                                                "repeat reproduction, then retry report_finding."
-                                            ),
-                                        },
-                                    )
-                            if verdict == "REFUTED":
-                                # Block the report_finding dispatch — treat
-                                # as a soft fail so Brain sees the refutation
-                                # reasoning on next iteration.
-                                self.state.add_message(
-                                    "tool",
-                                    {
-                                        "name": "report_finding",
-                                        "args": args,
-                                        "result": {
-                                            "ok": False,
-                                            "summary": (
-                                                "report_finding BLOCKED by auto-verifier "
-                                                "(REFUTED). Reason: "
-                                                + str(verdict_data.get("reasoning", ""))[:300]
-                                            ),
-                                            "data": {"verifier_blocked": True, "verdict": verdict},
-                                        },
-                                    },
-                                )
-                                logger.warning(
-                                    "iter %d: report_finding BLOCKED (REFUTED) for %s",
-                                    self.state.iteration,
-                                    args.get("affected_component", "?"),
-                                )
-                                self._emit_control_plane(
-                                    f"Auto-verifier refuted finding: {args.get('title', 'report_finding')}"
-                                )
-                                continue
+                        _verify_block = await self._verify_and_gate(
+                            args,
+                            require_confirmed=False,
+                            spawn_gap_on_unconfirmed=True,
+                            baseline_size=_baseline_size,
+                        )
                     except Exception:
                         logger.exception("auto-verify failed — proceeding with report_finding")
+                        _verify_block = None
+                    if _verify_block is not None:
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": "report_finding",
+                                "args": args,
+                                "result": {
+                                    "ok": False,
+                                    "summary": _verify_block.summary,
+                                    "data": _verify_block.data,
+                                },
+                            },
+                        )
+                        logger.warning(
+                            "iter %d: report_finding BLOCKED (%s) for %s",
+                            self.state.iteration,
+                            (_verify_block.data or {}).get("verdict", "?"),
+                            args.get("affected_component", "?"),
+                        )
+                        self._emit_control_plane(
+                            f"Auto-verifier refuted finding: {args.get('title', 'report_finding')}"
+                        )
+                        continue
 
                 if name == "report_finding" and isinstance(args, dict):
                     _refuted_match = self._matches_refuted_memory_pattern(args)
