@@ -43,6 +43,22 @@ SEVERITY_STYLES = {
     "informational": "dim",
 }
 
+PROFILE_LABELS = {
+    "passive": "정보 수집만",
+    "standard": "안전 점검",
+    "crown": "실전 검증",
+    "stealth": "조용한 점검",
+    "aggressive": "랩 전체 허용",
+    "p1-adversary-emulation": "허가된 모의공격",
+}
+
+
+def _profile_label(profile: str) -> str:
+    label = PROFILE_LABELS.get(profile)
+    if not label:
+        return profile
+    return f"{label} ({profile})"
+
 
 # ---------------------------------------------------------------------------
 # TUI renderer
@@ -79,7 +95,7 @@ def _build_header(s: ScanSnapshot) -> Panel:
 
     header = Text.from_markup(
         f"  [bold cyan]{s.target}[/bold cyan]  |  "
-        f"[yellow]{s.profile}[/yellow]  |  "
+        f"[yellow]{_profile_label(s.profile)}[/yellow]  |  "
         f"{bar} {pct}%  |  "
         f"[bold]{completed}[/bold]/{total} plugins  |  "
         f"[cyan]{running}[/cyan] running  |  "

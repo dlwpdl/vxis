@@ -202,12 +202,12 @@ SCAN_CATEGORIES = {
         "name": "AI 자율 스캔 (Agent Mode)",
         "icon": "\U0001f9e0",
         "desc": "AI 에이전트가 자율적으로 정찰→취약점→공격→검증 전 과정 수행",
-        "profile": "standard",
+        "profile": "crown",
         "plugins": None,  # agent decides
         "agent_mode": True,
     },
     "zero_touch": {
-        "name": "제로터치 (Passive)",
+        "name": "제로터치 (정보 수집만)",
         "icon": "\U0001f50d",
         "desc": "대상에 직접 접촉 없이 OSINT만으로 정보 수집",
         "profile": "passive",
@@ -280,26 +280,39 @@ SCAN_CATEGORIES = {
 
 PROFILES = {
     "passive": {
-        "name": "Passive",
-        "icon": "\U0001f441\ufe0f",
-        "desc": "직접 접촉 없음 (OSINT만)",
-    },
-    "stealth": {
-        "name": "Stealth",
-        "icon": "\U0001f422",
-        "desc": "IDS 우회용 저속 스캔",
+        "name": "정보 수집만",
+        "icon": "\U0001f50d",
+        "desc": "공개 정보와 가벼운 확인만 수행",
     },
     "standard": {
-        "name": "Standard",
-        "icon": "\u26a1",
-        "desc": "일반적인 속도 (권장)",
+        "name": "안전 점검",
+        "icon": "\U0001f6e1\ufe0f",
+        "desc": "운영 서비스용: 읽기/확인 위주, 위험한 공격 실행 차단",
+    },
+    "crown": {
+        "name": "실전 검증",
+        "icon": "\U0001f3af",
+        "desc": "권장: 취약점이 실제 피해로 이어지는지 승인 범위 안에서 확인",
+    },
+    "stealth": {
+        "name": "조용한 점검",
+        "icon": "\u25cc",
+        "desc": "요청을 줄이고 천천히 확인",
     },
     "aggressive": {
-        "name": "Aggressive",
+        "name": "랩 전체 허용",
         "icon": "\U0001f680",
-        "desc": "최대 속도 (랩 환경 전용)",
+        "desc": "격리된 테스트 환경 전용: 강한 공격까지 허용",
     },
 }
+
+
+def _profile_display(profile: str) -> str:
+    """Human-readable profile label for TUI summaries."""
+    prof = PROFILES.get(profile)
+    if not prof:
+        return profile
+    return f"{prof['name']} ({profile})"
 
 
 # ── 배너 ────────────────────────────────────────────────────────
@@ -401,7 +414,7 @@ def scan_wizard() -> dict | None:
     if not target:
         return None
 
-    # Step 3: 스캔 강도 (제로터치는 passive 고정)
+    # Step 3: 실행 모드 (제로터치는 passive 고정)
     if scan_type == "zero_touch":
         profile = "passive"
     else:
@@ -416,11 +429,11 @@ def scan_wizard() -> dict | None:
             })
 
         profile = inquirer.select(
-            message="스캔 강도를 선택하세요",
+            message="어느 정도까지 직접 확인할까요?",
             choices=profile_choices,
             default=cat["profile"],
             pointer="\u276f",
-            qmark="\u26a1",
+            qmark="\U0001f6e1\ufe0f",
             amark="\u2705",
         ).execute()
 
@@ -475,11 +488,11 @@ def _batch_wizard() -> dict | None:
     ]
 
     profile = inquirer.select(
-        message="스캔 강도를 선택하세요",
+        message="어느 정도까지 직접 확인할까요?",
         choices=profile_choices,
         default="standard",
         pointer="\u276f",
-        qmark="\u26a1",
+        qmark="\U0001f6e1\ufe0f",
         amark="\u2705",
     ).execute()
 
@@ -576,14 +589,20 @@ def _code_scan_wizard(cat: dict) -> dict | None:
         target = clone_dir
 
     profile = inquirer.select(
-        message="스캔 강도를 선택하세요",
+        message="코드를 어느 깊이까지 확인할까요?",
         choices=[
-            {"name": "\u26a1  Standard (권장)", "value": "standard"},
-            {"name": "\U0001f680  Aggressive (전체 히스토리 포함)", "value": "aggressive"},
+            {
+                "name": "\U0001f6e1\ufe0f  안전 점검 - 현재 코드와 의존성 위주로 확인 (권장)",
+                "value": "standard",
+            },
+            {
+                "name": "\U0001f680  깊은 코드 점검 - 더 오래 걸리지만 더 넓게 확인",
+                "value": "aggressive",
+            },
         ],
         default="standard",
         pointer="\u276f",
-        qmark="\u26a1",
+        qmark="\U0001f6e1\ufe0f",
         amark="\u2705",
     ).execute()
 
@@ -661,7 +680,7 @@ def _show_plugin_summary(
 
     table.add_row("\U0001f3af 대상:", f"[cyan]{target}[/cyan]")
     table.add_row("\U0001f4cb 스캔 유형:", f"[yellow]{scan_name}[/yellow]")
-    table.add_row("\u26a1 프로필:", f"[green]{profile}[/green]")
+    table.add_row("\U0001f6e1\ufe0f 실행 모드:", f"[green]{_profile_display(profile)}[/green]")
 
     # Plugin grid (4 columns)
     plugin_lines = []
@@ -917,7 +936,10 @@ def _execute_scan(params: dict) -> None:
         display.update(collector.snapshot)
         return await scan_task
 
-    console.print(f"\n[bold cyan]스캔 시작:[/bold cyan] {params['target']} ({params['profile']})\n")
+    console.print(
+        f"\n[bold cyan]스캔 시작:[/bold cyan] "
+        f"{params['target']} ({_profile_display(params['profile'])})\n"
+    )
 
     try:
         display = ScanLiveDisplay(console)
@@ -1394,17 +1416,27 @@ def _industry_csv_scan() -> None:
     ).execute()
 
     profile_choices = [
-        {"name": "\U0001f441\ufe0f  Passive (OSINT만)", "value": "passive"},
-        {"name": "\u26a1  Standard (권장)", "value": "standard"},
-        {"name": "\U0001f680  Aggressive (최대 속도)", "value": "aggressive"},
+        {"name": "\U0001f50d  정보 수집만 - 공개 정보와 가벼운 확인만 수행", "value": "passive"},
+        {
+            "name": "\U0001f6e1\ufe0f  안전 점검 - 운영 서비스용, 위험한 공격 실행 차단",
+            "value": "standard",
+        },
+        {
+            "name": "\U0001f3af  실전 검증 - 실제 피해 가능성까지 승인 범위 안에서 확인",
+            "value": "crown",
+        },
+        {
+            "name": "\U0001f680  랩 전체 허용 - 격리된 테스트 환경 전용",
+            "value": "aggressive",
+        },
     ]
 
     profile = inquirer.select(
-        message="스캔 강도를 선택하세요",
+        message="어느 정도까지 직접 확인할까요?",
         choices=profile_choices,
-        default="standard",
+        default="crown",
         pointer="\u276f",
-        qmark="\u26a1",
+        qmark="\U0001f6e1\ufe0f",
         amark="\u2705",
     ).execute()
 
@@ -1432,7 +1464,7 @@ def _industry_csv_scan() -> None:
     )
 
     confirm = inquirer.confirm(
-        message=f"{len(companies)}개 기업을 스캔할까요? (profile={profile})",
+        message=f"{len(companies)}개 기업을 스캔할까요? ({_profile_display(profile)})",
         default=True,
         qmark="\U0001f3ed",
         amark="\u2705",
@@ -2125,7 +2157,7 @@ def _execute_agent_scan(params: dict) -> None:
     import os
 
     target = params["target"]
-    profile = params.get("profile", "standard")
+    profile = params.get("profile", "crown")
 
     source_class = inquirer.select(
         message="AI 두뇌 소스를 선택하세요",
@@ -2211,49 +2243,61 @@ def _execute_agent_scan(params: dict) -> None:
 
     model_short = model.split("/")[-1] if "/" in model else model
 
-    # Ceiling 선택 — AI 추론은 100%, 실행만 천장 이내
+    # Execution permission 선택 — AI reasoning stays broad; target actions stay inside this bound.
     ceiling = inquirer.select(
-        message="실행 천장(ceiling)을 설정하세요 — AI 추론은 항상 100%",
+        message="AI가 어디까지 직접 실행해도 될까요?",
         choices=[
-            {"name": "\U0001f50d  Passive — OSINT만, 대상 접촉 없음 (안전)", "value": "passive"},
-            {"name": "\U0001f310  Standard — 일반 스캔 도구 허용 (권장)", "value": "standard"},
-            {"name": "\U0001f680  Aggressive — 깊은 익스플로잇 허용", "value": "aggressive"},
-            {"name": "\U0001f480  Elite — Zero-Day 탐색 + 전체 도구 (랩 전용)", "value": "elite"},
+            {
+                "name": "\U0001f50d  정보 수집만 - 공개 정보와 가벼운 확인만 수행",
+                "value": "passive",
+            },
+            {
+                "name": "\U0001f6e1\ufe0f  안전 점검 - 읽기/확인 위주, 위험한 공격 실행 차단",
+                "value": "standard",
+            },
+            {
+                "name": "\U0001f3af  실전 검증 - 실제 피해 가능성까지 승인 범위 안에서 확인 (권장)",
+                "value": "crown",
+            },
+            {
+                "name": "\U0001f680  랩 전체 허용 - 격리/명시 승인 환경에서만 강한 공격 허용",
+                "value": "aggressive",
+            },
         ],
-        default="standard",
+        default="crown",
         pointer="\u276f",
         qmark="\U0001f6e1\ufe0f",
         amark="\u2705",
-        instruction="AI가 이 천장 이내에서 자율 판단합니다",
+        instruction="AI는 넓게 생각하되, 실제 실행은 이 선택 안에서만 진행합니다",
     ).execute()
 
     if ceiling is None:
         return
 
-    # Ceiling → profile 매핑
+    # User-facing execution permission -> internal profile.
     ceiling_profile_map = {
         "passive": "passive",
         "standard": "standard",
+        "crown": "crown",
         "aggressive": "aggressive",
-        "elite": "aggressive",
     }
-    profile = ceiling_profile_map.get(ceiling, "standard")
+    profile = ceiling_profile_map.get(ceiling, "crown")
 
     ceiling_kr = {
-        "passive": "Passive (접촉 없음)",
-        "standard": "Standard (일반 스캔)",
-        "aggressive": "Aggressive (익스플로잇)",
-        "elite": "Elite (전체 허용)",
+        "passive": "정보 수집만",
+        "standard": "안전 점검",
+        "crown": "실전 검증",
+        "aggressive": "랩 전체 허용",
     }
 
     console.print()
     console.print(Panel(
         f"[bold cyan]\U0001f9e0 VXIS AI Agent Mode[/bold cyan]\n\n"
         f"\U0001f3af 타겟: [white]{target}[/white]\n"
-        f"\U0001f6e1\ufe0f 천장: [yellow]{ceiling_kr.get(ceiling, ceiling)}[/yellow]\n"
+        f"\U0001f6e1\ufe0f 실행 허용 범위: [yellow]{ceiling_kr.get(ceiling, ceiling)}[/yellow]\n"
         f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
-        f"[dim]AI의 추론 능력은 항상 100%. 실행만 천장 이내.\n"
-        f"Passive여도 OSINT에서 critical 발견하면 보고합니다.[/dim]",
+        f"[dim]AI는 넓게 생각하지만, 실제 요청과 공격 실행은 선택한 범위 안에서만 진행합니다.\n"
+        f"정보 수집만 모드에서도 공개 정보에서 중요한 위험이 보이면 보고합니다.[/dim]",
         title="\U0001f9e0 Autonomous Pentesting",
         border_style="cyan",
     ))

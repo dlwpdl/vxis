@@ -11,6 +11,44 @@ from rich.panel import Panel
 from rich.table import Table
 
 
+PROFILE_DISPLAY = {
+    "passive": (
+        "정보 수집만",
+        "공개 정보와 가벼운 확인만 수행",
+        "cyan",
+    ),
+    "standard": (
+        "안전 점검",
+        "운영 서비스용: 읽기/확인 위주, 위험한 공격 실행 차단",
+        "green",
+    ),
+    "crown": (
+        "실전 검증",
+        "실제 피해 가능성까지 승인 범위 안에서 확인",
+        "bold cyan",
+    ),
+    "stealth": (
+        "조용한 점검",
+        "요청을 줄이고 천천히 확인",
+        "yellow",
+    ),
+    "aggressive": (
+        "랩 전체 허용",
+        "격리/명시 승인 환경 전용: 강한 공격까지 허용",
+        "red",
+    ),
+    "p1-adversary-emulation": (
+        "허가된 모의공격",
+        "계약된 engagement와 감사 기록이 필요한 고급 실행",
+        "magenta",
+    ),
+}
+
+
+def _profile_display(profile: str) -> tuple[str, str, str]:
+    return PROFILE_DISPLAY.get(profile, (profile, "사용자 지정 실행 모드", "white"))
+
+
 class ScanLiveDisplay:
     """실시간 스캔 진행 상황 표시.
 
@@ -285,14 +323,13 @@ class ScanLiveDisplay:
         table = Table.grid(padding=(0, 2))
         table.add_column(style="bold", no_wrap=True)
         table.add_column()
-        _pstyle = {
-            "stealth": "yellow",
-            "standard": "green",
-            "aggressive": "red",
-            "p1-adversary-emulation": "magenta",
-        }.get(self.profile, "white")
+        profile_name, profile_help, profile_style = _profile_display(self.profile)
         table.add_row("Target:", f"[cyan]{self.target}[/cyan]")
-        table.add_row("Profile:", f"[{_pstyle}]{self.profile}[/{_pstyle}]")
+        table.add_row(
+            "Mode:",
+            f"[{profile_style}]{profile_name}[/{profile_style}] [dim]({self.profile})[/dim]",
+        )
+        table.add_row("Allows:", f"[dim]{profile_help}[/dim]")
         table.add_row("Brain:", f"[green]{self.brain}[/green]")
         runtime = self._runtime_summary()
         if runtime:
