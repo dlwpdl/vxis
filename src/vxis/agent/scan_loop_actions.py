@@ -787,6 +787,14 @@ class ScanLoopActionMixin:
         verdict = str(verdict_data.get("verdict", "UNCONFIRMED"))
         reasoning = str(verdict_data.get("reasoning", "")) or f"Verifier returned {verdict}."
         confidence = str(verdict_data.get("confidence", "low"))
+        # NOW-1/1.3: stamp the verdict onto the (proceed-bound) args so report_finding
+        # persists it on the finding. Both callers reuse this same args dict for the
+        # subsequent report_finding dispatch. REFUTED is blocked below and never
+        # dispatched, so a stamp on it is harmless. The gate-skip early return above
+        # leaves args unstamped on purpose (blank verdict => kept, not excluded).
+        args["verifier_verdict"] = verdict
+        args["verifier_confidence"] = confidence
+        args["verifier_reasoning"] = reasoning[:300]
         self.state.verdict_counts[verdict] = self.state.verdict_counts.get(verdict, 0) + 1
         _belief_entry = {
             "iter": self.state.iteration,
