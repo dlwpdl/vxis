@@ -263,9 +263,9 @@ SCAN_CATEGORIES = {
         "plugins": None,  # None = all available plugins
     },
     "batch": {
-        "name": "PE 포트폴리오 (Batch)",
+        "name": "여러 대상 일괄 스캔 (CSV)",
         "icon": "\U0001f4ca",
-        "desc": "CSV 파일의 다수 대상 일괄 스캔 + 리스크 등급 리포트",
+        "desc": "CSV 파일의 다수 대상 일괄 스캔 + 리스크 등급 리포트 (PE 포트폴리오 등)",
         "profile": "standard",
         "plugins": [],
     },
@@ -440,49 +440,91 @@ def print_banner() -> None:
 
 # ── 메인 메뉴 ──────────────────────────────────────────────────
 
-def main_menu() -> str | None:
-    """메인 메뉴를 표시하고 선택된 액션을 반환."""
-    choices = [
+def _main_menu_choices() -> list:
+    """NOW-3: collapsed top level — daily actions up front, the rest under 고급."""
+    return [
         {"name": "\U0001f50d  스캔 시작", "value": "scan"},
-        {"name": "\U0001f3ed  산업 스캔", "value": "industry"},
         {"name": "\U0001f4ca  스캔 결과 조회", "value": "results"},
         {"name": "\U0001f4c4  리포트 생성 / 내보내기", "value": "report"},
-        {"name": "\U0001f50c  플러그인 관리", "value": "plugins"},
-        {"name": "\U0001f464  클라이언트 관리", "value": "client"},
-        {"name": "\U0001f310  대시보드 열기", "value": "dashboard"},
         Separator(),
+        {"name": "\U0001f6e0\ufe0f   고급 (산업 스캔 · 클라이언트 · 플러그인 · 대시보드)", "value": "advanced"},
         {"name": "\u2699\ufe0f   설정", "value": "settings"},
         {"name": "\u274c  종료", "value": "exit"},
     ]
 
-    result = inquirer.select(
+
+def _advanced_menu_choices() -> list:
+    """Advanced submenu — repeat-user / B2B features moved off the top level."""
+    return [
+        {"name": "\U0001f3ed  산업 스캔 (도메인 리스트 · 기업 발굴 · 아웃리치)", "value": "industry"},
+        {"name": "\U0001f464  클라이언트 관리", "value": "client"},
+        {"name": "\U0001f50c  플러그인 관리", "value": "plugins"},
+        {"name": "\U0001f310  대시보드 열기", "value": "dashboard"},
+        Separator(),
+        {"name": "\u2196\ufe0f   뒤로", "value": "back"},
+    ]
+
+
+def main_menu() -> str | None:
+    """메인 메뉴를 표시하고 선택된 액션을 반환."""
+    return inquirer.select(
         message="무엇을 하시겠습니까?",
-        choices=choices,
+        choices=_main_menu_choices(),
         pointer="\u276f",
         qmark="",
         amark="",
         instruction="(↑↓ 방향키로 선택, Enter 확인)",
     ).execute()
 
-    return result
 
+def _advanced_menu() -> str | None:
+    """고급 서브메뉴를 표시하고 선택된 액션을 반환 (back/None = 메인으로)."""
+    return inquirer.select(
+        message="고급 기능",
+        choices=_advanced_menu_choices(),
+        pointer="\u276f",
+        qmark="\U0001f6e0\ufe0f",
+        amark="\u2705",
+        instruction="(↑↓ 방향키)",
+    ).execute()
 
 # ── 스캔 위자드 ────────────────────────────────────────────────
+
+# NOW-3: scan SCOPE first (AI auto recommended), advanced execution shapes
+# (full / batch / custom) grouped under a separator so the list reads cleanly.
+_SCAN_PRIMARY_ORDER = ["ai_auto", "zero_touch", "external", "internal", "code", "cloud"]
+_SCAN_ADVANCED_ORDER = ["full", "batch", "custom"]
+
+
+def _ordered_scan_choices() -> list:
+    """Scan-type choices: recommended AI auto first, advanced types after a
+    separator. Any category not explicitly ordered falls into the advanced
+    group so new categories are never silently dropped."""
+    known = set(_SCAN_PRIMARY_ORDER) | set(_SCAN_ADVANCED_ORDER)
+    leftover = [k for k in SCAN_CATEGORIES if k not in known]
+    out: list = []
+    for key in _SCAN_PRIMARY_ORDER:
+        if key not in SCAN_CATEGORIES:
+            continue
+        cat = SCAN_CATEGORIES[key]
+        rec = "  [권장]" if key == "ai_auto" else ""
+        out.append({"name": f"{cat['icon']}  {cat['name']}{rec}    {cat['desc']}", "value": key})
+    out.append(Separator("── 고급 스캔 유형 ──"))
+    for key in _SCAN_ADVANCED_ORDER + leftover:
+        if key not in SCAN_CATEGORIES:
+            continue
+        cat = SCAN_CATEGORIES[key]
+        out.append({"name": f"{cat['icon']}  {cat['name']}    {cat['desc']}", "value": key})
+    return out
+
 
 def scan_wizard() -> dict | None:
     """스캔 설정 위자드. 선택된 파라미터를 dict로 반환."""
 
     # Step 1: 스캔 유형 선택
-    scan_choices = []
-    for key, cat in SCAN_CATEGORIES.items():
-        scan_choices.append({
-            "name": f"{cat['icon']}  {cat['name']}    {cat['desc']}",
-            "value": key,
-        })
-
     scan_type = inquirer.select(
         message="스캔 유형을 선택하세요",
-        choices=scan_choices,
+        choices=_ordered_scan_choices(),
         pointer="\u276f",
         qmark="\U0001f50d",
         amark="\u2705",
@@ -960,6 +1002,11 @@ def _dispatch(action: str) -> None:
         result = report_menu()
         if result:
             _generate_report(result)
+
+    elif action == "advanced":
+        sub = _advanced_menu()
+        if sub and sub != "back":
+            _dispatch(sub)
 
     elif action == "plugins":
         from vxis.cli.installer import install_interactive
