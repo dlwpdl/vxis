@@ -109,6 +109,33 @@ PROFILE_POLICY_TABLE: dict[str, ScanPolicy] = {
 }
 
 
+def attack_level_badge(profile_name: str) -> dict:
+    """NOW-3 #2: quantify a profile's attack level for the TUI/dashboard.
+
+    Reads the profile's ScanPolicy straight from PROFILE_POLICY_TABLE (fail-closed
+    to the `none` default for unknown names) so the displayed badge can never drift
+    from the policy actually enforced. Returns the exploitation ceiling, its 0–3
+    rank, a 3-cell ●/○ bar, and human risk flags (lab-only / evasion-on /
+    approval-required)."""
+    policy = PROFILE_POLICY_TABLE.get(
+        normalize_scan_profile_name(profile_name or ""), FAIL_CLOSED_DEFAULT
+    )
+    rank = ceiling_rank(policy.exploitation_ceiling)
+    flags: list[str] = []
+    if policy.scope_strictness == "lab-allowlist":
+        flags.append("lab-only")
+    if policy.evasion_allowed:
+        flags.append("evasion-on")
+    if policy.deferred_mutation_approval:
+        flags.append("approval-required")
+    return {
+        "ceiling": policy.exploitation_ceiling,
+        "rank": rank,
+        "bars": "●" * rank + "○" * (len(_CEILING_ORDER) - 1 - rank),
+        "flags": flags,
+    }
+
+
 def resolve_policy(config: object | None) -> ScanPolicy:
     """Resolve the active profile to a ScanPolicy. Fail-closed (`none`) on a
     None config, an empty/unset profile, or an unknown profile string. The

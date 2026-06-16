@@ -2246,26 +2246,27 @@ def _execute_agent_scan(params: dict) -> None:
     model_short = model.split("/")[-1] if "/" in model else model
 
     # Execution permission 선택 — AI reasoning stays broad; target actions stay inside this bound.
+    # NOW-3 #2: each option carries an attack-level badge derived from the
+    # profile ScanPolicy ceiling (●●● = full), so the attack level is
+    # quantified right at the choice ("공격레벨 수치화").
+    from vxis.agent.policy.scan_policy import attack_level_badge
+
+    _ceiling_opts = [
+        ("passive", "\U0001f50d", "정보 수집만", "공개 정보와 가벼운 확인만 수행"),
+        ("standard", "\U0001f6e1\ufe0f", "안전 점검", "읽기/확인 위주, 위험한 공격 실행 차단"),
+        ("crown", "\U0001f3af", "실전 검증", "실제 피해 가능성까지 승인 범위 안에서 확인 (권장)"),
+        ("aggressive", "\U0001f680", "랩 전체 허용", "격리/명시 승인 환경에서만 강한 공격 허용"),
+    ]
+    _ceiling_choices = [
+        {
+            "name": f"{icon}  [공격력 {attack_level_badge(value)['bars']}] {label} - {desc}",
+            "value": value,
+        }
+        for value, icon, label, desc in _ceiling_opts
+    ]
     ceiling = inquirer.select(
-        message="AI가 어디까지 직접 실행해도 될까요?",
-        choices=[
-            {
-                "name": "\U0001f50d  정보 수집만 - 공개 정보와 가벼운 확인만 수행",
-                "value": "passive",
-            },
-            {
-                "name": "\U0001f6e1\ufe0f  안전 점검 - 읽기/확인 위주, 위험한 공격 실행 차단",
-                "value": "standard",
-            },
-            {
-                "name": "\U0001f3af  실전 검증 - 실제 피해 가능성까지 승인 범위 안에서 확인 (권장)",
-                "value": "crown",
-            },
-            {
-                "name": "\U0001f680  랩 전체 허용 - 격리/명시 승인 환경에서만 강한 공격 허용",
-                "value": "aggressive",
-            },
-        ],
+        message="AI가 어디까지 직접 실행해도 될까요?  (공격력 ○○○ → ●●●)",
+        choices=_ceiling_choices,
         default="crown",
         pointer="\u276f",
         qmark="\U0001f6e1\ufe0f",
@@ -2292,6 +2293,7 @@ def _execute_agent_scan(params: dict) -> None:
         "aggressive": "랩 전체 허용",
     }
 
+    _badge = attack_level_badge(profile)
     console.print()
     console.print(Panel(
         f"[bold cyan]\U0001f9e0 VXIS AI Agent Mode[/bold cyan]\n\n"
@@ -2299,6 +2301,9 @@ def _execute_agent_scan(params: dict) -> None:
         f"⚫ 박스 모드: [white]블랙박스[/white] "
         f"[dim](외부 공격자 시점 · 소스/내부 정보 접근 없음)[/dim]\n"
         f"\U0001f6e1\ufe0f 실행 허용 범위: [yellow]{ceiling_kr.get(ceiling, ceiling)}[/yellow]\n"
+        f"\U0001f4ca 공격 레벨: [bold]{_badge['bars']}[/bold] "
+        f"[dim]{_badge['ceiling']}"
+        f"{' · ' + ', '.join(_badge['flags']) if _badge['flags'] else ''}[/dim]\n"
         f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
         f"[dim]AI는 넓게 생각하지만, 실제 요청과 공격 실행은 선택한 범위 안에서만 진행합니다.\n"
         f"정보 수집만 모드에서도 공개 정보에서 중요한 위험이 보이면 보고합니다.[/dim]",
