@@ -58,6 +58,11 @@ ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the veri
 - [x] **#3 parallel vs serial toggle** (`22ca95f`): agent wizard asks 직렬/병렬, sets `VXIS_LOCAL_WORKER_CONCURRENCY` (the agent-graph worker LLM semaphore) — serial=1 (default), parallel=4; `_exec_mode_to_concurrency` fail-safes to serial; shown in the summary.
 - [x] **#4 verification-rate panel** (`71d92fb`): bilingual "Verification Rate / 검증율" panel in the report executive summary (CONFIRMED % + per-verdict table), rendered only when `report.has_verdicts`. RESIDUAL (#4 other half): proving a LIVE scan emits this end-to-end needs a real scan run → user-initiated only (CLAUDE.md).
 
+## Model currency + TUI UX (user request 2026-06-16 — de-risked by workflow `wjr4wm2k3`)
+- [x] **Hybrid model catalog** (`7af2183`, `a08cd30`): `llm/model_catalog.available_models(provider)` = curated registry (authoritative, offline) + LIVE models.dev (`api.json`, no key, SST/OpenCode community catalog) merged, newest-first, 3-tier fallback live→24h disk cache→bundled. Registry refreshed (`claude-opus-4-8` flagship) + `ModelInfo.release_date`. TUI cloud picker rebuilt: provider-select (key-availability tags) → live model list (source label 라이브/캐시/기본값) → 직접-입력 fallback. Kills the hand-maintained stale lists. Verified live: anthropic 25 / openai 50 / gemini 24.
+- [x] **TUI menu full restructure** (`ddffe56`): top level 9→ scan/results/report + 🛠️고급 submenu (산업/클라이언트/플러그인/대시보드); scan wizard AI-auto-first [권장] + advanced types under a separator; "PE 포트폴리오"→"여러 대상 일괄 스캔 (CSV)". Pure choice-builders → unit-tested.
+- [ ] RESIDUAL: the duplicated cloud model lists in `agent/brain.py:297-344` + `llm/hybrid_config.py:328-394` still hardcode (internal defaults/validation, NOT user-facing now). Route them through `model_catalog`/`model_registry` too. Also: a Settings → "모델 소스 새로고침" entry to force-refresh the cache.
+
 ## NEXT
 - [ ] Global cost/USD/turn budget governor + honest per-agent attribution (proposal R11).
 - [ ] Desktop dynamic confirmation (real `DYLD_INSERT_LIBRARIES` inject) + Windows DESKTOP branch; fix cross-surface synth Finding↔Evidence type bridge + pull into the live scan loop (P8).
