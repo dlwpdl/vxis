@@ -135,3 +135,20 @@ def test_check_local_llm_ready_uses_llamacpp_models_endpoint() -> None:
     assert ready is True
     assert "llamacpp reachable" in message
     assert urlopen.call_args.args[0].full_url == "http://localhost:8080/v1/models"
+
+
+# ── NOW-3 #3: parallel/serial agent-execution toggle ──
+class TestExecModeToConcurrency:
+    def test_serial_is_one_worker(self):
+        assert interactive._exec_mode_to_concurrency("serial") == 1
+
+    def test_parallel_is_multiple_workers(self):
+        assert interactive._exec_mode_to_concurrency("parallel") == 4
+
+    def test_unknown_or_blank_defaults_serial(self):
+        # fail-safe to serial (deterministic, low resource)
+        assert interactive._exec_mode_to_concurrency("") == 1
+        assert interactive._exec_mode_to_concurrency("bogus") == 1
+
+    def test_case_insensitive(self):
+        assert interactive._exec_mode_to_concurrency("PARALLEL") == 4

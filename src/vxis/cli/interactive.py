@@ -315,6 +315,17 @@ def _profile_display(profile: str) -> str:
     return f"{prof['name']} ({profile})"
 
 
+# NOW-3 #3: parallel/serial agent execution. The agent-graph worker LLM semaphore
+# (VXIS_LOCAL_WORKER_CONCURRENCY) caps how many sub-agents run at once: 1 = serial
+# (deterministic, low resource); >1 = parallel (faster, heavier on the model).
+_PARALLEL_WORKER_COUNT = 4
+
+
+def _exec_mode_to_concurrency(mode: str) -> int:
+    """serial → 1 worker; parallel → _PARALLEL_WORKER_COUNT. Fail-safe to serial."""
+    return _PARALLEL_WORKER_COUNT if str(mode).strip().lower() == "parallel" else 1
+
+
 # ── 배너 ────────────────────────────────────────────────────────
 
 _BANNER = r"""
@@ -2286,6 +2297,27 @@ def _execute_agent_scan(params: dict) -> None:
     }
     profile = ceiling_profile_map.get(ceiling, "crown")
 
+    # NOW-3 #3: parallel vs serial agent execution — sets the agent-graph worker
+    # LLM concurrency (VXIS_LOCAL_WORKER_CONCURRENCY) for this run.
+    import os as _os_exec
+
+    exec_mode = inquirer.select(
+        message="에이전트 실행 방식을 선택하세요",
+        choices=[
+            {"name": "🧵  직렬 - 한 번에 하나씩 (안정적 · 저비용 · 권장)", "value": "serial"},
+            {"name": "⚡  병렬 - 여러 작업 동시 (빠름 · 모델 부하 큼)", "value": "parallel"},
+        ],
+        default="serial",
+        pointer="❯",
+        qmark="🧵",
+        amark="✅",
+    ).execute()
+    if exec_mode is None:
+        return
+    _worker_n = _exec_mode_to_concurrency(exec_mode)
+    _os_exec.environ["VXIS_LOCAL_WORKER_CONCURRENCY"] = str(_worker_n)
+    _exec_mode_kr = "병렬" if exec_mode == "parallel" else "직렬"
+
     ceiling_kr = {
         "passive": "정보 수집만",
         "standard": "안전 점검",
@@ -2304,6 +2336,7 @@ def _execute_agent_scan(params: dict) -> None:
         f"\U0001f4ca 공격 레벨: [bold]{_badge['bars']}[/bold] "
         f"[dim]{_badge['ceiling']}"
         f"{' · ' + ', '.join(_badge['flags']) if _badge['flags'] else ''}[/dim]\n"
+        f"\U0001f9f5 실행 방식: [white]{_exec_mode_kr}[/white] [dim](동시 워커 {_worker_n})[/dim]\n"
         f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
         f"[dim]AI는 넓게 생각하지만, 실제 요청과 공격 실행은 선택한 범위 안에서만 진행합니다.\n"
         f"정보 수집만 모드에서도 공개 정보에서 중요한 위험이 보이면 보고합니다.[/dim]",
