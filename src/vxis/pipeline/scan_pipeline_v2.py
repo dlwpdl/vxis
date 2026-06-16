@@ -149,6 +149,27 @@ def _evasion_blocked_by_policy(policy: Any) -> bool:
     return not permit_strategy("ghost", policy).allowed
 
 
+_VALID_BOX_MODES = ("black", "white", "grey")
+
+
+def _resolve_box_mode(override: str | None, kind: TargetKind) -> str:
+    """NOW-3 #1: resolve the effective box-mode for the tool registry.
+
+    override None → legacy derivation (CODE → white, any dynamic surface → black).
+    A valid explicit choice (black/white/grey; 'gray' normalized) is honored as-is,
+    so an operator can force black even on a CODE target — "블랙박스는 완전히
+    블랙박스여야함". Fail-closed: any invalid/empty override resolves to black (the
+    no-source-access default), never silently escalating to source-aware tools.
+    """
+    derived = "white" if kind == TargetKind.CODE else "black"
+    if override is None:
+        return derived
+    norm = str(override).strip().lower()
+    if norm == "gray":
+        norm = "grey"
+    return norm if norm in _VALID_BOX_MODES else "black"
+
+
 def _resolve_scan_loop_budget() -> tuple[int, int, int]:
     """Return (soft_max, hard_max, extension_chunk) for the Brain loop."""
     provider = os.environ.get("UPSTREAM_LLM_PROVIDER", "").strip().lower()
@@ -819,6 +840,7 @@ class ScanPipeline:
         resume_from: str | None = None,  # Phase A: ignored, kept for signature compat
         kind: TargetKind = TargetKind.WEB,
         target_hints: dict[str, str] | None = None,
+        box_mode: str | None = None,  # NOW-3: explicit black/white/grey; None → derive from kind
     ) -> ScanContext:
         """Run a Strix-parity single-loop scan against the target."""
         started = time.monotonic()
@@ -940,7 +962,10 @@ class ScanPipeline:
 
             # 5. Build the tool registry. NOW-2/2b: black-box (any dynamic surface)
             # registers no source-aware tools; only a CODE target is white-box.
-            box_mode = "white" if kind == TargetKind.CODE else "black"
+            # NOW-3 #1: an explicit box_mode override (from the TUI box step) wins,
+            # fail-closed to black; None keeps the legacy kind-derived behavior.
+            box_mode = _resolve_box_mode(box_mode, kind)
+            self._emit("box_mode_resolved", {"box_mode": box_mode, "kind": kind.value})
             registry = build_default_registry(
                 brain=self.brain,
                 sandbox_key=str(getattr(ctx, "scan_id", "") or ctx.target),

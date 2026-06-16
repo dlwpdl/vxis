@@ -99,6 +99,17 @@ def _is_local_benchmark(target: str) -> bool:
     return has_benchmark_port and has_loopback_host
 
 
+def _box_flag_to_mode(box: str) -> str | None:
+    """NOW-3 #1: map the --box flag to the pipeline's box_mode override.
+
+    'auto' / blank → None (let the pipeline derive from --kind). Any other value
+    is lowercased and passed through; the pipeline's _resolve_box_mode validates
+    it and fail-closes to black, so the CLI keeps a single source of truth.
+    """
+    norm = (box or "").strip().lower()
+    return None if norm in ("", "auto") else norm
+
+
 @app.callback()
 def _app_callback(ctx: typer.Context) -> None:
     """인자 없이 vxis 실행 시 인터랙티브 모드 진입."""
@@ -204,6 +215,13 @@ def scan(
         "--kind",
         help="Target surface: web | desktop | mobile | game (phase-A: web only; "
         "desktop/mobile/game land in phase-B+).",
+    ),
+    box: str = typer.Option(
+        "auto",
+        "--box",
+        help="Box mode: auto (derive from --kind) | black (zero source access, "
+        "external-attacker view) | white (source-aware) | grey (source + dynamic). "
+        "An explicit 'black' stays fully black even on a code target.",
     ),
     instruction: Optional[str] = typer.Option(
         None,
@@ -613,7 +631,12 @@ def scan(
 
         refresh_task = _aio.create_task(_refresh_loop())
         try:
-            ctx = await pipeline.run(target=_target, resume_from=resume, kind=_kind)
+            ctx = await pipeline.run(
+                target=_target,
+                resume_from=resume,
+                kind=_kind,
+                box_mode=_box_flag_to_mode(box),
+            )
         finally:
             refresh_task.cancel()
             try:

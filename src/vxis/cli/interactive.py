@@ -2126,6 +2126,7 @@ def _run_brain_first_scan_from_tui(
     profile: str,
     *,
     allow_inject: bool = False,
+    box_mode: str = "black",
 ) -> None:
     """Delegate TUI AI mode to the same Brain-first pipeline as `vxis scan`."""
     import typer
@@ -2146,6 +2147,7 @@ def _run_brain_first_scan_from_tui(
             allow_inject=allow_inject,
             plugins=None,
             kind="web",
+            box=box_mode,
         )
     except typer.Exit as exc:
         if exc.exit_code not in (0, None):
@@ -2294,6 +2296,8 @@ def _execute_agent_scan(params: dict) -> None:
     console.print(Panel(
         f"[bold cyan]\U0001f9e0 VXIS AI Agent Mode[/bold cyan]\n\n"
         f"\U0001f3af 타겟: [white]{target}[/white]\n"
+        f"⚫ 박스 모드: [white]블랙박스[/white] "
+        f"[dim](외부 공격자 시점 · 소스/내부 정보 접근 없음)[/dim]\n"
         f"\U0001f6e1\ufe0f 실행 허용 범위: [yellow]{ceiling_kr.get(ceiling, ceiling)}[/yellow]\n"
         f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
         f"[dim]AI는 넓게 생각하지만, 실제 요청과 공격 실행은 선택한 범위 안에서만 진행합니다.\n"
@@ -2303,10 +2307,13 @@ def _execute_agent_scan(params: dict) -> None:
     ))
     console.print()
 
+    # NOW-3 #1: the web agent path is always black-box — pass it explicitly so the
+    # pipeline ENFORCES "완전히 블랙박스" (no source-aware tools), not just derives it.
     _run_brain_first_scan_from_tui(
         target=target,
         profile=profile,
         allow_inject=False,
+        box_mode="black",
     )
 
 

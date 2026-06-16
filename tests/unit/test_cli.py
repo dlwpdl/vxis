@@ -162,6 +162,29 @@ class TestScanCommandHelp:
         """scan registers the --no-report flag."""
         assert "--no-report" in scan_option_names()
 
+    def test_scan_registers_box_option(self):
+        """NOW-3 #1: scan exposes an explicit --box {auto,black,white,grey} flag."""
+        assert "--box" in scan_option_names()
+
+
+class TestBoxFlagToMode:
+    """NOW-3 #1: --box flag → pipeline box_mode override (validation deferred to
+    the pipeline's _resolve_box_mode; the CLI only maps 'auto'/blank → None)."""
+
+    def test_auto_and_blank_map_to_none(self):
+        from vxis.cli.main import _box_flag_to_mode
+
+        assert _box_flag_to_mode("auto") is None
+        assert _box_flag_to_mode("") is None
+        assert _box_flag_to_mode("  AUTO ") is None
+
+    def test_explicit_modes_pass_through_normalized(self):
+        from vxis.cli.main import _box_flag_to_mode
+
+        assert _box_flag_to_mode("black") == "black"
+        assert _box_flag_to_mode("  WHITE ") == "white"
+        assert _box_flag_to_mode("grey") == "grey"
+
 
 # ---------------------------------------------------------------------------
 # scan command functional tests (mocked orchestrator)
