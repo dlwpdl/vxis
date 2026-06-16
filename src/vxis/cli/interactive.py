@@ -326,6 +326,53 @@ def _exec_mode_to_concurrency(mode: str) -> int:
     return _PARALLEL_WORKER_COUNT if str(mode).strip().lower() == "parallel" else 1
 
 
+# NOW-3 #2 residual: full PROFILE_POLICY_TABLE parity in the TUI. The agent wizard's
+# quick selector covers the 4 intensity profiles; the rest (incl. the user's VC
+# monitor) are reachable via a "전문 프로필" drill-in, labelled with the same
+# attack-level badge so the displayed level matches the enforced policy.
+_PROFILE_KR = {
+    "passive": "정보 수집만",
+    "standard": "안전 점검",
+    "crown": "실전 검증",
+    "aggressive": "랩 전체 허용",
+    "stealth": "조용한 점검",
+    "vc-portfolio-monitor": "VC 포트폴리오 모니터링",
+    "pre-investment-dd": "투자 전 실사 (Due Diligence)",
+    "continuous-devsec": "지속 DevSec 점검",
+    "remediation-verification": "조치 검증 (재점검)",
+    "compliance-mapping": "컴플라이언스 매핑 (SOC-2 등)",
+    "p1-adversary-emulation": "허가된 모의공격",
+}
+_PRIMARY_PROFILES = frozenset({"passive", "standard", "crown", "aggressive"})
+
+
+def _specialized_profile_choices() -> list[dict]:
+    """Inquirer choices for the non-primary profiles, ordered by attack rank.
+
+    Excludes the 4 quick-pick intensity profiles and any requires_engagement
+    profile (those need the P1 `vxis eng` / --engagement workflow, not a casual
+    TUI pick), so every offered option actually runs from the TUI."""
+    from vxis.agent.policy.scan_policy import PROFILE_POLICY_TABLE, attack_level_badge
+    from vxis.config.schema import resolve_scan_profile
+
+    out: list[dict] = []
+    for name in sorted(PROFILE_POLICY_TABLE, key=lambda n: (-attack_level_badge(n)["rank"], n)):
+        if name in _PRIMARY_PROFILES:
+            continue
+        try:
+            if getattr(resolve_scan_profile(name), "requires_engagement", False):
+                continue
+        except Exception:
+            continue
+        badge = attack_level_badge(name)
+        label = _PROFILE_KR.get(name, name)
+        flags = (" · " + ", ".join(badge["flags"])) if badge["flags"] else ""
+        out.append(
+            {"name": f"[공격력 {badge['bars']}] {label} ({name}){flags}", "value": name}
+        )
+    return out
+
+
 # ── 배너 ────────────────────────────────────────────────────────
 
 _BANNER = r"""
@@ -2275,6 +2322,9 @@ def _execute_agent_scan(params: dict) -> None:
         }
         for value, icon, label, desc in _ceiling_opts
     ]
+    _ceiling_choices.append(
+        {"name": "⚙️  전문 프로필 직접 선택 (VC · 투자실사 · 컴플라이언스 등)", "value": "specialized"}
+    )
     ceiling = inquirer.select(
         message="AI가 어디까지 직접 실행해도 될까요?  (공격력 ○○○ → ●●●)",
         choices=_ceiling_choices,
@@ -2288,14 +2338,26 @@ def _execute_agent_scan(params: dict) -> None:
     if ceiling is None:
         return
 
-    # User-facing execution permission -> internal profile.
-    ceiling_profile_map = {
-        "passive": "passive",
-        "standard": "standard",
-        "crown": "crown",
-        "aggressive": "aggressive",
-    }
-    profile = ceiling_profile_map.get(ceiling, "crown")
+    # User-facing execution permission -> internal profile. "specialized" drills
+    # into the full PROFILE_POLICY_TABLE (VC monitor, DD, compliance, …).
+    if ceiling == "specialized":
+        profile = inquirer.select(
+            message="전문 프로필을 선택하세요  (공격력 뱃지 = 실제 정책 ceiling)",
+            choices=_specialized_profile_choices(),
+            pointer="\u276f",
+            qmark="⚙️",
+            amark="\u2705",
+        ).execute()
+        if profile is None:
+            return
+    else:
+        ceiling_profile_map = {
+            "passive": "passive",
+            "standard": "standard",
+            "crown": "crown",
+            "aggressive": "aggressive",
+        }
+        profile = ceiling_profile_map.get(ceiling, "crown")
 
     # NOW-3 #3: parallel vs serial agent execution — sets the agent-graph worker
     # LLM concurrency (VXIS_LOCAL_WORKER_CONCURRENCY) for this run.
@@ -2318,13 +2380,7 @@ def _execute_agent_scan(params: dict) -> None:
     _os_exec.environ["VXIS_LOCAL_WORKER_CONCURRENCY"] = str(_worker_n)
     _exec_mode_kr = "병렬" if exec_mode == "parallel" else "직렬"
 
-    ceiling_kr = {
-        "passive": "정보 수집만",
-        "standard": "안전 점검",
-        "crown": "실전 검증",
-        "aggressive": "랩 전체 허용",
-    }
-
+    _profile_kr = _PROFILE_KR.get(profile, profile)
     _badge = attack_level_badge(profile)
     console.print()
     console.print(Panel(
@@ -2332,7 +2388,7 @@ def _execute_agent_scan(params: dict) -> None:
         f"\U0001f3af 타겟: [white]{target}[/white]\n"
         f"⚫ 박스 모드: [white]블랙박스[/white] "
         f"[dim](외부 공격자 시점 · 소스/내부 정보 접근 없음)[/dim]\n"
-        f"\U0001f6e1\ufe0f 실행 허용 범위: [yellow]{ceiling_kr.get(ceiling, ceiling)}[/yellow]\n"
+        f"\U0001f6e1\ufe0f 실행 허용 범위: [yellow]{_profile_kr}[/yellow]\n"
         f"\U0001f4ca 공격 레벨: [bold]{_badge['bars']}[/bold] "
         f"[dim]{_badge['ceiling']}"
         f"{' · ' + ', '.join(_badge['flags']) if _badge['flags'] else ''}[/dim]\n"

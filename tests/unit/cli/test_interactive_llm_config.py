@@ -152,3 +152,32 @@ class TestExecModeToConcurrency:
 
     def test_case_insensitive(self):
         assert interactive._exec_mode_to_concurrency("PARALLEL") == 4
+
+
+# ── NOW-3 #2 residual: full profile parity — specialized profile picker ──
+class TestSpecializedProfileChoices:
+    def test_includes_vc_and_enterprise_profiles(self):
+        vals = {c["value"] for c in interactive._specialized_profile_choices()}
+        assert "vc-portfolio-monitor" in vals  # the user's "VC"
+        assert "pre-investment-dd" in vals
+        assert "compliance-mapping" in vals
+
+    def test_excludes_primary_and_engagement_profiles(self):
+        vals = {c["value"] for c in interactive._specialized_profile_choices()}
+        # primary-4 live in the simple selector, not here
+        assert "crown" not in vals and "passive" not in vals
+        # p1-adversary-emulation needs the P1 engagement CLI workflow
+        assert "p1-adversary-emulation" not in vals
+
+    def test_all_values_are_real_profiles(self):
+        from vxis.agent.policy.scan_policy import PROFILE_POLICY_TABLE
+
+        for c in interactive._specialized_profile_choices():
+            assert c["value"] in PROFILE_POLICY_TABLE
+
+    def test_labels_carry_attack_badge_and_korean(self):
+        choices = interactive._specialized_profile_choices()
+        vc = next(c for c in choices if c["value"] == "vc-portfolio-monitor")
+        assert "VC" in vc["name"]
+        assert "공격력" in vc["name"]
+        assert "●" in vc["name"] or "○" in vc["name"]
