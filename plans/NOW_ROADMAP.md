@@ -14,8 +14,8 @@
 > metadata guard `1a523fe`; **F3 injection-approval wired into dispatch `d66aa81`** (this batch).
 > **NOW-3 DONE (#1 box-mode, #2 attack-level badge, #3 parallel/serial, #4 verification-rate panel).**
 > **2nd review fixes DONE**: policy now active by default (was dormant), readonly is genuinely
-> read-only, dashboard dropdown aligned. **Resume at: NEXT/LATER** — or the NOW-3 residuals
-> (full 11-profile wizard parity incl. vc-portfolio-monitor; LIVE-scan report proof = user-run).
+> read-only, dashboard dropdown aligned. Full 11-profile TUI parity DONE (`49707c8`).
+> **Resume at: NEXT/LATER.** Only NOW-3 residual left = LIVE-scan report proof (user-run scan).
 > Fix-followups (non-blocking, tracked below): 1.3c DB-regen filter; agent-graph temp-file leak;
 > precision-panel vs findings-table UNCONFIRMED count divergence.
 > Decisions locked (user-approved 2026-06-15):
@@ -54,7 +54,7 @@ ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the veri
 
 ## NOW-3 — TUI box/profile/attack-level + live report proof
 - [x] **#1 box-mode explicit + enforced** (`024b07e`): `pipeline.run(box_mode=)` + pure fail-closed `_resolve_box_mode` (explicit black wins over kind; invalid → black, never escalates to source); `--box` CLI flag; the TUI web-agent path passes `box_mode="black"` EXPLICITLY and shows "⚫ 박스 모드: 블랙박스 (외부 시점 · 소스 접근 없음)" in the summary. **Honest scope:** white/grey register source-aware tools but `_register_code_surface_tools` is still an empty seam, so NO fake grey/white TUI option is offered yet (would be a no-op). White-box stays the dedicated code-scan category. Profile labels Korean-friendly + `crown` surfaced (`ca4907f`). RESIDUAL: a true FIRST-step black/white/grey selector waits on real source-aware tools.
-- [x] **#2 attack-level badge** (`ac553dc`): `attack_level_badge(profile)` reads PROFILE_POLICY_TABLE → 0–3 rank from `exploitation_ceiling` (●/○ bar) + risk flags (lab-only / evasion-on / approval-required), so the display can't drift from enforcement. Rendered on every agent-wizard execution-permission option ([공격력 ●●○] …) + a "📊 공격 레벨" summary line. RESIDUAL: full 11-profile parity (incl. `vc-portfolio-monitor`) in the wizard list still TODO; labels + crown done (`ca4907f`).
+- [x] **#2 attack-level badge + full profile parity** (`ac553dc`, `49707c8`): `attack_level_badge(profile)` reads PROFILE_POLICY_TABLE → 0–3 rank from `exploitation_ceiling` (●/○ bar) + risk flags (lab-only / evasion-on / approval-required), so the display can't drift from enforcement. Rendered on every agent-wizard execution-permission option ([공격력 ●●○] …) + a "📊 공격 레벨" summary line. **Full parity (`49707c8`):** a 5th quick-pick option "⚙️ 전문 프로필 직접 선택" drills into `_specialized_profile_choices()` — VC 포트폴리오 모니터링, 투자 전 실사, 지속 DevSec, 조치 검증, 컴플라이언스 매핑, 조용한 점검, each badge-labelled. `requires_engagement` profiles (p1-adversary-emulation) excluded (need the `vxis eng`/--engagement workflow, not a TUI pick).
 - [x] **#3 parallel vs serial toggle** (`22ca95f`): agent wizard asks 직렬/병렬, sets `VXIS_LOCAL_WORKER_CONCURRENCY` (the agent-graph worker LLM semaphore) — serial=1 (default), parallel=4; `_exec_mode_to_concurrency` fail-safes to serial; shown in the summary.
 - [x] **#4 verification-rate panel** (`71d92fb`): bilingual "Verification Rate / 검증율" panel in the report executive summary (CONFIRMED % + per-verdict table), rendered only when `report.has_verdicts`. RESIDUAL (#4 other half): proving a LIVE scan emits this end-to-end needs a real scan run → user-initiated only (CLAUDE.md).
 
