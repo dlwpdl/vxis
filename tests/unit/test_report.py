@@ -236,6 +236,23 @@ class TestReportGeneratorRenderHtml:
         assert "<html" in html
         assert "</html>" in html
 
+    def test_verification_rate_panel_rendered_when_verdicts_present(self):
+        # NOW-3 #4(b): page-1 verification-rate panel (CONFIRMED vs REFUTED)
+        rd = make_report_data(
+            findings=[make_finding(severity=Severity.high)],
+            verdict_counts={"CONFIRMED": 3, "REFUTED": 1},
+        )
+        html = make_generator().render_html(rd)
+        assert "Verification Rate" in html
+        assert "검증율" in html
+        assert "75%" in html  # 3 / (3 + 1) confirmed
+        assert "CONFIRMED" in html
+
+    def test_no_verification_panel_without_verdicts(self):
+        rd = make_report_data(findings=[make_finding()])  # no verdict_counts
+        html = make_generator().render_html(rd)
+        assert "Verification Rate" not in html
+
     def test_all_severity_sections_present_when_findings_exist(self):
         findings = [
             make_finding(id="f1", severity=Severity.critical),

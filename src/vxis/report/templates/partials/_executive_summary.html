@@ -46,6 +46,45 @@
 </div>
 {% endif %}
 
+{# Verification rate panel — adversarial verifier outcomes (ADR-012, NOW-3 #4) #}
+{% if report.has_verdicts %}
+{% set vc = report.verdict_counts %}
+<h3><span class="en">Verification Rate</span><span class="ko">검증율</span></h3>
+<p>
+  <span class="en">
+    Every reported finding is adversarially verified before inclusion. This
+    assessment confirmed
+    <strong>{{ "%.0f" | format(report.verification_rate * 100) }}%</strong>
+    of verified findings (CONFIRMED vs REFUTED) — a direct, quantified measure of
+    false-positive control.
+  </span>
+  <span class="ko">
+    모든 보고 항목은 포함 전에 적대적으로 검증됩니다. 본 평가는 검증 대상의
+    <strong>{{ "%.0f" | format(report.verification_rate * 100) }}%</strong>를
+    CONFIRMED로 확정했으며(REFUTED 대비), 이는 오탐 통제 수준을 정량적으로
+    보여줍니다.
+  </span>
+</p>
+<table>
+  <thead>
+    <tr>
+      <th><span class="en">Verdict</span><span class="ko">검증 결과</span></th>
+      <th style="text-align:center;"><span class="en">Count</span><span class="ko">건수</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for verdict in ["CONFIRMED", "REFUTED", "UNCONFIRMED"] %}
+    {% if vc.get(verdict) %}
+    <tr>
+      <td style="font-weight:600;">{{ verdict }}</td>
+      <td style="text-align:center;">{{ vc.get(verdict, 0) }}</td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
 {# Executive summary narrative #}
 {% if report.executive_summary %}
 <h3><span class="en">Assessment Overview</span><span class="ko">평가 개요</span></h3>
