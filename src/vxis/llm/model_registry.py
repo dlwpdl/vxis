@@ -100,6 +100,18 @@ _MODELS: tuple[ModelInfo, ...] = (
     ),
     # ── Anthropic ─────────────────────────────────────────────
     ModelInfo(
+        model_id="claude-opus-4-8",
+        provider="anthropic",
+        context_window=1_000_000,     # 1M max tier
+        max_output_tokens=64_000,
+        supports_vision=True,
+        supports_json_mode=False,     # Anthropic uses tool_use for structured output
+        reasoning_model=False,
+        family="claude-4.8",
+        aliases=("claude-opus-4-8[1m]",),
+        notes="Anthropic flagship — 1M context in max tier (recommended default)",
+    ),
+    ModelInfo(
         model_id="claude-opus-4-6",
         provider="anthropic",
         context_window=1_000_000,     # 1M max tier
@@ -109,7 +121,7 @@ _MODELS: tuple[ModelInfo, ...] = (
         reasoning_model=False,
         family="claude-4.6",
         aliases=("claude-opus-4-6[1m]",),
-        notes="Anthropic flagship — 1M context in max tier",
+        notes="Prior flagship — kept for compatibility; live catalog supplies newer ids",
     ),
     ModelInfo(
         model_id="claude-sonnet-4-6",
