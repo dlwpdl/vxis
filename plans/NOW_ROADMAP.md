@@ -12,7 +12,10 @@
 > F1 PTI redaction completion `f0e5999`; F2 ceiling governs run_skill `c886d00`;
 > F4 policy-token restore + F6 log swallowed v3-reg `08a6a73`; F5 box-mode source-access
 > metadata guard `1a523fe`; **F3 injection-approval wired into dispatch `d66aa81`** (this batch).
-> **Resume at: NOW-3 (TUI box/profile/attack-level) — or NEXT/LATER.**
+> **NOW-3 DONE (#1 box-mode, #2 attack-level badge, #3 parallel/serial, #4 verification-rate panel).**
+> **2nd review fixes DONE**: policy now active by default (was dormant), readonly is genuinely
+> read-only, dashboard dropdown aligned. **Resume at: NEXT/LATER** — or the NOW-3 residuals
+> (full 11-profile wizard parity incl. vc-portfolio-monitor; LIVE-scan report proof = user-run).
 > Fix-followups (non-blocking, tracked below): 1.3c DB-regen filter; agent-graph temp-file leak;
 > precision-panel vs findings-table UNCONFIRMED count divergence.
 > Decisions locked (user-approved 2026-06-15):
@@ -47,12 +50,13 @@ ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the veri
 - [x] **NOW-2 hardening** (user's 6 findings, recommended order F1→F2→F5→F3; F4/F6 done earlier): **F1** PTI trajectory redaction completion — output_action + outcome_evidence + header/bearer/query detectors (`f0e5999`); **F2** exploitation ceiling governs `run_skill` attack templates via `skill_blocked_by_ceiling` (`c886d00`); **F4** policy-token restore so nested/SDK/MCP runs can't wipe the outer policy + **F6** `logger.debug` the swallowed optional-v3 tool-registration except (`08a6a73`); **F5** box-mode source-access metadata guard `tool_is_source_aware` + `_enforce_box_mode` (`1a523fe`); **F3** injection-approval (above). Full suite 2526 green.
 - [ ] **permit_pivot** per-destination (cross-host) (BLOCKED): no real cross-host executor exists (lateral_move/data_exfil agents are single-target feasibility recon → hypothesis routing). Coarse agent-level spawn gate is possible; true wiring blocked until an H-exec executor exists. Defer.
 - [x] grey-box explicit opt-in (`--box {auto,black,white,grey}` CLI flag) (`024b07e`): plumbing done — flag + `_box_flag_to_mode` → `pipeline.run(box_mode=...)`. TUI grey option still withheld until source tools exist (see NOW-3 #1).
+- [x] **REVIEW FIXES (2nd external review, 2 High + 1 Med)** — F1/F2/F4/F5/F6 + injection redaction probe verified clean. **#1 policy was DORMANT by default** (gate on VXIS_V3_POLICY/VXIS_V3, never set by cli/main or multi_scan → injection approval never fired, F1/F2/F3 inert): fixed via `ScanPipeline(enable_policy=...)` + `_policy_active()`; CLI single-scan + batch pass `enable_policy=True`; default profile crown so the common scan isn't neutered (`5c5f3bc`). **#2 readonly wasn't read-only** (treated like full): `injection_action_blocked` now refuses exploitation + non-passive skills + mutating HTTP (POST/PUT/PATCH/DELETE) under readonly; GET/HEAD + passive still run; CLI text says BLOCKED not "deferred"; the test locking the no-op was rewritten (`5c5f3bc`). **#3 dashboard dropdown** aligned to TUI labels + crown (`17a1e27`).
 
 ## NOW-3 — TUI box/profile/attack-level + live report proof
 - [x] **#1 box-mode explicit + enforced** (`024b07e`): `pipeline.run(box_mode=)` + pure fail-closed `_resolve_box_mode` (explicit black wins over kind; invalid → black, never escalates to source); `--box` CLI flag; the TUI web-agent path passes `box_mode="black"` EXPLICITLY and shows "⚫ 박스 모드: 블랙박스 (외부 시점 · 소스 접근 없음)" in the summary. **Honest scope:** white/grey register source-aware tools but `_register_code_surface_tools` is still an empty seam, so NO fake grey/white TUI option is offered yet (would be a no-op). White-box stays the dedicated code-scan category. Profile labels Korean-friendly + `crown` surfaced (`ca4907f`). RESIDUAL: a true FIRST-step black/white/grey selector waits on real source-aware tools.
-- [ ] Unify TUI `PROFILES` with `PROFILE_POLICY_TABLE` (11 profiles incl. **`vc-portfolio-monitor`** = the user's "VC"); render **attack-level badge** from `exploitation_ceiling`/`ceiling_rank` (none→read-only→lateral→full); risk labels (lab-only / evasion-on / approval-required). PARTIAL: labels + crown done (`ca4907f`); badge-from-ceiling_rank + full 11-profile parity still TODO.
-- [ ] **Parallel vs serial** toggle for agent scans (`background_worker_concurrency`).
-- [ ] Prove a LIVE scan emits a bilingual NCC report at fixture depth; surface verification-rate (CONFIRMED vs REFUTED) as a page-1 panel.
+- [x] **#2 attack-level badge** (`ac553dc`): `attack_level_badge(profile)` reads PROFILE_POLICY_TABLE → 0–3 rank from `exploitation_ceiling` (●/○ bar) + risk flags (lab-only / evasion-on / approval-required), so the display can't drift from enforcement. Rendered on every agent-wizard execution-permission option ([공격력 ●●○] …) + a "📊 공격 레벨" summary line. RESIDUAL: full 11-profile parity (incl. `vc-portfolio-monitor`) in the wizard list still TODO; labels + crown done (`ca4907f`).
+- [x] **#3 parallel vs serial toggle** (`22ca95f`): agent wizard asks 직렬/병렬, sets `VXIS_LOCAL_WORKER_CONCURRENCY` (the agent-graph worker LLM semaphore) — serial=1 (default), parallel=4; `_exec_mode_to_concurrency` fail-safes to serial; shown in the summary.
+- [x] **#4 verification-rate panel** (`71d92fb`): bilingual "Verification Rate / 검증율" panel in the report executive summary (CONFIRMED % + per-verdict table), rendered only when `report.has_verdicts`. RESIDUAL (#4 other half): proving a LIVE scan emits this end-to-end needs a real scan run → user-initiated only (CLAUDE.md).
 
 ## NEXT
 - [ ] Global cost/USD/turn budget governor + honest per-agent attribution (proposal R11).
