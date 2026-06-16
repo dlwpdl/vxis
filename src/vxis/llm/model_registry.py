@@ -31,6 +31,7 @@ class ModelInfo:
     family: str = ""                # e.g. "gpt-5.4", "claude-4.6", "gemini-3.1"
     aliases: tuple[str, ...] = field(default_factory=tuple)
     notes: str = ""
+    release_date: str = ""          # ISO date (from live catalog); "" for curated/unknown
 
 
 @dataclass(frozen=True)

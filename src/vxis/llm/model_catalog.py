@@ -118,6 +118,7 @@ def _normalize_models_dev(raw: dict | None, vxis_provider: str) -> list[ModelInf
                 reasoning_model=bool(entry.get("reasoning")),
                 family=str(entry.get("family") or ""),
                 notes=str(entry.get("name") or ""),
+                release_date=str(entry.get("release_date") or entry.get("last_updated") or ""),
             )
         )
     return out
@@ -161,6 +162,8 @@ def available_models(
     live_models = _normalize_models_dev(raw, provider) if raw else []
     if not live_models:
         source = "default"
+    # Surface newest live models first (curated stays pinned ahead of them).
+    live_models.sort(key=lambda m: m.release_date, reverse=True)
     return CatalogResult(models=merge_catalog(curated, live_models), source=source)
 
 

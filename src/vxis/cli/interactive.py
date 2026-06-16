@@ -373,6 +373,49 @@ def _specialized_profile_choices() -> list[dict]:
     return out
 
 
+# NOW: dynamic cloud model picker — fed by the hybrid model_catalog (models.dev
+# live + curated), so the TUI never shows a hand-maintained stale list.
+_CLOUD_PROVIDERS = [
+    ("anthropic", "Anthropic — Claude"),
+    ("openai", "OpenAI — GPT"),
+    ("gemini", "Google — Gemini"),
+    ("together", "Together.ai — 통합 게이트웨이"),
+]
+
+
+def _source_label_kr(source: str) -> str:
+    """Human label for where the model list came from (live / cache / default)."""
+    return {
+        "live": "라이브 · models.dev",
+        "cache": "캐시 (24h)",
+        "default": "기본값 (오프라인)",
+    }.get(source, source or "기본값")
+
+
+def _cloud_provider_choices() -> list[dict]:
+    """Provider list with an API-key-availability tag, surfaced at choice time."""
+    out: list[dict] = []
+    for pid, label in _CLOUD_PROVIDERS:
+        tag = "" if _has_cloud_provider_key(pid) else "   (키 없음 — 선택 시 입력)"
+        out.append({"name": f"{label}{tag}", "value": pid})
+    return out
+
+
+def _cloud_model_choices(provider: str, models: list, limit: int = 12) -> list[dict]:
+    """Inquirer choices for a provider's catalog (capped) + a custom-id entry.
+
+    value = (provider, model_id); the first (newest/curated) model is marked
+    recommended. A trailing '직접 입력' entry returns (provider, '__custom__')."""
+    out: list[dict] = []
+    for i, m in enumerate(models[:limit]):
+        ctx = f"{m.context_window // 1000}k ctx" if getattr(m, "context_window", 0) else ""
+        extras = " · ".join(x for x in [ctx, "권장 ⭐" if i == 0 else ""] if x)
+        name = m.model_id + (f"   ({extras})" if extras else "")
+        out.append({"name": name, "value": (provider, m.model_id)})
+    out.append({"name": "✏️  직접 입력 (커스텀 모델 ID)", "value": (provider, "__custom__")})
+    return out
+
+
 # ── 배너 ────────────────────────────────────────────────────────
 
 _BANNER = r"""
@@ -2240,36 +2283,41 @@ def _execute_agent_scan(params: dict) -> None:
             return
         provider, model, base_url = local_selection
     else:
-        llm_choices = [
-            Separator("── Together.ai (통합 게이트웨이) ──"),
-            {"name": "\U0001f9e0 Kimi-K2.5 (1T params, 추론 특화, 권장)", "value": ("together", "moonshotai/Kimi-K2.5")},
-            {"name": "\U0001f9e0 GLM-5 (744B params, 에이전트 특화)", "value": ("together", "zai-org/GLM-5")},
-            {"name": "\U0001f9e0 DeepSeek-R1 (추론 체인)", "value": ("together", "deepseek-ai/DeepSeek-R1")},
-            {"name": "\U0001f9e0 DeepSeek-V3 (범용)", "value": ("together", "deepseek-ai/DeepSeek-V3")},
-            {"name": "\U0001f9e0 Qwen-72B (빠른 응답)", "value": ("together", "Qwen/Qwen2.5-72B-Instruct-Turbo")},
-            {"name": "\U0001f9e0 Llama-3.3-70B (오픈소스)", "value": ("together", "meta-llama/Llama-3.3-70B-Instruct-Turbo")},
-            Separator("── 직접 연결 (API 키 필요) ──"),
-            {"name": "\U0001f7e3 Claude Opus 4.6 (Anthropic, 최강)", "value": ("anthropic", "claude-opus-4-6")},
-            {"name": "\U0001f7e3 Claude Sonnet 4.6 (Anthropic, 균형)", "value": ("anthropic", "claude-sonnet-4-6")},
-            {"name": "\U0001f7e2 Gemini 3.1 Pro (Google, 최신)", "value": ("gemini", "gemini-3.1-pro")},
-            {"name": "\U0001f7e2 Gemini 2.5 Flash (Google, 빠름)", "value": ("gemini", "gemini-2.5-flash")},
-            {"name": "\U0001f535 GPT-5.4 (OpenAI, 최신)", "value": ("openai", "gpt-5.4")},
-            {"name": "\U0001f535 GPT-4o Mini (OpenAI, 저렴)", "value": ("openai", "gpt-4o-mini")},
-        ]
-
-        llm_selection = inquirer.select(
-            message="AI 에이전트의 두뇌를 선택하세요",
-            choices=llm_choices,
-            pointer="\u276f",
+        provider = inquirer.select(
+            message="LLM 프로바이더를 선택하세요",
+            choices=_cloud_provider_choices(),
+            pointer="❯",
             qmark="\U0001f9e0",
-            amark="\u2705",
+            amark="✅",
             instruction="(↑↓ 방향키)",
         ).execute()
-
-        if llm_selection is None:
+        if provider is None:
             return
 
-        provider, model = llm_selection
+        # Live model list from the hybrid catalog (models.dev + curated, cached).
+        from vxis.llm.model_catalog import available_models
+
+        _catalog = available_models(provider)
+        picked = inquirer.select(
+            message=f"모델을 선택하세요  [목록: {_source_label_kr(_catalog.source)}]",
+            choices=_cloud_model_choices(provider, _catalog.models),
+            pointer="❯",
+            qmark="\U0001f9e0",
+            amark="✅",
+            instruction="(↑↓ — 최신/권장이 위)",
+        ).execute()
+        if picked is None:
+            return
+        provider, model = picked
+        if model == "__custom__":
+            model = inquirer.text(
+                message="모델 ID를 입력하세요",
+                qmark="✏️",
+                amark="✅",
+            ).execute()
+            if not model or not model.strip():
+                return
+            model = model.strip()
         base_url = ""
 
     resolved_base_url = _configure_llm_environment(provider, model, base_url)

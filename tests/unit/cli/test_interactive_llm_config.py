@@ -181,3 +181,35 @@ class TestSpecializedProfileChoices:
         assert "VC" in vc["name"]
         assert "공격력" in vc["name"]
         assert "●" in vc["name"] or "○" in vc["name"]
+
+
+# ── Phase 2: dynamic cloud model picker helpers ──
+class TestCloudModelChoices:
+    def _models(self, n):
+        from vxis.llm.model_registry import ModelInfo
+        return [ModelInfo(model_id=f"m{i}", provider="openai",
+                          context_window=128_000, max_output_tokens=8_000) for i in range(n)]
+
+    def test_caps_at_limit_plus_custom(self):
+        ch = interactive._cloud_model_choices("openai", self._models(20), limit=5)
+        assert len(ch) == 6  # 5 models + custom entry
+        assert ch[-1]["value"] == ("openai", "__custom__")
+
+    def test_first_is_recommended_and_values_are_tuples(self):
+        ch = interactive._cloud_model_choices("anthropic", self._models(3))
+        assert "권장" in ch[0]["name"]
+        assert ch[0]["value"] == ("anthropic", "m0")
+        assert ch[1]["value"] == ("anthropic", "m1")
+
+    def test_empty_models_still_offers_custom(self):
+        ch = interactive._cloud_model_choices("openai", [])
+        assert len(ch) == 1
+        assert ch[0]["value"] == ("openai", "__custom__")
+
+
+class TestSourceLabel:
+    def test_labels(self):
+        assert "라이브" in interactive._source_label_kr("live")
+        assert "캐시" in interactive._source_label_kr("cache")
+        assert "기본값" in interactive._source_label_kr("default")
+        assert interactive._source_label_kr("weird")  # non-empty fallback

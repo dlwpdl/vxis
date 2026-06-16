@@ -114,3 +114,24 @@ def test_available_live_merges_and_labels_source(monkeypatch):
     ids = {m.model_id for m in res.models}
     assert "claude-opus-4-8" in ids
     assert "claude-zztest-9" in ids  # live-only model present
+
+
+def test_normalize_captures_release_date():
+    raw = {"anthropic": {"models": {"x": {
+        "id": "x", "release_date": "2026-01-02",
+        "modalities": {"input": ["text"]}, "limit": {"context": 1, "output": 1}}}}}
+    m = _normalize_models_dev(raw, "anthropic")[0]
+    assert m.release_date == "2026-01-02"
+
+
+def test_available_sorts_live_models_newest_first(monkeypatch):
+    raw = {"openai": {"models": {
+        "zzz-old": {"id": "zzz-old", "release_date": "2024-01-01",
+                    "modalities": {"input": ["text"]}, "limit": {"context": 1, "output": 1}},
+        "aaa-new": {"id": "aaa-new", "release_date": "2026-05-01",
+                    "modalities": {"input": ["text"]}, "limit": {"context": 1, "output": 1}},
+    }}}
+    monkeypatch.setattr("vxis.llm.model_catalog._save_cache", lambda data: None)
+    res = available_models("openai", fetcher=lambda: raw)
+    live_ids = [m.model_id for m in res.models if m.model_id in ("zzz-old", "aaa-new")]
+    assert live_ids == ["aaa-new", "zzz-old"]  # newest release_date first (not alpha)
