@@ -111,11 +111,12 @@ def test_injection_decision_roundtrip():
     assert get_injection_decision() is None
 
 
-def test_injection_blocked_only_on_deny():
-    # None (legacy/ungated) and full/readonly (approved) never block
-    for decision in (None, "full", "readonly"):
+def test_injection_not_blocked_on_none_or_full():
+    # None (legacy/ungated) and full (approved) never block — incl. mutating HTTP
+    for decision in (None, "full"):
         assert injection_action_blocked("shell_exec", {}, decision) is False
         assert injection_action_blocked("run_skill", {"skill": "test_injection"}, decision) is False
+        assert injection_action_blocked("http_request", {"method": "POST"}, decision) is False
 
 
 def test_injection_deny_blocks_injection_class_actions():
@@ -126,7 +127,25 @@ def test_injection_deny_blocks_injection_class_actions():
 
 
 def test_injection_deny_allows_passive_and_non_injection_tools():
-    # injection deny skips injection, but passive recon + non-injection tools still run
+    # injection deny skips the attack phase, but passive recon + navigation still run
     assert injection_action_blocked("run_skill", {"skill": "enumerate_endpoints"}, "deny") is False
     assert injection_action_blocked("http_request", {"url": "http://t"}, "deny") is False
     assert injection_action_blocked("report_finding", {}, "deny") is False
+
+
+# ── F3 follow-up: readonly must be genuinely read-only (was a no-op == full) ──
+def test_readonly_blocks_exploitation_attack_skills_and_mutating_http():
+    # readonly = "GET/HEAD only"; everything that can mutate is refused at dispatch
+    assert injection_action_blocked("shell_exec", {}, "readonly") is True
+    assert injection_action_blocked("python_exec", {}, "readonly") is True
+    assert injection_action_blocked("run_skill", {"skill": "test_injection"}, "readonly") is True
+    for method in ("POST", "post", "PUT", "PATCH", "DELETE"):
+        assert injection_action_blocked("http_request", {"method": method}, "readonly") is True, method
+
+
+def test_readonly_allows_get_head_and_passive():
+    assert injection_action_blocked("http_request", {"method": "GET"}, "readonly") is False
+    assert injection_action_blocked("http_request", {"method": "HEAD"}, "readonly") is False
+    assert injection_action_blocked("http_request", {}, "readonly") is False  # defaults to GET
+    assert injection_action_blocked("run_skill", {"skill": "enumerate_endpoints"}, "readonly") is False
+    assert injection_action_blocked("report_finding", {}, "readonly") is False

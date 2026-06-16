@@ -521,7 +521,7 @@ def scan(
                     f"Phases to run: {summary.get('phase_count')} "
                     f"(SQLi/XSS/RCE/SSRF/Path/Cmd 등)\n\n"
                     f"[bold]Choose mode:[/bold]\n"
-                    f"  [green]R[/green] = [green]read-only[/green] (GET/HEAD probes only; POST/PUT/DELETE go to deferred queue)\n"
+                    f"  [green]R[/green] = [green]read-only[/green] (GET/HEAD probes only; POST/PUT/DELETE and exploit primitives are BLOCKED)\n"
                     f"  [yellow]F[/yellow] = [yellow]full[/yellow] (all HTTP methods auto-execute — may MUTATE DATA)\n"
                     f"  [red]N[/red] = [red]deny[/red] (skip injection entirely, recon-only)\n\n"
                     f"[dim]Default is R (safest). F on customer products can DELETE/MODIFY real data.[/dim]",
@@ -543,7 +543,7 @@ def scan(
             else:
                 mode = "readonly"
                 console.print(
-                    "[green]✅ READ-ONLY mode — GET/HEAD only; mutations deferred to end-of-scan approval[/green]"
+                    "[green]✅ READ-ONLY mode — GET/HEAD only; mutating methods + exploit primitives blocked[/green]"
                 )
             console.print()
 
@@ -627,6 +627,10 @@ def scan(
             auto_approve_injection=_is_benchmark,
             report_output_path=None if no_report else output,
             generate_report=not no_report,
+            # Activate the capability-ceiling policy + injection-approval gate for
+            # real scans. CLAUDE.md mandates injection approval ("yes/no 승인 후
+            # 실행"); without this the gate was dormant (no caller set VXIS_V3_POLICY).
+            enable_policy=True,
         )
 
         refresh_task = _aio.create_task(_refresh_loop())

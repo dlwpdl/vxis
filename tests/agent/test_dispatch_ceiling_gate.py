@@ -122,3 +122,26 @@ async def test_dispatch_allows_shell_when_no_injection_decision():
     reg = _reg()  # legacy: no decision set
     r = await reg.dispatch("shell_exec", {"command": "id"})
     assert r.ok is True
+
+
+@pytest.mark.asyncio
+async def test_dispatch_blocks_mutating_http_under_readonly():
+    # readonly is genuinely read-only — a POST is refused at dispatch
+    reg = _reg()
+    tok = set_injection_decision("readonly")
+    try:
+        r = await reg.dispatch("http_request", {"method": "POST", "url": "http://t"})
+    finally:
+        clear_injection_decision(tok)
+    assert r.ok is False and r.error == "injection_blocked"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_allows_get_http_under_readonly():
+    reg = _reg()
+    tok = set_injection_decision("readonly")
+    try:
+        r = await reg.dispatch("http_request", {"method": "GET", "url": "http://t"})
+    finally:
+        clear_injection_decision(tok)
+    assert r.ok is True

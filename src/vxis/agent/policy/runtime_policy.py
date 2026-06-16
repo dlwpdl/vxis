@@ -112,20 +112,31 @@ def skill_blocked_by_ceiling(skill_name: str, policy: ScanPolicy | None) -> bool
     return ceiling_rank(policy.exploitation_ceiling) < ceiling_rank("lateral")
 
 
+# HTTP methods that mutate target state. Under a "readonly" injection decision
+# these are refused at dispatch so the scan is genuinely read-only (GET/HEAD only).
+_MUTATING_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_HTTP_TOOLS = frozenset({"http_request"})
+
+
 def injection_action_blocked(tool_name: str, args: dict | None, decision: str | None) -> bool:
     """NOW-2/2e (F3): True when the operator's injection decision forbids this action.
 
-    decision None (no approval configured / legacy) or "full"/"readonly" (approved)
-    → never blocks here (read-only mutation deferral is handled by the existing
-    deferred-mutation gate). decision "deny" (injection skipped) → block injection-
-    class actions: shell_exec/python_exec and run_skill with an active/attack skill.
-    Passive recon and non-injection tools still run.
+    decision None (no approval configured / legacy) or "full" (approved) → never
+    blocks. "deny" (skip the attack phase) and "readonly" (GET/HEAD only) both block
+    injection-class actions — shell_exec/python_exec and run_skill with an active
+    (non-passive) skill. "readonly" ADDITIONALLY refuses mutating HTTP methods
+    (POST/PUT/PATCH/DELETE) so it is genuinely read-only rather than full-by-another-
+    name. Passive recon, GET/HEAD requests, and non-injection tools still run.
     """
-    if decision != "deny":
+    if decision not in ("deny", "readonly"):
         return False
     if tool_name in _EXPLOITATION_TOOLS:
         return True
     if tool_name == "run_skill":
         skill = str((args or {}).get("skill", "")).strip().lower()
-        return skill not in _PASSIVE_SKILLS
+        if skill not in _PASSIVE_SKILLS:
+            return True
+    if decision == "readonly" and tool_name in _HTTP_TOOLS:
+        method = str((args or {}).get("method", "GET")).strip().upper()
+        return method in _MUTATING_HTTP_METHODS
     return False

@@ -63,6 +63,9 @@ def _build_pipeline(
     return ScanPipeline(
         brain=brain,
         report_output_path=report_output_path,
+        # Same activation as the single-scan CLI path: batch scans get the
+        # capability-ceiling + secret redaction by default (no env flag needed).
+        enable_policy=True,
     )
 
 

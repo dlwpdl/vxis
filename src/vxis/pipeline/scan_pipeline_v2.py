@@ -769,6 +769,7 @@ class ScanPipeline:
         auto_approve_injection: bool = False,
         report_output_path: Path | str | None = None,
         generate_report: bool = True,
+        enable_policy: bool | None = None,
     ) -> None:
         self.brain = brain
         self.config = config
@@ -779,6 +780,22 @@ class ScanPipeline:
         self._auto_approve_injection = auto_approve_injection
         self._report_output_path = report_output_path
         self._generate_report_enabled = generate_report
+        # NOW-2: capability-ceiling + injection-approval activation. None → follow the
+        # VXIS_V3_POLICY/VXIS_V3 env (legacy/test default); True/False → force on/off.
+        # The CLI passes True so the mandated injection-approval gate + ceiling run for
+        # real scans (previously dormant because no caller set the env flag).
+        self._enable_policy = enable_policy
+
+    def _policy_active(self) -> bool:
+        """Whether the capability-ceiling policy + injection gate are active.
+
+        Explicit enable_policy wins; otherwise fall back to the env flag so existing
+        flag-driven and test paths are unchanged."""
+        if self._enable_policy is not None:
+            return self._enable_policy
+        from vxis.agent.scan_loop_v3 import v3_enabled, v3_flag
+
+        return v3_flag("VXIS_V3_POLICY") or v3_enabled()
 
     def _emit(self, event_type: str, data: dict) -> None:
         if self._event_callback:
@@ -792,9 +809,8 @@ class ScanPipeline:
         flag. Fail-closed default when off/unknown; no chokepoint is wired in
         this increment — this only makes ctx.policy available."""
         from vxis.agent.policy.scan_policy import resolve_policy
-        from vxis.agent.scan_loop_v3 import v3_enabled, v3_flag
 
-        if v3_flag("VXIS_V3_POLICY") or v3_enabled():
+        if self._policy_active():
             ctx.policy = resolve_policy(self.config)
 
     async def _resolve_injection_decision(self, ctx: ScanContext) -> str | None:
@@ -803,9 +819,7 @@ class ScanPipeline:
         capability-ceiling policy is active; otherwise returns None (legacy/ungated).
         Honors auto_approve_injection, else the approval callback (fail-closed deny on
         error), else None when no approval mechanism is configured."""
-        from vxis.agent.scan_loop_v3 import v3_enabled, v3_flag
-
-        if not (v3_flag("VXIS_V3_POLICY") or v3_enabled()):
+        if not self._policy_active():
             return None
         if self._auto_approve_injection:
             logger.warning("auto_approve_injection=True — bypassing injection approval (full)")
