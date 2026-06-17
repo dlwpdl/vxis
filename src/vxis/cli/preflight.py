@@ -79,6 +79,30 @@ def check_target_reachable(
             return False, 0.0
 
 
+def _gemini_model_available(model: str, api_key: str, *, _opener=None) -> bool:
+    """Cheap check that a Gemini model is actually callable with this key.
+
+    Gemini's readiness used to be key-presence only, so a preview/unavailable
+    model (e.g. gemini-3.1-pro-preview) showed Brain ✓ then 404'd every call →
+    silent 0-finding scans. Fail-open: returns True when it can't tell (no
+    key/model, transient network error); only a definitive 400/403/404 from the
+    models endpoint returns False."""
+    if not model or not api_key:
+        return True
+    import urllib.error
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}?key={api_key}"
+    opener = _opener or urllib.request.urlopen
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with opener(req, timeout=3) as resp:
+            return 200 <= getattr(resp, "status", 200) < 300
+    except urllib.error.HTTPError as exc:
+        return exc.code not in (400, 403, 404)  # model missing/forbidden/bad request
+    except Exception:
+        return True  # transient/network — don't block a scan on the check itself
+
+
 def check_brain(interactive: bool = False) -> tuple[str, bool]:
     """Brain 백엔드 상태 체크.
 
@@ -150,6 +174,17 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
             "or configure a reachable local legacy backend)",
             False,
         )
+
+    # Gemini: verify the model is actually callable, not just that a key exists —
+    # a preview/unavailable model otherwise passes preflight then silently 404s.
+    if provider == "gemini" and model:
+        key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
+        if not _gemini_model_available(model, key):
+            return (
+                f"api:gemini/{model} (model not callable with this key — pick a GA "
+                f"model like gemini-2.5-pro)",
+                False,
+            )
 
     label = f"api:{provider}" + (f"/{model}" if model else "")
     return label, True

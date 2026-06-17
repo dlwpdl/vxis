@@ -72,6 +72,8 @@ def test_check_brain_accepts_local_llamacpp_provider() -> None:
 
 
 def test_check_brain_normalizes_google_to_gemini() -> None:
+    # mock the model-availability network check — this test is about provider
+    # normalization (google → gemini), not whether the model is callable.
     with patch.dict(
         "os.environ",
         {
@@ -80,7 +82,7 @@ def test_check_brain_normalizes_google_to_gemini() -> None:
             "GOOGLE_API_KEY": "test-key",
         },
         clear=True,
-    ):
+    ), patch("vxis.cli.preflight._gemini_model_available", return_value=True):
         label, ready = check_brain(interactive=False)
 
     assert ready is True
