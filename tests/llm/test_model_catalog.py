@@ -135,3 +135,30 @@ def test_available_sorts_live_models_newest_first(monkeypatch):
     res = available_models("openai", fetcher=lambda: raw)
     live_ids = [m.model_id for m in res.models if m.model_id in ("zzz-old", "aaa-new")]
     assert live_ids == ["aaa-new", "zzz-old"]  # newest release_date first (not alpha)
+
+
+# ── single-source flagship + cache refresh ──
+def test_flagship_returns_current_anthropic():
+    from vxis.llm.model_registry import flagship
+    assert flagship("anthropic") == "claude-opus-4-8"
+    assert flagship("ANTHROPIC") == "claude-opus-4-8"  # case-insensitive
+    assert flagship("nonexistent") is None
+
+
+def test_flagship_is_a_registered_model():
+    from vxis.llm.model_registry import flagship, get_model_info
+    for prov in ("anthropic", "openai", "gemini", "together"):
+        fid = flagship(prov)
+        assert fid and get_model_info(fid) is not None, prov
+
+
+def test_clear_cache_removes_file(tmp_path, monkeypatch):
+    from vxis.llm import model_catalog
+    cache = tmp_path / "models_dev.json"
+    cache.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("VXIS_MODELS_CACHE", str(cache))
+    assert cache.exists()
+    assert model_catalog.clear_cache() is True
+    assert not cache.exists()
+    # idempotent: clearing again is a no-op, returns False
+    assert model_catalog.clear_cache() is False

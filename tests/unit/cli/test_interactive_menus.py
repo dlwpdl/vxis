@@ -44,3 +44,11 @@ class TestScanWizardOrder:
         name = SCAN_CATEGORIES["batch"]["name"]
         assert "PE 포트폴리오" not in name
         assert "CSV" in name
+
+
+class TestSettingsMenu:
+    def test_settings_offers_model_refresh_and_back(self):
+        from vxis.cli import interactive
+        vals = {c["value"] for c in interactive._settings_menu_choices() if isinstance(c, dict)}
+        assert "refresh_models" in vals
+        assert "back" in vals

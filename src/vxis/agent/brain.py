@@ -299,10 +299,15 @@ class AgentBrain:
             # MemoryCompressor never needs to truncate. Cost is higher but for
             # multi-hour enterprise scans the loss of context is worse than the
             # extra tokens.
+            # Flagship id comes from the model registry (single source) so a Claude
+            # upgrade is a one-line edit there, not scattered string literals.
+            from vxis.llm.model_registry import flagship
+
+            _opus = flagship("anthropic") or "claude-opus-4-8"
             if os.environ.get("VXIS_LONG_CONTEXT") == "1":
-                chain.append({"provider": "anthropic", "model": "claude-opus-4-6[1m]"})
+                chain.append({"provider": "anthropic", "model": f"{_opus}[1m]"})
                 chain.append({"provider": "anthropic", "model": "claude-sonnet-4-6[1m]"})
-            chain.append({"provider": "anthropic", "model": "claude-opus-4-6"})
+            chain.append({"provider": "anthropic", "model": _opus})
             chain.append({"provider": "anthropic", "model": "claude-sonnet-4-6"})
             chain.append({"provider": "anthropic", "model": "claude-haiku-4-5-20251001"})
 

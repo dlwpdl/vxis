@@ -330,6 +330,24 @@ def list_models(provider: str | None = None) -> list[ModelInfo]:
     return list(_MODELS)
 
 
+# Recommended default ("flagship") model per provider — the single source other
+# modules (brain failover chain, hybrid config) reference instead of hardcoding,
+# so a model upgrade is a one-line edit here. Each value MUST be a registered id.
+_FLAGSHIP: dict[str, str] = {
+    "anthropic": "claude-opus-4-8",
+    "openai": "gpt-5.4",
+    "gemini": "gemini-3.1-pro-preview",
+    "together": "moonshotai/Kimi-K2.5",
+    "deepseek": "deepseek-ai/DeepSeek-R1-0528",
+}
+
+
+def flagship(provider: str) -> str | None:
+    """Recommended default model id for *provider* (case-insensitive); None if
+    the provider has no curated flagship."""
+    return _FLAGSHIP.get((provider or "").strip().lower())
+
+
 def _runtime_context_window(provider: str, model_id: str) -> int:
     """Resolve the effective runtime context window for compression decisions."""
     provider = (provider or "").lower()
@@ -422,4 +440,5 @@ __all__ = [
     "is_reasoning_model",
     "supports_json_mode",
     "list_models",
+    "flagship",
 ]

@@ -490,6 +490,27 @@ def _advanced_menu() -> str | None:
 
 # ── 스캔 위자드 ────────────────────────────────────────────────
 
+def _settings_menu_choices() -> list:
+    """Settings submenu — real actions (was a static help message)."""
+    return [
+        {"name": "\U0001f504  모델 소스 새로고침 (models.dev 캐시 비우기)", "value": "refresh_models"},
+        {"name": "\U0001f511  환경변수 / API 키 안내", "value": "env_help"},
+        Separator(),
+        {"name": "\u2196\ufe0f   뒤로", "value": "back"},
+    ]
+
+
+def _settings_menu() -> str | None:
+    return inquirer.select(
+        message="설정",
+        choices=_settings_menu_choices(),
+        pointer="\u276f",
+        qmark="\u2699\ufe0f",
+        amark="\u2705",
+        instruction="(↑↓ 방향키)",
+    ).execute()
+
+
 # NOW-3: scan SCOPE first (AI auto recommended), advanced execution shapes
 # (full / batch / custom) grouped under a separator so the list reads cleanly.
 _SCAN_PRIMARY_ORDER = ["ai_auto", "zero_touch", "external", "internal", "code", "cloud"]
@@ -1023,8 +1044,23 @@ def _dispatch(action: str) -> None:
         _industry_menu()
 
     elif action == "settings":
-        console.print("[dim]설정은 .env 파일 또는 VXIS_ 환경변수로 관리합니다.[/dim]")
-        console.print("[dim]  예: VXIS_DB_URL, VXIS_LOG_LEVEL, VXIS_SHODAN_API_KEY[/dim]")
+        sub = _settings_menu()
+        if sub == "refresh_models":
+            from vxis.llm.model_catalog import available_models, clear_cache
+
+            removed = clear_cache()
+            console.print(
+                "[dim]모델 캐시를 비웠습니다 — 새로 가져옵니다…[/dim]"
+                if removed else "[dim]캐시 없음 — 새로 가져옵니다…[/dim]"
+            )
+            res = available_models("anthropic")  # force a live fetch + re-cache
+            console.print(
+                f"[green]모델 소스 새로고침 완료: {_source_label_kr(res.source)} "
+                f"(anthropic {len(res.models)}개)[/green]"
+            )
+        elif sub == "env_help":
+            console.print("[dim]설정은 .env 파일 또는 VXIS_ 환경변수로 관리합니다.[/dim]")
+            console.print("[dim]  예: VXIS_DB_URL, VXIS_LOG_LEVEL, VXIS_SHODAN_API_KEY[/dim]")
 
 
 def _execute_scan(params: dict) -> None:

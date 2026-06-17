@@ -91,6 +91,21 @@ def _save_cache(data: dict) -> None:
         pass
 
 
+def clear_cache() -> bool:
+    """Delete the on-disk models.dev cache so the next fetch is fresh.
+
+    Returns True if a cache file was removed, False if none existed. Used by the
+    TUI "모델 소스 새로고침" action. Never raises."""
+    try:
+        path = _cache_path()
+        if path.exists():
+            path.unlink()
+            return True
+    except Exception:
+        pass
+    return False
+
+
 def _normalize_models_dev(raw: dict | None, vxis_provider: str) -> list[ModelInfo]:
     """Map a models.dev catalog into ModelInfo for one vxis provider.
 
@@ -171,5 +186,6 @@ __all__ = [
     "CatalogResult",
     "available_models",
     "merge_catalog",
+    "clear_cache",
     "MODELS_DEV_URL",
 ]
