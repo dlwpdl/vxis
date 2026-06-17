@@ -69,6 +69,7 @@ ADR-012 Gap 1 closure. The single highest-ROI move (moat bet #1): turns the veri
 - [ ] White-box CODE fusion wired into the live loop (gap#1): `CodeRecon.fingerprint → code_recon_to_hypotheses → push CodeHypothesis into P3 queue → dynamic-confirm → Finding with source line:col`. Run alongside a web target in one scan.
 
 ## LATER
+- [ ] **GBrain concept adoption** (ADR-015, concept-only, self-implemented — NOT the product): (1) self-wiring typed-edge knowledge graph over findings/targets (`runs_service`/`vulnerable_to`/`chains_to`…, zero-LLM extraction) — their bench: +31.4 P@5 over graph-off; (2) **coverage-gap synthesis** → report panel ("untested vectors/endpoints/phases", pairs with the verification-rate panel) = cheapest near-term win; (3) consolidation/"dream-cycle" daemon for the growth loop. Folds into the self-improvement + KnowledgeStore items below.
 - [ ] Converge self-improvement: retrospective `improvement_hints` → structured skill-scheduling bias the decision policy consumes; feed `findings_by_type` into a connected KnowledgeStore.
 - [ ] Decide P15 Digital Twin (wire with real per-skill replay, OR drop) ; **DROP P12 Evolution + delete phantom registry entries** ; wire or shelve P13 Biometrics.
 - [ ] Fix ADR-001 license record (Strix = **Apache-2.0**, PentAGI/pentest-ai-agents/pentestagent = **MIT** — all non-AGPL).
