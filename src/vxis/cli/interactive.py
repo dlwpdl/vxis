@@ -383,6 +383,38 @@ _CLOUD_PROVIDERS = [
 ]
 
 
+_BACK = object()
+
+
+def _back_choices(choices: list, back_label: str = "← 뒤로") -> list:
+    """Append a standard back entry (value=_BACK) to inquirer choices."""
+    return list(choices) + [Separator(), {"name": back_label, "value": _BACK}]
+
+
+def _select_back(message: str, choices: list, **kwargs):
+    """inquirer.select with a "← 뒤로" entry. Returns the value, _BACK (go
+    back), or None (Esc/Ctrl-C = abort)."""
+    kwargs.setdefault("pointer", "❯")
+    kwargs.setdefault("amark", "✅")
+    return inquirer.select(message=message, choices=_back_choices(choices), **kwargs).execute()
+
+
+def _run_wizard_steps(steps: list, state: dict) -> bool:
+    """Drive a back-navigable wizard. Each step(state) returns truthy to advance,
+    _BACK to return to the previous step, or None to abort. True iff all steps
+    completed; False on abort / back-out of the first step."""
+    i = 0
+    while 0 <= i < len(steps):
+        result = steps[i](state)
+        if result is None:
+            return False
+        if result is _BACK:
+            i -= 1
+            continue
+        i += 1
+    return i >= len(steps)
+
+
 def _source_label_kr(source: str) -> str:
     """Human label for where the model list came from (live / cache / default)."""
     return {
@@ -543,17 +575,15 @@ def scan_wizard() -> dict | None:
     """스캔 설정 위자드. 선택된 파라미터를 dict로 반환."""
 
     # Step 1: 스캔 유형 선택
-    scan_type = inquirer.select(
-        message="스캔 유형을 선택하세요",
-        choices=_ordered_scan_choices(),
-        pointer="\u276f",
+    scan_type = _select_back(
+        "스캔 유형을 선택하세요",
+        _ordered_scan_choices(),
         qmark="\U0001f50d",
-        amark="\u2705",
         instruction="(↑↓ 방향키)",
-    ).execute()
+    )
 
-    if scan_type is None:
-        return None
+    if scan_type is None or scan_type is _BACK:
+        return None  # 메인 메뉴로
 
     cat = SCAN_CATEGORIES[scan_type]
 
@@ -2318,10 +2348,16 @@ def _run_brain_first_scan_from_tui(
     from vxis.cli.main import scan as run_scan
 
     try:
+        # NOTE: `scan` is a typer command; any parameter NOT passed here resolves
+        # to its typer.OptionInfo default (not the intended value), which later
+        # crashes (e.g. instruction.strip() → "'OptionInfo' object has no attribute
+        # 'strip'"). So EVERY scan parameter must be passed explicitly. A regression
+        # test (test_tui_passes_every_scan_param) fails if a new param is added.
         run_scan(
             target=target,
             manifest=None,
             profile=profile,
+            client=None,
             ghost=False,
             output=None,
             no_report=False,
@@ -2332,77 +2368,94 @@ def _run_brain_first_scan_from_tui(
             plugins=None,
             kind="web",
             box=box_mode,
+            instruction=None,
+            instruction_file=None,
+            engagement=None,
+            approve_destructive=False,
         )
     except typer.Exit as exc:
         if exc.exit_code not in (0, None):
             console.print(f"[red]Brain-first scan exited with code {exc.exit_code}[/red]")
 
 
-def _execute_agent_scan(params: dict) -> None:
-    """AI 자율 에이전트 모드 실행."""
-    import os
+def _select_cloud_provider_model():
+    """Cloud provider + model picker with back. Returns (provider, model, "") |
+    _BACK (back to brain source) | None (abort)."""
+    from vxis.llm.model_catalog import available_models
 
-    target = params["target"]
-    profile = params.get("profile", "crown")
-
-    source_class = inquirer.select(
-        message="AI 두뇌 소스를 선택하세요",
-        choices=[
-            {"name": "Cloud API — OpenAI / Anthropic / Gemini / Together", "value": "cloud"},
-            {"name": "Local Runtime — Ollama / llama.cpp", "value": "local"},
-        ],
-        pointer="\u276f",
-        qmark="\U0001f9e0",
-        amark="\u2705",
-        instruction="(↑↓ 방향키)",
-    ).execute()
-
-    if source_class is None:
-        return
-
-    if source_class == "local":
-        local_selection = _select_local_llm()
-        if local_selection is None:
-            return
-        provider, model, base_url = local_selection
-    else:
-        provider = inquirer.select(
-            message="LLM 프로바이더를 선택하세요",
-            choices=_cloud_provider_choices(),
-            pointer="❯",
+    while True:
+        provider = _select_back(
+            "LLM 프로바이더를 선택하세요",
+            _cloud_provider_choices(),
             qmark="\U0001f9e0",
-            amark="✅",
             instruction="(↑↓ 방향키)",
-        ).execute()
+        )
         if provider is None:
-            return
-
-        # Live model list from the hybrid catalog (models.dev + curated, cached).
-        from vxis.llm.model_catalog import available_models
-
-        _catalog = available_models(provider)
-        picked = inquirer.select(
-            message=f"모델을 선택하세요  [목록: {_source_label_kr(_catalog.source)}]",
-            choices=_cloud_model_choices(provider, _catalog.models),
-            pointer="❯",
+            return None
+        if provider is _BACK:
+            return _BACK
+        cat = available_models(provider)
+        picked = _select_back(
+            f"모델을 선택하세요  [목록: {_source_label_kr(cat.source)}]",
+            _cloud_model_choices(provider, cat.models),
             qmark="\U0001f9e0",
-            amark="✅",
             instruction="(↑↓ — 최신/권장이 위)",
-        ).execute()
+        )
         if picked is None:
-            return
-        provider, model = picked
+            return None
+        if picked is _BACK:
+            continue  # back to provider select
+        prov, model = picked
         if model == "__custom__":
             model = inquirer.text(
-                message="모델 ID를 입력하세요",
+                message="모델 ID를 입력하세요 (빈 값 = 뒤로)",
                 qmark="✏️",
                 amark="✅",
             ).execute()
             if not model or not model.strip():
-                return
+                continue  # empty = back to provider/model
             model = model.strip()
-        base_url = ""
+        return (prov, model, "")
 
+
+def _select_brain_source():
+    """Brain source picker with back. Returns (provider, model, base_url) |
+    _BACK | None."""
+    while True:
+        source = _select_back(
+            "AI 두뇌 소스를 선택하세요",
+            [
+                {"name": "Cloud API — OpenAI / Anthropic / Gemini / Together", "value": "cloud"},
+                {"name": "Local Runtime — Ollama / llama.cpp", "value": "local"},
+            ],
+            qmark="\U0001f9e0",
+            instruction="(↑↓ 방향키)",
+        )
+        if source is None:
+            return None
+        if source is _BACK:
+            return _BACK
+        if source == "local":
+            sel = _select_local_llm()
+            if sel is None:
+                continue  # back to source
+            return sel
+        sel = _select_cloud_provider_model()
+        if sel is None:
+            return None
+        if sel is _BACK:
+            continue  # back to source
+        return sel
+
+
+def _step_brain(state: dict):
+    """Wizard step: pick + configure the AI brain (source/provider/model/key)."""
+    import os
+
+    sel = _select_brain_source()
+    if sel is None or sel is _BACK:
+        return sel
+    provider, model, base_url = sel
     resolved_base_url = _configure_llm_environment(provider, model, base_url)
 
     if provider in _LOCAL_LLM_PROVIDERS:
@@ -2414,116 +2467,123 @@ def _execute_agent_scan(params: dict) -> None:
                     "[dim]먼저 llama-server를 실행하세요. 예: "
                     "llama-server -m /path/to/model.gguf --host 127.0.0.1 --port 8080[/dim]"
                 )
-            return
+            return _BACK
         console.print(f"[green]{message}[/green]")
 
-    # Check API key
     if provider not in _LOCAL_LLM_PROVIDERS and not _has_cloud_provider_key(provider):
         key_env = _cloud_provider_key_env(provider)
         api_key = inquirer.secret(
-            message=f"{key_env}를 입력하세요",
+            message=f"{key_env}를 입력하세요 (빈 값 = 뒤로)",
             qmark="\U0001f511",
-            amark="\u2705",
+            amark="✅",
         ).execute()
+        if not api_key:
+            console.print("[dim]뒤로 갑니다.[/dim]")
+            return _BACK
+        os.environ[key_env] = api_key.strip()
 
-        if api_key:
-            os.environ[key_env] = api_key.strip()
-        else:
-            console.print("[red]API 키가 필요합니다.[/red]")
-            return
+    state["provider"] = provider
+    state["model"] = model
+    return True
 
-    model_short = model.split("/")[-1] if "/" in model else model
 
-    # Execution permission 선택 — AI reasoning stays broad; target actions stay inside this bound.
-    # NOW-3 #2: each option carries an attack-level badge derived from the
-    # profile ScanPolicy ceiling (●●● = full), so the attack level is
-    # quantified right at the choice ("공격레벨 수치화").
+def _step_ceiling(state: dict):
+    """Wizard step: execution-permission ceiling (+ specialized profile drill-in)."""
     from vxis.agent.policy.scan_policy import attack_level_badge
 
-    _ceiling_opts = [
+    ceiling_opts = [
         ("passive", "\U0001f50d", "정보 수집만", "공개 정보와 가벼운 확인만 수행"),
         ("standard", "\U0001f6e1\ufe0f", "안전 점검", "읽기/확인 위주, 위험한 공격 실행 차단"),
         ("crown", "\U0001f3af", "실전 검증", "실제 피해 가능성까지 승인 범위 안에서 확인 (권장)"),
         ("aggressive", "\U0001f680", "랩 전체 허용", "격리/명시 승인 환경에서만 강한 공격 허용"),
     ]
-    _ceiling_choices = [
-        {
-            "name": f"{icon}  [공격력 {attack_level_badge(value)['bars']}] {label} - {desc}",
-            "value": value,
-        }
-        for value, icon, label, desc in _ceiling_opts
+    ceiling_choices = [
+        {"name": f"{icon}  [공격력 {attack_level_badge(value)['bars']}] {label} - {desc}", "value": value}
+        for value, icon, label, desc in ceiling_opts
     ]
-    _ceiling_choices.append(
+    ceiling_choices.append(
         {"name": "⚙️  전문 프로필 직접 선택 (VC · 투자실사 · 컴플라이언스 등)", "value": "specialized"}
     )
-    ceiling = inquirer.select(
-        message="AI가 어디까지 직접 실행해도 될까요?  (공격력 ○○○ → ●●●)",
-        choices=_ceiling_choices,
-        default="crown",
-        pointer="\u276f",
-        qmark="\U0001f6e1\ufe0f",
-        amark="\u2705",
-        instruction="AI는 넓게 생각하되, 실제 실행은 이 선택 안에서만 진행합니다",
-    ).execute()
+    while True:
+        ceiling = _select_back(
+            "AI가 어디까지 직접 실행해도 될까요?  (공격력 ○○○ → ●●●)",
+            ceiling_choices,
+            default="crown",
+            qmark="\U0001f6e1\ufe0f",
+            instruction="AI는 넓게 생각하되, 실제 실행은 이 선택 안에서만 진행합니다",
+        )
+        if ceiling is None:
+            return None
+        if ceiling is _BACK:
+            return _BACK
+        if ceiling == "specialized":
+            prof = _select_back(
+                "전문 프로필을 선택하세요  (공격력 뱃지 = 실제 정책 ceiling)",
+                _specialized_profile_choices(),
+                qmark="⚙️",
+            )
+            if prof is None:
+                return None
+            if prof is _BACK:
+                continue  # back to ceiling select
+            state["profile"] = prof
+            return True
+        state["profile"] = {
+            "passive": "passive", "standard": "standard",
+            "crown": "crown", "aggressive": "aggressive",
+        }.get(ceiling, "crown")
+        return True
 
-    if ceiling is None:
-        return
 
-    # User-facing execution permission -> internal profile. "specialized" drills
-    # into the full PROFILE_POLICY_TABLE (VC monitor, DD, compliance, …).
-    if ceiling == "specialized":
-        profile = inquirer.select(
-            message="전문 프로필을 선택하세요  (공격력 뱃지 = 실제 정책 ceiling)",
-            choices=_specialized_profile_choices(),
-            pointer="\u276f",
-            qmark="⚙️",
-            amark="\u2705",
-        ).execute()
-        if profile is None:
-            return
-    else:
-        ceiling_profile_map = {
-            "passive": "passive",
-            "standard": "standard",
-            "crown": "crown",
-            "aggressive": "aggressive",
-        }
-        profile = ceiling_profile_map.get(ceiling, "crown")
-
-    # NOW-3 #3: parallel vs serial agent execution — sets the agent-graph worker
-    # LLM concurrency (VXIS_LOCAL_WORKER_CONCURRENCY) for this run.
-    import os as _os_exec
-
-    exec_mode = inquirer.select(
-        message="에이전트 실행 방식을 선택하세요",
-        choices=[
-            {"name": "🧵  직렬 - 한 번에 하나씩 (안정적 · 저비용 · 권장)", "value": "serial"},
+def _step_exec(state: dict):
+    """Wizard step: parallel vs serial agent execution."""
+    exec_mode = _select_back(
+        "에이전트 실행 방식을 선택하세요",
+        [
+            {"name": "\U0001f9f5  직렬 - 한 번에 하나씩 (안정적 · 저비용 · 권장)", "value": "serial"},
             {"name": "⚡  병렬 - 여러 작업 동시 (빠름 · 모델 부하 큼)", "value": "parallel"},
         ],
         default="serial",
-        pointer="❯",
-        qmark="🧵",
-        amark="✅",
-    ).execute()
-    if exec_mode is None:
-        return
-    _worker_n = _exec_mode_to_concurrency(exec_mode)
-    _os_exec.environ["VXIS_LOCAL_WORKER_CONCURRENCY"] = str(_worker_n)
-    _exec_mode_kr = "병렬" if exec_mode == "parallel" else "직렬"
+        qmark="\U0001f9f5",
+    )
+    if exec_mode is None or exec_mode is _BACK:
+        return exec_mode
+    state["exec_mode"] = exec_mode
+    return True
 
-    _profile_kr = _PROFILE_KR.get(profile, profile)
-    _badge = attack_level_badge(profile)
+
+def _execute_agent_scan(params: dict) -> None:
+    """AI 자율 에이전트 모드 실행 — 뒤로가기 가능한 단계형 위자드."""
+    import os as _os_exec
+
+    from vxis.agent.policy.scan_policy import attack_level_badge
+
+    state = {"target": params["target"], "profile": params.get("profile", "crown")}
+    if not _run_wizard_steps([_step_brain, _step_ceiling, _step_exec], state):
+        return  # aborted or backed out of the first step
+
+    provider, model = state["provider"], state["model"]
+    profile, exec_mode = state["profile"], state["exec_mode"]
+    target = state["target"]
+
+    worker_n = _exec_mode_to_concurrency(exec_mode)
+    _os_exec.environ["VXIS_LOCAL_WORKER_CONCURRENCY"] = str(worker_n)
+    exec_mode_kr = "병렬" if exec_mode == "parallel" else "직렬"
+    model_short = model.split("/")[-1] if "/" in model else model
+    profile_kr = _PROFILE_KR.get(profile, profile)
+    badge = attack_level_badge(profile)
+
     console.print()
     console.print(Panel(
         f"[bold cyan]\U0001f9e0 VXIS AI Agent Mode[/bold cyan]\n\n"
         f"\U0001f3af 타겟: [white]{target}[/white]\n"
         f"⚫ 박스 모드: [white]블랙박스[/white] "
         f"[dim](외부 공격자 시점 · 소스/내부 정보 접근 없음)[/dim]\n"
-        f"\U0001f6e1\ufe0f 실행 허용 범위: [yellow]{_profile_kr}[/yellow]\n"
-        f"\U0001f4ca 공격 레벨: [bold]{_badge['bars']}[/bold] "
-        f"[dim]{_badge['ceiling']}"
-        f"{' · ' + ', '.join(_badge['flags']) if _badge['flags'] else ''}[/dim]\n"
-        f"\U0001f9f5 실행 방식: [white]{_exec_mode_kr}[/white] [dim](동시 워커 {_worker_n})[/dim]\n"
+        f"\U0001f6e1\ufe0f 실행 허용 범위: [yellow]{profile_kr}[/yellow]\n"
+        f"\U0001f4ca 공격 레벨: [bold]{badge['bars']}[/bold] "
+        f"[dim]{badge['ceiling']}"
+        f"{' · ' + ', '.join(badge['flags']) if badge['flags'] else ''}[/dim]\n"
+        f"\U0001f9f5 실행 방식: [white]{exec_mode_kr}[/white] [dim](동시 워커 {worker_n})[/dim]\n"
         f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
         f"[dim]AI는 넓게 생각하지만, 실제 요청과 공격 실행은 선택한 범위 안에서만 진행합니다.\n"
         f"정보 수집만 모드에서도 공개 정보에서 중요한 위험이 보이면 보고합니다.[/dim]",
@@ -2532,8 +2592,8 @@ def _execute_agent_scan(params: dict) -> None:
     ))
     console.print()
 
-    # NOW-3 #1: the web agent path is always black-box — pass it explicitly so the
-    # pipeline ENFORCES "완전히 블랙박스" (no source-aware tools), not just derives it.
+    # NOW-3 #1: web agent path is always black-box — pass explicitly so the
+    # pipeline ENFORCES "완전히 블랙박스" (no source-aware tools).
     _run_brain_first_scan_from_tui(
         target=target,
         profile=profile,

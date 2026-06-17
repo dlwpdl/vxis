@@ -52,3 +52,74 @@ class TestSettingsMenu:
         vals = {c["value"] for c in interactive._settings_menu_choices() if isinstance(c, dict)}
         assert "refresh_models" in vals
         assert "back" in vals
+
+
+class TestBackNavigation:
+    def test_back_choices_appends_back_sentinel(self):
+        from vxis.cli import interactive
+        base = [{"name": "A", "value": "a"}, {"name": "B", "value": "b"}]
+        out = interactive._back_choices(base)
+        assert out[0]["value"] == "a" and out[1]["value"] == "b"  # originals preserved
+        backs = [c for c in out if isinstance(c, dict) and c.get("value") is interactive._BACK]
+        assert len(backs) == 1  # exactly one back entry, carrying the _BACK sentinel
+
+    def test_steps_complete_when_all_advance(self):
+        from vxis.cli import interactive
+        seq = []
+        steps = [lambda s: (seq.append(0) or True), lambda s: (seq.append(1) or True)]
+        assert interactive._run_wizard_steps(steps, {}) is True
+        assert seq == [0, 1]
+
+    def test_back_returns_to_previous_step(self):
+        from vxis.cli import interactive
+        seq = []
+        state = {"used": False}
+
+        def s0(st):
+            seq.append("s0")
+            return True
+
+        def s1(st):
+            seq.append("s1")
+            if not st["used"]:
+                st["used"] = True
+                return interactive._BACK
+            return True
+
+        assert interactive._run_wizard_steps([s0, s1], state) is True
+        assert seq == ["s0", "s1", "s0", "s1"]  # backed up to s0, then forward
+
+    def test_none_aborts(self):
+        from vxis.cli import interactive
+        assert interactive._run_wizard_steps([lambda s: None], {}) is False
+
+    def test_back_from_first_step_aborts(self):
+        from vxis.cli import interactive
+        assert interactive._run_wizard_steps([lambda s: interactive._BACK], {}) is False
+
+
+class TestBrainFirstDelegation:
+    def test_tui_passes_every_scan_param(self, monkeypatch):
+        """Regression: calling the typer `scan` command directly turns any
+        unpassed parameter into an OptionInfo object (→ 'OptionInfo has no
+        attribute strip'). The TUI must pass ALL of scan's params explicitly."""
+        import inspect
+
+        from vxis.cli import interactive
+        from vxis.cli import main as climain
+
+        scan_params = set(inspect.signature(climain.scan).parameters)  # real sig first
+        captured = {}
+
+        def fake_scan(**kwargs):
+            captured.update(kwargs)
+
+        monkeypatch.setattr(climain, "scan", fake_scan)
+        interactive._run_brain_first_scan_from_tui("http://localhost:3000", "crown")
+
+        missing = scan_params - set(captured)
+        assert not missing, f"TUI did not pass scan params (become OptionInfo): {missing}"
+        # and nothing passed should be a typer OptionInfo
+        import typer.models as tmodels
+        leaked = {k for k, v in captured.items() if isinstance(v, tmodels.OptionInfo)}
+        assert not leaked, f"OptionInfo leaked for: {leaked}"
