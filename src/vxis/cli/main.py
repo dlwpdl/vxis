@@ -113,6 +113,15 @@ def _box_flag_to_mode(box: str) -> str | None:
 @app.callback()
 def _app_callback(ctx: typer.Context) -> None:
     """인자 없이 vxis 실행 시 인터랙티브 모드 진입."""
+    # Load persisted API keys (~/.vxis/.env) without overriding real env vars,
+    # so keys saved in a previous session are available this run.
+    try:
+        from vxis.config.env_store import load_env
+
+        load_env()
+    except Exception:
+        pass
+
     if ctx.invoked_subcommand is None:
         try:
             from vxis.cli.interactive import run_interactive

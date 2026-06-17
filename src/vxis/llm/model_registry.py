@@ -336,7 +336,9 @@ def list_models(provider: str | None = None) -> list[ModelInfo]:
 _FLAGSHIP: dict[str, str] = {
     "anthropic": "claude-opus-4-8",
     "openai": "gpt-5.4",
-    "gemini": "gemini-3.1-pro-preview",
+    # GA model, not the -preview (preview/limited models aren't callable with a
+    # standard key → silent 0-finding scans). Live catalog still surfaces newer GA ids.
+    "gemini": "gemini-2.5-pro",
     "together": "moonshotai/Kimi-K2.5",
     "deepseek": "deepseek-ai/DeepSeek-R1-0528",
 }

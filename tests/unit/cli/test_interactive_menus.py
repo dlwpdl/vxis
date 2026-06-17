@@ -123,3 +123,29 @@ class TestBrainFirstDelegation:
         import typer.models as tmodels
         leaked = {k for k, v in captured.items() if isinstance(v, tmodels.OptionInfo)}
         assert not leaked, f"OptionInfo leaked for: {leaked}"
+
+
+class TestPreviewModelDemotion:
+    def _m(self, mid):
+        from vxis.llm.model_registry import ModelInfo
+        return ModelInfo(model_id=mid, provider="gemini", context_window=1_000_000, max_output_tokens=64_000)
+
+    def test_is_preview_model(self):
+        from vxis.cli import interactive
+        assert interactive._is_preview_model("gemini-3.1-pro-preview") is True
+        assert interactive._is_preview_model("gpt-5.4-exp") is True
+        assert interactive._is_preview_model("models/gemini-2.0-flash-exp") is True
+        assert interactive._is_preview_model("gemini-2.5-pro") is False
+        assert interactive._is_preview_model("claude-opus-4-8") is False
+
+    def test_recommended_is_ga_not_preview(self):
+        # newest-first list leads with a preview model; the picker must demote it so
+        # the ⭐ recommended (first) is a GA model
+        from vxis.cli import interactive
+        models = [self._m("gemini-3.1-pro-preview"), self._m("gemini-2.5-pro")]
+        choices = interactive._cloud_model_choices("gemini", models)
+        first_value = choices[0]["value"]
+        assert first_value == ("gemini", "gemini-2.5-pro")
+        # preview still present (just lower)
+        vals = [c["value"] for c in choices if isinstance(c.get("value"), tuple)]
+        assert ("gemini", "gemini-3.1-pro-preview") in vals

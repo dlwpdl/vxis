@@ -162,3 +162,8 @@ def test_clear_cache_removes_file(tmp_path, monkeypatch):
     assert not cache.exists()
     # idempotent: clearing again is a no-op, returns False
     assert model_catalog.clear_cache() is False
+
+
+def test_gemini_flagship_is_ga_not_preview():
+    from vxis.llm.model_registry import flagship
+    assert "preview" not in flagship("gemini").lower()  # don't default to a preview model

@@ -433,15 +433,32 @@ def _cloud_provider_choices() -> list[dict]:
     return out
 
 
+_PREVIEW_MARKERS = ("preview", "experimental", "-exp", "exp-", "-rc", "-beta", "beta-")
+
+
+def _is_preview_model(model_id: str) -> bool:
+    """True for preview/experimental/beta model ids. These are often gated and
+    NOT callable with a standard API key — so they must not be the recommended
+    default (a preview Gemini caused a 0-finding scan death)."""
+    mid = (model_id or "").lower()
+    return any(t in mid for t in _PREVIEW_MARKERS)
+
+
 def _cloud_model_choices(provider: str, models: list, limit: int = 12) -> list[dict]:
     """Inquirer choices for a provider's catalog (capped) + a custom-id entry.
 
-    value = (provider, model_id); the first (newest/curated) model is marked
-    recommended. A trailing '직접 입력' entry returns (provider, '__custom__')."""
+    value = (provider, model_id). GA models are listed before preview/experimental
+    ones (stable order preserved within each group) so the first — marked 권장 ⭐ —
+    is always a generally-available model the user's key can actually call. A
+    trailing '직접 입력' entry returns (provider, '__custom__')."""
+    ga = [m for m in models if not _is_preview_model(m.model_id)]
+    preview = [m for m in models if _is_preview_model(m.model_id)]
+    ordered = (ga + preview)[:limit]
     out: list[dict] = []
-    for i, m in enumerate(models[:limit]):
+    for i, m in enumerate(ordered):
         ctx = f"{m.context_window // 1000}k ctx" if getattr(m, "context_window", 0) else ""
-        extras = " · ".join(x for x in [ctx, "권장 ⭐" if i == 0 else ""] if x)
+        tag = "권장 ⭐" if i == 0 else ("preview" if _is_preview_model(m.model_id) else "")
+        extras = " · ".join(x for x in [ctx, tag] if x)
         name = m.model_id + (f"   ({extras})" if extras else "")
         out.append({"name": name, "value": (provider, m.model_id)})
     out.append({"name": "✏️  직접 입력 (커스텀 모델 ID)", "value": (provider, "__custom__")})
@@ -2481,6 +2498,20 @@ def _step_brain(state: dict):
             console.print("[dim]뒤로 갑니다.[/dim]")
             return _BACK
         os.environ[key_env] = api_key.strip()
+        # Offer to persist so it isn't re-entered every run (~/.vxis/.env, 0600).
+        if inquirer.confirm(
+            message=f"{key_env}를 저장해서 다음부터 안 묻게 할까요? (~/.vxis/.env)",
+            default=True,
+            qmark="\U0001f4be",
+            amark="✅",
+        ).execute():
+            try:
+                from vxis.config.env_store import upsert_env
+
+                upsert_env(key_env, api_key.strip())
+                console.print("[green]저장됨 — 다음 실행부터 자동 사용됩니다.[/green]")
+            except Exception as exc:
+                console.print(f"[yellow]저장 실패(무시): {exc}[/yellow]")
 
     state["provider"] = provider
     state["model"] = model
