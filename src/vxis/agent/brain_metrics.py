@@ -100,6 +100,27 @@ def reset_llm_usage_stats() -> None:
         })
 
 
+def llm_health_warning(call_count: int, usage_stats: dict[str, Any]) -> str | None:
+    """Return a loud, actionable warning when LLM calls were attempted but NONE
+    succeeded — otherwise None.
+
+    `_record_llm_usage` only fires on a successful response, so `call_count > 0`
+    (calls entered the choke point) with `usage_stats["calls"] == 0` (none
+    recorded) means every provider call failed and the Brain never produced a
+    decision. The scan's "0 findings" then reflects a dead Brain, not a clean
+    target, and must be surfaced instead of reported as a completed scan."""
+    if call_count > 0 and int(usage_stats.get("calls", 0)) == 0:
+        return (
+            f"Brain produced NO output: all {call_count} LLM call(s) failed "
+            f"(0 succeeded, 0 tokens). The scan result is NOT valid — '0 findings' "
+            f"reflects a dead Brain, not a clean target. Likely cause: provider "
+            f"auth / model / quota (e.g. gemini-2.5-pro needs a paid plan — use "
+            f"gemini-2.5-flash on the free tier). See logs/scan_*.log for the "
+            f"per-call error."
+        )
+    return None
+
+
 def _estimate_token_count(value: Any) -> int:
     """Cheap text-length proxy when providers do not return token usage."""
     if value is None:

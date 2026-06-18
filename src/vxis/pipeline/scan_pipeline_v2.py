@@ -50,6 +50,7 @@ from vxis.agent.brain import (
     reset_llm_call_count,
     reset_llm_usage_stats,
 )
+from vxis.agent.brain_metrics import llm_health_warning
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tools import build_default_registry
 from vxis.agent.tools.finding_tools import _get_chains as _get_chain_dicts
@@ -1314,6 +1315,17 @@ class ScanPipeline:
                 f"llm_call_count={llm_calls} brain_decision_count={brain_decisions} "
                 f"findings_count={findings_count}"
             )
+
+            # Loud-fail: if calls were attempted but none succeeded, the Brain was
+            # dead (auth/model/quota) — "0 findings" is meaningless, say so.
+            brain_warning = llm_health_warning(llm_calls, get_llm_usage_stats())
+            if brain_warning:
+                logger.error("VXIS_BRAIN_HEALTH %s", brain_warning)
+                print(f"\n⚠  {brain_warning}\n")
+                try:
+                    ctx.brain_health_warning = brain_warning  # type: ignore[attr-defined]
+                except Exception:
+                    pass
 
             # Phase C: MITRE ATT&CK coverage calculation. Builds technique and
             # tactic coverage from the current scan's findings and prints a
