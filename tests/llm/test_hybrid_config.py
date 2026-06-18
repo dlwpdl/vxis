@@ -137,3 +137,21 @@ def test_parse_model_ref_preserves_provider_owned_model_ids() -> None:
         "moonshotai/Kimi-K2.5",
     )
     assert parse_model_ref("moonshotai/Kimi-K2.5") == ("", "moonshotai/Kimi-K2.5")
+
+
+def test_frontier_autopromote_gemini_uses_ga_model_not_preview() -> None:
+    # A bare GOOGLE_API_KEY (no explicit provider/model) must auto-promote to the
+    # GA flagship, not a preview model a standard key can't call. Previously the
+    # frontier table hardcoded gemini-3.1-pro-preview, drifting from the GA default
+    # used on explicit selection — so "just export a Google key" silently 404'd.
+    config = resolve_hybrid_model_config(env={"GOOGLE_API_KEY": "AIzaTESTKEY1234567890"})
+    assert config.director.provider == "gemini"
+    assert config.director.model == "gemini-2.5-pro"
+    assert "preview" not in config.director.model
+
+
+def test_frontier_autopromote_anthropic_openai_unchanged() -> None:
+    a = resolve_hybrid_model_config(env={"ANTHROPIC_API_KEY": "sk-ant-x"})
+    assert (a.director.provider, a.director.model) == ("anthropic", "claude-sonnet-4-6")
+    o = resolve_hybrid_model_config(env={"OPENAI_API_KEY": "sk-x"})
+    assert (o.director.provider, o.director.model) == ("openai", "gpt-5.4")

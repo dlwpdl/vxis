@@ -324,12 +324,18 @@ def _first_available_frontier(
     *,
     role: ModelRole = ModelRole.DIRECTOR,
 ) -> ModelEndpoint | None:
-    for provider, model, key_names in (
-        ("anthropic", "claude-sonnet-4-6", ("ANTHROPIC_API_KEY",)),
-        ("openai", "gpt-5.4", ("OPENAI_API_KEY", "LLM_API_KEY")),
-        ("gemini", "gemini-3.1-pro-preview", ("GOOGLE_API_KEY", "GEMINI_API_KEY")),
+    # Model comes from _default_model_for_provider — the single source for the
+    # per-provider default — so auto-promote (key present, no explicit provider)
+    # can't drift from explicit selection. It once hardcoded gemini-3.1-pro-preview
+    # here while explicit selection used the GA gemini-2.5-pro, so merely exporting
+    # a Google key picked a preview model a standard key can't call.
+    for provider, key_names in (
+        ("anthropic", ("ANTHROPIC_API_KEY",)),
+        ("openai", ("OPENAI_API_KEY", "LLM_API_KEY")),
+        ("gemini", ("GOOGLE_API_KEY", "GEMINI_API_KEY")),
     ):
         if any(_env_get(env, key) for key in key_names):
+            model = _default_model_for_provider(provider, env)
             return ModelEndpoint(
                 role=role,
                 provider=provider,
