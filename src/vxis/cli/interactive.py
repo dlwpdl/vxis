@@ -79,6 +79,33 @@ def _configure_llm_environment(
     return ""
 
 
+# Brain env vars _configure_llm_environment writes for a cloud provider. Persisted
+# alongside the API key so a standalone `vxis scan` reuses the SAME selection — the
+# key alone isn't enough: with no provider set a fresh process defaults the director
+# back to anthropic and preflight reports "no Brain" despite the saved Google key.
+_PERSISTED_BRAIN_ENV_KEYS = (
+    "UPSTREAM_LLM_PROVIDER", "UPSTREAM_LLM_MODEL",
+    "VXIS_DIRECTOR_LLM_PROVIDER", "VXIS_DIRECTOR_LLM_MODEL",
+    "VXIS_VERIFIER_LLM_PROVIDER", "VXIS_VERIFIER_LLM_MODEL",
+)
+
+
+def _persist_brain_selection(key_env: str, api_key: str, *, path=None) -> None:
+    """Persist the entered API key AND the resolved provider/model selection to
+    ~/.vxis/.env. The wizard already set the selection in os.environ via
+    _configure_llm_environment; only set (non-empty) brain vars are written so we
+    never clobber resolution with empty placeholders."""
+    import os
+
+    from vxis.config.env_store import upsert_env
+
+    upsert_env(key_env, api_key, path=path)
+    for k in _PERSISTED_BRAIN_ENV_KEYS:
+        v = os.environ.get(k)
+        if v:
+            upsert_env(k, v, path=path)
+
+
 def _cloud_provider_key_env(provider: str) -> str:
     """Return the required API-key env var for a cloud provider."""
     return _CLOUD_PROVIDER_KEYS.get("gemini" if provider == "google" else provider, "TOGETHER_API_KEY")
@@ -92,6 +119,19 @@ def _has_cloud_provider_key(provider: str) -> bool:
     if provider == "openai" and os.environ.get("LLM_API_KEY"):
         return True
     return bool(os.environ.get(key_env))
+
+
+def _is_plausible_api_key(value: str) -> bool:
+    """Reject obvious non-keys before they get saved — e.g. the target URL
+    fat-fingered into the key prompt (``GOOGLE_API_KEY=http://localhost:3000``),
+    which then silently 404'd every Brain call. Generic so it never false-rejects
+    a real provider key: non-blank, no whitespace, no ``://``, reasonably long."""
+    v = (value or "").strip()
+    if len(v) < 16:
+        return False
+    if "://" in v or any(c.isspace() for c in v):
+        return False
+    return True
 
 
 def _fetch_llamacpp_models(base_url: str, timeout: float = 2.5) -> list[str]:
@@ -2487,31 +2527,53 @@ def _step_brain(state: dict):
             return _BACK
         console.print(f"[green]{message}[/green]")
 
-    if provider not in _LOCAL_LLM_PROVIDERS and not _has_cloud_provider_key(provider):
+    if provider not in _LOCAL_LLM_PROVIDERS:
         key_env = _cloud_provider_key_env(provider)
-        api_key = inquirer.secret(
-            message=f"{key_env}를 입력하세요 (빈 값 = 뒤로)",
-            qmark="\U0001f511",
-            amark="✅",
-        ).execute()
-        if not api_key:
-            console.print("[dim]뒤로 갑니다.[/dim]")
-            return _BACK
-        os.environ[key_env] = api_key.strip()
-        # Offer to persist so it isn't re-entered every run (~/.vxis/.env, 0600).
-        if inquirer.confirm(
-            message=f"{key_env}를 저장해서 다음부터 안 묻게 할까요? (~/.vxis/.env)",
-            default=True,
-            qmark="\U0001f4be",
-            amark="✅",
-        ).execute():
-            try:
-                from vxis.config.env_store import upsert_env
-
-                upsert_env(key_env, api_key.strip())
-                console.print("[green]저장됨 — 다음 실행부터 자동 사용됩니다.[/green]")
-            except Exception as exc:
-                console.print(f"[yellow]저장 실패(무시): {exc}[/yellow]")
+        # Key is changeable anytime: if one is already saved, offer keep-or-replace
+        # instead of silently skipping — otherwise a wrong key (e.g. a pasted URL)
+        # is stuck forever with no way to fix it from the wizard.
+        change_key = True
+        if _has_cloud_provider_key(provider):
+            change_key = inquirer.select(
+                message=f"{key_env} 이미 저장됨 — 어떻게 할까요?",
+                choices=[
+                    {"name": "✅ 저장된 키 그대로 사용", "value": False},
+                    {"name": "\U0001f511 새 키 입력 (재저장)", "value": True},
+                ],
+                default=False,
+                qmark="\U0001f511",
+                amark="✅",
+            ).execute()
+        if change_key:
+            while True:
+                api_key = inquirer.secret(
+                    message=f"{key_env}를 입력하세요 (빈 값 = 뒤로)",
+                    qmark="\U0001f511",
+                    amark="✅",
+                ).execute()
+                if not api_key:
+                    console.print("[dim]뒤로 갑니다.[/dim]")
+                    return _BACK
+                api_key = api_key.strip()
+                if _is_plausible_api_key(api_key):
+                    break
+                console.print(
+                    "[yellow]API 키 형식이 아닙니다 (URL·타겟 주소가 아닌지 확인). "
+                    "다시 입력하세요.[/yellow]"
+                )
+            os.environ[key_env] = api_key
+            # Offer to persist so it isn't re-entered every run (~/.vxis/.env, 0600).
+            if inquirer.confirm(
+                message=f"{key_env}를 저장해서 다음부터 안 묻게 할까요? (~/.vxis/.env)",
+                default=True,
+                qmark="\U0001f4be",
+                amark="✅",
+            ).execute():
+                try:
+                    _persist_brain_selection(key_env, api_key)
+                    console.print("[green]저장됨 — 다음 실행부터 자동 사용됩니다 (provider/model 포함).[/green]")
+                except Exception as exc:
+                    console.print(f"[yellow]저장 실패(무시): {exc}[/yellow]")
 
     state["provider"] = provider
     state["model"] = model
