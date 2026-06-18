@@ -24,6 +24,7 @@ dependencies = [
     "anthropic>=0.40.0",
     "httpx>=0.28,<1",  # CPR Hands — HTTP 세션 매니저
     "openai-agents==0.14.6",
+    "textual>=6.2.1",
 ]
 
 [project.optional-dependencies]
