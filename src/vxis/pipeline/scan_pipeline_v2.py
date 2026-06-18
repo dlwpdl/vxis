@@ -51,6 +51,7 @@ from vxis.agent.brain import (
     reset_llm_usage_stats,
 )
 from vxis.agent.brain_metrics import llm_health_warning
+from vxis.agent.event_log import format_event
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tools import build_default_registry
 from vxis.agent.tools.finding_tools import _get_chains as _get_chain_dicts
@@ -804,6 +805,14 @@ class ScanPipeline:
                 self._event_callback(event_type, data)
             except Exception:
                 logger.exception("event_callback raised — ignoring")
+        # Tee the same stream to the scan log as a Strix-style narrative, so
+        # `tail -f logs/scan_*.log` shows live "what attack / how / result".
+        try:
+            line = format_event(event_type, data)
+            if line:
+                logger.info("%s", line)
+        except Exception:
+            logger.debug("event_log format failed for %s", event_type, exc_info=True)
 
     def _resolve_and_attach_policy(self, ctx: ScanContext) -> None:
         """Component P: resolve + attach the scan policy, gated behind the v3
