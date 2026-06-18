@@ -829,17 +829,24 @@ def scan(
         f"findings_count={len(ctx.findings)}[/dim]"
     )
     _llm_usage = getattr(ctx, "llm_usage", {}) or {}
-    if _llm_usage:
-        _provider = _llm_usage.get("provider") or "?"
-        _model = _llm_usage.get("model") or "?"
-        _tokens = int(_llm_usage.get("total_tokens") or 0)
-        _token_prefix = "~" if _llm_usage.get("tokens_estimated") else ""
-        _cost = float(_llm_usage.get("cost_usd") or 0.0)
-        _cost_prefix = "est. " if _llm_usage.get("cost_estimated") else ""
+    _rows = _llm_usage.get("rows") or []
+    if _rows:
+        # Per-model (×role) breakdown — the single bucket only kept the LAST
+        # model, useless when a hybrid scan mixes models. Costs are estimates.
+        from vxis.agent.llm_cost import format_cost_line, summarize_usage
+
+        _summary = summarize_usage(_rows)
         console.print(
-            f"[dim]LLM_USAGE provider={_provider} model={_model} "
-            f"tokens={_token_prefix}{_tokens} cost={_cost_prefix}${_cost:.4f}[/dim]"
+            f"[dim]LLM_USAGE total tokens={_summary['total_tokens']:,} "
+            f"est.cost=~${_summary['total_cost_usd']:.4f}  (per model below)[/dim]"
         )
+        for _b in _summary["by_model_role"][:8]:
+            _role = "all" if _b["role"] in ("", "?") else _b["role"]
+            console.print(
+                "[dim]  • "
+                + format_cost_line(_b["model"], _role, _b["input_tokens"], _b["output_tokens"])
+                + f"  ×{_b['calls']}[/dim]"
+            )
 
     # Report path (Phase 6이 리포트 생성했으면)
     if ctx.findings:

@@ -75,13 +75,23 @@ _LLM_USAGE_STATS: dict[str, Any] = {
     "cost_usd": 0.0,
     "tokens_estimated": False,
     "cost_estimated": False,
+    # Per-call rows {model, role, input_tokens, output_tokens} — the data behind
+    # the per-model×role cost panel (the single-bucket fields above only keep the
+    # last provider/model, which is useless when a hybrid scan mixes models).
+    "rows": [],
 }
 
 
 def get_llm_usage_stats() -> dict[str, Any]:
-    """Return cumulative LLM usage telemetry for the current process."""
+    """Return cumulative LLM usage telemetry for the current process.
+
+    ``rows`` is returned as a fresh copy so a reader can iterate it without
+    racing the recording thread that appends to the live list.
+    """
     with _LLM_USAGE_LOCK:
-        return dict(_LLM_USAGE_STATS)
+        snapshot = dict(_LLM_USAGE_STATS)
+        snapshot["rows"] = list(_LLM_USAGE_STATS.get("rows", []))
+        return snapshot
 
 
 def reset_llm_usage_stats() -> None:
@@ -97,6 +107,7 @@ def reset_llm_usage_stats() -> None:
             "cost_usd": 0.0,
             "tokens_estimated": False,
             "cost_estimated": False,
+            "rows": [],
         })
 
 
@@ -165,8 +176,13 @@ def _record_llm_usage(
     user_prompt: Any,
     response_text: Any,
     usage: dict[str, Any] | None = None,
+    role: str = "?",
 ) -> None:
-    """Accumulate live usage telemetry from a single LLM call."""
+    """Accumulate live usage telemetry from a single LLM call.
+
+    ``role`` (director/worker/verifier/summarizer) groups the cost panel by
+    model×role; it defaults to "?" until the brain call sites thread it through.
+    """
     usage = usage or {}
     input_tokens = int(
         usage.get("prompt_tokens")
@@ -201,3 +217,9 @@ def _record_llm_usage(
         _LLM_USAGE_STATS["cost_usd"] = round(float(_LLM_USAGE_STATS.get("cost_usd", 0.0)) + cost_usd, 4)
         _LLM_USAGE_STATS["tokens_estimated"] = bool(_LLM_USAGE_STATS.get("tokens_estimated", False) or tokens_estimated)
         _LLM_USAGE_STATS["cost_estimated"] = bool(_LLM_USAGE_STATS.get("cost_estimated", False) or cost_estimated)
+        _LLM_USAGE_STATS.setdefault("rows", []).append({
+            "model": model,
+            "role": role,
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+        })
