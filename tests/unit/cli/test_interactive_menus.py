@@ -149,3 +149,16 @@ class TestPreviewModelDemotion:
         # preview still present (just lower)
         vals = [c["value"] for c in choices if isinstance(c.get("value"), tuple)]
         assert ("gemini", "gemini-3.1-pro-preview") in vals
+
+
+class TestGhostStep:
+    """Ghost (stealth) mode is now a wizard step — selectable + threaded into scan."""
+
+    def test_ghost_choices_offer_off_and_on(self):
+        from vxis.cli import interactive
+        vals = {c["value"] for c in interactive._ghost_choices()}
+        assert vals == {"off", "on"}
+
+    def test_ghost_off_is_first_and_default(self):
+        from vxis.cli import interactive
+        assert interactive._ghost_choices()[0]["value"] == "off"

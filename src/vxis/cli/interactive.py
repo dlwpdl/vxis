@@ -2398,6 +2398,7 @@ def _run_brain_first_scan_from_tui(
     *,
     allow_inject: bool = False,
     box_mode: str = "black",
+    ghost: bool = False,
 ) -> None:
     """Delegate TUI AI mode to the same Brain-first pipeline as `vxis scan`."""
     import typer
@@ -2415,7 +2416,7 @@ def _run_brain_first_scan_from_tui(
             manifest=None,
             profile=profile,
             client=None,
-            ghost=False,
+            ghost=ghost,
             output=None,
             no_report=False,
             resume=None,
@@ -2645,6 +2646,30 @@ def _step_exec(state: dict):
     return True
 
 
+def _ghost_choices() -> list[dict]:
+    """Stealth-mode options for the scan wizard (off is first / default)."""
+    return [
+        {"name": "\U0001f507  고스트 OFF — 직접 연결 (기본 · 빠름)", "value": "off"},
+        {"name": "\U0001f47b  고스트 ON — 프록시 로테이션 + UA 위장 + 타이밍 지연 (은밀)", "value": "on"},
+    ]
+
+
+def _step_ghost(state: dict):
+    """Wizard step: ghost (stealth) mode. Previously unreachable — the TUI always
+    scanned with ghost off and gave no way to turn it on, so operators couldn't
+    tell whether stealth was active."""
+    choice = _select_back(
+        "고스트(은밀) 모드를 사용할까요?",
+        _ghost_choices(),
+        default="off",
+        qmark="\U0001f47b",
+    )
+    if choice is None or choice is _BACK:
+        return choice
+    state["ghost"] = (choice == "on")
+    return True
+
+
 def _execute_agent_scan(params: dict) -> None:
     """AI 자율 에이전트 모드 실행 — 뒤로가기 가능한 단계형 위자드."""
     import os as _os_exec
@@ -2652,11 +2677,12 @@ def _execute_agent_scan(params: dict) -> None:
     from vxis.agent.policy.scan_policy import attack_level_badge
 
     state = {"target": params["target"], "profile": params.get("profile", "crown")}
-    if not _run_wizard_steps([_step_brain, _step_ceiling, _step_exec], state):
+    if not _run_wizard_steps([_step_brain, _step_ceiling, _step_exec, _step_ghost], state):
         return  # aborted or backed out of the first step
 
     provider, model = state["provider"], state["model"]
     profile, exec_mode = state["profile"], state["exec_mode"]
+    ghost = bool(state.get("ghost", False))
     target = state["target"]
 
     worker_n = _exec_mode_to_concurrency(exec_mode)
@@ -2677,6 +2703,7 @@ def _execute_agent_scan(params: dict) -> None:
         f"[dim]{badge['ceiling']}"
         f"{' · ' + ', '.join(badge['flags']) if badge['flags'] else ''}[/dim]\n"
         f"\U0001f9f5 실행 방식: [white]{exec_mode_kr}[/white] [dim](동시 워커 {worker_n})[/dim]\n"
+        f"\U0001f47b 고스트: [white]{'ON (프록시·UA·타이밍 위장)' if ghost else 'OFF (직접 연결)'}[/white]\n"
         f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
         f"[dim]AI는 넓게 생각하지만, 실제 요청과 공격 실행은 선택한 범위 안에서만 진행합니다.\n"
         f"정보 수집만 모드에서도 공개 정보에서 중요한 위험이 보이면 보고합니다.[/dim]",
@@ -2692,6 +2719,7 @@ def _execute_agent_scan(params: dict) -> None:
         profile=profile,
         allow_inject=False,
         box_mode="black",
+        ghost=ghost,
     )
 
 
