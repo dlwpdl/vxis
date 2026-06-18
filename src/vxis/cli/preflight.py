@@ -190,6 +190,25 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
     return label, True
 
 
+def _brain_unavailable_message(reason: str = "") -> str:
+    """Compose the preflight 'no Brain' error. Surfaces check_brain's specific
+    reason (e.g. 'model not callable — pick a GA model') instead of only the
+    generic 'set a key' line, which infuriated users who HAD set a key but hit a
+    non-callable (preview/unavailable) model or a bad key value."""
+    base = (
+        "No Brain backend available. Install 'claude' CLI, start Ollama/llama.cpp, or set "
+        "ANTHROPIC_API_KEY / TOGETHER_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY"
+    )
+    detail = (reason or "").strip()
+    # Suppress the no-key/no-backend labels ("none", "none (director LLM key
+    # missing — set …)", "unknown") — base already says "set a key", so appending
+    # them just duplicates the instruction. Keep specific reasons like
+    # "api:gemini/… (model not callable …)" or "… (unreachable)".
+    if detail and not detail.lower().startswith(("none", "unknown")):
+        return f"{base}\n  → {detail}"
+    return base
+
+
 def check_docker() -> bool:
     """Docker daemon 접근 가능 여부."""
     if not shutil.which("docker"):
@@ -241,10 +260,7 @@ def run_preflight(
     # 2. Brain 백엔드
     result.brain_backend, result.brain_ready = check_brain(interactive=interactive)
     if not result.brain_ready:
-        result.errors.append(
-            "No Brain backend available. Install 'claude' CLI, start Ollama/llama.cpp, or set "
-            "ANTHROPIC_API_KEY / TOGETHER_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY"
-        )
+        result.errors.append(_brain_unavailable_message(result.brain_backend))
 
     # 3. Docker (Phase 15 Digital Twin용)
     result.docker_available = check_docker()
