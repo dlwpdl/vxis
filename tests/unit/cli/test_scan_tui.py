@@ -1,48 +1,63 @@
-"""Pilot tests for the Textual scan TUI — feed events, assert the iteration tree
-+ detail pane + status update. Headless via App.run_test() (no real scan)."""
-from textual.widgets import ListView, RichLog, Static
+"""Pilot tests for the Textual scan TUI — the navigable Director/Agents tree.
+
+Headless via App.run_test() (no real scan). Assertions lean on the model (which
+drives the tree) plus the Textual Tree node structure.
+"""
+from textual.widgets import RichLog, Static, Tree
 
 from vxis.cli.scan_tui import ScanTUI
 
 
-async def test_feed_events_build_iteration_tree_and_detail():
-    app = ScanTUI(target="http://localhost:3000", brain="gemini/gemini-2.5-flash")
+async def test_feed_builds_director_iteration_tree():
+    app = ScanTUI(target="http://localhost:3000", brain="together/GLM-5")
     async with app.run_test() as pilot:
         app.feed_event("brain_thinking", {
             "iteration": 1, "max_iters": 120,
             "vectors": [{"id": "web:recon", "reasoning": "map the surface"}],
         })
-        app.feed_event("attack", {"vector_id": "skill:sqli", "method": "SKILL", "endpoint": "/rest/user/login"})
+        app.feed_event("attack", {"vector_id": "skill:test_injection", "method": "SKILL", "endpoint": "/login"})
         app.feed_event("hit", {"vector_id": "sqli", "confidence": "critical"})
         await pilot.pause()
 
-        lv = app.query_one("#iters", ListView)
-        assert len(lv) == 1                          # one Brain round → one node
-        assert app.model.iterations[0].topic == "Recon"  # human category
+        # model (drives the tree): topic from the brain round's vector, finding counted
+        assert app.model.iterations[0].topic == "Recon"
         assert app.model.iterations[0].found == 1
 
-        # detail pane rendered the current iteration's coloured timeline
-        detail = app.query_one("#detail", RichLog)
-        assert len(detail.lines) > 0
+        # tree: a Director branch with one iteration leaf under it
+        tree = app.query_one("#tree", Tree)
+        director = tree.root.children[0]
+        assert "Director" in str(director.label)
+        assert len(director.children) == 1
 
-        # status bar reflects the finding count
-        status = app.query_one("#status", Static)
-        assert "1 finding" in str(status.render())
+        # detail renders the iteration's coloured timeline without error
+        app._render_detail({"kind": "iter", "pos": 0})
+        assert len(app.query_one("#detail", RichLog).lines) > 0
+
+        assert "1 finding" in str(app.query_one("#status", Static).render())
 
 
-async def test_second_brain_round_adds_a_second_node():
+async def test_control_plane_shows_nested_agent_subtree():
     app = ScanTUI(target="t")
     async with app.run_test() as pilot:
-        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "skill:test_ssrf", "reasoning": "a"}]})
-        app.feed_event("brain_thinking", {"iteration": 2, "vectors": [{"id": "skill:test_xss", "reasoning": "b"}]})
+        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]})
+        app.feed_event("control_plane", {"agents": [
+            {"id": "director", "status": "running", "role": "director"},
+            {"id": "w1", "parent_id": "director", "status": "running", "task": "skill:test_ssrf"},
+            {"id": "w2", "parent_id": "director", "status": "waiting", "task": "skill:test_xss"},
+        ]})
         await pilot.pause()
-        assert len(app.query_one("#iters", ListView)) == 2
-        assert [it.topic for it in app.model.iterations] == ["SSRF", "XSS"]
+
+        assert {n["agent"]["id"] for n in app.model.agent_tree()} == {"director"}
+        tree = app.query_one("#tree", Tree)
+        # second top branch is "Agents", with the director nesting two workers
+        labels = [str(c.label) for c in tree.root.children]
+        assert any("Agents" in lbl for lbl in labels)
+        agents_branch = [c for c in tree.root.children if "Agents" in str(c.label)][0]
+        director = agents_branch.children[0]
+        assert len(director.children) == 2  # w1, w2 nested under director
 
 
 async def test_scan_runner_worker_drives_feed_and_marks_done():
-    """A scan_runner (async) runs in a worker thread, feeds events via
-    thread_safe_feed, and the app marks _done when it returns."""
     holder: dict = {}
 
     async def runner():
@@ -68,6 +83,7 @@ async def test_feed_event_never_raises_on_garbage():
     async with app.run_test():
         app.feed_event("brain_thinking", None)
         app.feed_event("totally_unknown", {"x": 1})
-        app.feed_event("attack", {})  # missing keys
-        # no exception, no spurious iterations from unknown/None
+        app.feed_event("attack", {})
+        app.feed_event("control_plane", {"agents": [{"no_id": 1}]})
         assert len(app.model.iterations) <= 1
+        assert app.model.agent_tree() == []

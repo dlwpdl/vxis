@@ -40,6 +40,9 @@ class ScanEventModel:
 
     def __init__(self) -> None:
         self.iterations: list[Iteration] = []
+        # Latest state per delegated agent (id → dict), harvested from the
+        # control_plane snapshot — the data behind the nested parallel agent tree.
+        self.agents: dict[str, dict] = {}
 
     @property
     def current(self) -> Iteration | None:
@@ -65,9 +68,23 @@ class ScanEventModel:
             if event_type == "hit":
                 current.found += 1
             self._append_line(current, event_type, d)
-        # anything else (control_plane, unknown): skip — no crash.
+        elif event_type == "control_plane":
+            self._handle_control_plane(d)
+        # anything else (unknown): skip — no crash.
 
     # -- internals ----------------------------------------------------------
+
+    def _handle_control_plane(self, d: dict) -> None:
+        # Merge the latest agent states (delegated workers) by id; newest wins.
+        for agent in d.get("agents") or []:
+            if isinstance(agent, dict) and agent.get("id"):
+                self.agents[str(agent["id"])] = agent
+
+    def agent_tree(self) -> list[dict]:
+        """Nested ``[{agent, children}]`` view of the delegated agents."""
+        from vxis.agent.agent_tree import build_agent_tree
+
+        return build_agent_tree(list(self.agents.values()))
 
     def _handle_brain_thinking(self, d: dict) -> None:
         new_index = d.get("iteration")

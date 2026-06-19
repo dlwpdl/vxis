@@ -144,3 +144,20 @@ def test_current_is_none_on_empty_model() -> None:
     m = ScanEventModel()
     assert m.current is None
     assert m.get(0) is None
+
+
+def test_control_plane_agents_build_nested_tree() -> None:
+    m = ScanEventModel()
+    m.handle("control_plane", {"agents": [
+        {"id": "director", "status": "running", "role": "director"},
+        {"id": "w1", "parent_id": "director", "status": "running", "task": "sqli"},
+        {"id": "w2", "parent_id": "director", "status": "waiting", "task": "ssrf"},
+    ]})
+    assert set(m.agents) == {"director", "w1", "w2"}
+    tree = m.agent_tree()
+    assert [n["agent"]["id"] for n in tree] == ["director"]
+    assert {c["agent"]["id"] for c in tree[0]["children"]} == {"w1", "w2"}
+    # a later snapshot updates status in place (newest wins), no duplicate node
+    m.handle("control_plane", {"agents": [{"id": "w1", "parent_id": "director", "status": "done"}]})
+    assert m.agents["w1"]["status"] == "done"
+    assert len(m.agents) == 3
