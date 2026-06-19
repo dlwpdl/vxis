@@ -110,6 +110,30 @@ def _box_flag_to_mode(box: str) -> str | None:
     return None if norm in ("", "auto") else norm
 
 
+def _textual_available() -> bool:
+    import importlib.util
+
+    return importlib.util.find_spec("textual") is not None
+
+
+def _should_use_tui(tui_flag: bool, interactive: bool) -> bool:
+    """Decide whether to launch the interactive Textual scan TUI.
+
+    Default-on (`--tui`, the user's choice), but only when it can actually work:
+    a real TTY, textual installed, and NOT the Claude-Code `--interactive` brain
+    (which already owns stdin/stdout as a JSON protocol). Anything else
+    (`--no-tui`, headless/CI, piped output) falls back to the Rich-Live display
+    so there is zero regression off-terminal.
+    """
+    import sys
+
+    if not tui_flag or interactive:
+        return False
+    if not sys.stdout.isatty():
+        return False
+    return _textual_available()
+
+
 @app.callback()
 def _app_callback(ctx: typer.Context) -> None:
     """인자 없이 vxis 실행 시 인터랙티브 모드 진입."""
@@ -207,6 +231,14 @@ def scan(
         "--verbose",
         "-v",
         help="Enable verbose (DEBUG) logging",
+    ),
+    tui: bool = typer.Option(
+        True,
+        "--tui/--no-tui",
+        help="Interactive Textual TUI (navigable iteration tree + drill-in) when "
+        "on a real terminal. --no-tui forces the classic Rich-Live dashboard. "
+        "Injection approval defaults to read-only under the TUI; use --no-tui for "
+        "the interactive yes/no gate on a real target.",
     ),
     allow_inject: bool = typer.Option(
         False,
@@ -467,7 +499,7 @@ def scan(
 
     ctx = None
 
-    async def _run():
+    async def _run(event_sink, tui_mode, do_refresh):
         nonlocal ctx
         from vxis.pipeline.scan_pipeline_v2 import ScanPipeline
 
@@ -627,12 +659,24 @@ def scan(
                 pass
             return approvals
 
+        # Under the Textual TUI we can't drop to a blocking console prompt mid-app,
+        # so injection approval fails SAFE to read-only and mutating deferred
+        # actions are denied (the TUI shows this; --no-tui gives the yes/no gate).
+        async def _tui_injection(_summary):
+            return "readonly"
+
+        async def _tui_deferred(actions):
+            return [False] * len(actions)
+
+        injection_cb = _tui_injection if tui_mode else _injection_gate
+        approval_cb = _tui_deferred if tui_mode else _deferred_approval
+
         pipeline = ScanPipeline(
             brain=brain,
             config=config,
-            event_callback=display.handle_event,
-            injection_approval_callback=_injection_gate,
-            approval_callback=_deferred_approval,
+            event_callback=event_sink,
+            injection_approval_callback=injection_cb,
+            approval_callback=approval_cb,
             auto_approve_injection=_is_benchmark,
             report_output_path=None if no_report else output,
             generate_report=not no_report,
@@ -642,7 +686,7 @@ def scan(
             enable_policy=True,
         )
 
-        refresh_task = _aio.create_task(_refresh_loop())
+        refresh_task = _aio.create_task(_refresh_loop()) if do_refresh else None
         try:
             ctx = await pipeline.run(
                 target=_target,
@@ -651,11 +695,12 @@ def scan(
                 box_mode=_box_flag_to_mode(box),
             )
         finally:
-            refresh_task.cancel()
-            try:
-                await refresh_task
-            except _aio.CancelledError:
-                pass
+            if refresh_task is not None:
+                refresh_task.cancel()
+                try:
+                    await refresh_task
+                except _aio.CancelledError:
+                    pass
 
         # findings severity 카운팅 — live hit feed가 이미 올린 값을 다시 누적하지
         # 말고, 종료 시점의 ctx.findings로 최종값을 덮어쓴다.
@@ -665,7 +710,8 @@ def scan(
             final_counts[sev] = final_counts.get(sev, 0) + 1
         display.findings_count = final_counts
         display.total_findings = len(ctx.findings)
-        display.refresh()
+        if do_refresh:
+            display.refresh()
 
     # ── Fail-closed scope activation (single-target path only) ──────
     # Inject the target host into in_scope_domains when no scope is configured
@@ -682,9 +728,42 @@ def scan(
         build_target_scope_enforcer(target, scope_arg=None),
         approve_destructive=approve_destructive,
     )
+    use_tui = _should_use_tui(tui, interactive)
     try:
-        with display:
-            asyncio.run(_run())
+        if use_tui:
+            # Interactive Textual TUI owns the event loop, so the scan runs in a
+            # worker thread; events fan out to BOTH the live TUI and the (now
+            # passive) ScanLiveDisplay, which still aggregates phases/findings for
+            # the post-scan summary below. Injection approval defaults to read-only
+            # under the TUI (no interactive prompt mid-app); --no-tui restores the
+            # yes/no gate.
+            from vxis.cli.scan_tui import ScanTUI
+
+            tui_app = ScanTUI(
+                target=target,
+                profile=profile,
+                brain=brain_label,
+                box_mode=_box_flag_to_mode(box) or "black",
+                ghost=display_ghost,
+            )
+
+            def _tui_sink(event_type, data):
+                try:
+                    display.handle_event(event_type, data)
+                except Exception:
+                    pass
+                tui_app.thread_safe_feed(event_type, data)
+
+            async def _tui_runner():
+                await _run(_tui_sink, True, False)
+
+            tui_app.scan_runner = _tui_runner
+            tui_app.run()
+            if tui_app.scan_error is not None:
+                raise tui_app.scan_error
+        else:
+            with display:
+                asyncio.run(_run(display.handle_event, False, True))
     except KeyboardInterrupt:
         console.print("\n[yellow]Scan interrupted by user[/yellow]")
         raise typer.Exit(code=130)

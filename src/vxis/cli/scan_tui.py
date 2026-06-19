@@ -62,12 +62,18 @@ class ScanTUI(App):
         brain: str = "",
         box_mode: str = "",
         ghost: bool = False,
+        scan_runner: Any = None,
     ) -> None:
         super().__init__()
         self.model = ScanEventModel()
         self._raw: dict[int, list[tuple[str, dict]]] = {}
-        self._usage_rows: list[dict] = []
         self._rendered = 0
+        # scan_runner: an async no-arg callable that runs the scan, using
+        # self.thread_safe_feed (+ whatever else the caller composes) as its event
+        # sink. Started as a worker THREAD on mount; None = passive (tests).
+        self.scan_runner = scan_runner
+        self.scan_error: BaseException | None = None
+        self._done = False
         self._meta = {
             "target": target,
             "profile": profile,
@@ -90,6 +96,43 @@ class ScanTUI(App):
         self.title = "VXIS"
         self.sub_title = self._meta["target"]
         self.query_one("#iters", ListView).focus()
+        if self.scan_runner is not None:
+            # Textual owns the event loop, so the (async) scan runs in a worker
+            # THREAD; its events marshal back via thread_safe_feed → feed_event.
+            self.run_worker(self._drive_scan, thread=True, exclusive=True, name="scan")
+
+    # -- scan driving (worker thread) ---------------------------------------
+
+    def thread_safe_feed(self, event_type: str, data: dict | None) -> None:
+        """Event sink for the scan worker thread — marshals onto the UI thread."""
+        try:
+            self.call_from_thread(self.feed_event, event_type, data)
+        except Exception:
+            pass
+
+    def _drive_scan(self) -> None:
+        import asyncio
+
+        try:
+            asyncio.run(self.scan_runner())
+        except BaseException as exc:  # surfaced to the caller after the app exits
+            self.scan_error = exc
+        finally:
+            try:
+                self.call_from_thread(self._on_scan_done)
+            except Exception:
+                self._done = True
+
+    def _on_scan_done(self) -> None:
+        self._done = True
+        try:
+            self.query_one("#status", Static).update(self._status_text())
+            self.query_one("#detail", RichLog).write(
+                "[bold green]── scan complete ──[/bold green] "
+                "[dim]press q to exit · ↑↓ to browse iterations[/dim]"
+            )
+        except Exception:
+            pass
 
     # -- public feed --------------------------------------------------------
 
@@ -104,24 +147,9 @@ class ScanTUI(App):
             pos = len(self.model.iterations) - 1
             if pos >= 0:
                 self._raw.setdefault(pos, []).append((event_type, data or {}))
-            if event_type in ("hit", "attack", "brain_thinking"):
-                self._record_usage(data or {})
             self._sync()
         except Exception:  # a display must never crash the scan
             pass
-
-    def _record_usage(self, data: dict) -> None:
-        # control_plane carries telemetry; brain_thinking/attack don't carry
-        # tokens. We harvest token/model/role from any event that does.
-        model = data.get("model") or data.get("llm_model")
-        if not model:
-            return
-        self._usage_rows.append({
-            "model": str(model),
-            "role": str(data.get("role") or "?"),
-            "input_tokens": int(data.get("input_tokens") or 0),
-            "output_tokens": int(data.get("output_tokens") or 0),
-        })
 
     # -- rendering ----------------------------------------------------------
 
@@ -166,16 +194,27 @@ class ScanTUI(App):
 
     def _status_text(self) -> str:
         m = self._meta
-        summary = summarize_usage(self._usage_rows)
+        # Real per-scan usage (the brain records it process-globally); events
+        # themselves don't carry tokens.
+        rows: list[dict] = []
+        try:
+            from vxis.agent.brain_metrics import get_llm_usage_stats
+
+            rows = get_llm_usage_stats().get("rows") or []
+        except Exception:
+            rows = []
+        summary = summarize_usage(rows)
         cost = (
             f"~${summary['total_cost_usd']:.4f} · {summary['total_tokens']:,} tok"
-            if self._usage_rows else "~$0 · 0 tok"
+            if rows else "~$0 · 0 tok"
         )
         found = sum(it.found for it in self.model.iterations)
+        state = "[green]done[/green]" if self._done else "[yellow]running[/yellow]"
         sep = "  [dim]│[/dim]  "
         return (
-            f" {cost}{sep}box {m['box_mode']}{sep}ghost {'on' if m['ghost'] else 'off'}"
-            f"{sep}{found} findings{sep}[dim]q quit · ↑↓ move[/dim]"
+            f" {state}{sep}{cost}{sep}box {m['box_mode']}"
+            f"{sep}ghost {'on' if m['ghost'] else 'off'}{sep}{found} findings"
+            f"{sep}[dim]q quit · ↑↓ move[/dim]"
         )
 
 

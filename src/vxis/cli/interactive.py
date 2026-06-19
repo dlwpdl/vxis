@@ -2422,6 +2422,7 @@ def _run_brain_first_scan_from_tui(
             resume=None,
             interactive=False,
             verbose=False,
+            tui=True,
             allow_inject=allow_inject,
             plugins=None,
             kind="web",

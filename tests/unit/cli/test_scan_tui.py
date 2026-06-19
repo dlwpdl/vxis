@@ -40,6 +40,29 @@ async def test_second_brain_round_adds_a_second_node():
         assert [it.topic for it in app.model.iterations] == ["SSRF", "XSS"]
 
 
+async def test_scan_runner_worker_drives_feed_and_marks_done():
+    """A scan_runner (async) runs in a worker thread, feeds events via
+    thread_safe_feed, and the app marks _done when it returns."""
+    holder: dict = {}
+
+    async def runner():
+        app = holder["app"]
+        app.thread_safe_feed("brain_thinking", {"iteration": 1, "vectors": [{"id": "skill:test_ssrf", "reasoning": "x"}]})
+        app.thread_safe_feed("hit", {"vector_id": "ssrf", "confidence": "high"})
+
+    app = ScanTUI(target="t", scan_runner=runner)
+    holder["app"] = app
+    async with app.run_test() as pilot:
+        for _ in range(40):
+            await pilot.pause(0.05)
+            if app._done:
+                break
+        assert app.scan_error is None
+        assert app._done is True
+        assert app.model.iterations and app.model.iterations[0].topic == "SSRF"
+        assert app.model.iterations[0].found == 1
+
+
 async def test_feed_event_never_raises_on_garbage():
     app = ScanTUI(target="t")
     async with app.run_test():
