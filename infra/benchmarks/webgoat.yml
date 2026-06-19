@@ -1,0 +1,5 @@
+services:
+  webgoat:
+    image: webgoat/webgoat
+    ports:
+      - "8888:8080"   # → http://localhost:8888/WebGoat

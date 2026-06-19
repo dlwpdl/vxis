@@ -46,7 +46,7 @@ X-Ray  = 투시 (트래픽 가로채기)
 ```bash
 # Benchmark 타겟 기동 (Docker)
 docker compose -f infra/benchmarks/juice-shop.yml up -d   # :3000
-docker compose -f infra/benchmarks/webgoat.yml up -d      # :8080
+docker compose -f infra/benchmarks/webgoat.yml up -d      # :8888/WebGoat
 
 # 풀 스캔
 python -m vxis.cli scan --target http://localhost:3000 --mode enterprise
