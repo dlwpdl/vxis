@@ -69,6 +69,15 @@ def _render_chain_step(data: dict[str, object]) -> str:
     return f"[magenta]chain step[/magenta]  {category}{where}"
 
 
+def _render_error(data: dict[str, object]) -> str:
+    msg = str(data.get("error") or data.get("message") or "").strip()
+    if not msg:
+        return ""
+    stage = str(data.get("stage") or "").strip()
+    where = f"  [dim]{stage}[/dim]" if stage else ""
+    return f"[bold red]✗ error[/bold red]{where}  [red]{msg}[/red]"
+
+
 # event_type -> renderer. Add a new event type by adding one entry here.
 _RENDERERS: dict[str, Renderer] = {
     "brain_thinking": _render_brain_thinking,
@@ -76,6 +85,7 @@ _RENDERERS: dict[str, Renderer] = {
     "hit": _render_hit,
     "chain_start": _render_chain_start,
     "chain_step": _render_chain_step,
+    "error": _render_error,
 }
 
 

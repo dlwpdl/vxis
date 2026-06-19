@@ -90,6 +90,18 @@ def test_chain_step_includes_category_endpoint() -> None:
     _assert_valid_markup(out)
 
 
+def test_error_is_red_and_carries_message() -> None:
+    out = render_detail("error", {"stage": "scan_loop", "error": "boom failed"})
+    assert "boom failed" in out
+    assert "red" in out          # errors stand out, not lost in the gray stream
+    assert "scan_loop" in out
+    _assert_valid_markup(out)
+
+
+def test_error_without_message_returns_empty() -> None:
+    assert render_detail("error", {"stage": "scan_loop"}) == ""
+
+
 def test_control_plane_returns_empty() -> None:
     assert render_detail("control_plane", {"cpu": 0.4, "mem": 1024}) == ""
 
@@ -128,4 +140,6 @@ def test_every_known_type_renders_valid_markup_with_full_data(event_type: str) -
         "chain_id": "C-1",
         "level": 2,
     }
-    _assert_valid_markup(render_detail(event_type, data))
+    out = render_detail(event_type, data)
+    assert out
+    _assert_valid_markup(out)

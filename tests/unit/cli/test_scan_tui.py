@@ -157,6 +157,47 @@ async def test_cursor_selection_survives_live_updates():
         assert tree.cursor_node is second_iter   # not yanked back to the root
 
 
+async def test_markup_for_iteration_is_scoped_director_is_everything():
+    """Drill-in scoping: an iteration node shows only its own events; the Director
+    (root) node shows the whole narrative across all iterations."""
+    app = ScanTUI(target="t")
+    async with app.run_test() as pilot:
+        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "map surface"}]})
+        app.feed_event("attack", {"vector_id": "skill:test_injection", "method": "SKILL", "endpoint": "/login"})
+        app.feed_event("brain_thinking", {"iteration": 2, "vectors": [{"id": "skill:test_ssrf", "reasoning": "probe ssrf"}]})
+        await pilot.pause()
+
+        iter0 = app._markup_for({"kind": "iter", "pos": 0})
+        assert any("map surface" in m for m in iter0)
+        assert any("SQL Injection" in m for m in iter0)
+        assert not any("probe ssrf" in m for m in iter0)   # scoped to iteration 0
+
+        everything = app._markup_for({"kind": "root"})
+        assert any("map surface" in m for m in everything)
+        assert any("probe ssrf" in m for m in everything)  # all iterations
+
+
+async def test_detail_follows_live_then_freezes_on_drill_in():
+    """The detail pane streams the narrative live (no click needed); drilling into
+    a specific iteration stops the live follow and shows just that node."""
+    app = ScanTUI(target="t")
+    async with app.run_test() as pilot:
+        detail = app.query_one("#detail", RichLog)
+        app.feed_event("attack", {"vector_id": "skill:test_injection", "method": "SKILL", "endpoint": "/login"})
+        await pilot.pause()
+        n1 = len(detail.lines)
+        app.feed_event("hit", {"vector_id": "sqli", "confidence": "high"})
+        await pilot.pause()
+        assert len(detail.lines) > n1            # streamed live, without any click
+
+        app._on_node_focus({"kind": "iter", "pos": 0})  # drill in
+        await pilot.pause()
+        frozen = len(detail.lines)
+        app.feed_event("attack", {"vector_id": "skill:test_xss", "method": "GET", "endpoint": "/s"})
+        await pilot.pause()
+        assert len(detail.lines) == frozen       # frozen on the drilled node
+
+
 async def test_feed_event_never_raises_on_garbage():
     app = ScanTUI(target="t")
     async with app.run_test():

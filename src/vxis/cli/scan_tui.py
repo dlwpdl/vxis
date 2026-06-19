@@ -98,6 +98,10 @@ class ScanTUI(App):
         self._tlabels: dict[Any, str] = {}          # last label per key (diff guard)
         self._tagent_parent: dict[str, Any] = {}    # agent id -> parent key (reparent detect)
         self._tagent_branch: dict[str, bool] = {}   # agent id -> created as expandable branch
+        # Detail pane "follow" mode: stream the narrative live (Strix-style) until
+        # the operator drills into a specific node; drilling freezes on that node.
+        self._follow = True
+        self._narrative_started = False
         self.scan_runner = scan_runner
         self.scan_error: BaseException | None = None
         self._done = False
@@ -197,6 +201,16 @@ class ScanTUI(App):
                 if pos >= 0:
                     self._raw.setdefault(pos, []).append((event_type, data or {}))
             self._sync()
+            # Live follow: stream the narrative into the detail pane as it happens
+            # (no click needed) — unless the operator has drilled into a node.
+            if self._follow:
+                markup = render_detail(event_type, data or {})
+                if markup:
+                    log = self.query_one("#detail", RichLog)
+                    if not self._narrative_started:
+                        log.clear()  # drop the "scan starting…" placeholder
+                        self._narrative_started = True
+                    log.write(markup)
         except Exception as exc:
             self._dbg(f"feed_event _sync FAILED for {event_type}: {exc!r}")
 
@@ -354,30 +368,62 @@ class ScanTUI(App):
         self._tagent_branch.pop(key[1], None)
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
-        self._render_detail(event.node.data)
+        self._on_node_focus(event.node.data)
 
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
-        self._render_detail(event.node.data)
+        self._on_node_focus(event.node.data)
 
-    def _render_detail(self, data: Any) -> None:
+    def _on_node_focus(self, data: Any) -> None:
+        """A tree node gained focus (click or ↑↓). Drilling into a specific
+        iteration/agent freezes the pane on that node's logs; focusing the
+        Director / a group / the tree root resumes the live full-narrative follow."""
+        if isinstance(data, dict) and data.get("kind") in ("iter", "agent"):
+            self._follow = False
+            self._render_detail(data)
+        else:
+            self._follow = True
+            self._render_detail({"kind": "root"})
+
+    def _markup_for(self, data: Any) -> list[str]:
+        """Rich-markup lines to show for a focused node (pure, never raises).
+
+        - ``iter``  → just that iteration's narrative
+        - ``root``  → the whole narrative across every iteration (Director view)
+        - ``agent`` → the agent's id/role/status/task summary (per-agent log
+          streams need the engine to attribute events to sub-agents; until then
+          the full stream lives under the Director view)
+        """
         if not isinstance(data, dict):
-            return
-        log = self.query_one("#detail", RichLog)
+            return []
         kind = data.get("kind")
         if kind == "iter":
-            log.clear()
-            for event_type, payload in self._raw.get(data.get("pos", -1), []):
-                markup = render_detail(event_type, payload)
-                if markup:
-                    log.write(markup)
-        elif kind == "agent":
+            return [m for et, pl in self._raw.get(data.get("pos", -1), []) if (m := render_detail(et, pl))]
+        if kind == "root":
+            out: list[str] = []
+            for pos in sorted(self._raw):
+                for et, pl in self._raw[pos]:
+                    m = render_detail(et, pl)
+                    if m:
+                        out.append(m)
+            return out
+        if kind == "agent":
             agent = data.get("agent") or {}
-            log.clear()
-            log.write(f"[bold cyan]{agent.get('id', '?')}[/bold cyan]  "
-                      f"[dim]{agent.get('role', '')} · {agent.get('status', '')}[/dim]")
+            lines = [
+                f"[bold cyan]{agent.get('id', '?')}[/bold cyan]  "
+                f"[dim]{agent.get('role', '')} · {agent.get('status', '')}[/dim]"
+            ]
             task = str(agent.get("task") or agent.get("instruction") or "").strip()
             if task:
-                log.write(f"[white]{task}[/white]")
+                lines.append(f"[white]{task}[/white]")
+            return lines
+        return []
+
+    def _render_detail(self, data: Any) -> None:
+        log = self.query_one("#detail", RichLog)
+        log.clear()
+        self._narrative_started = True
+        for line in self._markup_for(data):
+            log.write(line)
 
     def action_expand_all(self) -> None:
         try:
