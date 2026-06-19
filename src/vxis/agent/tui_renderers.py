@@ -21,8 +21,12 @@ from __future__ import annotations
 
 from typing import Callable
 
+from vxis.agent.attack_taxonomy import attack_category
+
 # Each renderer receives the (already-normalised) event payload dict and returns
-# Rich markup, or "" when the event carries no displayable detail.
+# Rich markup, or "" when the event carries no displayable detail. Colour carries
+# the signal (this renders in the Textual pane) so we don't need decorative
+# emoji; identifiers are shown as their human pentest category, never the raw id.
 Renderer = Callable[[dict[str, object]], str]
 
 
@@ -33,34 +37,36 @@ def _render_brain_thinking(data: dict[str, object]) -> str:
         reasoning = str(vectors[0].get("reasoning") or "").strip()
     if not reasoning:
         return ""
-    return f"[bold yellow]🧠 thinking[/] {reasoning}"
+    return f"[grey50]plan[/grey50]  {reasoning}"
 
 
 def _render_attack(data: dict[str, object]) -> str:
-    vector_id = str(data.get("vector_id") or "?")
+    category = attack_category(str(data.get("vector_id") or ""))
     method = str(data.get("method") or "")
     endpoint = str(data.get("endpoint") or "")
-    return f"[bold cyan]🎯 {vector_id}[/]  [magenta]{method}[/] {endpoint}".rstrip()
+    where = f"  [dim]{method} {endpoint}[/dim]".rstrip() if (method or endpoint) else ""
+    return f"[bold cyan]{category}[/bold cyan]{where}"
 
 
 def _render_hit(data: dict[str, object]) -> str:
-    vector_id = str(data.get("vector_id") or data.get("finding_id") or "finding")
-    confidence = str(data.get("confidence") or "")
-    return f"[bold red]🔎 FINDING[/] {vector_id} [dim](severity={confidence})[/]"
+    category = attack_category(str(data.get("vector_id") or data.get("finding_id") or ""))
+    confidence = str(data.get("confidence") or "").strip()
+    sev = f"  [dim]{confidence}[/dim]" if confidence else ""
+    return f"[bold green]found[/bold green]  [green]{category}[/green]{sev}"
 
 
 def _render_chain_start(data: dict[str, object]) -> str:
-    chain_id = str(data.get("chain_id") or "?")
-    vector_id = str(data.get("vector_id") or "?")
+    category = attack_category(str(data.get("vector_id") or ""))
     endpoint = str(data.get("endpoint") or "")
-    return f"[bold green]🔗 chain {chain_id} START[/] {vector_id} @ {endpoint}".rstrip()
+    where = f"  [dim]{endpoint}[/dim]" if endpoint else ""
+    return f"[bold magenta]chain[/bold magenta]  {category}{where}"
 
 
 def _render_chain_step(data: dict[str, object]) -> str:
-    chain_id = str(data.get("chain_id") or "?")
-    vector_id = str(data.get("vector_id") or "?")
+    category = attack_category(str(data.get("vector_id") or ""))
     endpoint = str(data.get("endpoint") or "")
-    return f"[green]🔗 chain {chain_id} step[/] {vector_id} @ {endpoint}".rstrip()
+    where = f"  [dim]{endpoint}[/dim]" if endpoint else ""
+    return f"[magenta]chain step[/magenta]  {category}{where}"
 
 
 # event_type -> renderer. Add a new event type by adding one entry here.

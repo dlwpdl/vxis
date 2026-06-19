@@ -4,14 +4,15 @@ how, and the result. format_event is pure; noisy/telemetry events skip (None).""
 from vxis.agent.event_log import format_event
 
 
-def test_attack_event_shows_vector_method_endpoint():
+def test_attack_event_shows_category_method_endpoint():
     line = format_event("attack", {
         "vector_id": "skill:test_injection",
         "method": "SKILL",
         "endpoint": "/rest/user/login",
     })
     assert line is not None
-    assert "skill:test_injection" in line
+    assert "SQL Injection" in line          # human category, not the raw id
+    assert "skill:test_injection" not in line
     assert "SKILL" in line
     assert "/rest/user/login" in line
 
@@ -25,18 +26,18 @@ def test_brain_thinking_shows_reasoning():
     assert "SQLi on /login" in line
 
 
-def test_hit_event_shows_finding_and_severity():
+def test_hit_event_shows_category_and_severity():
     line = format_event("hit", {
         "finding_id": "F-1", "vector_id": "sqli", "confidence": "critical", "level": 4,
     })
     assert line is not None
-    assert "sqli" in line
+    assert "SQL Injection" in line
     assert "critical" in line
 
 
-def test_chain_events_show_chain():
+def test_chain_events_show_category():
     s = format_event("chain_start", {"chain_id": "C1", "vector_id": "idor", "endpoint": "/api/u/1"})
-    assert s is not None and "C1" in s and "idor" in s
+    assert s is not None and "IDOR" in s and "/api/u/1" in s
 
 
 def test_noisy_and_unknown_events_skip():

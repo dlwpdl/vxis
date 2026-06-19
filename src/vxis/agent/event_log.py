@@ -13,9 +13,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from vxis.agent.attack_taxonomy import attack_category
+
 
 def format_event(event_type: str, data: dict[str, Any] | None) -> str | None:
-    """Map one live scan event to a narrative log line, or None to skip."""
+    """Map one live scan event to a plain-text narrative log line, or None to
+    skip. Identifiers render as their human pentest category; the leading word is
+    a clean text tag (the log file has no colour), no decorative emoji.
+    """
     d = data or {}
 
     if event_type == "brain_thinking":
@@ -23,29 +28,25 @@ def format_event(event_type: str, data: dict[str, Any] | None) -> str | None:
         reasoning = ""
         if vectors and isinstance(vectors[0], dict):
             reasoning = str(vectors[0].get("reasoning") or "").strip()
-        return f"🧠 {reasoning}" if reasoning else None
+        return f"plan   {reasoning}" if reasoning else None
 
     if event_type == "attack":
-        vid = str(d.get("vector_id") or "?")
-        tail = f" {d.get('method') or ''} {d.get('endpoint') or ''}".rstrip()
-        return f"🎯 {vid}{tail}".rstrip()
+        category = attack_category(str(d.get("vector_id") or ""))
+        where = f"  {d.get('method') or ''} {d.get('endpoint') or ''}".rstrip()
+        return f"try    {category}{where}".rstrip()
 
     if event_type == "hit":
-        vid = str(d.get("vector_id") or d.get("finding_id") or "finding")
+        category = attack_category(str(d.get("vector_id") or d.get("finding_id") or ""))
         sev = str(d.get("confidence") or "").strip()
-        return f"🔎 FINDING {vid}" + (f" (severity={sev})" if sev else "")
+        return f"FOUND  {category}" + (f" ({sev})" if sev else "")
 
     if event_type == "chain_start":
-        return (
-            f"🔗 chain {d.get('chain_id', '?')} START: "
-            f"{d.get('vector_id', '?')} @ {d.get('endpoint', '')}"
-        ).rstrip()
+        category = attack_category(str(d.get("vector_id") or ""))
+        return f"chain  {category} @ {d.get('endpoint', '')}".rstrip()
 
     if event_type == "chain_step":
-        return (
-            f"🔗 chain {d.get('chain_id', '?')} step: "
-            f"{d.get('vector_id', '?')} @ {d.get('endpoint', '')}"
-        ).rstrip()
+        category = attack_category(str(d.get("vector_id") or ""))
+        return f"chain  step {category} @ {d.get('endpoint', '')}".rstrip()
 
     return None
 

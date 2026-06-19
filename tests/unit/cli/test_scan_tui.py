@@ -18,7 +18,7 @@ async def test_feed_events_build_iteration_tree_and_detail():
 
         lv = app.query_one("#iters", ListView)
         assert len(lv) == 1                          # one Brain round → one node
-        assert app.model.iterations[0].topic == "web:recon"
+        assert app.model.iterations[0].topic == "Recon"  # human category
         assert app.model.iterations[0].found == 1
 
         # detail pane rendered the current iteration's coloured timeline
@@ -33,11 +33,11 @@ async def test_feed_events_build_iteration_tree_and_detail():
 async def test_second_brain_round_adds_a_second_node():
     app = ScanTUI(target="t")
     async with app.run_test() as pilot:
-        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "v1", "reasoning": "a"}]})
-        app.feed_event("brain_thinking", {"iteration": 2, "vectors": [{"id": "v2", "reasoning": "b"}]})
+        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "skill:test_ssrf", "reasoning": "a"}]})
+        app.feed_event("brain_thinking", {"iteration": 2, "vectors": [{"id": "skill:test_xss", "reasoning": "b"}]})
         await pilot.pause()
         assert len(app.query_one("#iters", ListView)) == 2
-        assert [it.topic for it in app.model.iterations] == ["v1", "v2"]
+        assert [it.topic for it in app.model.iterations] == ["SSRF", "XSS"]
 
 
 async def test_feed_event_never_raises_on_garbage():

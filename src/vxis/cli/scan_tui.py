@@ -3,10 +3,10 @@
 An alternative to the Rich-Live ``ScanLiveDisplay``: instead of a fixed dashboard,
 this renders a **navigable iteration tree** the operator can drill into — ↑/↓ (or
 click) to move between Brain thinking rounds, and the detail pane shows that
-round's timeline (🧠 thinking / 🎯 attack / 🔎 finding / 🔗 chain) coloured by
-:func:`vxis.agent.tui_renderers.render_detail`. A footer line carries the live
-cost estimate (model×role) and the box/ghost/mode flags so "is ghost on?" is
-always answerable.
+round's timeline (each line a human pentest category — "SQL Injection", "SSRF" —
+colour-coded by :func:`vxis.agent.tui_renderers.render_detail`, no emoji noise).
+A footer line carries the live cost estimate and the box/ghost/finding flags so
+"is ghost on?" is always answerable.
 
 Data flow: the scan loop's event callback calls :meth:`ScanTUI.feed_event`
 (marshalled onto the UI thread with ``call_from_thread`` by the caller). Events
@@ -29,9 +29,14 @@ from vxis.agent.tui_renderers import render_detail
 
 
 def _iter_label(it: Any) -> str:
-    """One-line ListView label for an iteration: index · topic · found badge."""
-    badge = f"  [bold red]✦{it.found}[/]" if it.found else ""
-    return f"[dim]iter {it.index}[/] [bold]{it.topic}[/]{badge}"
+    """One-line ListView label: step number, human category, finding count.
+
+    No emoji — the topic is already the human pentest category and colour carries
+    the state (a found round is tinted green).
+    """
+    if it.found:
+        return f"[dim]{it.index:>2}[/dim]  [green]{it.topic}[/green]  [dim]· {it.found} found[/dim]"
+    return f"[dim]{it.index:>2}[/dim]  {it.topic}"
 
 
 class ScanTUI(App):
@@ -161,16 +166,16 @@ class ScanTUI(App):
 
     def _status_text(self) -> str:
         m = self._meta
-        ghost = "👻 ghost ON" if m["ghost"] else "ghost off"
         summary = summarize_usage(self._usage_rows)
         cost = (
-            f"💸 ~${summary['total_cost_usd']:.4f} / {summary['total_tokens']:,} tok"
-            if self._usage_rows else "💸 ~$0 / 0 tok"
+            f"~${summary['total_cost_usd']:.4f} · {summary['total_tokens']:,} tok"
+            if self._usage_rows else "~$0 · 0 tok"
         )
         found = sum(it.found for it in self.model.iterations)
+        sep = "  [dim]│[/dim]  "
         return (
-            f" {cost}   ⚫ box:{m['box_mode']}   {ghost}   "
-            f"🔎 {found} finding(s)   [dim]q=quit ↑↓=navigate[/]"
+            f" {cost}{sep}box {m['box_mode']}{sep}ghost {'on' if m['ghost'] else 'off'}"
+            f"{sep}{found} findings{sep}[dim]q quit · ↑↓ move[/dim]"
         )
 
 

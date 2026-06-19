@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from vxis.agent.attack_taxonomy import attack_category
 from vxis.agent.event_log import format_event
 
 # Event types whose narrative lines attach to the current iteration's timeline
@@ -60,7 +61,7 @@ class ScanEventModel:
         elif event_type in _TIMELINE_EVENTS:
             current = self.current
             if current is None:
-                current = self._append_iteration(index=0, topic="scan")
+                current = self._append_iteration(index=0, topic="Scan")
             if event_type == "hit":
                 current.found += 1
             self._append_line(current, event_type, d)
@@ -78,12 +79,14 @@ class ScanEventModel:
 
     @staticmethod
     def _topic_from_vectors(d: dict) -> str:
+        # The topic is what the operator reads in the tree, so map the internal
+        # vector id to its human pentest category ("SQL Injection", "SSRF", …).
         vectors = d.get("vectors") or []
         if vectors and isinstance(vectors[0], dict):
             vid = vectors[0].get("id")
             if vid:
-                return str(vid)
-        return "scan_loop"
+                return attack_category(str(vid))
+        return "Scan"
 
     def _append_iteration(self, index: int, topic: str) -> Iteration:
         it = Iteration(index=index, topic=topic)

@@ -10,6 +10,8 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.table import Table
 
+from vxis.agent.attack_taxonomy import attack_category
+
 
 PROFILE_DISPLAY = {
     "passive": (
@@ -201,15 +203,16 @@ class ScanLiveDisplay:
             self.last_error = f"{data.get('name', '?')}: {data.get('error', '?')[:80]}"
 
         elif event_type == "attack":
-            vector = data.get("vector_id", "?")
+            # Show the human pentest category, not the internal vector id.
+            category = attack_category(data.get("vector_id") or "")
             method = data.get("method", "?")
             endpoint = data.get("endpoint", "?")
             _ep = endpoint[-38:] if len(endpoint) > 38 else endpoint
             self.attack_feed.append(
-                f"[dim]▶[/dim] [cyan]{vector:<18}[/cyan] [yellow]{method:<5}[/yellow] {_ep}"
+                f"[dim]▶[/dim] [cyan]{category[:22]:<22}[/cyan] [yellow]{method:<5}[/yellow] {_ep}"
             )
             self.total_attacks += 1
-            self.current_vector = vector
+            self.current_vector = category
             self.loop_status = f"{method} {endpoint}"[:100]
 
         elif event_type == "hit":
@@ -244,7 +247,7 @@ class ScanLiveDisplay:
             # 첫 벡터의 reasoning을 표시
             if vectors:
                 first = vectors[0]
-                self.current_vector = first.get("id", "")
+                self.current_vector = attack_category(first.get("id") or "")
                 self.current_reasoning = first.get("reasoning", "")[:80]
                 self.loop_status = self.current_reasoning
 
@@ -445,16 +448,16 @@ class ScanLiveDisplay:
         # Phase Guide 정보 (새로 통합됨)
         if self.current_objective:
             content_parts.append(
-                f"[bold yellow]🎯 목표:[/bold yellow] [italic]{self.current_objective}[/italic]"
+                f"[bold yellow]목표:[/bold yellow] [italic]{self.current_objective}[/italic]"
             )
         if self.current_crown_hint:
             content_parts.append(
-                f"[bold red]👑 크라운:[/bold red] [dim italic]{self.current_crown_hint}[/dim italic]"
+                f"[bold red]크라운:[/bold red] [dim italic]{self.current_crown_hint}[/dim italic]"
             )
 
         # Brain runtime 정보
         if self.current_vector:
-            content_parts.append(f"[bold cyan]Vector:[/bold cyan] {self.current_vector}")
+            content_parts.append(f"[bold cyan]Category:[/bold cyan] {self.current_vector}")
         if self.current_reasoning:
             content_parts.append(
                 f"[bold]Reasoning:[/bold] [italic]{self.current_reasoning}[/italic]"
@@ -467,7 +470,7 @@ class ScanLiveDisplay:
 
         return Panel(
             content,
-            title="[bold magenta]🧠 Brain Thinking[/bold magenta]",
+            title="[bold magenta]Brain Thinking[/bold magenta]",
             border_style="magenta",
         )
 
@@ -1079,7 +1082,7 @@ class ScanLiveDisplay:
         content = "\n".join(lines)
         return Panel(
             content,
-            title=f"[bold]🔗 Chain Ops[/bold] [dim](linked: {self.total_chains})[/dim]",
+            title=f"[bold]Chain Ops[/bold] [dim](linked: {self.total_chains})[/dim]",
             border_style="blue",
         )
 

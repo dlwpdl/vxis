@@ -22,15 +22,15 @@ def test_brain_thinking_attack_hit_builds_one_iteration() -> None:
     it = m.iterations[0]
     assert isinstance(it, Iteration)
     assert it.index == 1
-    assert it.topic == "web:recon"
+    assert it.topic == "Recon"  # human category, not the raw "web:recon"
     assert it.found == 1
     # the real format_event lines must be present
     attack_line = format_event("attack", {"vector_id": "web:recon", "method": "GET", "endpoint": "/login"})
     hit_line = format_event("hit", {"finding_id": "F1", "vector_id": "web:recon", "confidence": "high"})
     assert attack_line in it.timeline
     assert hit_line in it.timeline
-    assert any(line.startswith("🎯") for line in it.timeline)
-    assert any(line.startswith("🔎") for line in it.timeline)
+    assert any(line.startswith("try") for line in it.timeline)
+    assert any(line.startswith("FOUND") for line in it.timeline)
 
 
 def test_second_brain_thinking_starts_new_iteration() -> None:
@@ -40,9 +40,9 @@ def test_second_brain_thinking_starts_new_iteration() -> None:
 
     assert len(m.iterations) == 2
     assert m.iterations[0].index == 1
-    assert m.iterations[0].topic == "web:recon"
+    assert m.iterations[0].topic == "Recon"
     assert m.iterations[1].index == 2
-    assert m.iterations[1].topic == "web:xss"
+    assert m.iterations[1].topic == "XSS"
     assert m.current is m.iterations[1]
 
 
@@ -54,12 +54,12 @@ def test_same_iteration_number_does_not_create_new_iteration() -> None:
     assert m.iterations[0].index == 1
 
 
-def test_brain_thinking_without_vectors_uses_scan_loop_topic() -> None:
+def test_brain_thinking_without_vectors_uses_generic_topic() -> None:
     m = ScanEventModel()
     m.handle("brain_thinking", {"iteration": 5})
     assert len(m.iterations) == 1
     assert m.iterations[0].index == 5
-    assert m.iterations[0].topic == "scan_loop"
+    assert m.iterations[0].topic == "Scan"
 
 
 def test_events_before_any_brain_thinking_land_in_index_zero_scan_iteration() -> None:
@@ -70,10 +70,10 @@ def test_events_before_any_brain_thinking_land_in_index_zero_scan_iteration() ->
     assert len(m.iterations) == 1
     it = m.iterations[0]
     assert it.index == 0
-    assert it.topic == "scan"
+    assert it.topic == "Scan"
     assert it.found == 1
-    assert any(line.startswith("🎯") for line in it.timeline)
-    assert any(line.startswith("🔎") for line in it.timeline)
+    assert any(line.startswith("try") for line in it.timeline)
+    assert any(line.startswith("FOUND") for line in it.timeline)
 
 
 def test_chain_events_append_to_current_timeline() -> None:
@@ -105,7 +105,7 @@ def test_brain_thinking_without_reasoning_skips_line_but_creates_iteration() -> 
     assert len(m.iterations) == 1
     assert m.current is not None
     assert m.current.index == 1
-    assert m.current.topic == "web:recon"
+    assert m.current.topic == "Recon"
     assert m.current.timeline == []
 
 

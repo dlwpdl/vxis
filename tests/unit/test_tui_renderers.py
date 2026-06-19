@@ -25,7 +25,7 @@ def test_brain_thinking_includes_reasoning_and_tag() -> None:
         {"vectors": [{"id": "v1", "reasoning": "login form looks injectable"}]},
     )
     assert "login form looks injectable" in out
-    assert "[bold yellow]" in out
+    assert "[grey50]" in out
     _assert_valid_markup(out)
 
 
@@ -47,49 +47,46 @@ def test_attack_includes_vector_method_endpoint() -> None:
         "attack",
         {"vector_id": "SQLI-01", "method": "POST", "endpoint": "/login"},
     )
-    assert "SQLI-01" in out
+    assert "SQL Injection" in out  # category, not the raw "SQLI-01"
     assert "POST" in out
     assert "/login" in out
     assert "[bold cyan]" in out
-    assert "[magenta]" in out
     _assert_valid_markup(out)
 
 
-def test_hit_includes_vector_and_severity() -> None:
+def test_hit_includes_category_and_severity() -> None:
     out = render_detail(
         "hit",
         {"finding_id": "F-1", "vector_id": "SQLI-01", "level": 3, "confidence": "high"},
     )
-    assert "SQLI-01" in out
+    assert "SQL Injection" in out
     assert "high" in out
-    assert "FINDING" in out
-    assert "[bold red]" in out
-    _assert_valid_markup(out)
-
-
-def test_chain_start_includes_chain_vector_endpoint() -> None:
-    out = render_detail(
-        "chain_start",
-        {"chain_id": "C-7", "vector_id": "IDOR-2", "endpoint": "/api/user/3"},
-    )
-    assert "C-7" in out
-    assert "IDOR-2" in out
-    assert "/api/user/3" in out
-    assert "START" in out
+    assert "found" in out
     assert "[bold green]" in out
     _assert_valid_markup(out)
 
 
-def test_chain_step_includes_chain_vector_endpoint() -> None:
+def test_chain_start_includes_category_endpoint() -> None:
+    out = render_detail(
+        "chain_start",
+        {"chain_id": "C-7", "vector_id": "IDOR-2", "endpoint": "/api/user/3"},
+    )
+    assert "IDOR" in out  # category
+    assert "/api/user/3" in out
+    assert "chain" in out
+    assert "[bold magenta]" in out
+    _assert_valid_markup(out)
+
+
+def test_chain_step_includes_category_endpoint() -> None:
     out = render_detail(
         "chain_step",
         {"chain_id": "C-7", "vector_id": "IDOR-3", "endpoint": "/api/user/4"},
     )
-    assert "C-7" in out
-    assert "IDOR-3" in out
+    assert "IDOR" in out
     assert "/api/user/4" in out
     assert "step" in out
-    assert "[green]" in out
+    assert "[magenta]" in out
     _assert_valid_markup(out)
 
 
