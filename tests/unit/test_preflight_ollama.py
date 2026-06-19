@@ -90,6 +90,9 @@ def test_check_brain_normalizes_google_to_gemini() -> None:
 
 
 def test_check_brain_promotes_frontier_director_when_local_worker_has_key() -> None:
+    # This test isolates frontier *promotion* (director resolves to openai/gpt-5.4
+    # when a frontier key exists). The orthogonal model-callable probe is mocked
+    # so a fake key doesn't 401 the now-real healthcheck.
     with patch.dict(
         "os.environ",
         {
@@ -99,7 +102,7 @@ def test_check_brain_promotes_frontier_director_when_local_worker_has_key() -> N
             "OPENAI_API_KEY": "test-key",
         },
         clear=True,
-    ):
+    ), patch("vxis.agent.brain.AgentBrain.healthcheck", return_value=(True, "")):
         label, ready = check_brain(interactive=False)
 
     assert ready is True

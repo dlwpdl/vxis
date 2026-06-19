@@ -1,16 +1,15 @@
 """VXIS Agent Brain — AI-driven pentesting decision engine.
 
-Phase 3 Architecture:
+Runtime architecture:
     ┌──────────────────────────────────────────────────────────┐
     │  BRAIN (Cognitive Loop)                                   │
     │                                                          │
     │  1. PERCEIVE  — Context Compressor로 데이터 압축           │
     │  2. RECALL    — Knowledge Store에서 패턴 매칭             │
     │  3. REASON    — Token Router로 최적 모델 선택 → LLM 호출  │
-    │  4. CHAIN     — Chain Reasoner로 공격 체인 추론            │
-    │  5. REFLECT   — 전략 전환 필요 여부 판단                   │
-    │  6. ACT       — 실행할 도구 결정                          │
-    │  7. LEARN     — 결과를 Knowledge Store에 축적             │
+    │  4. REFLECT   — 전략 전환 필요 여부 판단                   │
+    │  5. ACT       — 실행할 도구 결정                          │
+    │  6. LEARN     — 결과를 Knowledge Store에 축적             │
     └──────────────────────────────────────────────────────────┘
 
     쓸수록 강해지는 구조:
@@ -69,7 +68,6 @@ if TYPE_CHECKING:
     from vxis.knowledge.store import KnowledgeStore
     from vxis.knowledge.compressor import ContextCompressor
     from vxis.llm.router import TokenRouter
-    from vxis.graph.chain_reasoner import ChainReasoner
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +142,6 @@ class AgentBrain:
         knowledge_store: "KnowledgeStore | None" = None,
         compressor: "ContextCompressor | None" = None,
         token_router: "TokenRouter | None" = None,
-        chain_reasoner: "ChainReasoner | None" = None,
         brain_mode: str = "standard",
         target_kind: TargetKind = TargetKind.WEB,
     ) -> None:
@@ -176,13 +173,16 @@ class AgentBrain:
         # Surface kind — controls which system prompt branch is used.
         # 서피스 종류 — 어떤 시스템 프롬프트 분기를 사용할지 결정.
         self._target_kind: TargetKind = target_kind
-        # Phase 3 모듈
+        # Optional context helpers
         self._knowledge_store = knowledge_store
         self._compressor = compressor
         self._token_router = token_router
-        self._chain_reasoner = chain_reasoner
         self._reflection_interval = 5  # 매 N스텝마다 자기 평가
         self._consecutive_no_findings = 0  # 연속 발견 없는 스텝 수
+        # Last provider/model/HTTP error from a failed call — surfaced by
+        # healthcheck() (preflight) and the brain-death runtime diagnostic so the
+        # real cause is visible instead of a generic "auth/quota" guess.
+        self._last_llm_error = ""
         # LLM Fallback 체인 (정책 거부 대응)
         self._fallback_providers = self._build_fallback_chain()
         self._log_llm_runtime_config()
@@ -350,10 +350,31 @@ class AgentBrain:
 
         return chain
 
-    def think(self, observation: AgentObservation) -> list[AgentAction]:
-        """Phase 3 인지 루프: Perceive → Recall → Reason → Chain → Reflect → Act.
+    @property
+    def last_llm_error(self) -> str:
+        """The most recent provider/model/HTTP error from a failed LLM call."""
+        return self._last_llm_error
 
-        기존 think()를 대체하며, 컴파일된 패턴이 있으면 LLM 호출을 건너뛴다.
+    def healthcheck(self) -> tuple[bool, str]:
+        """Probe the resolved director with ONE minimal call through the real call
+        path. Returns ``(callable, reason)`` where reason is the actual
+        provider/model/HTTP error. preflight uses this to refuse a dead Brain
+        before the scan instead of letting every call fail silently mid-scan."""
+        self._last_llm_error = ""
+        try:
+            out = self._call_llm_direct("healthcheck — reply with OK", "OK")
+        except Exception as exc:  # a health probe must never raise
+            return False, f"{self._provider}/{self._model}: {exc}"
+        if out:
+            return True, ""
+        return False, self._last_llm_error or (
+            f"{self._provider}/{self._model}: no output (check key / model / quota)"
+        )
+
+    def think(self, observation: AgentObservation) -> list[AgentAction]:
+        """Compatibility cognitive loop: Perceive → Recall → Reason → Reflect → Act.
+
+        Compiled patterns can short-circuit the LLM call.
         """
         with self._state_lock:
             if self.is_done or self._step_count >= self.max_steps:
@@ -381,7 +402,7 @@ class AgentBrain:
         tools_text = "\n".join(f"  - {name}: {desc}" for name, desc in TOOL_DESCRIPTIONS.items())
         system = build_agent_system_prompt(self._target_kind).format(available_tools=tools_text)
 
-        # Knowledge Store + Memory + Chain Reasoner 컨텍스트 통합
+        # Knowledge Store + Memory context
         enriched_context = self._build_enriched_context(observation)
         user_prompt = self._build_observation_prompt(observation, enriched_context)
 
@@ -394,11 +415,6 @@ class AgentBrain:
             return []
 
         actions = self._parse_response(response)
-
-        # ── Step 4: CHAIN — 공격 체인 추론 결과로 추가 액션 ──
-        chain_actions = self._get_chain_driven_actions()
-        if chain_actions:
-            actions.extend(chain_actions)
 
         # Check for DONE
         if any(a.tool == "DONE" for a in actions):
@@ -831,7 +847,7 @@ class AgentBrain:
         return ModelRole.DIRECTOR
 
     def record_result(self, action: AgentAction, result: dict[str, Any]) -> None:
-        """결과 기록 + Knowledge Store 학습 + Chain Reasoner 업데이트."""
+        """결과 기록 + Knowledge Store 학습."""
         if self.steps:
             self.steps[-1].results.append(
                 {
@@ -1042,10 +1058,10 @@ class AgentBrain:
                 with self._state_lock:
                     self.is_done = True
 
-    # ── Phase 3: Enriched Context ────────────────────────────────
+    # ── Enriched Context ─────────────────────────────────────────
 
     def _build_enriched_context(self, observation: AgentObservation) -> str:
-        """모든 Phase 3 모듈의 컨텍스트를 통합하여 LLM 프롬프트를 풍부하게 만든다."""
+        """통합 컨텍스트를 만들어 LLM 프롬프트를 풍부하게 만든다."""
         parts: list[str] = []
 
         # 1. 기존 Memory 컨텍스트
@@ -1072,16 +1088,7 @@ class AgentBrain:
             except Exception as exc:
                 logger.debug("Knowledge Store 컨텍스트 실패 (무시): %s", exc)
 
-        # 3. Chain Reasoner 컨텍스트 (발견된 체인, 완성 가능 체인)
-        if self._chain_reasoner is not None:
-            try:
-                chain_ctx = self._chain_reasoner.format_chains_for_brain()
-                if chain_ctx:
-                    parts.append(chain_ctx)
-            except Exception as exc:
-                logger.debug("Chain Reasoner 컨텍스트 실패 (무시): %s", exc)
-
-        # 4. 반성 컨텍스트
+        # 3. 반성 컨텍스트
         if self._consecutive_no_findings >= 3:
             parts.append(
                 f"\n## 주의: {self._consecutive_no_findings}스텝 연속 발견 없음"
@@ -1089,45 +1096,6 @@ class AgentBrain:
             )
 
         return "\n\n".join(parts)
-
-    # ── Phase 3: Chain-driven Actions ────────────────────────────
-
-    def _get_chain_driven_actions(self) -> list[AgentAction]:
-        """Chain Reasoner의 가설에서 추가 액션을 생성한다."""
-        if self._chain_reasoner is None:
-            return []
-
-        try:
-            hypotheses = self._chain_reasoner.get_chain_hypotheses()
-            actions = []
-            for h in hypotheses[:2]:  # 최대 2개
-                # 체인 완성을 위한 탐색 도구 매핑
-                vuln_to_tool = {
-                    "ssrf": "nuclei",
-                    "sqli": "sqlmap",
-                    "info_disclosure": "ffuf",
-                    "redis_noauth": "nmap",
-                    "mongodb_noauth": "nmap",
-                    "cloud_metadata": "nuclei",
-                    "xss": "nuclei",
-                    "secret_exposure": "trufflehog",
-                }
-                tool = vuln_to_tool.get(
-                    h.get("missing_vuln_type", ""),
-                    "nuclei",
-                )
-                actions.append(
-                    AgentAction(
-                        tool=tool,
-                        args={},
-                        reasoning=f"[체인 추론] {h['rationale']}",
-                        priority="high",
-                    )
-                )
-            return actions
-        except Exception as exc:
-            logger.debug("체인 기반 액션 생성 실패 (무시): %s", exc)
-            return []
 
     # ── Phase 3: Learning from Results ───────────────────────────
 
@@ -1499,6 +1467,10 @@ class AgentBrain:
             url = urls.get(provider)
             api_key = keys.get(provider)
             if not url or not api_key:
+                self._last_llm_error = (
+                    f"{provider}/{model}: no API key set "
+                    f"({'unknown provider' if not url else 'missing key'})"
+                )
                 return None
 
         # gpt-5.x / o1 / o3 reasoning models reject `max_tokens`.
@@ -1586,11 +1558,13 @@ class AgentBrain:
                 err_body = exc.read().decode("utf-8", errors="replace")[:400]
             except Exception:
                 err_body = ""
+            self._last_llm_error = f"{provider}/{model}: HTTP {exc.code} {err_body}".strip()
             logger.warning(
                 "LLM call failed (%s/%s): HTTP %d %s", provider, model, exc.code, err_body
             )
             return None
         except Exception as exc:
+            self._last_llm_error = f"{provider}/{model}: {exc}"
             logger.warning("LLM call failed (%s/%s): %s", provider, model, exc)
             return None
 

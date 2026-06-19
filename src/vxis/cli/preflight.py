@@ -175,8 +175,9 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
             False,
         )
 
-    # Gemini: verify the model is actually callable, not just that a key exists —
-    # a preview/unavailable model otherwise passes preflight then silently 404s.
+    # Verify the model is actually CALLABLE, not just that a key exists — a
+    # wrong/unavailable model (e.g. a completions-only "gpt-5.3-codex", or a
+    # preview Gemini) otherwise passes preflight then dies on every scan call.
     if provider == "gemini" and model:
         key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY", "")
         if not _gemini_model_available(model, key):
@@ -185,6 +186,20 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
                 f"model like gemini-2.5-pro)",
                 False,
             )
+    elif provider in ("openai", "together", "deepseek", "anthropic") and model:
+        from vxis.llm.model_registry import get_model_info, list_models
+
+        # Fast, no-network reject: an id we don't know about is almost always a
+        # fat-fingered / stale value. Surface the valid options for a re-pick.
+        if get_model_info(model) is None:
+            valid = ", ".join(m.model_id for m in list_models(provider)) or "see model_registry"
+            return (f"api:{provider}/{model} (unknown model — valid: {valid})", False)
+        # Known model → confirm it actually answers with this key (auth/quota/endpoint).
+        from vxis.agent.brain import AgentBrain
+
+        ok, reason = AgentBrain().healthcheck()
+        if not ok:
+            return (f"api:{provider}/{model} (Brain call failed — {reason})", False)
 
     label = f"api:{provider}" + (f"/{model}" if model else "")
     return label, True
@@ -262,15 +277,15 @@ def run_preflight(
     if not result.brain_ready:
         result.errors.append(_brain_unavailable_message(result.brain_backend))
 
-    # 3. Docker (Phase 15 Digital Twin용)
+    # 3. Docker (sandbox/browser/tooling availability)
     result.docker_available = check_docker()
     if not result.docker_available:
-        result.warnings.append("Docker not available — Phase 15 Digital Twin will skip")
+        result.warnings.append("Docker not available — sandboxed scanners may be limited")
 
-    # 4. GitHub 토큰 (Phase 13 OSINT용)
+    # 4. GitHub token (optional upstream/news integrations)
     result.github_token = check_github_token()
     if not result.github_token:
-        result.warnings.append("GITHUB_TOKEN not set — Phase 13 OSINT will be limited")
+        result.warnings.append("GITHUB_TOKEN not set — upstream/news integrations may be limited")
 
     # 5. Proxy pool (Ghost 모드)
     result.proxy_pool_size = check_proxy_pool()
