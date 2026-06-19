@@ -39,6 +39,13 @@ from vxis.agent.tui_renderers import render_detail
 _AGENT_ICON = {"running": "●", "waiting": "◌", "done": "✓", "blocked": "■"}
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value or default)
+    except (TypeError, ValueError):
+        return default
+
+
 def _iter_label(it: Any) -> str:
     found = f"  [dim]· {it.found} found[/dim]" if it.found else ""
     tint = "green" if it.found else "white"
@@ -51,7 +58,9 @@ def _agent_label(agent: dict) -> str:
     aid = str(agent.get("id") or "?")
     category = attack_category(str(agent.get("task") or agent.get("skill") or agent.get("role") or ""))
     color = {"running": "bold cyan", "waiting": "yellow", "done": "green", "blocked": "red"}.get(status, "white")
-    tail = f"  [dim][{status}][/dim]" if status else ""
+    # Escape the bracket so Rich renders a literal "[running]" instead of parsing
+    # "[running]" as a (bogus) markup tag and swallowing the status text entirely.
+    tail = f"  [dim]\\[{status}][/dim]" if status else ""
     return f"[{color}]{icon} {aid}[/{color}]  {category}{tail}"
 
 
@@ -82,6 +91,13 @@ class ScanTUI(App):
         super().__init__()
         self.model = ScanEventModel()
         self._raw: dict[int, list[tuple[str, dict]]] = {}
+        # Stable key -> TreeNode map so _sync() can reconcile in place instead of
+        # clear()+rebuild (which wiped cursor/selection/expansion on every event).
+        # Keys: "director", "agents", ("iter", pos), ("agent", id).
+        self._tnodes: dict[Any, Any] = {}
+        self._tlabels: dict[Any, str] = {}          # last label per key (diff guard)
+        self._tagent_parent: dict[str, Any] = {}    # agent id -> parent key (reparent detect)
+        self._tagent_branch: dict[str, bool] = {}   # agent id -> created as expandable branch
         self.scan_runner = scan_runner
         self.scan_error: BaseException | None = None
         self._done = False
@@ -89,6 +105,9 @@ class ScanTUI(App):
         self._meta = {
             "target": target, "profile": profile, "brain": brain,
             "box_mode": box_mode or "black", "ghost": ghost,
+            "injection_mode": "pending",
+            "context": "ctx n/a",
+            "brain_decisions": 0,
         }
 
     # -- layout -------------------------------------------------------------
@@ -171,6 +190,7 @@ class ScanTUI(App):
         if self._evt_count <= 20:
             self._dbg(f"event #{self._evt_count} {event_type}")
         try:
+            self._capture_runtime_state(event_type, data or {})
             self.model.handle(event_type, data)
             if event_type in ("brain_thinking", "attack", "hit", "chain_start", "chain_step"):
                 pos = len(self.model.iterations) - 1
@@ -180,40 +200,158 @@ class ScanTUI(App):
         except Exception as exc:
             self._dbg(f"feed_event _sync FAILED for {event_type}: {exc!r}")
 
+    def _capture_runtime_state(self, event_type: str, data: dict) -> None:
+        if event_type == "injection_approval_result":
+            decision = str(data.get("decision") or "").strip().lower()
+            if decision:
+                self._meta["injection_mode"] = decision
+            return
+        if event_type != "control_plane":
+            return
+        telemetry = data.get("telemetry") or {}
+        if not isinstance(telemetry, dict):
+            return
+        self._meta["brain_decisions"] = _as_int(telemetry.get("brain_decisions"))
+        compression = telemetry.get("memory_compression") or {}
+        if isinstance(compression, dict):
+            before = _as_int(compression.get("last_tokens_before"))
+            threshold = _as_int(compression.get("last_threshold"))
+            saved = _as_int(compression.get("total_tokens_saved"))
+            if threshold > 0:
+                self._meta["context"] = f"ctx {before:,}/{threshold:,}"
+                if saved > 0:
+                    self._meta["context"] += f" saved {saved:,}"
+
     def _sync(self) -> None:
+        """Reconcile the model into the tree IN PLACE — never clear()+rebuild.
+
+        Rebuilding the whole tree on every event (the old behaviour) recreated all
+        TreeNodes, so the cursor, selection and expansion state were wiped on each
+        scan event and the tree was impossible to click/navigate while a scan ran.
+        Instead we keep a stable ``key -> TreeNode`` map and only add new nodes,
+        relabel changed ones, and remove vanished ones.
+        """
         if not self.is_running:
             return
+        self._reconcile_director()
+        self._reconcile_agents()
+        self.query_one("#status", Static).update(self._status_text())
+
+    def _set_label(self, key: Any, node: Any, label: str) -> None:
+        """set_label only when the text actually changed (avoid needless redraws)."""
+        if self._tlabels.get(key) != label:
+            node.set_label(label)
+            self._tlabels[key] = label
+
+    def _reconcile_director(self) -> None:
         tree = self.query_one("#tree", Tree)
-        tree.clear()
         iters = self.model.iterations
         cur_topic = iters[-1].topic if iters else "starting…"
         state = "done" if self._done else "running"
+        dlabel = f"[bold]Director[/bold] — {cur_topic} [dim][{state}][/dim]"
 
-        director = tree.root.add(f"[bold]Director[/bold] — {cur_topic} [dim][{state}][/dim]",
-                                 data={"kind": "root"}, expand=True)
-        for i, it in enumerate(iters):
-            director.add_leaf(_iter_label(it), data={"kind": "iter", "pos": i})
-
-        agent_tree = self.model.agent_tree()
-        if agent_tree:
-            total = len(self.model.agents)
-            agents_node = tree.root.add(f"[bold]Agents[/bold] [dim]({total})[/dim]",
-                                        data={"kind": "agents"}, expand=True)
-            for node in agent_tree:
-                self._add_agent(agents_node, node)
-
-        self.query_one("#status", Static).update(self._status_text())
-
-    def _add_agent(self, parent, node: dict) -> None:
-        agent = node["agent"]
-        children = node.get("children") or []
-        label = _agent_label(agent)
-        if children:
-            tn = parent.add(label, data={"kind": "agent", "agent": agent}, expand=True)
-            for child in children:
-                self._add_agent(tn, child)
+        director = self._tnodes.get("director")
+        if director is None:
+            # Created once, before the Agents branch, so the Director is always the
+            # first child of the root (the structure the pilot tests rely on).
+            director = tree.root.add(dlabel, data={"kind": "root"}, expand=True)
+            self._tnodes["director"] = director
+            self._tlabels["director"] = dlabel
         else:
-            parent.add_leaf(label, data={"kind": "agent", "agent": agent})
+            self._set_label("director", director, dlabel)
+
+        # Iterations are append-only and list-position keyed; only add new leaves
+        # and relabel ones whose finding count / topic changed in place.
+        for i, it in enumerate(iters):
+            key = ("iter", i)
+            node = self._tnodes.get(key)
+            label = _iter_label(it)
+            if node is None:
+                node = director.add_leaf(label, data={"kind": "iter", "pos": i})
+                self._tnodes[key] = node
+                self._tlabels[key] = label
+            else:
+                self._set_label(key, node, label)
+
+    def _reconcile_agents(self) -> None:
+        agent_tree = self.model.agent_tree()
+        if not agent_tree:
+            return
+        tree = self.query_one("#tree", Tree)
+        agents_node = self._tnodes.get("agents")
+        if agents_node is None:
+            agents_node = tree.root.add("", data={"kind": "agents"}, expand=True)
+            self._tnodes["agents"] = agents_node
+        self._set_label("agents", agents_node, f"[bold]Agents[/bold] [dim]({len(self.model.agents)})[/dim]")
+
+        self._walk_agents(agents_node, "agents", agent_tree)
+        self._prune_agents()
+
+    def _walk_agents(self, parent_node: Any, parent_key: Any, nodes: list[dict]) -> None:
+        for node in nodes:
+            agent = node["agent"]
+            aid = str(agent.get("id") or "?")
+            key = ("agent", aid)
+            children = node.get("children") or []
+            existing = self._tnodes.get(key)
+
+            # Recreate a node only if it moved under a new parent, or it was made a
+            # leaf but now needs to host children (Textual leaves can't grow them).
+            # Both are rare — the director appears before its workers.
+            if existing is not None:
+                reparented = self._tagent_parent.get(aid) != parent_key
+                upgraded = bool(children) and not self._tagent_branch.get(aid, False)
+                if reparented or upgraded:
+                    self._remove_agent(key)
+                    existing = None
+
+            label = _agent_label(agent)
+            if existing is None:
+                if children:
+                    tn = parent_node.add(label, data={"kind": "agent", "agent": agent}, expand=True)
+                else:
+                    tn = parent_node.add_leaf(label, data={"kind": "agent", "agent": agent})
+                self._tnodes[key] = tn
+                self._tlabels[key] = label
+                self._tagent_parent[aid] = parent_key
+                self._tagent_branch[aid] = bool(children)
+            else:
+                tn = existing
+                # Refresh node.data every time: on_tree_node_highlighted/selected
+                # reads it live to render the detail pane (status/task), so it must
+                # carry the latest agent dict, not just the latest label.
+                tn.data = {"kind": "agent", "agent": agent}
+                self._set_label(key, tn, label)
+
+            self._walk_agents(tn, key, children)
+
+    def _prune_agents(self) -> None:
+        """Drop nodes for agents the model no longer reports (rare; e.g. merged)."""
+        live = set(self.model.agents)
+        stale = [k for k in self._tnodes
+                 if isinstance(k, tuple) and k[0] == "agent" and k[1] not in live]
+        for key in stale:
+            self._remove_agent(key)
+
+    def _remove_agent(self, key: Any) -> None:
+        """Remove an agent node + its subtree from the widget and forget tracking."""
+        node = self._tnodes.get(key)
+        if node is not None:
+            try:
+                node.remove()  # removes the whole TreeNode subtree from the widget
+            except Exception:
+                pass
+        self._forget_agent_subtree(key)
+
+    def _forget_agent_subtree(self, key: Any) -> None:
+        # Removing a node drops its descendants' widgets too, so forget their
+        # tracking as well — they get recreated cleanly if they reappear.
+        for child_aid in [a for a, p in list(self._tagent_parent.items()) if p == key]:
+            self._forget_agent_subtree(("agent", child_aid))
+        self._tnodes.pop(key, None)
+        self._tlabels.pop(key, None)
+        self._tagent_parent.pop(key[1], None)
+        self._tagent_branch.pop(key[1], None)
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted) -> None:
         self._render_detail(event.node.data)
@@ -268,7 +406,10 @@ class ScanTUI(App):
         sep = "  [dim]│[/dim]  "
         return (
             f" {state}{sep}{cost}{sep}box {m['box_mode']}"
-            f"{sep}ghost {'on' if m['ghost'] else 'off'}{sep}{found} findings"
+            f"{sep}inject {m['injection_mode']}"
+            f"{sep}ghost {'on' if m['ghost'] else 'off'}"
+            f"{sep}{m['context']}{sep}brain {m['brain_decisions']}"
+            f"{sep}{found} findings"
             f"{sep}[dim]q quit · ↑↓ move · e expand[/dim]"
         )
 
