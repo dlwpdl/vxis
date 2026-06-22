@@ -2404,6 +2404,21 @@ def _run_brain_first_scan_from_tui(
     import typer
 
     from vxis.cli.main import scan as run_scan
+    from vxis.interaction.surface import TargetKind
+    from vxis.pipeline.launcher import infer_target_kind
+
+    # Branch on the target instead of assuming a web URL. A repo path used to be
+    # treated as web and failed preflight's URL-reachability check.
+    inferred = infer_target_kind(target)
+    if inferred == TargetKind.CODE:
+        console.print(
+            "[yellow]코드/저장소 경로가 감지되었습니다.[/yellow] 코드·하이브리드 화이트박스 "
+            "분석(소스에서 후보 탐지 → 동적 PoC 검증)은 현재 [bold]incubator(개발 중)[/bold]라 "
+            "라이브 스캔 루프에 아직 연결되지 않았습니다.\n"
+            "  • 블랙박스 동적 스캔: 실행 중인 URL 을 입력하세요 (예: http://localhost:3000)\n"
+            "  • 정적 코드 스캔: 메인 메뉴의 ‘코드 스캔’ 위자드를 사용하세요"
+        )
+        return
 
     try:
         # NOTE: `scan` is a typer command; any parameter NOT passed here resolves
@@ -2425,7 +2440,7 @@ def _run_brain_first_scan_from_tui(
             tui=True,
             allow_inject=allow_inject,
             plugins=None,
-            kind="web",
+            kind=inferred.value,
             box=box_mode,
             instruction=None,
             instruction_file=None,

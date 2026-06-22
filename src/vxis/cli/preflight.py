@@ -39,12 +39,15 @@ def check_target_reachable(
 
     kind="web"  → HTTP HEAD/GET 시도 (URL/도메인 가정)
     kind="desktop" → 파일 시스템 경로 존재 여부 (.app/.exe/binary path)
+    kind="code" → 파일 시스템 경로 존재 여부 (repo 디렉토리). URL 도달성 검사
+        대신 path 존재로 판정 — 그렇지 않으면 repo 경로가 web HEAD 로 떨어져
+        항상 실패한다.
     kind="mobile"/"game" → 일단 web 과 동일 (URL 입력 받는 형태). 후속 phase
         에서 ipa/apk/proto:port 형태로 분기 추가 예정.
     """
     import time
 
-    if kind == "desktop":
+    if kind in ("desktop", "code"):
         # macOS .app 번들이 들어오면 내부 Mach-O 까지 들어와도 OK,
         # 단순 디렉토리/파일 경로면 그것만으로 충분.
         t0 = time.monotonic()

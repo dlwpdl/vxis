@@ -15,6 +15,37 @@ from urllib.parse import urlparse
 
 from vxis.interaction.surface import TargetKind
 
+_REPO_HOSTS = {"github.com", "www.github.com", "gitlab.com", "www.gitlab.com"}
+
+
+def infer_target_kind(target: str) -> TargetKind:
+    """Infer the surface kind from a raw target string (first match wins).
+
+    - http(s):// on a github/gitlab host  -> CODE   (clone-and-analyze a repo)
+    - any other http(s):// URL            -> WEB
+    - an existing .app bundle or an executable file -> DESKTOP
+    - an existing directory, or a path-like string (/, ./, ../, ~) -> CODE
+    - anything else (bare domain / IP / CIDR / host:port) -> WEB
+
+    Lets Agent Mode branch instead of treating a repo path as a web URL — the
+    bug that made a path target fail preflight's URL-reachability check. Mirrors
+    Strix accepting `--target ./dir` as a first-class flow.
+    """
+    t = (target or "").strip()
+    if not t:
+        return TargetKind.WEB
+    if t.startswith(("http://", "https://")):
+        host = (urlparse(t).hostname or "").lower()
+        return TargetKind.CODE if host in _REPO_HOSTS else TargetKind.WEB
+    p = Path(t).expanduser()
+    if p.exists():
+        if p.suffix == ".app" or (p.is_file() and bool(p.stat().st_mode & 0o111)):
+            return TargetKind.DESKTOP
+        return TargetKind.CODE
+    if t.startswith(("/", "./", "../", "~")):
+        return TargetKind.CODE
+    return TargetKind.WEB
+
 
 @dataclass
 class RuntimeLaunch:
