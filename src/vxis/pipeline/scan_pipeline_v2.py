@@ -310,14 +310,17 @@ def _build_finding_from_dict(
     poc_script_code = str(d.get("poc_script_code", ""))
     remediation_body = str(d.get("remediation_steps") or d.get("remediation", ""))
 
-    bilingual_title = f"{title}|||{title}"
-    bilingual_desc = f"{desc_body}|||{desc_body}"
-    bilingual_impact = f"{impact_body}|||{impact_body}" if impact_body else None
-    bilingual_technical = f"{technical_body}|||{technical_body}" if technical_body else None
-    bilingual_poc = f"{poc_description}|||{poc_description}" if poc_description else None
-    bilingual_remediation = (
-        f"{remediation_body}|||{remediation_body}" if remediation_body else "TBD|||TBD"
-    )
+    # Live-scan auto-findings are English-only: the Brain does not yet produce
+    # Korean, so emit the English text once. The report renderer shows a field
+    # with no '|||' separator as-is (generator.py::_filter_bilingual). Faking
+    # "EN|||EN" duplicated Korean was a lie; real bilingual text comes from
+    # curated templates or a future translation pass, not duplication.
+    title_field = title
+    desc_field = desc_body
+    impact_field = impact_body or None
+    technical_field = technical_body or None
+    poc_field = poc_description or None
+    remediation_field = remediation_body or "TBD"
 
     evidence_text = poc_script_code or str(d.get("evidence", "")) or "No evidence captured."
     evidence_list = [
@@ -386,11 +389,11 @@ def _build_finding_from_dict(
         id=str(d.get("id", "VXIS-0000")),
         scan_id=scan_id,
         target=target,
-        title=bilingual_title,
-        description=bilingual_desc,
-        impact=bilingual_impact,
-        technical_analysis=bilingual_technical,
-        poc_description=bilingual_poc,
+        title=title_field,
+        description=desc_field,
+        impact=impact_field,
+        technical_analysis=technical_field,
+        poc_description=poc_field,
         poc_script_code=poc_script_code or None,
         severity=severity,
         status=_status,
@@ -400,7 +403,7 @@ def _build_finding_from_dict(
         cvss=cvss,
         cwe_ids=cwe_ids,
         evidence=evidence_list,
-        remediation=bilingual_remediation,
+        remediation=remediation_field,
         references=[],
     )
 
