@@ -65,18 +65,19 @@ python scripts/smoke_brain_first.py --target http://localhost:3000
 python scripts/generate_benchmark_reports.py
 ```
 
-## 파이프라인 구조 (14 active)
+## 런타임 구조 (single-loop · Brain-First)
+
+> 옛 "14-phase 파이프라인"은 폐기 — 현재는 Strix식 단일 ReAct 루프. (DECISIONS.md, `docs/superpowers/plans/2026-06-19-current-core-plan.md`)
 
 ```
-1 Foundation:     P0 Config → P1 Director
-2 Recon:          P4 CPR → P15 Digital Twin → P13 Biometrics
-3 Intelligence:   P2 Agents → P3 Hypothesis
-4 Exploitation:   P5 Special → P7 Hardware
-5 Chain Analysis: P8 Synthesis → P11 Mutation
-6 Deferred (승인)
-7 Report:         P6 NCC Style
-8 Learning:       P12 Evolution → P18 Collective KB
+target → scope/policy gate → Director 결정 (1 tool/turn) → 실행 → evidence
+       → verifier (약한 finding 도전) → branch/todo 갱신 → compact dashboard
+       → 다음 결정 → finish gate → report
 ```
+
+- 진입점: `ScanPipelineV2` → `ScanAgentLoop.run()` → `AgentBrain.think_in_loop()`.
+- 1 Brain · 1 action/turn · durable branch/finding state · 컨텍스트 압축 · 4-게이트 chokepoint · verifier-backed findings.
+- **미완성 기능은 `incubator/`** — wire + 통합테스트 완료 후에만 `src/vxis`로 승격. dead phase 레지스트리·에이전트 스웜 부활 금지.
 
 GH Actions (외부): `cve-watch.yml`, `domain-intel.yml`, `upstream-watch.yml`, `growth-loop.yml`.
 
