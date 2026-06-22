@@ -6,6 +6,8 @@ build-backend = "hatchling.build"
 name = "vxis"
 version = "0.2.0"
 description = "AI-powered security automation platform"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.9,<3",
