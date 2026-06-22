@@ -8,7 +8,7 @@
 |---|---|
 | `__init__.py` | Re-exports `Evidence`, `Severity`, `EvidenceType` from `vxis.models.finding` |
 | `schema.py` | Historical location — now a redirect |
-| `engine.py` | `EvidenceEngine` — finding persistence helper (used by legacy agents/runner.py) |
+| `engine.py` | `EvidenceEngine` — finding persistence helper used by legacy agent paths |
 
 ## Canonical location
 

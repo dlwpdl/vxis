@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 from rich.console import Console
 
-from vxis.cli.scan_display import ScanLiveDisplay
+from vxis.cli.scan_display import ScanLiveDisplay, _render_snapshot_display
+from vxis.core.events import PluginStatus, ScanSnapshot
 
 
 def test_scan_display_switches_to_single_loop_live_mode() -> None:
@@ -35,6 +36,7 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
             "vectors": [{"id": "web:sqli", "reasoning": "testing login surface"}],
         },
     )
+
     display.handle_event(
         "hit",
         {
@@ -455,6 +457,24 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "authenticated data exfiltration" in chain_text
     assert "delegated workers" in chain_text
     assert "positive_needs_pivot" in chain_text
+
+
+def test_snapshot_display_renders_legacy_collector_state() -> None:
+    console = Console(file=io.StringIO(), force_terminal=False, width=120)
+    snapshot = ScanSnapshot(target="https://example.test", profile="standard")
+    snapshot.plugins["nuclei"] = PluginStatus(
+        name="nuclei",
+        state="running",
+        finding_count=1,
+        last_output="probing templates",
+    )
+
+    console.print(_render_snapshot_display(snapshot))
+    output = console.file.getvalue()
+
+    assert "Legacy Plugin Scan" in output
+    assert "nuclei" in output
+    assert "probing templates" in output
 
 
 def test_scan_display_renders_p1_status() -> None:

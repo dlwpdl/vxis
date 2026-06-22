@@ -1,6 +1,5 @@
 import pytest
 from vxis.mission.config import MissionConfig, Depth, Perspective, Scope
-from vxis.mission.selector import AgentSelector
 
 
 def test_mission_config_defaults():
@@ -47,31 +46,3 @@ learn = true
 def test_invalid_depth_raises():
     with pytest.raises(ValueError):
         MissionConfig(target="example.com", depth="ultra")
-
-
-def test_selector_web_scope():
-    cfg = MissionConfig(target="example.com", scope=Scope.WEB)
-    agents = AgentSelector.select(cfg)
-    assert "web" in agents
-    assert "api" in agents
-    assert "ics_scada" not in agents
-
-
-def test_selector_stealth_disables_dos():
-    cfg = MissionConfig(target="example.com", stealth=True)
-    agents = AgentSelector.select(cfg)
-    assert "dos_resilience" not in agents
-    assert "deception_detection" in agents
-
-
-def test_selector_elite_enables_fuzzing():
-    cfg = MissionConfig(target="example.com", depth=Depth.ELITE)
-    agents = AgentSelector.select(cfg)
-    assert "fuzzing_zerodday" in agents
-
-
-def test_selector_internal_adds_ad():
-    cfg = MissionConfig(target="10.0.0.0/8", perspective=Perspective.INTERNAL)
-    agents = AgentSelector.select(cfg)
-    assert "identity_ad" in agents
-    assert "lateral_move" in agents

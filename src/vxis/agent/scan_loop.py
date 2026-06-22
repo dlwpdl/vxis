@@ -19,6 +19,8 @@ from vxis.agent.scan_loop_run import ScanLoopRunMixin
 from vxis.agent.scan_loop_v3 import initialize_v3_runtime
 from vxis.agent.scan_loop_policy import (
     DIRECTOR_PROMPT_TEMPLATE,
+    POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES,
+    ROLE_ALLOWED_CAPABILITIES,
     _DESKTOP_SKILLS,
 )
 from vxis.agent.tool_registry import ToolRegistry
@@ -35,74 +37,8 @@ def _env_flag(name: str) -> bool:
 class ScanAgentLoop(
     ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAgentGraphMixin, ScanLoopRunMixin
 ):
-    _ROLE_ALLOWED_CAPABILITIES: dict[str, set[str]] = {
-        "recon_worker": {
-            "recon",
-            "browse",
-            "probe",
-            "memory",
-            "plan",
-            "control",
-            "report",
-            "review",
-            "chain",
-        },
-        "exploit_worker": {
-            "browse",
-            "probe",
-            "exploit",
-            "report",
-            "review",
-            "chain",
-            "plan",
-            "control",
-        },
-        "post_exploit_worker": {
-            "probe",
-            "exploit",
-            "retrieve",
-            "report",
-            "review",
-            "chain",
-            "memory",
-            "plan",
-            "control",
-        },
-        "review_worker": {
-            "review",
-            "report",
-            "chain",
-            "memory",
-            "plan",
-            "control",
-        },
-    }
-    _POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES: dict[str, set[str]] = {
-        "session_reuse": {"browse", "probe", "retrieve", "report", "review", "plan", "control"},
-        "privilege_probe": {
-            "browse",
-            "probe",
-            "exploit",
-            "retrieve",
-            "report",
-            "review",
-            "chain",
-            "plan",
-            "control",
-        },
-        "data_access": {
-            "probe",
-            "exploit",
-            "retrieve",
-            "report",
-            "review",
-            "chain",
-            "memory",
-            "plan",
-            "control",
-        },
-        "chain_closure": {"report", "review", "chain", "memory", "plan", "control", "probe"},
-    }
+    _ROLE_ALLOWED_CAPABILITIES = ROLE_ALLOWED_CAPABILITIES
+    _POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES = POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES
 
     def __init__(
         self,

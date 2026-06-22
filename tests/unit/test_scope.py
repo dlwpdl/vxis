@@ -149,8 +149,7 @@ class TestValidate:
     def test_validate_does_not_raise_for_in_scope_target(
         self, basic_validator: ScopeValidator
     ) -> None:
-        # Should not raise
-        basic_validator.validate("192.168.1.50")
+        assert basic_validator.validate("192.168.1.50") is None
 
     def test_scope_violation_error_message_contains_target(
         self, basic_validator: ScopeValidator

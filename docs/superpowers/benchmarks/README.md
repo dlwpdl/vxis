@@ -1,6 +1,8 @@
 # `docs/superpowers/benchmarks/` — Benchmark Captures
 
 > Measurable data captures for each Phase milestone. Every architectural change must be evaluated against these.
+> Generated artifacts are not kept in the working tree; benchmark notes should
+> summarize the evidence instead.
 
 ## Canonical benchmark targets
 
@@ -46,14 +48,10 @@ Scan completed | 81.7s | 0 finding(s)
 
 The scan artifact (log) is captured at `logs/scan_20260409_113147.log` (gitignored).
 
-## `artifacts/` subdirectory
+## Artifact policy
 
-Actual HTML reports + raw scan logs captured during baseline runs. Structured as `artifacts/YYYY-MM-DD[-suffix]/<target>.{html,log}`:
-
-- `artifacts/2026-04-08/` — original Task 1 baseline captures (two targets)
-- `artifacts/2026-04-08-rerun/` — post-instrumentation re-run (two targets)
-
-HTML reports are small (~80 KB each) so they're committed. If a future benchmark produces reports >5 MB, summarize instead of committing.
+Do not commit HTML reports, raw scan logs, stdout captures, timing files, or
+screenshots. Put the important metrics and short excerpts in the benchmark note.
 
 ## Benchmark-authoring rules
 

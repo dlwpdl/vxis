@@ -1,10 +1,9 @@
 """Platform runtime launcher abstraction for ScanPipelineV2.
 
 The scan core should not need to know whether a target is a web URL, a local
-desktop app bundle, a mobile artifact, a code repository, or a game endpoint.
-This module normalizes the target entry and returns runtime metadata that can
-later expand into real Docker/VM/emulator launchers without changing the core
-scan loop contract.
+desktop app bundle, or a code repository. This module normalizes supported
+target entries and returns runtime metadata. Unsupported future surfaces fail
+closed here instead of pretending placeholder runtimes are available.
 """
 from __future__ import annotations
 
@@ -116,51 +115,6 @@ class DesktopTargetLauncher(BaseTargetLauncher):
         )
 
 
-class MobileTargetLauncher(BaseTargetLauncher):
-    launcher_name = "mobile_artifact"
-    runtime_mode = "artifact_static"
-
-    async def prepare(self, target: str, kind: TargetKind, hints: dict[str, str] | None = None) -> RuntimeLaunch:
-        resolved_path = str(Path(target).expanduser().resolve())
-        metadata = {
-            "entrypoint": resolved_path,
-            "artifact_exists": Path(resolved_path).exists(),
-            "emulator_required": True,
-            "hints": dict(hints or {}),
-        }
-        notes = [
-            "launcher:mobile target prepared as an artifact path; dynamic emulator/simulator launch is the next layer above this contract."
-        ]
-        if hints and hints.get("device_id"):
-            metadata["device_id"] = hints["device_id"]
-            notes.append("launcher:mobile target includes a preferred device/emulator identifier.")
-        return RuntimeLaunch(
-            kind=kind,
-            original_target=target,
-            resolved_target=resolved_path,
-            launcher_name=self.launcher_name,
-            runtime_mode=self.runtime_mode,
-            metadata=metadata,
-            shared_notes=notes,
-        )
-
-
-class GameTargetLauncher(BaseTargetLauncher):
-    launcher_name = "game_endpoint"
-    runtime_mode = "socket_target"
-
-    async def prepare(self, target: str, kind: TargetKind, hints: dict[str, str] | None = None) -> RuntimeLaunch:
-        return RuntimeLaunch(
-            kind=kind,
-            original_target=target,
-            resolved_target=target.strip(),
-            launcher_name=self.launcher_name,
-            runtime_mode=self.runtime_mode,
-            metadata={"entrypoint": target.strip(), "hints": dict(hints or {})},
-            shared_notes=["launcher:game target prepared as a direct runtime endpoint."],
-        )
-
-
 class CodeTargetLauncher(BaseTargetLauncher):
     launcher_name = "code_workspace"
     runtime_mode = "repo_workspace"
@@ -190,8 +144,6 @@ class CodeTargetLauncher(BaseTargetLauncher):
 _LAUNCHERS: dict[TargetKind, BaseTargetLauncher] = {
     TargetKind.WEB: WebTargetLauncher(),
     TargetKind.DESKTOP: DesktopTargetLauncher(),
-    TargetKind.MOBILE: MobileTargetLauncher(),
-    TargetKind.GAME: GameTargetLauncher(),
     TargetKind.CODE: CodeTargetLauncher(),
 }
 
@@ -201,5 +153,10 @@ async def prepare_target_runtime(
     kind: TargetKind,
     hints: dict[str, str] | None = None,
 ) -> RuntimeLaunch:
-    launcher = _LAUNCHERS.get(kind, BaseTargetLauncher())
+    launcher = _LAUNCHERS.get(kind)
+    if launcher is None:
+        raise NotImplementedError(
+            f"{kind.value} target runtime is not production-wired; keep it under incubator/ "
+            "until a real launcher and execution tests exist."
+        )
     return await launcher.prepare(target, kind, hints=hints)

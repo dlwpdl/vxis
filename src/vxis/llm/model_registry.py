@@ -406,17 +406,18 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
         )
 
     if provider in {"openai", "anthropic", "gemini", "together", "deepseek"}:
-        threshold = max(12_000, int(context_window * 0.85))
+        segment_cap = _context_segment_cap()
+        threshold = max(12_000, min(segment_cap, int(context_window * 0.85)))
         return CompressionPolicy(
             context_window=context_window,
             compress_threshold_tokens=threshold,
-            preserve_recent_messages=15,
+            preserve_recent_messages=12,
             chunk_size=10,
-            summary_max_words=300,
-            recent_full_iterations=5,
+            summary_max_words=220,
+            recent_full_iterations=4,
             output_token_cap=8_000,
             allow_long_context=True,
-            profile="cloud-large",
+            profile="cloud-segmented",
         )
 
     return CompressionPolicy(
@@ -429,6 +430,18 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
         allow_long_context=False,
         profile="balanced",
     )
+
+
+def _context_segment_cap() -> int:
+    raw = os.environ.get("VXIS_CONTEXT_SEGMENT_TOKENS", "").strip()
+    if raw:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = 200_000
+    else:
+        value = 200_000
+    return max(32_000, min(300_000, value))
 
 
 __all__ = [

@@ -17,7 +17,6 @@ _TEST_API_SEC = _REPO_ROOT / "src" / "vxis" / "agent" / "skills" / "test_api_sec
 _EVIDENCE = _REPO_ROOT / "src" / "vxis" / "agent" / "evidence.py"
 _SCAN_LOOP_AUTO = _REPO_ROOT / "src" / "vxis" / "agent" / "scan_loop_run_auto.py"
 _WAF_BYPASS_DB = _REPO_ROOT / "src" / "vxis" / "primitives" / "waf_bypass_db.json"
-_DEFENSE_SIM = _REPO_ROOT / "src" / "vxis" / "synthesis" / "defense_simulator.py"
 
 
 def _read(path: Path) -> str:
@@ -94,15 +93,10 @@ def test_sqlmap_uses_random_agent() -> None:
 
 
 # ---------------------------------------------------------------------------
-# waf_bypass_db.json and defense_simulator.py — burpcollaborator.net
+# waf_bypass_db.json — burpcollaborator.net
 # ---------------------------------------------------------------------------
 
 
 def test_no_burpcollaborator_in_waf_bypass_db() -> None:
     """'burpcollaborator.net' must not appear in waf_bypass_db.json."""
     assert "burpcollaborator" not in _read(_WAF_BYPASS_DB)
-
-
-def test_no_burpcollaborator_in_defense_simulator() -> None:
-    """'burpcollaborator.net' must not appear in defense_simulator.py."""
-    assert "burpcollaborator" not in _read(_DEFENSE_SIM)

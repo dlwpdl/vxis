@@ -1,4 +1,4 @@
-"""Rich Live display for vxis scan — real-time phase progress + attack feed."""
+"""Rich Live fallback for vxis scans — real-time loop progress + attack feed."""
 
 from __future__ import annotations
 
@@ -57,11 +57,10 @@ class ScanLiveDisplay:
     레이아웃:
     ┌──────────────── VXIS Scan ────────────────┐
     │ Target: ... | Brain: ... | Ghost: ...     │
-    ├───────────── Phases (14) ────────────────┤
-    │ ✓ Phase 0: Foundation          (0.1s)    │
-    │ ✓ Phase 1: Director            (0.2s)    │
-    │ ◉ Phase 4: CPR      [running]            │
-    │ ○ Phase 15: Digital Twin                 │
+    ├──────────── Runtime ─────────────────────┤
+    │ ◉ Scan Loop                  [running]   │
+    │   Iteration 12/120                       │
+    │   Focus SQL Injection                    │
     │   ...                                    │
     ├──────────── Live Attack Feed ────────────┤
     │ ▶ WEB-SQLI-001 POST /login               │
@@ -89,8 +88,8 @@ class ScanLiveDisplay:
         self.loop_max_iters = 0
         self.loop_status = ""
         self.waiting_reason = ""
-        self.current_objective: str = ""  # Phase guide objective_ko
-        self.current_crown_hint: str = ""  # Phase guide crown_hint_ko
+        self.current_objective: str = ""  # runtime objective hint
+        self.current_crown_hint: str = ""  # crown-impact hint
         self.attack_feed: deque = deque(maxlen=6)
         self.hit_feed: deque = deque(maxlen=4)
         self.chains: dict[str, dict] = {}  # chain_id → {origin, steps, current_level}
@@ -128,7 +127,7 @@ class ScanLiveDisplay:
         self.p1_status = {str(key): str(value) for key, value in status.items() if value}
 
     def init_phases(self, phase_list: list):
-        """Registry에서 Phase 목록 초기화."""
+        """Initialize fallback runtime stages."""
         for p in phase_list:
             self.phases.append(
                 {
@@ -186,7 +185,7 @@ class ScanLiveDisplay:
                     break
             self.current_phase = None
             self.total_findings = data.get("total_findings", self.total_findings)
-            # Severity 카운트 누계 갱신 (pipeline이 매 phase_end마다 보냄)
+            # Severity 카운트 누계 갱신 (pipeline이 runtime-end event에 싣는다)
             sev_counts = data.get("severity_counts")
             if sev_counts:
                 for k in self.findings_count:
@@ -399,7 +398,7 @@ class ScanLiveDisplay:
 
         table = Table(show_header=False, box=None, padding=(0, 1))
         table.add_column(width=3)  # status icon
-        table.add_column(width=6)  # phase ID
+        table.add_column(width=6)  # stage ID
         table.add_column()  # name
         table.add_column(justify="right", width=8)  # duration
         table.add_column(justify="right", width=8)  # findings
@@ -425,7 +424,7 @@ class ScanLiveDisplay:
             findings_style = "green" if p["findings"] else "dim"
             table.add_row(
                 icon,
-                f"P{p['id']}",
+                f"S{p['id']}",
                 f"[{name_style}]{name}[/{name_style}]" if name_style else name,
                 f"[dim]{duration}[/dim]",
                 f"[{findings_style}]{findings}[/{findings_style}]",
@@ -433,19 +432,18 @@ class ScanLiveDisplay:
         done = sum(1 for p in self.phases if p["status"] in ("done", "skipped"))
         return Panel(
             table,
-            title=f"[bold]Phases[/bold] [dim]({done}/{len(self.phases)})[/dim]",
+            title=f"[bold]Runtime[/bold] [dim]({done}/{len(self.phases)})[/dim]",
             border_style="blue",
         )
 
     def _render_brain_thinking(self) -> Panel:
-        """현재 Brain이 무엇을 시도 중인지 + Phase Guide 힌트 표시."""
+        """현재 Brain이 무엇을 시도 중인지 표시."""
         content_parts = []
 
         runtime = self._runtime_summary()
         if runtime:
             content_parts.append(f"[bold cyan]LLM Runtime:[/bold cyan] {runtime}")
 
-        # Phase Guide 정보 (새로 통합됨)
         if self.current_objective:
             content_parts.append(
                 f"[bold yellow]목표:[/bold yellow] [italic]{self.current_objective}[/italic]"
@@ -1096,7 +1094,7 @@ class ScanLiveDisplay:
         )
 
     def _render_findings(self) -> Panel:
-        # Update counts from phases
+        # Update counts from fallback runtime stages.
         sev_table = Table.grid(padding=(0, 2))
         sev_table.add_column(style="bold")
         sev_table.add_column(justify="right")
@@ -1181,7 +1179,7 @@ class ScanLiveDisplay:
     def __enter__(self):
         # Proxy renderable: Rich Live calls __rich_console__ on every refresh tick,
         # so passing this proxy makes _render() re-evaluate live (elapsed time,
-        # phase status, feeds) instead of freezing the initial snapshot.
+        # runtime status and feeds instead of freezing the initial snapshot.
         display = self
 
         class _LiveProxy:
@@ -1206,3 +1204,89 @@ class ScanLiveDisplay:
     def refresh(self):
         if self._live:
             self._live.update(self._render())
+
+
+def _render_snapshot_display(snapshot) -> Panel:
+    """Render legacy ScanSnapshot state inside the canonical Rich fallback module."""
+    elapsed = snapshot.elapsed_seconds
+    mins, secs = divmod(int(elapsed), 60)
+    pct = int(snapshot.progress_fraction * 100)
+
+    table = Table(
+        show_header=True,
+        header_style="bold dim",
+        border_style="dim",
+        expand=True,
+        padding=(0, 1),
+    )
+    table.add_column("Plugin", style="bold", no_wrap=True)
+    table.add_column("State", no_wrap=True)
+    table.add_column("Time", justify="right", no_wrap=True)
+    table.add_column("Findings", justify="right", no_wrap=True)
+    table.add_column("Detail")
+
+    order = {
+        "running": 0,
+        "waiting": 1,
+        "pending": 2,
+        "completed": 3,
+        "failed": 4,
+        "skipped": 5,
+        "timed_out": 6,
+    }
+    for plugin in sorted(
+        snapshot.plugins.values(),
+        key=lambda item: (order.get(item.state, 9), item.name),
+    ):
+        if plugin.state == "running" and plugin.started_at:
+            plugin_elapsed = time.monotonic() - plugin.started_at
+        else:
+            plugin_elapsed = plugin.elapsed_seconds
+        detail = plugin.error or plugin.waiting_for or plugin.last_output
+        table.add_row(
+            plugin.name,
+            plugin.state,
+            f"{plugin_elapsed:.1f}s" if plugin_elapsed else "",
+            str(plugin.finding_count) if plugin.finding_count else "",
+            str(detail)[:80],
+        )
+
+    if not snapshot.plugins:
+        table.add_row("scan", "starting", "", "", "waiting for plugin events")
+
+    sev = " ".join(
+        f"{name[:4].upper()}:{snapshot.severity_counts.get(name, 0)}"
+        for name in ("critical", "high", "medium", "low", "informational")
+    )
+    title = (
+        f"Legacy Plugin Scan | {snapshot.target or '-'} | {snapshot.profile or '-'} | "
+        f"{pct}% | {snapshot.completed_count}/{snapshot.total_count} | "
+        f"{mins:02d}:{secs:02d} | findings {snapshot.total_findings} | {sev}"
+    )
+    return Panel(table, title=title[:180], border_style="cyan")
+
+
+class SnapshotLiveDisplay:
+    """Compatibility Rich Live display for legacy ScanSnapshot producers.
+
+    This keeps the old orchestrator snapshot path from owning a separate display
+    module while the production CLI continues to use ScanLiveDisplay above.
+    """
+
+    def __init__(self, console, refresh_rate: float = 4.0) -> None:
+        self._live = Live(
+            "",
+            console=console,
+            refresh_per_second=refresh_rate,
+            transient=False,
+        )
+
+    def __enter__(self):
+        self._live.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        self._live.__exit__(*args)
+
+    def update(self, snapshot) -> None:
+        self._live.update(_render_snapshot_display(snapshot))

@@ -116,11 +116,8 @@ def build_default_registry(
     reg.register(AgentGraphTool())
     if v3_enabled():
         _register_optional_v3_tools(reg)
-    # NOW-2/2b: source-aware (white/grey-box) tools are gated here. A black-box
-    # scan (the fail-closed default) NEVER registers interaction.code-backed tools,
-    # so it provably cannot read target source.
-    if box_mode in ("white", "grey"):
-        _register_code_surface_tools(reg)
+    # Production scans are black-box today. Source-aware CODE tools must be
+    # completed and promoted deliberately before they are registered here.
     _enforce_box_mode(reg, box_mode)
     return reg
 
@@ -137,19 +134,6 @@ def _enforce_box_mode(reg: ToolRegistry, box_mode: str) -> None:
         leaked = [t.name for t in reg._tools.values() if ToolRegistry.tool_is_source_aware(t)]
         if leaked:
             raise RuntimeError(f"black-box registry leaked source-aware tools: {leaked}")
-
-
-def _register_code_surface_tools(reg: ToolRegistry) -> None:
-    """White/grey-box only: source-aware (interaction.code-backed) Brain tools.
-
-    No code-surface Brain tools exist yet — this is the single gated seam so that
-    when they land they CANNOT be registered for a black-box scan. The
-    tests/agent/tools/test_box_mode_enforcement invariants lock this. Add
-    source-aware tool registrations HERE, never in the unconditional block above —
-    and each MUST set a class attribute ``source_access = True`` so the black-box
-    guard (_enforce_box_mode) and tests catch it regardless of module path.
-    """
-    return
 
 
 def _register_optional_v3_tools(reg: ToolRegistry) -> None:

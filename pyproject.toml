@@ -70,6 +70,9 @@ packages = ["src/vxis"]
 include = [
     "src/vxis/**/*.py",
     "src/vxis/**/*.json",
+    "src/vxis/**/*.html",
+    "src/vxis/**/*.css",
+    "src/vxis/**/*.md",
 ]
 
 [tool.pytest.ini_options]

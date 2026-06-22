@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+.DS_Store
 .venv/
 *.egg-info/
 dist/
@@ -7,10 +8,14 @@ build/
 .ruff_cache/
 .pytest_cache/
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 .env
 /data/
 reports/
+report_*.html
+docs/superpowers/benchmarks/artifacts/
 
 # Benchmark runs — keep score.json as evidence, skip large HTML + verbose logs
 benchmarks/**/*.html
@@ -18,7 +23,6 @@ benchmarks/**/*.log
 
 # Upstream watch — state is cached in CI, digests are committed
 tools/upstream_watch/.state.json
-.worktrees/
 .worktrees/
 tools/benchmark/.brain/
 logs/
@@ -31,3 +35,5 @@ logs/
 .vxis/retrospectives/
 .vxis/signals/inbox/ingest-*.jsonl
 .vxis/signals/inbox/upstream-*.md
+.vxis/signals/processed/
+.vxis/signals/test-pending/

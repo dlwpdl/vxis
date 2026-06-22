@@ -1,12 +1,12 @@
 ---
 name: ADR-011 — Cognitive Engine v3 Consolidation (DAG 단일 prioritizer · PTI 메모리 통합)
 type: decision
-status: active
+status: superseded
 when_to_read: v3 가 왜 build 아니라 integrate 인지 / 중복 시스템(메모리·hypothesis·model table·prioritizer) 통합 결정 / 삭제를 왜 미루나 / dual-write 롤백
-updated: 2026-06-02
+updated: 2026-06-19
 sources:
-  - ../../docs/superpowers/plans/2026-06-02-cognitive-engine-v3.md
-  - ../../docs/superpowers/plans/2026-06-02-cognitive-engine-v3-phase0-consolidation.md
+  - ../../docs/superpowers/plans/2026-06-19-current-core-plan.md
+  - ../../docs/superpowers/DECISIONS.md
 related:
   - ./012_verifier_spine.md
   - ./013_profile_scan_policy.md
@@ -50,3 +50,7 @@ v3 는 신규 빌드가 아니라 **통합**이다. 메모리 2개·hypothesis 2
 - **Pro**: dual-write 로 `VXIS_V3_MEMORY=off` 가 진짜 1-플래그 롤백.
 - **Con**: 패리티 윈도우 동안 두 저장소 동시 유지 — 시크릿이 un-tenanted 레거시로 새지 않게 ScanMemory(요약만)로 제한.
 - **Enforcement**: Phase 0 exit grep — `^class Hypothesis\b`·`ROUTE_TABLE`·legacy finish 헬퍼 = 0. `CONSOLIDATION.md` 가 삭제/이전 원장.
+
+## 2026-06-19 supersession
+The old v3 consolidation plan and ledger were removed. Current authority is the
+single core plan plus `docs/superpowers/DECISIONS.md`.

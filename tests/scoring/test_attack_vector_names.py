@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import unicodedata
 
-from vxis.scoring.vectors import WEB_VECTORS, GAME_VECTORS
 from vxis.scoring.vectors import _ALL_VECTORS
 
 ALL_VECTORS = tuple(_ALL_VECTORS.values())

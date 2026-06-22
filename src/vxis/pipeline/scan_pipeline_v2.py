@@ -57,6 +57,9 @@ from vxis.agent.tools import build_default_registry
 from vxis.agent.tools.finding_tools import _get_chains as _get_chain_dicts
 from vxis.agent.tools.finding_tools import _get_findings as _get_finding_dicts
 from vxis.agent.tools.finding_tools import _reset_for_tests as _reset_finding_store
+from vxis.agent.tools.finding_tools import new_finding_store
+from vxis.agent.tools.finding_tools import reset_active_finding_store
+from vxis.agent.tools.finding_tools import set_active_finding_store
 from vxis.agent.tools.finding_tools import set_event_callback as _set_finding_event_callback
 from vxis.agent.tools.memory_tools import (
     load_target_memory_profile as _load_target_memory_profile,
@@ -151,25 +154,15 @@ def _evasion_blocked_by_policy(policy: Any) -> bool:
     return not permit_strategy("ghost", policy).allowed
 
 
-_VALID_BOX_MODES = ("black", "white", "grey")
-
-
 def _resolve_box_mode(override: str | None, kind: TargetKind) -> str:
-    """NOW-3 #1: resolve the effective box-mode for the tool registry.
+    """Resolve the effective production box mode for the tool registry.
 
-    override None → legacy derivation (CODE → white, any dynamic surface → black).
-    A valid explicit choice (black/white/grey; 'gray' normalized) is honored as-is,
-    so an operator can force black even on a CODE target — "블랙박스는 완전히
-    블랙박스여야함". Fail-closed: any invalid/empty override resolves to black (the
-    no-source-access default), never silently escalating to source-aware tools.
+    VXIS currently ships only black-box Brain tools. CODE analysis helpers are
+    library/test-covered, but no source-aware Brain tools are wired into the live
+    loop yet. Until that promotion happens, every mode resolves to black so the
+    public runtime never advertises source access it cannot actually execute.
     """
-    derived = "white" if kind == TargetKind.CODE else "black"
-    if override is None:
-        return derived
-    norm = str(override).strip().lower()
-    if norm == "gray":
-        norm = "grey"
-    return norm if norm in _VALID_BOX_MODES else "black"
+    return "black"
 
 
 def _resolve_scan_loop_budget() -> tuple[int, int, int]:
@@ -864,7 +857,7 @@ class ScanPipeline:
         resume_from: str | None = None,  # Phase A: ignored, kept for signature compat
         kind: TargetKind = TargetKind.WEB,
         target_hints: dict[str, str] | None = None,
-        box_mode: str | None = None,  # NOW-3: explicit black/white/grey; None → derive from kind
+        box_mode: str | None = None,  # Production runtime currently resolves all modes to black.
     ) -> ScanContext:
         """Run a Strix-parity single-loop scan against the target."""
         started = time.monotonic()
@@ -885,6 +878,7 @@ class ScanPipeline:
         _scope_owned = ensure_active_scope(runtime.resolved_target)
         _policy_token = None  # NOW-2/F4: reset token so cleanup restores the outer policy
         _injection_token = None  # NOW-2/2e: reset token for the ambient injection decision
+        _finding_store_token = set_active_finding_store(new_finding_store())
         try:
             self._emit(
                 "phase_end",
@@ -984,10 +978,9 @@ class ScanPipeline:
             if hasattr(self.brain, "_target_kind"):
                 self.brain._target_kind = kind
 
-            # 5. Build the tool registry. NOW-2/2b: black-box (any dynamic surface)
-            # registers no source-aware tools; only a CODE target is white-box.
-            # NOW-3 #1: an explicit box_mode override (from the TUI box step) wins,
-            # fail-closed to black; None keeps the legacy kind-derived behavior.
+            # 5. Build the tool registry. Production scans are black-box today:
+            # no source-aware Brain tools are registered until CODE/white-box is
+            # completed and promoted from the incubator path.
             box_mode = _resolve_box_mode(box_mode, kind)
             self._emit("box_mode_resolved", {"box_mode": box_mode, "kind": kind.value})
             registry = build_default_registry(
@@ -1196,6 +1189,7 @@ class ScanPipeline:
             # Phase C belief state: surface verdict counts + confirmed/refuted lists.
             verdict_counts = loop_result.get("verdict_counts", {}) or {}
             ctx.scan_loop_completed = bool(loop_result.get("completed", False))  # type: ignore[attr-defined]
+            ctx.scan_loop_iterations = int(loop_result.get("iterations", 0) or 0)  # type: ignore[attr-defined]
             ctx.verdict_counts = verdict_counts  # type: ignore[attr-defined]
             ctx.confirmed_findings = loop_result.get("confirmed_findings", []) or []  # type: ignore[attr-defined]
             ctx.refuted_findings = loop_result.get("refuted_findings", []) or []  # type: ignore[attr-defined]
@@ -1436,6 +1430,7 @@ class ScanPipeline:
                 clear_active_scope()
             clear_active_policy(_policy_token)
             clear_injection_decision(_injection_token)
+            reset_active_finding_store(_finding_store_token)
 
     async def _run_deferred_gate(self, ctx: ScanContext) -> None:
         """Invoke the approval callback on ctx.deferred_actions. Phase A stub."""

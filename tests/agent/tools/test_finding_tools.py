@@ -9,6 +9,9 @@ from vxis.agent.tools.finding_tools import (
     _reset_for_tests,
     _get_findings,
     _get_chains,
+    new_finding_store,
+    reset_active_finding_store,
+    set_active_finding_store,
 )
 
 
@@ -109,6 +112,41 @@ async def test_report_finding_stores_and_returns_id():
     assert result.data["total_findings"] == 1
     assert len(_get_findings()) == 1
     assert _get_findings()[0]["title"] == "SQL Injection in login"
+
+
+@pytest.mark.asyncio
+async def test_finding_store_is_scoped_by_active_scan_context():
+    tool = ReportFindingTool()
+    first_token = set_active_finding_store(new_finding_store())
+    try:
+        first = await tool.run(
+            title="Directory listing",
+            severity="low",
+            finding_type="misconfiguration",
+            affected_component="/files",
+            description="Index page exposes file names.",
+        )
+        assert first.ok is True
+        assert first.data["id"] == "VXIS-0001"
+        assert len(_get_findings()) == 1
+    finally:
+        reset_active_finding_store(first_token)
+
+    second_token = set_active_finding_store(new_finding_store())
+    try:
+        assert _get_findings() == []
+        second = await tool.run(
+            title="Debug header",
+            severity="low",
+            finding_type="information_disclosure",
+            affected_component="/",
+            description="Response includes a debug header.",
+        )
+        assert second.ok is True
+        assert second.data["id"] == "VXIS-0001"
+        assert len(_get_findings()) == 1
+    finally:
+        reset_active_finding_store(second_token)
 
 
 @pytest.mark.asyncio

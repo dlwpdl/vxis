@@ -163,13 +163,12 @@ class TestScanCommandHelp:
         assert "--no-report" in scan_option_names()
 
     def test_scan_registers_box_option(self):
-        """NOW-3 #1: scan exposes an explicit --box {auto,black,white,grey} flag."""
+        """scan exposes an explicit --box flag."""
         assert "--box" in scan_option_names()
 
 
 class TestBoxFlagToMode:
-    """NOW-3 #1: --box flag → pipeline box_mode override (validation deferred to
-    the pipeline's _resolve_box_mode; the CLI only maps 'auto'/blank → None)."""
+    """--box flag normalization for the production black-box path."""
 
     def test_auto_and_blank_map_to_none(self):
         from vxis.cli.main import _box_flag_to_mode
@@ -182,8 +181,8 @@ class TestBoxFlagToMode:
         from vxis.cli.main import _box_flag_to_mode
 
         assert _box_flag_to_mode("black") == "black"
-        assert _box_flag_to_mode("  WHITE ") == "white"
-        assert _box_flag_to_mode("grey") == "grey"
+        assert _box_flag_to_mode("  WHITE ") == "black"
+        assert _box_flag_to_mode("grey") == "black"
 
 
 # ---------------------------------------------------------------------------

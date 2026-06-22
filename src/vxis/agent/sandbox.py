@@ -6,10 +6,9 @@
 3. 일관된 실행 환경 (도구 버전 통일)
 
 Architecture:
-    AgentExecutor
-        └── SandboxManager (컨테이너 풀 관리, target별 1개)
-                └── DockerSandbox (단일 컨테이너 래퍼)
-                        └── docker CLI subprocess (docker-py SDK 불필요)
+    SandboxManager (컨테이너 풀 관리, target별 1개)
+        └── DockerSandbox (단일 컨테이너 래퍼)
+                └── docker CLI subprocess (docker-py SDK 불필요)
 
 Usage:
     mgr = SandboxManager()
@@ -436,9 +435,8 @@ class SandboxManager:
         self._sandboxes.clear()
 
 
-# ── 모듈 레벨 싱글톤 (AgentExecutor에서 공유) ─────────────────────
+# ── 모듈 레벨 싱글톤 ─────────────────────────────────────────────
 
-# AgentExecutor가 import 시 바로 사용할 수 있는 전역 매니저 인스턴스.
 # 별도 설정이 없으면 기본 Kali 이미지와 타임아웃 사용.
 _global_manager: SandboxManager | None = None
 

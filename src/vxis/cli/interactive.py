@@ -1181,7 +1181,7 @@ def _execute_scan(params: dict) -> None:
     from vxis.core.events import ScanEventBus, ScanSnapshotCollector
     from vxis.core.orchestrator import ScanOrchestrator
     from vxis.core.scope import ScopeViolationError
-    from vxis.cli.live_display import ScanLiveDisplay
+    from vxis.cli.scan_display import SnapshotLiveDisplay
 
     config = VXISConfig()
     event_bus = ScanEventBus()
@@ -1213,7 +1213,7 @@ def _execute_scan(params: dict) -> None:
     )
 
     try:
-        display = ScanLiveDisplay(console)
+        display = SnapshotLiveDisplay(console)
         with display:
             result = asyncio.run(_run_with_display())
     except ScopeViolationError as exc:

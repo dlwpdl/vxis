@@ -165,7 +165,7 @@ class TestScanTargetScopeActivation:
         ):
             findings = await _scan_target(target=target, scan_id="VXIS-TEST-001", max_iters=5)
 
-        assert findings == []
+        assert findings is None
         # pipeline.run was never called (skip=True returns early before scope activation)
         pipeline.run.assert_not_called()
         # Scope must be clear (was never set)

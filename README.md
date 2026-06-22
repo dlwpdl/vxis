@@ -65,12 +65,12 @@ poetry run vxis scan http://localhost:3000 --profile standard --output reports/j
 | `src/vxis/` | Core library (30+ submodules — see [`src/vxis/README.md`](src/vxis/README.md)) |
 | `docker/sandbox/` | Dockerfile for the Strix-power sandbox image (sqlmap/nuclei/ffuf/…) |
 | `docs/` | Project documentation — [`BLUEPRINT.md`](docs/BLUEPRINT.md), [`CONFIGURATION.md`](docs/CONFIGURATION.md), etc. |
-| `docs/superpowers/plans/` | Implementation plans (Phase A/B/C roadmap) |
+| `docs/superpowers/plans/` | Current implementation plan only |
+| `docs/superpowers/DECISIONS.md` | Dated project decisions and why they were made |
 | `docs/superpowers/benchmarks/` | Benchmark capture + scan artifacts |
 | `tests/` | pytest suite (unit + agent + pipeline + slow) |
 | `alembic/` | Database migrations (SQLAlchemy + Alembic) |
 | `scripts/` | Operational scripts |
-| `plans/` | Legacy plan archive (superseded by `docs/superpowers/plans/`) |
 | `tools/` | Local dev tools |
 | `reports/` | Generated HTML reports (gitignored) |
 | `logs/` | Runtime logs (gitignored) |

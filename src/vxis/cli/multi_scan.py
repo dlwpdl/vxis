@@ -47,10 +47,8 @@ def _resolve_output(template: str) -> Path:
 def _build_brain() -> Any:
     """Construct a default AgentBrain. Import is deferred so tests can mock."""
     from vxis.agent.brain import AgentBrain  # type: ignore[import-untyped]
-    from vxis.config.schema import VXISConfig  # type: ignore[import-untyped]
 
-    config = VXISConfig()
-    return AgentBrain(config=config)
+    return AgentBrain()
 
 
 def _build_pipeline(
@@ -73,28 +71,31 @@ async def _scan_target(
     target: ManifestTarget,
     scan_id: str,
     max_iters: int,
-) -> list[Finding]:
+) -> list[Finding] | None:
     """Run a single target scan and return its findings.
 
-    Returns an empty list when:
+    Returns None when:
       - target.skip is True
       - target.kind == CODE and surface raises NotImplementedError
+    Returns an empty list when the scan runs and produces no findings.
     """
     if target.skip:
         logger.info("Skipping target '%s' (skip=True)", target.name)
-        return []
+        return None
 
     if target.kind == TargetKind.CODE:
-        # Attempt to import CodeSurface; fall back gracefully if not yet landed.
         try:
             from vxis.interaction.factory import SurfaceFactory  # type: ignore[import-untyped]
-            SurfaceFactory.probe(TargetKind.CODE)
-        except (ImportError, NotImplementedError, AttributeError):
+            from vxis.interaction.surface import Target  # type: ignore[import-untyped]
+
+            SurfaceFactory.build(Target(kind=TargetKind.CODE, entry=target.entry))
+        except (ImportError, NotImplementedError, AttributeError, ValueError) as exc:
             logger.warning(
-                "CODE surface not yet available — skipping %s",
+                "CODE surface not yet available — skipping %s: %s",
                 target.name,
+                exc,
             )
-            return []
+            return None
 
     logger.info(
         "Starting scan for target '%s' (%s) → %s",
@@ -232,9 +233,10 @@ async def _async_multi_scan(manifest: ScanManifest) -> int:
             scan_id=per_target_scan_id,
             max_iters=manifest.max_iters_per_target,
         )
+        if findings is None:
+            continue
         all_findings.extend(findings)
-        if not target.skip and target.kind != TargetKind.CODE:
-            scanned_count += 1
+        scanned_count += 1
 
     if scanned_count == 0:
         logger.warning("All targets were skipped — no report generated.")

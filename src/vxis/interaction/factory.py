@@ -1,11 +1,9 @@
 """SurfaceFactory — dispatch Target.kind (and Target.os for desktop) to the
 matching Surface implementation.
 
-Phase-B wires the WEB branch. Phase-H wires MOBILE/GAME stubs (construction
-succeeds; method calls raise bilingual NotImplementedError so Brain detects
-the gap explicitly). Phase-I wires DESKTOP/macOS via the native CLI
-adapters (otool/codesign/dtrace). DESKTOP/Windows still raises until
-phase-C lands; DESKTOP/Linux is explicitly out-of-scope per the plan.
+WEB is the production dynamic branch. DESKTOP/macOS has native CLI adapters
+(otool/codesign/dtrace). MOBILE/GAME are intentionally not wired until real
+runtime surfaces exist; do not connect placeholder stubs to production scans.
 """
 from __future__ import annotations
 
@@ -13,14 +11,7 @@ from vxis.interaction.code import CodeEyes, CodeHands, CodeRecon, CodeXRay
 from vxis.interaction.desktop.dtrace_xray import MacOSXRay
 from vxis.interaction.desktop.macos_hands import MacOSHands
 from vxis.interaction.desktop.recon_macho import MacOSRecon
-from vxis.interaction.game.game_surface import GameEyes, GameHands, GameRecon, GameXRay
 from vxis.interaction.hands import SessionManager
-from vxis.interaction.mobile.mobile_surface import (
-    MobileEyes,
-    MobileHands,
-    MobileRecon,
-    MobileXRay,
-)
 from vxis.interaction.surface import (
     Eyes,
     InteractionEnvelope,
@@ -78,20 +69,18 @@ class SurfaceFactory:
                 recon=WebRecon(target),
             )
         if target.kind == TargetKind.MOBILE:
-            return Surface(
-                target=target,
-                hands=MobileHands(target),
-                eyes=MobileEyes(target),
-                xray=MobileXRay(target),
-                recon=MobileRecon(target),
+            raise NotImplementedError(
+                "mobile surface is not production-wired; develop it under incubator/ "
+                "and promote only after real APK/IPA + device/emulator execution works."
+                "|||모바일 서피스는 아직 프로덕 연결 대상이 아닙니다. 실제 APK/IPA와 "
+                "디바이스/에뮬레이터 실행이 완성된 뒤 승격하세요."
             )
         if target.kind == TargetKind.GAME:
-            return Surface(
-                target=target,
-                hands=GameHands(target),
-                eyes=GameEyes(target),
-                xray=GameXRay(target),
-                recon=GameRecon(target),
+            raise NotImplementedError(
+                "game surface is not production-wired; develop it under incubator/ "
+                "and promote only after real protocol/client execution works."
+                "|||게임 서피스는 아직 프로덕 연결 대상이 아닙니다. 실제 프로토콜/클라이언트 "
+                "실행이 완성된 뒤 승격하세요."
             )
         if target.kind == TargetKind.DESKTOP:
             return SurfaceFactory._build_desktop(target)

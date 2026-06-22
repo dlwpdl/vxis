@@ -138,7 +138,7 @@ class InteractionFinding:
     scan_id / source_plugin / cvss). Brain consumes these via
     `InteractionResult.findings` to keep its observation stream coherent
     when the controller surfaces a non-fatal signal — e.g. an unsupported
-    surface stub (phase-H), or a degraded mode fallback.
+    surface implementation or a degraded mode fallback.
     """
 
     severity: str
@@ -173,8 +173,8 @@ class InteractionResult:
     secrets_found: list[dict[str, str]] = field(default_factory=list)
     vulnerabilities: list[dict[str, str]] = field(default_factory=list)
 
-    # phase-H: in-flight findings emitted during execute() — used today by
-    # the unsupported-surface informational signal so Brain knows the gap.
+    # In-flight findings emitted during execute() — used by the
+    # unsupported-surface informational signal so Brain knows the gap.
     findings: list[InteractionFinding] = field(default_factory=list)
 
     # Chain 결과
@@ -553,10 +553,8 @@ class InteractionController:
                 headers=action.headers,
             )
         except NotImplementedError as exc:
-            # phase-H: Mobile/Game stubs (or any future kind) raise here.
-            # Surface the gap as an informational finding instead of crashing
-            # the Brain loop — so subsequent intent decisions can route
-            # around the unsupported surface.
+            # Unsupported surface implementations raise here. Surface the gap as
+            # an informational finding instead of crashing the Brain loop.
             kind = self._surface.target.kind.value
             return InteractionResult(
                 success=False,

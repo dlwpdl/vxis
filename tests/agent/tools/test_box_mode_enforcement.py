@@ -1,10 +1,7 @@
-"""NOW-2/2b — black-box hard-enforcement.
+"""Black-box hard-enforcement.
 
-A black-box scan must PROVABLY register ZERO interaction.code-backed (source-aware)
-Brain tools — the user's directive "블랙박스는 완전히 블랙박스여야함". No code-surface
-Brain tools exist yet, so this locks the invariant structurally: the moment a future
-change wires source-aware tools, they cannot leak into a black-box scan, and these
-tests fail if they do. Fail-closed default = black.
+A production scan must register ZERO interaction.code-backed source-aware Brain
+tools until CODE/white-box is explicitly completed and promoted.
 """
 import pytest
 
@@ -47,7 +44,8 @@ def test_enforce_box_mode_raises_on_source_aware_in_blackbox():
     reg.register(_FakeSourceAwareTool())
     with pytest.raises(RuntimeError):
         _enforce_box_mode(reg, "black")
-    # white / grey may carry source-aware tools
+    # Non-black remains available only as a direct guard primitive; production
+    # registry construction does not currently route through these modes.
     _enforce_box_mode(reg, "white")
     _enforce_box_mode(reg, "grey")
 
@@ -74,7 +72,7 @@ def test_blackbox_registers_no_code_surface_tools():
     assert leaked == [], f"black-box scan leaked source-aware tools: {leaked}"
 
 
-def test_white_box_is_superset_of_black():
+def test_white_box_registry_is_not_promoted_yet():
     black = set(build_default_registry(box_mode="black").list_tools())
     white = set(build_default_registry(box_mode="white").list_tools())
-    assert white >= black
+    assert white == black

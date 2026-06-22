@@ -3,9 +3,10 @@ name: ADR-012 — Verifier Spine (모든 finding 이 adversarial verify + PoC �
 type: decision
 status: active
 when_to_read: zero-FP 를 코드로 어떻게 강제하나 / verifier 게이트 위치 / 왜 전 severity / PoC 필수 / 신규 아니라 기존 강화
-updated: 2026-06-02
+updated: 2026-06-19
 sources:
-  - ../../docs/superpowers/plans/2026-06-02-cognitive-engine-v3.md
+  - ../../docs/superpowers/plans/2026-06-19-current-core-plan.md
+  - ../../docs/superpowers/DECISIONS.md
 related:
   - ./011_v3_consolidation.md
   - ./008_finding_precision_smoothing.md
@@ -46,3 +47,7 @@ code_anchors:
 - **Pro**: F(self-critique)는 recall 갭 담당이고 V 가 precision 담당 — 역할 분리, F 가 FP 게이트 완화 금지.
 - **Con**: 후보 finding 마다 verify 호출 → 비용. 후보 dedupe + borderline-only refuter 로 bound.
 - **Enforcement**: cassette 티어가 게이트 코드 회귀(severity·PoC) 차단; clean-control 0-FP 는 full-live 게이트.
+
+## 2026-06-19 note
+Old v3 plan files were removed. The verifier spine remains active as part of
+the compact Strix-style loop direction.

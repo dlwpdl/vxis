@@ -34,15 +34,23 @@ def test_llamacpp_compression_policy_is_aggressive() -> None:
     assert policy.profile == "local-small"
 
 
-def test_cloud_compression_policy_is_late() -> None:
+def test_cloud_compression_policy_is_segmented() -> None:
     policy = get_compression_policy("openai", "gpt-4o")
 
     assert policy.compress_threshold_tokens >= 100_000
-    assert policy.preserve_recent_messages == 15
-    assert policy.recent_full_iterations >= 5
+    assert policy.compress_threshold_tokens <= 200_000
+    assert policy.preserve_recent_messages == 12
+    assert policy.recent_full_iterations >= 4
     assert policy.output_token_cap == 8000
     assert policy.allow_long_context is True
-    assert policy.profile == "cloud-large"
+    assert policy.profile == "cloud-segmented"
+
+
+def test_large_cloud_models_do_not_wait_for_full_context() -> None:
+    policy = get_compression_policy("openai", "gpt-5.4")
+
+    assert policy.context_window > 200_000
+    assert policy.compress_threshold_tokens == 200_000
 
 
 def test_compress_history_uses_model_policy_for_llamacpp() -> None:

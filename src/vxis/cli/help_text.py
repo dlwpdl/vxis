@@ -13,14 +13,7 @@ def render_help(console: Console, print_banner: Callable[[], None]) -> None:
     """Render the full VXIS usage guide."""
     print_banner()
 
-    from vxis.registry import (
-        BENCHMARK_TARGETS,
-        EXTERNAL_PHASES,
-        FUTURE_PHASES,
-        STAGE_NAMES,
-        VERSION,
-        WEB_PHASES,
-    )
+    from vxis.registry import BENCHMARK_TARGETS, VERSION
 
     console.print(f"  [bold]v{VERSION}[/bold]\n")
 
@@ -92,8 +85,8 @@ vxis news stats                # 부트스트랩 모드 + 누적 통계
 # Claude Code에 VXIS를 도구로 등록
 claude mcp add vxis python -m vxis.mcp_server
 
-# 41개 primitive 툴 노출: sense_*/pattern_*/kb_*/session_*/
-#   ghost_*/chain_*/output_*/phase_*/scope_*
+# Primitive tools exposed: sense_*/pattern_*/kb_*/session_*/
+#   ghost_*/chain_*/output_*/scope_*
 ```
 
 ## P1 Adversary Emulation
@@ -131,27 +124,17 @@ vxis version          # 버전 정보
 """
     console.print(Markdown(guide))
 
-    console.print("\n[bold]Pipeline Phases[/bold]\n")
-    phase_table = Table(show_header=True, header_style="bold cyan")
-    phase_table.add_column("Phase", width=8)
-    phase_table.add_column("Name", width=45)
-    phase_table.add_column("Stage", width=20)
-
-    prev_stage = ""
-    for p in WEB_PHASES:
-        stage_label = STAGE_NAMES.get(p.stage, p.stage)
-        if p.stage != prev_stage:
-            phase_table.add_row("", "", "", style="dim")
-            prev_stage = p.stage
-        phase_table.add_row(f"P{p.id}", p.name, stage_label)
-
-    phase_table.add_row("", "", "", style="dim")
-    for p in EXTERNAL_PHASES:
-        phase_table.add_row(f"P{p.id}", f"{p.name} [dim](GHA)[/dim]", "External", style="dim")
-    for p in FUTURE_PHASES:
-        phase_table.add_row(f"P{p.id}", f"{p.name} [dim](planned)[/dim]", "Future", style="dim")
-
-    console.print(phase_table)
+    console.print("\n[bold]Live Scan Runtime[/bold]\n")
+    runtime_table = Table(show_header=True, header_style="bold cyan")
+    runtime_table.add_column("Layer", width=18)
+    runtime_table.add_column("Live path", width=54)
+    runtime_table.add_column("Purpose", width=34)
+    runtime_table.add_row("Entry", "vxis scan / dashboard / MCP", "Target, scope, profile")
+    runtime_table.add_row("Pipeline", "ScanPipelineV2", "Context + per-scan finding store")
+    runtime_table.add_row("Brain", "ScanAgentLoop + AgentBrain.think_in_loop", "One tool per message")
+    runtime_table.add_row("Tools", "ToolRegistry BrainTools", "Recon, skills, evidence, verifier")
+    runtime_table.add_row("Output", "TUI / dashboard / report", "Real scan state only")
+    console.print(runtime_table)
 
     console.print("\n[bold]Benchmark Targets[/bold]\n")
     target_table = Table(show_header=True, header_style="bold cyan")

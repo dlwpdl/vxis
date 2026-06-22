@@ -72,24 +72,13 @@ class ScanContext:
     # ── Attack Graph ──
     hypotheses: list[dict[str, Any]] = field(default_factory=list)
     attack_chains: list[dict[str, Any]] = field(default_factory=list)
-    chain_mutations: list[dict[str, Any]] = field(default_factory=list)
 
-    # ── CVE / Forecast ──
+    # ── CVE ──
     matched_cves: list[dict[str, Any]] = field(default_factory=list)
-    forecast_90d: list[dict[str, Any]] = field(default_factory=list)
-
-    # ── Digital Twin ──
-    twin_results: dict[str, Any] = field(default_factory=dict)
-
-    # ── Biometrics ──
-    biometrics: dict[str, Any] = field(default_factory=dict)
 
     # ── Findings ──
     findings: list[Finding] = field(default_factory=list)
     finding_counter: int = 0
-
-    # ── Red vs Blue ──
-    defense_rules: list[dict[str, Any]] = field(default_factory=list)
 
     # ── Ghost Mode ──
     ghost_active: bool = False
@@ -231,11 +220,7 @@ class ScanContext:
             "threat_model": self.threat_model,
             "hypotheses": self.hypotheses,
             "attack_chains": self.attack_chains,
-            "chain_mutations": self.chain_mutations,
             "matched_cves": self.matched_cves,
-            "forecast_90d": self.forecast_90d,
-            "twin_results": self.twin_results,
-            "biometrics": self.biometrics,
             "findings_count": len(self.findings),
             "xray_vulns": self.xray_vulns,
             "phase_logs": self.phase_logs,

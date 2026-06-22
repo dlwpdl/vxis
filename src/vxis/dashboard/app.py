@@ -629,6 +629,48 @@ async def client_detail(request: Request, client_id: str) -> HTMLResponse:
     )
 
 
+@app.get("/kb", response_class=HTMLResponse)
+async def kb_index(request: Request) -> HTMLResponse:
+    """Knowledge base browser with remediation guidance."""
+    from vxis.knowledge import get_vuln_kb
+
+    kb = get_vuln_kb()
+    entries = [kb.get_remediation(vuln_type) for vuln_type in kb.all_types]
+    entries = [entry for entry in entries if entry is not None]
+
+    return templates.TemplateResponse(
+        request,
+        "kb.html",
+        {
+            "entries": entries,
+            "total_entries": len(entries),
+            "query": "",
+        },
+    )
+
+
+@app.get("/kb/search", response_class=HTMLResponse)
+async def kb_search(request: Request, q: str = Query("")) -> HTMLResponse:
+    """HTMX partial for filtering KB entries."""
+    from vxis.knowledge import get_vuln_kb
+
+    kb = get_vuln_kb()
+    query = q.strip()
+    if query:
+        entries = kb.search(query)
+    else:
+        entries = [kb.get_remediation(vuln_type) for vuln_type in kb.all_types]
+        entries = [entry for entry in entries if entry is not None]
+
+    return templates.TemplateResponse(
+        request,
+        "partials/kb_cards.html",
+        {
+            "entries": entries,
+        },
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request, error: str | None = Query(None)) -> HTMLResponse:
     """Login page — supports both user credentials and dashboard token."""

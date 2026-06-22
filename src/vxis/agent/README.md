@@ -16,10 +16,10 @@
 | **`scan_loop_decision_policy.py`** | Finish-blocking policy, branch scoring, forced replan actions, focus discipline, and target-memory pressure. |
 | **`scan_loop_agent_graph.py`** | Director/worker agent graph state synchronization, child execution crediting, and crown-chain follow-up branch creation. |
 | **`scan_loop_dashboard.py`** | Compact per-iteration scan dashboard rendered into Brain context and TUI state. |
-| **`scan_loop_policy.py`** | Static director prompt and skill-family policy tables. |
+| **`scan_loop_policy.py`** | Static director prompt plus role, phase, skill-family, and surface-gating policy tables. |
 | **`scan_loop_state.py`** | Durable scan state: messages, verdict counts, vector candidates, branch state, review queue, callback/retrieval observations, and branch role/phase helpers. |
 | **`tool_registry.py`** | `BrainTool` runtime-checkable Protocol, `ToolResult` dataclass, and `ToolRegistry` async dispatcher. `describe_all()` output is the Brain's tool catalog. |
-| **`memory_compressor.py`** | LLM-based memory compression — Strix pattern. At 90K tokens, older messages are chunked and summarized. 15 most recent messages always preserved verbatim. |
+| **`memory_compressor.py`** | LLM-based memory compression — Strix pattern. Local runtimes compress early; cloud runtimes segment history around 200K tokens instead of filling the whole context window. |
 | **`egress.py`** | Enterprise egress filter. When `VXIS_EGRESS_STRICT=1`, builds an allowlist from the target URL and blocks sandbox outbound to non-target hosts. |
 | **`tools/`** | Subpackage with 23 BrainTool implementations. See [`tools/README.md`](tools/README.md). |
 
@@ -31,7 +31,7 @@
 | `brain_interactive.py` → `InteractiveBrain` | stdin/stdout NDJSON — external Claude Code process | Legacy (`vxis scan --interactive`) |
 | `brain_filebased.py` → `FileBasedBrain` | File-based protocol | Rarely used |
 
-All three implement `think()` which increments the unified `_BRAIN_DECISION_COUNT` counter. `brain_protocol.py` defines the shared Protocol.
+All three implement `think()` which increments the unified `_BRAIN_DECISION_COUNT` counter.
 
 ## Runtime roles
 
@@ -52,7 +52,7 @@ This is deliberate: VXIS aims for unattended execution with AI review, not conti
 # ScanAgentLoop.run() — scan_loop.py (simplified)
 while not completed and iteration < max_iters:  # max_iters=300
     iteration += 1
-    messages = await compress_history(messages, brain)  # at 90K tokens
+    messages = await compress_history(messages, brain)  # runtime-specific threshold
     dashboard = _build_scan_dashboard()  # compact progress summary
     actions = await brain.think_in_loop(messages + [dashboard], registry.describe_all())
     actions = actions[:1]  # Strix pattern: 1 tool per message
@@ -127,19 +127,20 @@ Triggers in `scan_loop.py` that fire when Brain hasn't reached for critical tool
 
 ## LLM memory compression
 
-`memory_compressor.py`: when history exceeds 90K tokens (~360K chars), messages are chunked in groups of 10 and summarized by the LLM. Summaries preserve vulnerabilities, credentials, failed attempts, and architecture insights. 15 most recent messages are always verbatim. Compression is best-effort (failure falls through silently).
+`memory_compressor.py`: when history exceeds the runtime threshold, older messages are chunked and summarized by the LLM. Local models compress early; cloud models segment around 200K tokens by default (`VXIS_CONTEXT_SEGMENT_TOKENS`). Summaries are concise bullets that preserve findings, evidence ids, failed attempts, credentials/session material, and next actions. Compression is best-effort (failure falls through silently).
 
-## Legacy / supporting files (still present)
+## Removed legacy surfaces
+
+The old `BaseAgent` / `DirectorAgent` phase pipeline, 63-agent fleet,
+`AgentExecutor`, attack graph, hypothesis queue, and CRT display were removed.
+They were not used by the live `ScanPipelineV2` path and were only kept alive by
+legacy tests.
+
+Remaining support files:
 
 | File | Role |
 |---|---|
-| `agents/` | Sub-package with legacy 63-agent fleet from old pipeline |
-| `base.py` | Base `AgentObservation`, `AgentAction`, `AgentStep` dataclasses |
-| `context.py` | `AgentContext` (legacy, separate from `ScanContext`) |
-| `director.py` | Legacy `DirectorAgent` for phase dispatch |
-| `executor.py` | Legacy action executor (pre-ScanAgentLoop) |
 | `memory.py` | Memory store (legacy knowledge base per scan) |
-| `runner.py` | Legacy `AgentRunner` with 63-agent orchestration |
 
 ## Instrumentation
 
@@ -156,7 +157,8 @@ reset_brain_decision_count()
 
 ## Critical rules for future edits
 
-- **Do NOT modify `AgentBrain.think()`** — it is legacy but still referenced. Add siblings instead.
+- Treat `think_in_loop()` plus `ScanAgentLoop` as the live path.
+- Keep `AgentBrain.think()` compatibility behavior small; do not add new orchestration there.
 - **Do NOT modify `AGENT_SYSTEM_PROMPT` body** — use `LOOP_PROMPT_ADAPTER` for overrides.
 - **Never pass `LOOP_PROMPT_ADAPTER` through `.format()`** — brace escape bug (see regression test).
 - **1 tool per message** — `actions[:1]` in scan_loop.py. Do not remove this.

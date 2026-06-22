@@ -469,6 +469,7 @@ def test_save_snapshot_swallows_transient_io_error(tmp_path, monkeypatch):
 
     # Should return normally, not raise.
     tool._save_snapshot()
+    assert not (tmp_path / "snap.json").exists()
 
 
 def test_save_snapshot_cleans_temp_file_on_replace_failure(tmp_path, monkeypatch):

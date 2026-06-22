@@ -144,13 +144,13 @@ class TestDispatchOrder:
         ):
             asyncio.run(_async_multi_scan(manifest))
 
-        # skip=True targets are handled inside _scan_target, which returns [] early.
+        # skip=True targets are handled inside _scan_target, which returns None early.
         # We are patching _scan_target entirely so it's called for all; but the real
         # implementation checks target.skip. Test the real impl:
         assert set(call_order) == {"active", "skipped", "also-active"}
 
     def test_skip_true_real_impl_not_scanned(self) -> None:
-        """Real _scan_target: skip=True returns [] without touching pipeline."""
+        """Real _scan_target: skip=True returns None without touching pipeline."""
         pipeline = _fake_pipeline()
         manifest = _make_manifest(
             targets=[
@@ -278,6 +278,27 @@ class TestPhaseGSynthesis:
 
 
 class TestCodeSurfaceGracefulSkip:
+    def test_code_surface_dispatches_when_available(self) -> None:
+        """CODE targets are real targets when the CODE surface builds."""
+        manifest = _make_manifest(
+            targets=[
+                ManifestTarget(name="code-target", kind=TargetKind.CODE, entry="/path/to/repo"),
+            ]
+        )
+        pipeline = _fake_pipeline()
+
+        with (
+            patch(_PIPELINE_PATH, return_value=pipeline),
+            patch(_BRAIN_PATH, return_value=MagicMock()),
+            patch(_PHASE_G_PATH, new_callable=AsyncMock, return_value=[]),
+            patch(_REPORT_PATH),
+        ):
+            exit_code = asyncio.run(_async_multi_scan(manifest))
+
+        assert exit_code == 0
+        pipeline.run.assert_awaited_once()
+        assert pipeline.run.await_args.kwargs["kind"] == TargetKind.CODE
+
     def test_code_surface_not_implemented_skips_gracefully(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -294,9 +315,8 @@ class TestCodeSurfaceGracefulSkip:
         def pipeline_factory() -> Any:
             return web_pipeline
 
-        # Simulate SurfaceFactory.probe raising NotImplementedError for CODE
-        def fake_surface_factory_probe(kind: TargetKind) -> None:
-            if kind == TargetKind.CODE:
+        def fake_surface_factory_build(target: Any) -> None:
+            if target.kind == TargetKind.CODE:
                 raise NotImplementedError("CODE surface not yet landed")
 
         with (
@@ -305,9 +325,8 @@ class TestCodeSurfaceGracefulSkip:
             patch(_PHASE_G_PATH, new_callable=AsyncMock, return_value=[]),
             patch(_REPORT_PATH),
             patch(
-                "vxis.interaction.factory.SurfaceFactory.probe",
-                side_effect=fake_surface_factory_probe,
-                create=True,
+                "vxis.interaction.factory.SurfaceFactory.build",
+                side_effect=fake_surface_factory_build,
             ),
             caplog.at_level(logging.WARNING, logger="vxis.cli.multi_scan"),
         ):

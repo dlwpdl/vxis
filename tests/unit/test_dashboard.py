@@ -323,3 +323,21 @@ def test_export_contains_html_report(client: TestClient, scan_id: int) -> None:
     response = client.get(f"/scan/{scan_id}/export")
     # The generated report should contain the target
     assert "192.168.1.1" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Knowledge base
+# ---------------------------------------------------------------------------
+
+def test_kb_page_is_linked_route(client: TestClient) -> None:
+    response = client.get("/kb")
+
+    assert response.status_code == 200
+    assert "Knowledge Base" in response.text
+
+
+def test_kb_search_partial_returns_cards(client: TestClient) -> None:
+    response = client.get("/kb/search?q=injection")
+
+    assert response.status_code == 200
+    assert "No results found" not in response.text

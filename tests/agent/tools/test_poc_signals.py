@@ -14,7 +14,10 @@ from __future__ import annotations
 
 def test_poc_signals_module_exists() -> None:
     """_poc_signals module must be importable from vxis.agent.tools."""
-    from vxis.agent.tools import _poc_signals  # noqa: F401
+    from vxis.agent.tools import _poc_signals
+
+    assert hasattr(_poc_signals, "POC_RESULT_MARKERS")
+    assert hasattr(_poc_signals, "CONTROL_MARKERS")
 
 
 def test_canonical_result_markers_includes_observed_delta() -> None:

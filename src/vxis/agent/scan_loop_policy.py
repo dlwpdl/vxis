@@ -111,6 +111,78 @@ CURRENT FINDINGS:
 Pick ONE action grounded in the evidence above and output the JSON tool call."""
 
 
+ROLE_ALLOWED_CAPABILITIES: dict[str, set[str]] = {
+    "recon_worker": {
+        "recon",
+        "browse",
+        "probe",
+        "memory",
+        "plan",
+        "control",
+        "report",
+        "review",
+        "chain",
+    },
+    "exploit_worker": {
+        "browse",
+        "probe",
+        "exploit",
+        "report",
+        "review",
+        "chain",
+        "plan",
+        "control",
+    },
+    "post_exploit_worker": {
+        "probe",
+        "exploit",
+        "retrieve",
+        "report",
+        "review",
+        "chain",
+        "memory",
+        "plan",
+        "control",
+    },
+    "review_worker": {
+        "review",
+        "report",
+        "chain",
+        "memory",
+        "plan",
+        "control",
+    },
+}
+
+
+POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES: dict[str, set[str]] = {
+    "session_reuse": {"browse", "probe", "retrieve", "report", "review", "plan", "control"},
+    "privilege_probe": {
+        "browse",
+        "probe",
+        "exploit",
+        "retrieve",
+        "report",
+        "review",
+        "chain",
+        "plan",
+        "control",
+    },
+    "data_access": {
+        "probe",
+        "exploit",
+        "retrieve",
+        "report",
+        "review",
+        "chain",
+        "memory",
+        "plan",
+        "control",
+    },
+    "chain_closure": {"report", "review", "chain", "memory", "plan", "control", "probe"},
+}
+
+
 # Module-level surface gating.
 #
 # Reused by both the kind-aware skill SWEEP (L~2080) and the dispatch-level

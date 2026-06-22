@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import inspect
 
 from vxis.core.db import create_engine, get_session, init_db
 from vxis.models.db_models import FindingRecord, ScanRecord, ToolRunRecord
@@ -39,6 +40,11 @@ class TestInitDb:
         eng = create_engine("sqlite+aiosqlite:///:memory:")
         try:
             await init_db(eng)  # should not raise
+            async with eng.begin() as conn:
+                tables = await conn.run_sync(
+                    lambda sync_conn: set(inspect(sync_conn).get_table_names())
+                )
+            assert {"scan_records", "finding_records", "tool_run_records"} <= tables
         finally:
             await eng.dispose()
 
@@ -48,6 +54,11 @@ class TestInitDb:
         try:
             await init_db(eng)
             await init_db(eng)  # second call — no-op
+            async with eng.begin() as conn:
+                tables = await conn.run_sync(
+                    lambda sync_conn: set(inspect(sync_conn).get_table_names())
+                )
+            assert {"scan_records", "finding_records", "tool_run_records"} <= tables
         finally:
             await eng.dispose()
 

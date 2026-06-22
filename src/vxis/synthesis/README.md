@@ -1,5 +1,11 @@
-# `src/vxis/synthesis/` — Cross-Protocol Attack Chain Synthesis
+# `src/vxis/synthesis/` — Focused Chain Synthesis Helpers
 
-Attack chain builder that combines findings from different phases/protocols into multi-step compromise paths. Legacy P8 phase logic.
+The live scan loop builds attack chains through the `link_chain` BrainTool in
+`agent/tools/finding_tools.py`. This package only keeps focused helpers that are
+still imported or tested:
 
-Phase A's Brain is expected to build chains itself via the `link_chain` BrainTool (`agent/tools/finding_tools.py`). This module is not consumed by the v2 shim — slated for review in Phase B cleanup.
+- `cross_protocol.py` tags evidence by surface/layer and synthesizes known
+  cross-surface chain patterns.
+Old standalone chain-builder, PoC-generator, honeypot, red/blue defense, and
+defense-simulator files were removed because they were not connected to runtime
+entrypoints.

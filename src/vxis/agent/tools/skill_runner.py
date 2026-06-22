@@ -20,22 +20,6 @@ from vxis.agent.tool_registry import ToolResult
 
 logger = logging.getLogger(__name__)
 
-# Per-(skill, args) result cache. When Brain re-runs an identical call, we
-# return the cached result plus a nudge that prompts it to vary the args.
-# This kills pathological loops (e.g. test_idor with the same pattern 16x)
-# without relying solely on the scan-loop dedup gate.
-#
-# Escalation policy (Brain-First: if Brain ignores nudges, ESCALATE):
-#   hit #1  → cached result + "CHANGE ARGS" nudge (soft)
-#   hit #2  → cached result + list of UNTRIED skills  (stronger)
-#   hit #3+ → ok=False, error="stuck_loop" — force Brain to pick another skill
-_skill_cache: dict[str, dict[str, Any]] = {}
-
-# Track every skill ever called (any args) so we can tell Brain what it
-# has NOT tried yet when it's stuck. Separate from _skill_cache because
-# we care about skill diversity, not args identity.
-_skills_ever_called: set[str] = set()
-
 _SKILL_ALIASES: dict[str, str] = {
     "auth_bypass": "attempt_auth",
     "sqli_bypass": "attempt_auth",
@@ -51,9 +35,12 @@ _SKILL_ALIASES: dict[str, str] = {
 
 
 def _reset_cache_for_tests() -> None:
-    """Clear the skill cache — production code should not call this."""
-    _skill_cache.clear()
-    _skills_ever_called.clear()
+    """Compatibility hook for older tests.
+
+    RunSkillTool cache state is now per tool instance, so fresh instances are
+    already clean and production scans cannot inherit another scan's skill cache.
+    """
+    return
 
 
 def _normalize_skill_name(skill_name: str) -> str:
@@ -115,6 +102,12 @@ class RunSkillTool:
         },
         "required": ["skill", "target_url"],
     }
+
+    def __init__(self) -> None:
+        # Per-(skill, args) result cache. This prevents same-scan loops without
+        # leaking stale results into a later scan of the same target.
+        self._skill_cache: dict[str, dict[str, Any]] = {}
+        self._skills_ever_called: set[str] = set()
 
     async def run(self, **kwargs: Any) -> ToolResult:
         requested_skill = str(kwargs.get("skill", "")).strip()
@@ -195,13 +188,13 @@ class RunSkillTool:
         except Exception:
             _cache_key = f"{skill_name}:{target_url}:{params!r}"
 
-        _cached = _skill_cache.get(_cache_key)
+        _cached = self._skill_cache.get(_cache_key)
         if _cached is not None:
             _cached["hits"] = _cached.get("hits", 1) + 1
             _hits = _cached["hits"]
 
             # Compute untried-skill hint for hits >= 2
-            _untried = sorted(SKILL_REGISTRY.keys() - _skills_ever_called)
+            _untried = sorted(SKILL_REGISTRY.keys() - self._skills_ever_called)
 
             if _hits >= 3:
                 # Hard block — Brain has ignored 2 soft nudges. Refuse the
@@ -257,7 +250,7 @@ class RunSkillTool:
 
         # Record that this skill has been attempted (fresh args) so the
         # "untried skills" list stays accurate across retries.
-        _skills_ever_called.add(skill_name)
+        self._skills_ever_called.add(skill_name)
 
         skill = SKILL_REGISTRY[skill_name]
         fn = skill["fn"]
@@ -388,7 +381,7 @@ class RunSkillTool:
         _summary = " | ".join(summary_parts)
         _data = _with_egress_metadata(result, egress)
         # Store in cache so repeat calls short-circuit without re-execution
-        _skill_cache[_cache_key] = {
+        self._skill_cache[_cache_key] = {
             "data": _data,
             "summary": _summary,
             "hits": 1,

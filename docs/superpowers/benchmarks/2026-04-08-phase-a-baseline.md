@@ -113,6 +113,10 @@ Task 14 sub-agent can re-derive max depth from them with the same parser.
 
 | File | Path |
 |---|---|
+The generated artifact files from this historical run were removed from the
+working tree on 2026-06-19. The paths below are retained only to document what
+was captured during the run.
+
 | Juice Shop report (live) | `reports/VXIS_Pipeline_localhost:3000.html` |
 | Juice Shop report (archived) | `docs/superpowers/benchmarks/artifacts/2026-04-08/report_juiceshop.html` |
 | Juice Shop scan log | `docs/superpowers/benchmarks/artifacts/2026-04-08/scan_juiceshop.log` |

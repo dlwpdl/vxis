@@ -71,8 +71,8 @@ class OSILayer(str, Enum):
     HUMAN = "human"  # 소셜 엔지니어링, 피싱
     DATA = "data"  # DB, 파일, 시크릿
     DESKTOP = "desktop"  # phase-G: native desktop apps (Win/macOS/Linux)
-    MOBILE = "mobile"  # phase-G: iOS/Android apps (stubs in phase-H)
-    GAME = "game"  # phase-G: game protocols (stubs in phase-H)
+    MOBILE = "mobile"  # iOS/Android evidence classification
+    GAME = "game"  # game protocol evidence classification
 
 
 class AttackCategory(str, Enum):

@@ -113,15 +113,20 @@ def _record_compression_result(
 def _build_summarize_prompt(max_words: int) -> str:
     return f"""\
 You are summarizing a chunk of penetration testing conversation history.
-Preserve ALL of the following in your summary:
-- Discovered vulnerabilities, endpoints, and attack vectors
-- Credentials, tokens, API keys, session cookies found
-- Tools used and their key results (what worked, what didn't)
-- Failed attempts (so the agent doesn't repeat them)
-- Architecture insights (tech stack, framework, routing patterns)
+Compress it into terse bullets so the next AI decision is fast and unambiguous.
 
-Be concise but NEVER drop security-relevant details. Output a single
-paragraph summary, max {max_words} words."""
+Keep only security-relevant state:
+- Objective / current branch
+- Scope and policy constraints
+- Confirmed findings and evidence ids
+- Promising leads not yet proven
+- Failed attempts and negative controls
+- Credentials/session material actually observed
+- Tool results that change next action
+- Next recommended action
+
+Do not include raw logs, long payload dumps, repeated prose, or speculation.
+Output bullets only, max {max_words} words."""
 
 
 def _resolve_policy(brain: Any) -> Any:

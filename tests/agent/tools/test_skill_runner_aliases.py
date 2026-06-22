@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+from typing import Any
 
 import pytest
 
-from vxis.agent.tools.skill_runner import RunSkillTool, _normalize_skill_name, _reset_cache_for_tests
 from vxis.agent.skills import SKILL_REGISTRY
+from vxis.agent.tools.skill_runner import RunSkillTool, _normalize_skill_name, _reset_cache_for_tests
 
 
 @pytest.mark.asyncio
@@ -100,5 +101,48 @@ async def test_run_skill_does_not_mutate_caller_params(monkeypatch: pytest.Monke
             params=params,
         )
         assert params == {"url": "http://localhost:3000/search?q=", "round": 1}
+    finally:
+        monkeypatch.setitem(SKILL_REGISTRY["test_injection"], "fn", original)
+
+
+@pytest.mark.asyncio
+async def test_run_skill_cache_is_per_tool_instance(monkeypatch: pytest.MonkeyPatch) -> None:
+    _reset_cache_for_tests()
+    calls = {"count": 0}
+
+    async def _fake_injection(*, url: str, **kwargs: Any) -> dict[str, Any]:
+        calls["count"] += 1
+        return {"vulnerable": False, "url": url, "findings": [], "calls": calls["count"]}
+
+    original = SKILL_REGISTRY["test_injection"]["fn"]
+    monkeypatch.setitem(SKILL_REGISTRY["test_injection"], "fn", _fake_injection)
+    try:
+        params = {"url": "http://localhost:3000/search?q=", "round": 1}
+        first_tool = RunSkillTool()
+
+        first = await first_tool.run(
+            skill="test_injection",
+            target_url="http://localhost:3000",
+            params=params,
+        )
+        repeat = await first_tool.run(
+            skill="test_injection",
+            target_url="http://localhost:3000",
+            params=params,
+        )
+        second_tool = RunSkillTool()
+        fresh_scan = await second_tool.run(
+            skill="test_injection",
+            target_url="http://localhost:3000",
+            params=params,
+        )
+
+        assert first.ok is True
+        assert repeat.ok is True
+        assert fresh_scan.ok is True
+        assert calls["count"] == 2
+        assert "[CACHED" in repeat.summary
+        assert "[CACHED" not in fresh_scan.summary
+        assert fresh_scan.data["calls"] == 2
     finally:
         monkeypatch.setitem(SKILL_REGISTRY["test_injection"], "fn", original)

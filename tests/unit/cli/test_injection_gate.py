@@ -8,8 +8,6 @@ These tests lock down the exact semantics via the extracted helper.
 
 from __future__ import annotations
 
-import pytest
-
 from vxis.cli.main import _is_local_benchmark
 
 

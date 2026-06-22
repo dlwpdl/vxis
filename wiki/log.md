@@ -45,4 +45,11 @@
 
 ## [2026-06-02] decision | ADR-011~013 v3.2 consolidation spine activated
 - v3.2 기준: 신규 빌드보다 Phase 0 통합이 우선. PTI memory shadow, `HypothesisNode`, single Brain model map, DAG finish priority, profile policy, verifier spine이 authoritative.
-- Implementation ledger: `docs/superpowers/CONSOLIDATION.md`.
+- Superseded on 2026-06-19 by `docs/superpowers/plans/2026-06-19-current-core-plan.md`
+  and `docs/superpowers/DECISIONS.md`.
+
+## [2026-06-19] decision | current-plan-only cleanup
+- Old phase-era plans/specs and the v3 consolidation ledger were removed from
+  the working tree.
+- Current direction: compact Strix-style loop, production wiring only, WIP
+  outside `src/` until complete.

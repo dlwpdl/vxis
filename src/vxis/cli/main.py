@@ -100,14 +100,16 @@ def _is_local_benchmark(target: str) -> bool:
 
 
 def _box_flag_to_mode(box: str) -> str | None:
-    """NOW-3 #1: map the --box flag to the pipeline's box_mode override.
+    """Map the --box flag to the production pipeline's box-mode override.
 
-    'auto' / blank → None (let the pipeline derive from --kind). Any other value
-    is lowercased and passed through; the pipeline's _resolve_box_mode validates
-    it and fail-closes to black, so the CLI keeps a single source of truth.
+    Only black-box is wired in production today. Blank/auto lets the pipeline
+    choose its default, and every unsupported spelling fail-closes to black
+    instead of pretending white/grey source-aware tools exist.
     """
     norm = (box or "").strip().lower()
-    return None if norm in ("", "auto") else norm
+    if norm in ("", "auto"):
+        return None
+    return "black"
 
 
 def _textual_available() -> bool:
@@ -132,6 +134,27 @@ def _should_use_tui(tui_flag: bool, interactive: bool) -> bool:
     if not sys.stdout.isatty():
         return False
     return _textual_available()
+
+
+def _runtime_display_stages() -> list[object]:
+    """Fallback display stages for the current single-loop runtime."""
+    from types import SimpleNamespace
+
+    return [SimpleNamespace(id=1, name="Scan Loop", stage="runtime")]
+
+
+def _require_optional_dependency(module_name: str, extra: str, command: str) -> None:
+    """Fail with an actionable message when an optional CLI extra is missing."""
+    import importlib.util
+
+    if importlib.util.find_spec(module_name) is not None:
+        return
+    err_console.print(
+        f"[bold red]{command} requires optional dependency '{module_name}'.[/bold red]\n"
+        f"Install it with: [cyan]uv sync --extra {extra}[/cyan] "
+        f"or [cyan]pip install 'vxis[{extra}]'[/cyan]"
+    )
+    raise typer.Exit(code=2)
 
 
 @app.callback()
@@ -218,7 +241,7 @@ def scan(
     resume: Optional[str] = typer.Option(
         None,
         "--resume",
-        help="Resume from checkpoint file (skip completed phases)",
+        help="Resume from checkpoint file",
     ),
     interactive: bool = typer.Option(
         False,
@@ -254,15 +277,15 @@ def scan(
     kind: str = typer.Option(
         "web",
         "--kind",
-        help="Target surface: web | desktop | mobile | game (phase-A: web only; "
-        "desktop/mobile/game land in phase-B+).",
+        help="Target surface: web | desktop | mobile | game | code. Use web for the "
+        "production-tested dynamic scan path.",
     ),
     box: str = typer.Option(
         "auto",
         "--box",
-        help="Box mode: auto (derive from --kind) | black (zero source access, "
-        "external-attacker view) | white (source-aware) | grey (source + dynamic). "
-        "An explicit 'black' stays fully black even on a code target.",
+        help="Box mode: auto | black. Production scans are black-box only today; "
+        "unsupported white/grey values fail closed to black until source-aware "
+        "CODE tools are completed outside the production path.",
     ),
     instruction: Optional[str] = typer.Option(
         None,
@@ -289,7 +312,7 @@ def scan(
     """Run a Brain-First security scan against the target.
 
     \b
-    기본: LLM API Brain이 20 Phase 파이프라인을 자율 실행
+    기본: LLM API Brain이 단일 scan loop를 자율 실행
     --interactive: Claude Code가 Brain (stdin/stdout JSON 프로토콜)
     --resume: 이전 스캔의 체크포인트에서 재개
     --manifest: 여러 타겟을 한 번에 스캔 (scan.yml)
@@ -404,7 +427,7 @@ def scan(
     _print_banner()
 
     from vxis.interaction.surface import TargetKind
-    from vxis.registry import VERSION, WEB_PHASES
+    from vxis.registry import VERSION
     from vxis.cli.preflight import run_preflight
     from vxis.cli.scan_display import ScanLiveDisplay
 
@@ -495,7 +518,7 @@ def scan(
                 "beacons": str(len(p1_engagement.beacons)),
             }
         )
-    display.init_phases(WEB_PHASES)
+    display.init_phases(_runtime_display_stages())
 
     ctx = None
 
@@ -559,7 +582,7 @@ def scan(
                     f"Target: [cyan]{summary.get('target')}[/cyan]\n"
                     f"Title:  {summary.get('title') or '(none)'}\n"
                     f"Frameworks: {', '.join(summary.get('frameworks') or []) or '(none)'}\n"
-                    f"Phases to run: {summary.get('phase_count')} "
+                    f"Planned checks: {summary.get('phase_count') or 'dynamic'} "
                     f"(SQLi/XSS/RCE/SSRF/Path/Cmd 등)\n\n"
                     f"[bold]Choose mode:[/bold]\n"
                     f"  [green]R[/green] = [green]read-only[/green] (GET/HEAD probes only; POST/PUT/DELETE and exploit primitives are BLOCKED)\n"
@@ -733,7 +756,7 @@ def scan(
         if use_tui:
             # Interactive Textual TUI owns the event loop, so the scan runs in a
             # worker thread; events fan out to BOTH the live TUI and the (now
-            # passive) ScanLiveDisplay, which still aggregates phases/findings for
+            # passive) ScanLiveDisplay, which still aggregates runtime/findings for
             # the post-scan summary below. Injection approval defaults to read-only
             # under the TUI (no interactive prompt mid-app); --no-tui restores the
             # yes/no gate.
@@ -877,15 +900,17 @@ def scan(
         )
 
     # Summary line
-    phase_failed = sum(1 for p in display.phases if p["status"] == "failed")
+    runtime_failed = sum(1 for p in display.phases if p["status"] == "failed")
+    iteration_count = int(getattr(ctx, "scan_loop_iterations", 0) or 0)
     summary_parts = [
         "[bold green]Scan completed[/bold green]",
         f"[cyan]{ctx.duration_seconds:.1f}s[/cyan]",
         f"[bold]{len(ctx.findings)}[/bold] finding(s)",
-        f"{len([p for p in display.phases if p['status'] == 'done'])}/{len(display.phases)} phases",
     ]
-    if phase_failed:
-        summary_parts.append(f"[red]{phase_failed} failed[/red]")
+    if iteration_count:
+        summary_parts.append(f"{iteration_count} iteration(s)")
+    if runtime_failed:
+        summary_parts.append(f"[red]{runtime_failed} failed[/red]")
     console.print("  |  ".join(summary_parts))
 
     # ── Benchmark instrumentation summary (grep-parseable) ──
@@ -927,7 +952,7 @@ def scan(
                 + f"  ×{_b['calls']}[/dim]"
             )
 
-    # Report path (Phase 6이 리포트 생성했으면)
+    # Report path when report generation produced an HTML artifact.
     if ctx.findings:
         from urllib.parse import urlparse as _up
 
@@ -939,9 +964,9 @@ def scan(
             console.print(f"[dim]Report:[/dim] [underline]{_report_path}[/underline]")
 
     # Exit code:
-    # 0 = success with findings OR clean target (all phases OK)
-    # 3 = scan completed but some phases failed (degraded)
-    if phase_failed:
+    # 0 = success with findings OR clean target
+    # 3 = scan completed but the fallback display saw a failed runtime stage
+    if runtime_failed:
         raise typer.Exit(code=3)
 
 
@@ -1040,6 +1065,7 @@ def attestation(
     ),
 ) -> None:
     """Generate a formal attestation letter (DOCX) for a completed scan."""
+    _require_optional_dependency("docx", "export", "vxis attestation")
     from datetime import date
 
     out_path = output or Path(f"attestation_{scan_id}_{date.today().isoformat()}.docx")
@@ -1189,6 +1215,7 @@ def batch(
     ),
 ) -> None:
     """Batch scan multiple targets from a CSV portfolio file."""
+    _require_optional_dependency("docx", "export", "vxis batch")
     from vxis.core.batch import BatchScanner
 
     profile = normalize_scan_profile_name(profile)
@@ -1306,6 +1333,8 @@ def export(
             f"Choose from: {', '.join(sorted(supported_formats))}"
         )
         raise typer.Exit(code=1)
+    if format in {"docx", "attestation"}:
+        _require_optional_dependency("docx", "export", f"vxis export --format {format}")
 
     # Resolve default output path
     ext_map = {"docx": "docx", "html": "html", "json": "json", "csv": "csv", "attestation": "docx"}
@@ -1415,6 +1444,7 @@ def dashboard(
     port: int = typer.Option(8080, "--port", help="Port number to listen on"),
 ) -> None:
     """Launch the VXIS web dashboard."""
+    _require_optional_dependency("fastapi", "dashboard", "vxis dashboard")
     import uvicorn
     from vxis.dashboard.app import app as dash_app
 
@@ -1428,6 +1458,7 @@ def dashboard(
 @app.command(name="dashboard-init")
 def dashboard_init() -> None:
     """Initialise dashboard DB tables and seed default admin/admin user."""
+    _require_optional_dependency("fastapi", "dashboard", "vxis dashboard-init")
     import asyncio
 
     from vxis.core.db import create_engine, init_db

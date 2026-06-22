@@ -81,7 +81,9 @@ These are **prompt engineering changes** in the ~25-line `LOOP_PROMPT_ADAPTER`. 
 
 ### Why this is acceptable for Phase A
 
-Phase A's plan document (`docs/superpowers/plans/2026-04-08-phase-a-strix-parity-single-loop.md`) explicitly predicted this outcome in the 2026-04-09 pivot section:
+The historical Phase A plan predicted this outcome in its 2026-04-09 pivot
+section. That plan has since been removed from the working tree; the durable
+decision is preserved in `docs/superpowers/DECISIONS.md`:
 
 > **Trade-off accepted:** Phase A benchmark (Task 14 revised) may show lower finding count than baseline temporarily — because gpt-5.4-mini running ad-hoc shell commands is less tuned than the current hand-coded phase pipeline. The win is that `brain_decision_count` is meaningful (each decision is a strategic scanner choice, not a micro-payload step) AND Phase B can trivially scale quality by adding better scanners or better models without touching the architecture.
 

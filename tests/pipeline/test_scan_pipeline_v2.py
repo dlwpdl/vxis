@@ -400,27 +400,6 @@ async def test_scan_pipeline_v2_copies_findings_from_store_into_ctx():
 
     _reset_for_tests()
     rep = ReportFindingTool()
-    await rep.run(
-        title="Test SQL Injection",
-        severity="high",
-        finding_type="sql_injection",
-        affected_component="/login",
-        description="Classic bypass",
-        evidence="POST /login user=admin'--",
-        impact="Login bypass may expose privileged data.",
-        technical_analysis="Negative control invalid credentials returned 401; injection payload returned an authenticated response twice. repeat_count=2",
-        poc_description="Replay invalid credentials, then replay the SQL injection payload twice.",
-        poc_script_code=(
-            "POST /login HTTP/1.1\n\nuser=bad&password=bad\n\n"
-            "HTTP/1.1 401 Unauthorized\n\nnegative control\n\n"
-            "POST /login HTTP/1.1\n\nuser=admin'--\n\n"
-            "HTTP/1.1 200 OK\nSet-Cookie: session=admin\n\n"
-            "repeat_count=2\n"
-            "POST /login HTTP/1.1\n\nuser=admin'--\n\n"
-            "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
-        ),
-        remediation_steps="Use parameterized queries for authentication.",
-    )
 
     fake_brain = MagicMock()
     pipe = ScanPipeline(brain=fake_brain, auto_approve_injection=True)
@@ -432,11 +411,39 @@ async def test_scan_pipeline_v2_copies_findings_from_store_into_ctx():
         "findings": [],
         "messages": 3,
     }
+
+    async def _fake_loop_run():
+        await rep.run(
+            title="Test SQL Injection",
+            severity="high",
+            finding_type="sql_injection",
+            affected_component="/login",
+            description="Classic bypass",
+            evidence="POST /login user=admin'--",
+            impact="Login bypass may expose privileged data.",
+            technical_analysis=(
+                "Negative control invalid credentials returned 401; injection payload "
+                "returned an authenticated response twice. repeat_count=2"
+            ),
+            poc_description="Replay invalid credentials, then replay the SQL injection payload twice.",
+            poc_script_code=(
+                "POST /login HTTP/1.1\n\nuser=bad&password=bad\n\n"
+                "HTTP/1.1 401 Unauthorized\n\nnegative control\n\n"
+                "POST /login HTTP/1.1\n\nuser=admin'--\n\n"
+                "HTTP/1.1 200 OK\nSet-Cookie: session=admin\n\n"
+                "repeat_count=2\n"
+                "POST /login HTTP/1.1\n\nuser=admin'--\n\n"
+                "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
+            ),
+            remediation_steps="Use parameterized queries for authentication.",
+        )
+        return fake_loop_result
+
     with patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls, patch(
         "vxis.pipeline.scan_pipeline_v2._reset_finding_store"
     ):
         mock_loop = MagicMock()
-        mock_loop.run = AsyncMock(return_value=fake_loop_result)
+        mock_loop.run = AsyncMock(side_effect=_fake_loop_run)
         mock_loop_cls.return_value = mock_loop
 
         ctx = await pipe.run(target="http://x")
@@ -558,6 +565,13 @@ async def test_prepare_target_runtime_marks_local_web_target_as_docker_aware():
     assert runtime.runtime_mode == "docker_local_target"
     assert runtime.metadata["local_target"] is True
     assert runtime.metadata["compose_file"] == "infra/benchmarks/juice-shop.yml"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", [TargetKind.MOBILE, TargetKind.GAME])
+async def test_prepare_target_runtime_rejects_unwired_future_surfaces(kind):
+    with pytest.raises(NotImplementedError, match="not production-wired"):
+        await prepare_target_runtime("x", kind)
 
 
 # ---------------------------------------------------------------------------

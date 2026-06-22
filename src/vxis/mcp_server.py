@@ -2,8 +2,8 @@
 
 External Brains (Claude Code Opus, etc.) connect via MCP JSON-RPC and call
 VXIS primitives as tools. This server is **LLM-free**: it only dispatches to
-pure primitive functions, Phase Registry lookups, and Scope Enforcement. The
-reasoning lives in the external Brain.
+pure primitive functions and Scope Enforcement. The reasoning lives in the
+external Brain.
 
 Tool groups:
     sense_*    — HTTP/browser/traffic observation (sensing primitives)
@@ -13,7 +13,6 @@ Tool groups:
     ghost_*    — anonymity layer control
     chain_*    — attack chain graph algorithms
     output_*   — finding storage, scoring, report generation
-    phase_*    — Phase Registry lookup (strategic guides)
     scope_*    — Scope & PII enforcement
 
 Transport: JSON-RPC 2.0 over stdio (MCP 2024-11-05).
@@ -383,82 +382,41 @@ TOOLS_SPEC: list[tuple[str, str, dict[str, Any], Callable[..., Awaitable[Any]]]]
 
 
 # ---------------------------------------------------------------------------
-# Non-primitive tools — phase registry & scope enforcement
+# Non-primitive tools — scope enforcement
 # ---------------------------------------------------------------------------
 
 
-async def _tool_phase_list(**_: Any) -> Any:
-    from vxis.phases.registry import EXECUTION_ORDER, PHASE_REGISTRY
-
-    out = []
-    for pid in EXECUTION_ORDER:
-        g = PHASE_REGISTRY.get(pid)
-        if g is None:
-            continue
-        out.append(
-            {
-                "id": g.id,
-                "name_en": g.name_en,
-                "name_ko": g.name_ko,
-                "parallel_group": g.parallel_group,
-                "depends_on": list(g.depends_on),
-            }
-        )
-    return {"phases": out, "total": len(out)}
-
-
-async def _tool_phase_get(phase_id: str) -> Any:
-    from vxis.phases.registry import PHASE_REGISTRY
-
-    g = PHASE_REGISTRY.get(phase_id)
-    if g is None:
-        raise ValueError(f"Unknown phase id: {phase_id}")
-    return {
-        "id": g.id,
-        "name_en": g.name_en,
-        "name_ko": g.name_ko,
-        "objective_en": g.objective_en,
-        "objective_ko": g.objective_ko,
-        "strategic_advice_en": g.strategic_advice_en,
-        "strategic_advice_ko": g.strategic_advice_ko,
-        "crown_hint_en": getattr(g, "crown_hint_en", ""),
-        "crown_hint_ko": getattr(g, "crown_hint_ko", ""),
-        "recommended_primitives": list(g.recommended_primitives),
-        "dead_end_criteria": [
-            {
-                "id": c.id,
-                "description_en": c.description_en,
-                "description_ko": c.description_ko,
-            }
-            for c in g.dead_end_criteria
-        ],
-        "parallel_group": g.parallel_group,
-        "depends_on": list(g.depends_on),
-    }
-
-
-async def _tool_phase_validate(**_: Any) -> Any:
-    from vxis.phases.registry import validate_dependencies
-
-    issues = validate_dependencies()
-    return {"valid": not issues, "issues": issues}
-
-
-async def _tool_scope_check_url(url: str, action: str = "read") -> Any:
+async def _tool_scope_check_url(
+    url: str,
+    scope_arg: str | None = None,
+    **_: Any,
+) -> Any:
     from vxis.scope import ScopeEnforcer, load_scope
 
-    scope = load_scope()
+    scope = load_scope(scope_arg, url)
     enforcer = ScopeEnforcer(scope)
-    result = enforcer.check_url(url, action=action)
+    result = enforcer.check_url(url)
     return _to_dict(result)
 
 
-async def _tool_scope_check_action(action: str, target: str = "") -> Any:
+async def _tool_scope_check_action(
+    method: str = "",
+    url: str = "",
+    body: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+    scope_arg: str | None = None,
+    action: str = "",
+    target: str = "",
+) -> Any:
     from vxis.scope import ScopeEnforcer, load_scope
 
-    scope = load_scope()
+    checked_url = url or target
+    checked_method = method or action or "GET"
+    if not checked_url:
+        raise ValueError("scope_check_action requires url")
+    scope = load_scope(scope_arg, checked_url)
     enforcer = ScopeEnforcer(scope)
-    result = enforcer.check_action(action, target=target)
+    result = enforcer.check_action(checked_method, checked_url, body=body, headers=headers)
     return _to_dict(result)
 
 
@@ -486,38 +444,23 @@ async def _tool_scope_redact(text: str) -> Any:
 
 NON_PRIMITIVE_TOOLS: list[tuple[str, str, dict[str, Any], Callable[..., Awaitable[Any]]]] = [
     (
-        "phase_list",
-        "List all Phase Guides in execution order (Brain-First strategic playbook).",
-        _s(),
-        _tool_phase_list,
-    ),
-    (
-        "phase_get",
-        "Fetch the full strategic guide for a Phase id (objective, advice, primitives, dead-end criteria).",
-        _s(phase_id=_p("string", "Phase id e.g. P4_cpr", required=True)),
-        _tool_phase_get,
-    ),
-    (
-        "phase_validate",
-        "Validate Phase Registry dependency graph.",
-        _s(),
-        _tool_phase_validate,
-    ),
-    (
         "scope_check_url",
-        "Check whether a URL is in-scope for an action.",
+        "Check whether a URL is in scope.",
         _s(
             url=_p("string", "URL to check", required=True),
-            action=_p("string", "Action (read/probe/inject)", default="read"),
+            scope_arg=_p("string", "Optional path to a scope JSON file"),
         ),
         _tool_scope_check_url,
     ),
     (
         "scope_check_action",
-        "Check whether an action is permitted by the current scope policy.",
+        "Check whether an HTTP action is permitted by scope policy.",
         _s(
-            action=_p("string", "Action name", required=True),
-            target=_p("string", "Optional target", default=""),
+            method=_p("string", "HTTP method", default="GET"),
+            url=_p("string", "URL to check", required=True),
+            body=_p("object", "Optional request body"),
+            headers=_p("object", "Optional request headers"),
+            scope_arg=_p("string", "Optional path to a scope JSON file"),
         ),
         _tool_scope_check_action,
     ),

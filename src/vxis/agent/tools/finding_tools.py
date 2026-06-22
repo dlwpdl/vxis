@@ -1,7 +1,8 @@
 """Finding CRUD tools — Brain reports / queries / chains discovered vulnerabilities.
 
-State is held in a module-level list of Finding dicts for Phase A. Phase B may
-swap this for a persistent store (SQLite/Postgres episodic memory).
+State is held in a per-scan FindingStore. Direct tool use falls back to a
+process-default store for compatibility, but production scans bind an active
+store through a context variable so findings/chains do not leak across runs.
 
 Tools:
 - report_finding: Brain submits a new finding. Assigns an ID, stores it, returns the ID.
@@ -14,6 +15,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+from contextvars import ContextVar, Token
+from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -27,10 +30,35 @@ from vxis.agent.tools._poc_signals import (
 
 logger = logging.getLogger(__name__)
 
-# Module-level findings store — Phase A in-memory
-_findings: list[dict[str, Any]] = []
-_chains: list[dict[str, Any]] = []
-_event_callback: Callable[[str, dict[str, Any]], None] | None = None
+
+@dataclass
+class FindingStore:
+    findings: list[dict[str, Any]] = field(default_factory=list)
+    chains: list[dict[str, Any]] = field(default_factory=list)
+    event_callback: Callable[[str, dict[str, Any]], None] | None = None
+
+
+_DEFAULT_STORE = FindingStore()
+_ACTIVE_STORE: ContextVar[FindingStore] = ContextVar(
+    "vxis_finding_store",
+    default=_DEFAULT_STORE,
+)
+
+
+def new_finding_store() -> FindingStore:
+    return FindingStore()
+
+
+def set_active_finding_store(store: FindingStore) -> Token[FindingStore]:
+    return _ACTIVE_STORE.set(store)
+
+
+def reset_active_finding_store(token: Token[FindingStore]) -> None:
+    _ACTIVE_STORE.reset(token)
+
+
+def _store() -> FindingStore:
+    return _ACTIVE_STORE.get()
 
 _VALID_SEVERITIES = ("critical", "high", "medium", "low", "informational")
 _REPEAT_MARKERS = (
@@ -196,34 +224,34 @@ def _canonical_finding_type(value: str) -> str:
 
 
 def _reset_for_tests() -> None:
-    """Reset module-level state. Called from test fixtures, NOT from production."""
-    global _findings, _chains, _event_callback
-    _findings = []
-    _chains = []
-    _event_callback = None
+    """Reset the active in-memory store. Called from test fixtures and scan setup."""
+    store = _store()
+    store.findings.clear()
+    store.chains.clear()
+    store.event_callback = None
 
 
 def _get_findings() -> list[dict[str, Any]]:
     """Public accessor for integration (ScanAgentLoop) to read the findings list."""
-    return list(_findings)
+    return list(_store().findings)
 
 
 def _get_chains() -> list[dict[str, Any]]:
     """Public accessor for integration to read the chains list."""
-    return list(_chains)
+    return list(_store().chains)
 
 
 def set_event_callback(callback: Callable[[str, dict[str, Any]], None] | None) -> None:
     """Register a lightweight callback for live TUI events."""
-    global _event_callback
-    _event_callback = callback
+    _store().event_callback = callback
 
 
 def _emit_event(event_type: str, data: dict[str, Any]) -> None:
-    if _event_callback is None:
+    callback = _store().event_callback
+    if callback is None:
         return
     try:
-        _event_callback(event_type, data)
+        callback(event_type, data)
     except Exception:
         logger.debug("finding tool event callback failed for %s", event_type, exc_info=True)
 
@@ -239,7 +267,7 @@ def _severity_to_level(severity: str) -> int:
 
 
 def _finding_by_id(finding_id: str) -> dict[str, Any] | None:
-    for finding in _findings:
+    for finding in _store().findings:
         if finding.get("id") == finding_id:
             return finding
     return None
@@ -285,18 +313,18 @@ def _normalize_chain_artifact(value: Any) -> dict[str, Any]:
         return {}
 
     normalized: dict[str, Any] = {}
-    for field in _CHAIN_ARTIFACT_FIELDS:
-        if field not in value:
+    for artifact_field in _CHAIN_ARTIFACT_FIELDS:
+        if artifact_field not in value:
             continue
-        if field == "source_output_used_in_pivot":
-            normalized[field] = bool(value.get(field))
-        elif field == "repeat_count":
+        if artifact_field == "source_output_used_in_pivot":
+            normalized[artifact_field] = bool(value.get(artifact_field))
+        elif artifact_field == "repeat_count":
             try:
-                normalized[field] = int(value.get(field) or 0)
+                normalized[artifact_field] = int(value.get(artifact_field) or 0)
             except (TypeError, ValueError):
-                normalized[field] = 0
+                normalized[artifact_field] = 0
         else:
-            normalized[field] = _stringify_artifact_value(value.get(field))
+            normalized[artifact_field] = _stringify_artifact_value(value.get(artifact_field))
 
     hops: list[dict[str, Any]] = []
     raw_hops = value.get("hops")
@@ -305,18 +333,18 @@ def _normalize_chain_artifact(value: Any) -> dict[str, Any]:
             if not isinstance(raw_hop, dict):
                 continue
             hop: dict[str, Any] = {}
-            for field in _CHAIN_HOP_FIELDS:
-                if field not in raw_hop:
+            for hop_field in _CHAIN_HOP_FIELDS:
+                if hop_field not in raw_hop:
                     continue
-                if field == "source_output_used_in_pivot":
-                    hop[field] = bool(raw_hop.get(field))
-                elif field == "repeat_count":
+                if hop_field == "source_output_used_in_pivot":
+                    hop[hop_field] = bool(raw_hop.get(hop_field))
+                elif hop_field == "repeat_count":
                     try:
-                        hop[field] = int(raw_hop.get(field) or 0)
+                        hop[hop_field] = int(raw_hop.get(hop_field) or 0)
                     except (TypeError, ValueError):
-                        hop[field] = 0
+                        hop[hop_field] = 0
                 else:
-                    hop[field] = _stringify_artifact_value(raw_hop.get(field))
+                    hop[hop_field] = _stringify_artifact_value(raw_hop.get(hop_field))
             if hop:
                 hops.append(hop)
     if hops:
@@ -693,6 +721,7 @@ class ReportFindingTool:
     }
 
     async def run(self, **kwargs: Any) -> ToolResult:
+        findings = _store().findings
         severity = kwargs.get("severity", "").lower()
         if severity not in _VALID_SEVERITIES:
             return ToolResult(
@@ -781,7 +810,7 @@ class ReportFindingTool:
         new_base = _base_path(kwargs["affected_component"])
         normalized_extra_evidence = _normalize_extra_evidence(kwargs.get("extra_evidence"))
 
-        for existing in _findings:
+        for existing in findings:
             ex_type = _normalize(_canonical_finding_type(existing["finding_type"]))
             ex_component = _normalize(existing["affected_component"])
             ex_base = _base_path(existing["affected_component"])
@@ -860,7 +889,7 @@ class ReportFindingTool:
                     ok=True,
                     data={
                         "id": existing["id"],
-                        "total_findings": len(_findings),
+                        "total_findings": len(findings),
                         "deduped": True,
                         "affected_endpoints": existing.get("affected_endpoints", []),
                     },
@@ -871,7 +900,7 @@ class ReportFindingTool:
                     ),
                 )
 
-        finding_id = f"VXIS-{len(_findings) + 1:04d}"
+        finding_id = f"VXIS-{len(findings) + 1:04d}"
         finding = {
             "id": finding_id,
             "title": str(kwargs["title"]),
@@ -898,7 +927,7 @@ class ReportFindingTool:
             "verifier_reasoning": str(kwargs.get("verifier_reasoning", "")),
             "verified": str(kwargs.get("verifier_verdict", "")).upper() == "CONFIRMED",
         }
-        _findings.append(finding)
+        findings.append(finding)
         logger.info(
             "[Finding] %s [%s] %s — %s",
             finding_id,
@@ -922,7 +951,7 @@ class ReportFindingTool:
 
         return ToolResult(
             ok=True,
-            data={"id": finding_id, "total_findings": len(_findings), "proof": finding["proof"]},
+            data={"id": finding_id, "total_findings": len(findings), "proof": finding["proof"]},
             summary=f"finding recorded: {finding_id} [{severity}] {str(kwargs['title'])[:60]}",
         )
 
@@ -951,6 +980,7 @@ class QueryFindingsTool:
     }
 
     async def run(self, **kwargs: Any) -> ToolResult:
+        findings = _store().findings
         severity = kwargs.get("severity")
         finding_type = kwargs.get("finding_type")
         component_substr = (kwargs.get("component_contains") or "").lower()
@@ -962,7 +992,7 @@ class QueryFindingsTool:
         limit = max(1, min(100, limit))
 
         results = []
-        for f in _findings:
+        for f in findings:
             if severity and f["severity"] != severity:
                 continue
             if finding_type and f["finding_type"] != finding_type:
@@ -987,8 +1017,8 @@ class QueryFindingsTool:
 
         return ToolResult(
             ok=True,
-            data={"count": len(results), "findings": results, "total_in_store": len(_findings)},
-            summary=f"query_findings: {len(results)} match(es) (of {len(_findings)} total)",
+            data={"count": len(results), "findings": results, "total_in_store": len(findings)},
+            summary=f"query_findings: {len(results)} match(es) (of {len(findings)} total)",
         )
 
 
@@ -1035,6 +1065,9 @@ class LinkChainTool:
     }
 
     async def run(self, **kwargs: Any) -> ToolResult:
+        store = _store()
+        findings = store.findings
+        chains = store.chains
         finding_ids = kwargs.get("finding_ids") or []
         rationale = kwargs.get("rationale", "")
         crown_jewel = kwargs.get("crown_jewel", "")
@@ -1057,7 +1090,7 @@ class LinkChainTool:
                 ok=False, summary="link_chain: rationale is required", error="missing_rationale"
             )
 
-        known_ids = {f["id"] for f in _findings}
+        known_ids = {f["id"] for f in findings}
         unknown = [fid for fid in finding_ids if fid not in known_ids]
         if unknown:
             return ToolResult(
@@ -1087,7 +1120,7 @@ class LinkChainTool:
             )
 
         new_signature = _chain_signature(list(finding_ids), str(crown_jewel))
-        for existing in _chains:
+        for existing in chains:
             existing_ids = list(existing.get("finding_ids") or [])
             if tuple(existing_ids) == tuple(finding_ids):
                 return ToolResult(
@@ -1095,7 +1128,7 @@ class LinkChainTool:
                     data={
                         "id": existing.get("id", ""),
                         "length": len(existing_ids),
-                        "total_chains": len(_chains),
+                        "total_chains": len(chains),
                         "dedup": True,
                         "verification_status": existing.get("verification_status", "narrative"),
                         "proof": existing.get("proof", {}),
@@ -1111,7 +1144,7 @@ class LinkChainTool:
                     data={
                         "id": existing.get("id", ""),
                         "length": len(existing_ids),
-                        "total_chains": len(_chains),
+                        "total_chains": len(chains),
                         "dedup": True,
                         "verification_status": existing.get("verification_status", "narrative"),
                         "proof": existing.get("proof", {}),
@@ -1119,7 +1152,7 @@ class LinkChainTool:
                     summary=f"link_chain: similar chain ignored ({existing.get('id', '')})",
                 )
 
-        chain_id = f"CHAIN-{len(_chains) + 1:03d}"
+        chain_id = f"CHAIN-{len(chains) + 1:03d}"
         chain = {
             "id": chain_id,
             "finding_ids": list(finding_ids),
@@ -1130,7 +1163,7 @@ class LinkChainTool:
             "proof": proof,
             "verification_status": "verified" if proof.get("verified") else "narrative",
         }
-        _chains.append(chain)
+        chains.append(chain)
         logger.info("[Chain] %s: %s → %s", chain_id, " → ".join(finding_ids), str(crown_jewel)[:60])
         first = _finding_by_id(finding_ids[0]) or {}
         _emit_event(
@@ -1170,7 +1203,7 @@ class LinkChainTool:
             data={
                 "id": chain_id,
                 "length": len(finding_ids),
-                "total_chains": len(_chains),
+                "total_chains": len(chains),
                 "verification_status": chain["verification_status"],
                 "proof": proof,
             },

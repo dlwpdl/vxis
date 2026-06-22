@@ -43,7 +43,10 @@ class _Ghost:
 
 
 def test_valid_intensity_allows(tmp_path) -> None:
-    enforce(_eng("stealth"), technique="recon", target="app.acme.com", **_ctx(tmp_path))
+    entry = enforce(_eng("stealth"), technique="recon", target="app.acme.com", **_ctx(tmp_path))
+
+    assert entry["decision"] == "ALLOW"
+    assert entry["target"] == "app.acme.com"
 
 
 def test_unknown_intensity_rejected(tmp_path) -> None:

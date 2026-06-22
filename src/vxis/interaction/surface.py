@@ -1,9 +1,10 @@
 """Surface ABC layer — universal app pentesting foundation.
 
 Discriminator (`TargetKind`) + four role ABCs (`Hands`, `Eyes`, `XRay`, `Recon`)
-let Brain attack web / desktop / mobile / game targets through one contract.
-Concrete implementations live in `web_surface.py` (phase-B), `desktop/*` (phase-C+),
-`mobile/*` (phase-H), `game/*` (phase-H).
+let Brain attack supported targets through one contract. Concrete production
+implementations live in `web_surface.py` and selected `desktop/*` adapters.
+MOBILE/GAME enum values remain for evidence classification, but their runtime
+surfaces are not wired until real implementations are promoted.
 
 Brain · Director · Phase logic stay surface-agnostic — they program against the ABC,
 the SurfaceFactory binds the right impl per `Target.kind` (+ `Target.os` for desktop).
