@@ -1,20 +1,16 @@
 """VXIS Agent Brain — AI-driven pentesting decision engine.
 
-Runtime architecture:
-    ┌──────────────────────────────────────────────────────────┐
-    │  BRAIN (Cognitive Loop)                                   │
-    │                                                          │
-    │  1. PERCEIVE  — Context Compressor로 데이터 압축           │
-    │  2. RECALL    — Knowledge Store에서 패턴 매칭             │
-    │  3. REASON    — Token Router로 최적 모델 선택 → LLM 호출  │
-    │  4. REFLECT   — 전략 전환 필요 여부 판단                   │
-    │  5. ACT       — 실행할 도구 결정                          │
-    │  6. LEARN     — 결과를 Knowledge Store에 축적             │
-    └──────────────────────────────────────────────────────────┘
+Runtime architecture (single persistent ReAct loop):
+    1. PERCEIVE — compress prior steps into a compact 3-tier history
+    2. REASON   — call the director LLM (provider fallback chain) for ONE action
+    3. ACT      — return the chosen tool call to the scan loop
+    4. REFLECT  — periodic self-assessment / strategy shift
 
-    쓸수록 강해지는 구조:
-    - Day 1:   90% LLM, 10% 컴파일 패턴 → 비쌈
-    - Day 100: 10% LLM, 90% 컴파일 패턴 → 저렴 & 최강
+NOTE (honesty): an earlier design also described a KnowledgeStore that "gets
+stronger with use" (Day 1 expensive -> Day 100 cheap compiled patterns) and a
+TokenRouter tier selector. Neither is wired into the live runtime — no caller
+passes a knowledge_store, and the token router was removed. Do not describe
+self-learning or tier-routing as a current capability.
 """
 
 from __future__ import annotations
@@ -67,7 +63,6 @@ if TYPE_CHECKING:
     from vxis.agent.memory import AgentMemory
     from vxis.knowledge.store import KnowledgeStore
     from vxis.knowledge.compressor import ContextCompressor
-    from vxis.llm.router import TokenRouter
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +136,6 @@ class AgentBrain:
         memory: "AgentMemory | None" = None,
         knowledge_store: "KnowledgeStore | None" = None,
         compressor: "ContextCompressor | None" = None,
-        token_router: "TokenRouter | None" = None,
         brain_mode: str = "standard",
         target_kind: TargetKind = TargetKind.WEB,
     ) -> None:
@@ -176,7 +170,6 @@ class AgentBrain:
         # Optional context helpers
         self._knowledge_store = knowledge_store
         self._compressor = compressor
-        self._token_router = token_router
         self._reflection_interval = 5  # 매 N스텝마다 자기 평가
         self._consecutive_no_findings = 0  # 연속 발견 없는 스텝 수
         # Last provider/model/HTTP error from a failed call — surfaced by
