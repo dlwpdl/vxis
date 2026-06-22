@@ -1094,14 +1094,35 @@ def report_menu() -> dict | None:
 
 # ── 전체 인터랙티브 루프 ────────────────────────────────────────
 
+def _home_menu_action(use_home: bool) -> str | None:
+    """The dossier Textual home when usable; the InquirerPy menu otherwise (and
+    as a fallback if the Textual home fails to start)."""
+    if use_home:
+        try:
+            from vxis.cli.home_tui import run_home_menu
+
+            return run_home_menu()
+        except Exception:
+            pass
+    return main_menu()
+
+
 def run_interactive() -> None:
     """메인 인터랙티브 루프. `vxis` 실행 시 호출."""
-    print_banner()
-    console.print()
+    import sys
+
+    from vxis.cli.main import _textual_available
+
+    # Textual "dossier" home on a real terminal (it carries its own banner);
+    # InquirerPy menu off-TTY / when textual is unavailable.
+    use_home = sys.stdout.isatty() and _textual_available()
+    if not use_home:
+        print_banner()
+        console.print()
 
     while True:
         try:
-            action = main_menu()
+            action = _home_menu_action(use_home)
         except KeyboardInterrupt:
             console.print("\n[dim]종료합니다.[/dim]")
             break
