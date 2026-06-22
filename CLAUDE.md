@@ -36,7 +36,7 @@ X-Ray  = 투시 (트래픽 가로채기)
 - 텍스트 바이링구얼: `"English|||한국어"`. 한국어도 영어만큼 상세히.
 - 리포트: NCC Group 스타일 단일 HTML, `ReportGenerator.generate_html_file()`.
 - 네트워크: Hands/X-Ray/Controller/Finding 모듈. raw `httpx` 금지.
-- AGPL 포크 금지 (Strix/PentAGI 등). 100% 자체 구현.
+- 외부 펜테스트 툴 포크 금지 — 100% 자체 구현. (Strix=Apache-2.0·PentAGI=MIT 등 permissive라 라이선스상은 가능하지만, own-IP·재라이선스 자유 위해 개념만 참고. 근거 → [ADR-014](wiki/decisions/014_moat_strategy.md))
 - 100% 공격 벡터 커버리지. Phase 건너뛰기 금지.
 - Enterprise 스캔 시 인젝션은 **마지막**, yes/no 승인 후 실행.
 - 코드 수정 후 자동 스캔 실행 금지 — 사용자 요청 시만.

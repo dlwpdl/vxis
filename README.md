@@ -80,7 +80,7 @@ poetry run vxis scan http://localhost:3000 --profile standard --output reports/j
 - `any` 타입 사용 금지 — Zod/Pydantic 런타임 검증
 - 모든 텍스트 **bilingual** — `"English|||한국어"`
 - 리포트는 항상 **NCC Group 스타일** 단일 HTML (VXIS ReportGenerator)
-- AGPL 라이선스 코드 포크 금지 — 100% 자체 구현
+- 외부 펜테스트 툴 포크 금지 — 100% 자체 구현 (Strix·PentAGI 등은 permissive 라이선스지만 own-IP 위해 개념만 참고)
 - Hands/X-Ray/Controller/Finding 모듈 사용, raw `httpx` 금지
 - Enterprise 스캔 시 injection은 마지막에 **approval gate** 필수
 
