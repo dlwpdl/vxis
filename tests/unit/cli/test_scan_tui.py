@@ -198,6 +198,33 @@ async def test_detail_follows_live_then_freezes_on_drill_in():
         assert len(detail.lines) == frozen       # frozen on the drilled node
 
 
+async def test_dossier_theme_and_chrome_applied():
+    """The refined 'dossier' look: vxis theme, titled bordered panels, hidden root,
+    and a status bar that renders (markup valid) with the brass cost segment."""
+    app = ScanTUI(target="http://localhost:3000")
+    async with app.run_test():
+        assert app.theme == "vxis"
+        tree = app.query_one("#tree", Tree)
+        assert tree.show_root is False
+        assert str(tree.border_title) == "SCAN TREE"
+        # detail starts "DETAIL"; focusing the tree highlights the (root) Director
+        # view in live-follow mode, so the title reflects the followed node.
+        assert str(app.query_one("#detail", RichLog).border_title) in ("DETAIL", "DIRECTOR")
+        status = str(app.query_one("#status", Static).render())
+        assert "$" in status and "tok" in status  # cost segment present + markup OK
+
+
+async def test_detail_border_title_follows_drilled_node():
+    app = ScanTUI(target="t")
+    async with app.run_test() as pilot:
+        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]})
+        await pilot.pause()
+        app._render_detail({"kind": "iter", "pos": 0})
+        assert str(app.query_one("#detail", RichLog).border_title) == "ITER 01"
+        app._render_detail({"kind": "agent", "agent": {"id": "w1"}})
+        assert str(app.query_one("#detail", RichLog).border_title) == "W1"
+
+
 async def test_feed_event_never_raises_on_garbage():
     app = ScanTUI(target="t")
     async with app.run_test():

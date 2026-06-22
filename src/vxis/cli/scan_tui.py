@@ -29,6 +29,7 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
+from textual.theme import Theme
 from textual.widgets import Footer, Header, RichLog, Static, Tree
 
 from vxis.agent.attack_taxonomy import attack_category
@@ -37,6 +38,30 @@ from vxis.agent.scan_event_model import ScanEventModel
 from vxis.agent.tui_renderers import render_detail
 
 _AGENT_ICON = {"running": "●", "waiting": "◌", "done": "✓", "blocked": "■"}
+
+# Dossier identity: graphite ink ground + brass (home accent) + steel cyan, the
+# same palette as the VXIS comparison artifact — a deliberate, cohesive look
+# instead of Textual's generic default theme. Brand colors are also used as
+# literal hex in status/label markup (Rich markup can't resolve TCSS $vars).
+_BRASS = "#E3A24A"
+_CYAN = "#5FB6C4"
+_GREEN = "#6FB86F"
+_HAIR = "#3A4150"
+
+VXIS_THEME = Theme(
+    name="vxis",
+    primary=_BRASS,
+    secondary=_CYAN,
+    accent=_BRASS,
+    foreground="#E8EAED",
+    background="#13161C",
+    surface="#1B1F27",
+    panel="#222732",
+    success=_GREEN,
+    warning=_BRASS,
+    error="#D97777",
+    dark=True,
+)
 
 
 def _as_int(value: Any, default: int = 0) -> int:
@@ -68,10 +93,28 @@ class ScanTUI(App):
     """Interactive scan view. Feed it events via :meth:`feed_event`."""
 
     CSS = """
-    Horizontal { height: 1fr; }
-    #tree { width: 42%; border-right: solid $accent; }
-    #detail { width: 1fr; padding: 0 1; }
-    #status { height: 1; dock: bottom; background: $panel; color: $text; }
+    Screen { background: $background; }
+    Header { background: $surface; color: $primary; text-style: bold; }
+    Footer { background: $surface; }
+    Horizontal { height: 1fr; padding: 1 1 0 1; }
+    #tree {
+        width: 42%;
+        background: $surface;
+        border: round $primary;
+        border-title-color: $primary;
+        border-title-align: left;
+        padding: 0 1;
+    }
+    #detail {
+        width: 1fr;
+        background: $surface;
+        border: round $secondary;
+        border-title-color: $secondary;
+        border-title-align: left;
+        padding: 0 1;
+        margin-left: 1;
+    }
+    #status { height: 1; dock: bottom; background: $panel; color: $text; padding: 0 1; }
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -127,10 +170,17 @@ class ScanTUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        self.register_theme(VXIS_THEME)
+        self.theme = "vxis"
         self.title = "VXIS"
         self.sub_title = self._meta["target"]
-        self.query_one("#tree", Tree).focus()
-        self.query_one("#detail", RichLog).write(
+        tree = self.query_one("#tree", Tree)
+        tree.show_root = False  # the target lives in the header/border-title, not a root node
+        tree.border_title = "SCAN TREE"
+        tree.focus()
+        detail = self.query_one("#detail", RichLog)
+        detail.border_title = "DETAIL"
+        detail.write(
             "[dim]Scan starting — the Brain's first decision can take ~10-30s on a "
             "large-context model. Steps appear on the left; select one to inspect.[/dim]"
         )
@@ -418,8 +468,18 @@ class ScanTUI(App):
             return lines
         return []
 
+    def _detail_title(self, data: Any) -> str:
+        if isinstance(data, dict):
+            kind = data.get("kind")
+            if kind == "iter":
+                return f"ITER {int(data.get('pos', 0)) + 1:02d}"
+            if kind == "agent":
+                return str((data.get("agent") or {}).get("id", "AGENT")).upper()
+        return "DIRECTOR"
+
     def _render_detail(self, data: Any) -> None:
         log = self.query_one("#detail", RichLog)
+        log.border_title = self._detail_title(data)
         log.clear()
         self._narrative_started = True
         for line in self._markup_for(data):
@@ -448,14 +508,16 @@ class ScanTUI(App):
             if rows else "~$0 · 0 tok"
         )
         found = sum(it.found for it in self.model.iterations)
-        state = "[green]done[/green]" if self._done else "[yellow]running[/yellow]"
-        sep = "  [dim]│[/dim]  "
+        state = f"[{_GREEN}]● done[/]" if self._done else f"[{_BRASS}]● running[/]"
+        found_txt = f"{found} findings"
+        found_str = f"[{_GREEN}]{found_txt}[/]" if found else f"[dim]{found_txt}[/dim]"
+        sep = f"  [{_HAIR}]│[/]  "
         return (
-            f" {state}{sep}{cost}{sep}box {m['box_mode']}"
+            f" {state}{sep}[{_BRASS}]{cost}[/]{sep}[{_CYAN}]box {m['box_mode']}[/]"
             f"{sep}inject {m['injection_mode']}"
             f"{sep}ghost {'on' if m['ghost'] else 'off'}"
-            f"{sep}{m['context']}{sep}brain {m['brain_decisions']}"
-            f"{sep}{found} findings"
+            f"{sep}[dim]{m['context']}[/dim]{sep}brain {m['brain_decisions']}"
+            f"{sep}{found_str}"
             f"{sep}[dim]q quit · ↑↓ move · e expand[/dim]"
         )
 
