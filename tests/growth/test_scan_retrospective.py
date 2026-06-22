@@ -89,7 +89,8 @@ def test_record_scan_retrospective_writes_local_json(tmp_path, monkeypatch) -> N
     assert payload["llm_runtime"]["discipline_profile"] == "frontier_loose"
     assert payload["memory_compression"]["triggered"] == 2
     assert payload["memory_compression"]["total_tokens_saved"] == 1200
-    assert payload["strix_comparison"]["reference"] == "strix"
+    assert payload["maturity_scorecard"]["method"] == "self_maturity_rubric_v1"
+    assert "strix" not in repr(payload["maturity_scorecard"]).lower()
     hint_ids = {hint["hint_id"] for hint in payload["improvement_hints"]}
     assert "error_oracle_noise" in hint_ids
     assert "false_positive_pressure" in hint_ids

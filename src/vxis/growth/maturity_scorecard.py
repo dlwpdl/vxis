@@ -1,13 +1,17 @@
-"""Heuristic maturity scorecard for comparing VXIS runtime output to Strix.
+"""Internal self-maturity scorecard for a scan's output.
 
-This is intentionally a stable rubric rather than a claim of objective truth.
-The goal is to record the same dimensions over time so "are we getting closer
-to Strix-style depth?" can be tracked numerically instead of by gut feel.
+A stable rubric that scores each scan's output on five dimensions computed from
+real run data (findings, chains, control-plane, LLM usage). The goal is to
+track "is our depth improving over time?" numerically across runs.
+
+NOTE: this is an INTERNAL self-rubric, not a competitor comparison. An earlier
+version hardcoded a fictional "Strix = 100" baseline and emitted overall_gap
+into every retrospective; that fabricated number was removed (honesty over
+aspiration). Compare scorecards across our own runs, not against a made-up bar.
 """
 from __future__ import annotations
 
 from typing import Any
-
 
 _CHAINABLE_TYPES = {
     "weak_auth",
@@ -24,24 +28,9 @@ _CHAINABLE_TYPES = {
     "business_logic",
 }
 
-_STRIX_BASELINE = {
-    "poc_rigor": 100,
-    "chaining_depth": 100,
-    "campaign_convergence": 100,
-    "autonomy": 100,
-    "operator_visibility": 100,
-}
-
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 100.0) -> float:
     return max(lower, min(upper, value))
-
-
-def _finding_blob(finding: dict[str, Any]) -> str:
-    return " ".join(
-        str(finding.get(key, ""))
-        for key in ("finding_type", "title", "description", "impact", "technical_analysis", "poc_description")
-    ).lower()
 
 
 def _score_poc_rigor(findings: list[dict[str, Any]], verdict_counts: dict[str, int]) -> float:
@@ -148,7 +137,7 @@ def _score_operator_visibility(control_plane: dict[str, Any] | None, review_hist
     return _clamp(score)
 
 
-def build_strix_comparison_scorecard(
+def build_maturity_scorecard(
     *,
     findings: list[dict[str, Any]],
     loop_result: dict[str, Any],
@@ -156,6 +145,11 @@ def build_strix_comparison_scorecard(
     llm_usage: dict[str, Any] | None = None,
     control_plane: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Score this scan's output on five maturity dimensions (0-100 each).
+
+    Returns ``{"method", "overall", "dimensions": {dim: score}}`` — bare scores,
+    no competitor baseline. Track these across our own runs over time.
+    """
     verdict_counts = dict(loop_result.get("verdict_counts") or {})
     review_queue = list(loop_result.get("review_queue") or [])
     branches = list(loop_result.get("branches") or [])
@@ -187,17 +181,7 @@ def build_strix_comparison_scorecard(
     }
     overall = round(sum(dimensions.values()) / max(1, len(dimensions)), 1)
     return {
-        "reference": "strix",
-        "method": "heuristic_fixed_rubric_v1",
-        "overall_vxis": overall,
-        "overall_strix": 100.0,
-        "overall_gap": round(100.0 - overall, 1),
-        "dimensions": {
-            key: {
-                "vxis": value,
-                "strix": _STRIX_BASELINE[key],
-                "gap": round(_STRIX_BASELINE[key] - value, 1),
-            }
-            for key, value in dimensions.items()
-        },
+        "method": "self_maturity_rubric_v1",
+        "overall": overall,
+        "dimensions": dimensions,
     }

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from vxis.growth.strix_comparison import build_strix_comparison_scorecard
+from vxis.growth.maturity_scorecard import build_maturity_scorecard
 
 logger = logging.getLogger(__name__)
 
@@ -225,7 +225,7 @@ def record_scan_retrospective(
         },
         "memory_compression": dict((control_plane or {}).get("telemetry", {}).get("memory_compression") or {}),
         "timeline": _tool_timeline(messages),
-        "strix_comparison": build_strix_comparison_scorecard(
+        "maturity_scorecard": build_maturity_scorecard(
             findings=findings,
             loop_result=loop_result,
             attack_chains=attack_chains or [],

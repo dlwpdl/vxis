@@ -6,7 +6,7 @@ import urllib.request
 from typing import Any
 
 from vxis.agent.brain import AgentBrain, get_brain_decision_count, get_llm_call_count
-from vxis.growth.strix_comparison import build_strix_comparison_scorecard
+from vxis.growth.maturity_scorecard import build_maturity_scorecard
 from vxis.pipeline.scan_pipeline_v2 import ScanPipeline
 
 TARGET = os.environ.get("VXIS_BENCH_TARGET", "http://127.0.0.1:3000").strip()
@@ -137,7 +137,7 @@ async def main() -> None:
         "blocking_branches": latest_control_plane.get("blocking_branches") or [],
         "memory_directives": latest_control_plane.get("memory_directives") or [],
         "chain_candidates": latest_control_plane.get("chain_candidates") or [],
-        "strix_comparison": build_strix_comparison_scorecard(
+        "maturity_scorecard": build_maturity_scorecard(
             findings=[
                 {
                     "finding_type": getattr(f, "finding_type", ""),
