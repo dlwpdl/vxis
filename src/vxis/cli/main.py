@@ -136,6 +136,29 @@ def _should_use_tui(tui_flag: bool, interactive: bool) -> bool:
     return _textual_available()
 
 
+def _tui_skip_reason(tui_flag: bool, interactive: bool) -> str | None:
+    """Human reason the Textual TUI will NOT launch — surfaced to the operator so
+    a silent fallback to the Rich-Live display is never mysterious. Returns None
+    when the TUI will launch, or when the skip is the user's explicit choice
+    (`--no-tui` / `--interactive`), which need no warning.
+    """
+    import sys
+
+    if not tui_flag or interactive:
+        return None
+    if not _textual_available():
+        return (
+            "textual is not installed in this environment — run "
+            "`uv tool install --force --editable <repo>` (or `pip install textual`)."
+        )
+    if not sys.stdout.isatty():
+        return (
+            "stdout is not a TTY (piped/redirected, or a non-terminal IDE console); "
+            "the interactive TUI needs a real terminal."
+        )
+    return None
+
+
 def _runtime_display_stages() -> list[object]:
     """Fallback display stages for the current single-loop runtime."""
     from types import SimpleNamespace
@@ -752,6 +775,9 @@ def scan(
         approve_destructive=approve_destructive,
     )
     use_tui = _should_use_tui(tui, interactive)
+    _tui_reason = _tui_skip_reason(tui, interactive)
+    if _tui_reason:
+        console.print(f"[yellow]ℹ Interactive TUI off:[/yellow] [dim]{_tui_reason}[/dim]")
     try:
         if use_tui:
             # Interactive Textual TUI owns the event loop, so the scan runs in a

@@ -1146,6 +1146,9 @@ class ScanLiveDisplay:
             total_tokens = int(self.telemetry.get("total_tokens") or 0)
             token_prefix = "~" if self.telemetry.get("tokens_estimated") else ""
             parts.append(f"[bold]Tokens:[/bold] [cyan]{token_prefix}{total_tokens:,}[/cyan]")
+            cost_usd = float(self.telemetry.get("cost_usd") or 0.0)
+            cost_prefix = "est. " if self.telemetry.get("cost_estimated") else ""
+            parts.append(f"[bold]Cost:[/bold] [cyan]{cost_prefix}${cost_usd:.4f}[/cyan]")
 
         return Panel(" │ ".join(parts), border_style="cyan")
 
