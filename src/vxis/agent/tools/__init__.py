@@ -7,6 +7,7 @@ Future tasks will expand build_default_registry() with high-level Phase wrappers
 from __future__ import annotations
 
 import logging
+import os
 
 from vxis.agent.tool_registry import ToolRegistry
 from vxis.agent.tools.control_tools import FinishScanTool, ThinkTool, WaitTool
@@ -92,7 +93,11 @@ def build_default_registry(
     reg.register(BrowserRenderTool())
     reg.register(InterceptProxyTool())
     reg.register(ShellExecTool(sandbox_key=sandbox_key))
-    reg.register(NmapScanTool(sandbox_key=sandbox_key))
+    # nmap is OFF by default: it is not installed in the sandbox image, and
+    # active port/service scanning carries scope/noise/legality risk. Opt in
+    # explicitly with VXIS_ENABLE_NMAP=1 (and install nmap in the sandbox).
+    if os.environ.get("VXIS_ENABLE_NMAP", "").strip().lower() in {"1", "true", "yes", "on"}:
+        reg.register(NmapScanTool(sandbox_key=sandbox_key))
     reg.register(PythonExecTool(sandbox_key=sandbox_key))
     reg.register(ReportFindingTool())
     reg.register(QueryFindingsTool())

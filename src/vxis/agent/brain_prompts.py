@@ -373,7 +373,7 @@ If you're unsure what to do next, ALWAYS call think first. Never guess.
 
 - ONE action per message. See result → think → next action.
 - python_exec for multi-line code. shell_exec for single commands. Never heredocs.
-- shell_exec runs inside Docker sandbox (sqlmap, nuclei, ffuf, nmap available).
+- shell_exec runs inside Docker sandbox (sqlmap, nuclei, ffuf available).
 - Report findings via report_finding when you discover something real.
 - NEVER call report_finding on a thin signal alone. First gather a real PoC:
   baseline/control comparison, concrete request/response transcript, and the

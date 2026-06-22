@@ -145,6 +145,9 @@ async def test_nmap_scan_tool_respects_default_local_backpressure(monkeypatch):
     assert len(shell.calls) == 2
 
 
-def test_build_default_registry_contains_nmap_scan_tool():
+def test_build_default_registry_excludes_nmap_by_default(monkeypatch):
+    # nmap is held behind VXIS_ENABLE_NMAP (not in the sandbox image +
+    # active-scan risk); the default registry must not advertise it.
+    monkeypatch.delenv("VXIS_ENABLE_NMAP", raising=False)
     reg = build_default_registry()
-    assert "nmap_scan" in reg.list_tools()
+    assert "nmap_scan" not in reg.list_tools()

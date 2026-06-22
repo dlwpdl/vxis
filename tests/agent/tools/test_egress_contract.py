@@ -24,7 +24,10 @@ def test_default_registry_tools_have_target_egress_contracts() -> None:
         assert isinstance(target_egress["target_facing"], bool)
 
 
-def test_registry_target_egress_snapshot_flags_partial_and_direct_tools() -> None:
+def test_registry_target_egress_snapshot_flags_partial_and_direct_tools(monkeypatch) -> None:
+    # nmap is opt-in (VXIS_ENABLE_NMAP); enable it here to exercise the
+    # direct_raw_socket egress flagging it represents.
+    monkeypatch.setenv("VXIS_ENABLE_NMAP", "1")
     snapshot = registry_target_egress_snapshot(build_default_registry())
     tools = {item["name"]: item for item in snapshot["tools"]}
 

@@ -27,7 +27,7 @@ Output ONLY a JSON object — no prose, no explanation outside it:
 
 Primary — full freedom to compose attacks:
 - `shell_exec` — Linux sandbox with sqlmap, nuclei, ffuf, nikto, gobuster,
-  wapiti, curl, httpx, nmap, jq, python3 pre-installed. Use it like a real
+  wapiti, curl, httpx, jq, python3 pre-installed. Use it like a real
   pentester's terminal. Pick wordlists, tune flags, pipe outputs.
 - `python_exec` — multi-line Python 3 in the same sandbox (httpx/aiohttp
   pre-installed). For custom fuzzers, PoC scripts, parallel request sprays.
