@@ -29,39 +29,24 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
-from textual.theme import Theme
 from textual.widgets import Footer, Header, RichLog, Static, Tree
 
 from vxis.agent.attack_taxonomy import attack_category
 from vxis.agent.llm_cost import summarize_usage
 from vxis.agent.scan_event_model import ScanEventModel
 from vxis.agent.tui_renderers import render_detail
+from vxis.cli.theme import BRASS as _BRASS
+from vxis.cli.theme import CYAN as _CYAN
+from vxis.cli.theme import GREEN as _GREEN
+from vxis.cli.theme import HAIR as _HAIR
+from vxis.cli.theme import vxis_textual_theme
 
 _AGENT_ICON = {"running": "●", "waiting": "◌", "done": "✓", "blocked": "■"}
 
-# Dossier identity: graphite ink ground + brass (home accent) + steel cyan, the
-# same palette as the VXIS comparison artifact — a deliberate, cohesive look
-# instead of Textual's generic default theme. Brand colors are also used as
-# literal hex in status/label markup (Rich markup can't resolve TCSS $vars).
-_BRASS = "#E3A24A"
-_CYAN = "#5FB6C4"
-_GREEN = "#6FB86F"
-_HAIR = "#3A4150"
-
-VXIS_THEME = Theme(
-    name="vxis",
-    primary=_BRASS,
-    secondary=_CYAN,
-    accent=_BRASS,
-    foreground="#E8EAED",
-    background="#13161C",
-    surface="#1B1F27",
-    panel="#222732",
-    success=_GREEN,
-    warning=_BRASS,
-    error="#D97777",
-    dark=True,
-)
+# Dossier identity (graphite ink + brass + steel cyan), shared with the input
+# wizard via vxis.cli.theme. Brand hex are also used as literals in status/label
+# markup (Rich markup can't resolve TCSS $vars).
+VXIS_THEME = vxis_textual_theme()
 
 
 def _as_int(value: Any, default: int = 0) -> int:

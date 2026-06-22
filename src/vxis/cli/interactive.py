@@ -11,10 +11,33 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from InquirerPy import inquirer
+from InquirerPy import inquirer as _inquirer
 from InquirerPy.separator import Separator
 
+from vxis.cli.theme import BRASS, CYAN, vxis_inquirer_style
+
 console = Console()
+
+# Inject the VXIS "dossier" style into every InquirerPy prompt in this module so
+# the input wizard matches the scan TUI — without editing 50+ call sites. The
+# shim shadows the `inquirer` name: `inquirer.select(...)` etc. route through here
+# and get `style=` defaulted. Only `style` is injected (every prompt type accepts
+# it); per-call qmark/pointer/marker are left untouched.
+_VXIS_PROMPT_STYLE = vxis_inquirer_style()
+
+
+class _StyledInquirer:
+    def __getattr__(self, name: str):
+        factory = getattr(_inquirer, name)
+
+        def _make(*args, **kwargs):
+            kwargs.setdefault("style", _VXIS_PROMPT_STYLE)
+            return factory(*args, **kwargs)
+
+        return _make
+
+
+inquirer = _StyledInquirer()
 
 _DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 _DEFAULT_OLLAMA_MODEL = "qwen2.5-coder:14b"
@@ -519,9 +542,9 @@ __     __ __  __ ___  ____
 def print_banner() -> None:
     console.print(
         Panel(
-            Text(_BANNER.strip(), style="bold cyan", justify="center"),
+            Text(_BANNER.strip(), style=f"bold {BRASS}", justify="center"),
             subtitle="[dim]AI-powered security automation platform[/dim]",
-            border_style="cyan",
+            border_style=BRASS,
             padding=(0, 2),
         )
     )
@@ -946,7 +969,7 @@ def _show_plugin_summary(
     )
 
     console.print()
-    console.print(Panel(table, title="스캔 설정 확인", border_style="blue"))
+    console.print(Panel(table, title="스캔 설정 확인", border_style=CYAN))
     for line in plugin_lines:
         console.print(f"  {line}")
     console.print()
@@ -1024,7 +1047,7 @@ def report_menu() -> dict | None:
             table = Table(
                 title="\U0001f4cb 최근 스캔 목록",
                 show_header=True, header_style="bold",
-                border_style="cyan", expand=False,
+                border_style=CYAN, expand=False,
             )
             table.add_column("ID", style="bold cyan")
             table.add_column("대상")
@@ -1410,7 +1433,7 @@ def _execute_scan(params: dict) -> None:
             title=f"\U0001f50d 취약점 목록 — {params['target']}",
             show_header=True,
             header_style="bold",
-            border_style="cyan",
+            border_style=CYAN,
             expand=False,
         )
         _detail_table.add_column("심각도", no_wrap=True, width=12)
@@ -1500,7 +1523,7 @@ def _show_results(params: dict) -> None:
                     info.add_row("\U0001f4c5 시작:", str(scan.started_at))
                     info.add_row("\u2705 상태:", f"[green]{scan.status}[/green]")
                     info.add_row("\U0001f50d 발견:", f"[bold]{len(findings)}[/bold]개")
-                    console.print(Panel(info, title=f"스캔 #{scan_id}", border_style="blue"))
+                    console.print(Panel(info, title=f"스캔 #{scan_id}", border_style=CYAN))
 
                     if findings:
                         # Severity 테이블
@@ -1556,7 +1579,7 @@ def _show_results(params: dict) -> None:
                     table = Table(
                         title="\U0001f4cb 최근 스캔 목록",
                         show_header=True, header_style="bold",
-                        border_style="cyan", expand=False,
+                        border_style=CYAN, expand=False,
                     )
                     table.add_column("ID", style="bold cyan", no_wrap=True)
                     table.add_column("대상", no_wrap=True)
@@ -1944,7 +1967,7 @@ def _industry_view_results() -> None:
         title="\U0001f4ca 산업 스캔 결과 파일",
         show_header=True,
         header_style="bold",
-        border_style="cyan",
+        border_style=CYAN,
     )
     table.add_column("파일명", style="cyan")
     table.add_column("유형")
@@ -2001,7 +2024,7 @@ def _industry_outreach_menu() -> None:
         }
         table = Table(
             title="\U0001f4e4 아웃리치 큐",
-            show_header=True, header_style="bold", border_style="cyan",
+            show_header=True, header_style="bold", border_style=CYAN,
         )
         table.add_column("ID (앞 8자)", style="dim")
         table.add_column("기업명")
@@ -2091,7 +2114,7 @@ def _show_industry_summary(result: object) -> None:
 
     grade_table = Table(
         title="\U0001f4ca 보안 등급 분포",
-        show_header=True, header_style="bold", border_style="cyan",
+        show_header=True, header_style="bold", border_style=CYAN,
     )
     grade_table.add_column("등급", width=8)
     grade_table.add_column("기업 수", justify="right")
@@ -2724,7 +2747,7 @@ def _execute_agent_scan(params: dict) -> None:
         f"[dim]AI는 넓게 생각하지만, 실제 요청과 공격 실행은 선택한 범위 안에서만 진행합니다.\n"
         f"정보 수집만 모드에서도 공개 정보에서 중요한 위험이 보이면 보고합니다.[/dim]",
         title="\U0001f9e0 Autonomous Pentesting",
-        border_style="cyan",
+        border_style=BRASS,
     ))
     console.print()
 
