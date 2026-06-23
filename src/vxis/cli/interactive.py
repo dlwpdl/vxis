@@ -14,7 +14,7 @@ from rich.text import Text
 from InquirerPy import inquirer as _inquirer
 from InquirerPy.separator import Separator
 
-from vxis.cli.theme import BRASS, CYAN, vxis_inquirer_style
+from vxis.cli.theme import BRASS, vxis_inquirer_style
 
 console = Console()
 
@@ -589,16 +589,39 @@ def main_menu() -> str | None:
     ).execute()
 
 
-def _advanced_menu() -> str | None:
-    """고급 서브메뉴를 표시하고 선택된 액션을 반환 (back/None = 메인으로)."""
+def _menu_select(title: str, choices: list) -> str | None:
+    """A dossier Textual submenu (matches the home screen) when usable; the
+    InquirerPy select otherwise. `choices` are inquirer-style ({"name","value"}
+    + Separator). Returns the selected value, or None on back/quit."""
+    import sys
+
+    use_textual = False
+    try:
+        from vxis.cli.main import _textual_available
+
+        use_textual = sys.stdout.isatty() and _textual_available()
+    except Exception:
+        use_textual = False
+    if use_textual:
+        try:
+            from vxis.cli.home_tui import run_menu
+
+            items = [
+                (str(c["value"]), str(c.get("name", c["value"])))
+                for c in choices
+                if isinstance(c, dict) and "value" in c
+            ]
+            return run_menu(title, items)
+        except Exception:
+            pass
     return inquirer.select(
-        message="고급 기능",
-        choices=_advanced_menu_choices(),
-        pointer="\u276f",
-        qmark="\U0001f6e0\ufe0f",
-        amark="\u2705",
-        instruction="(↑↓ 방향키)",
+        message=title, choices=choices, instruction="(↑↓ 방향키)",
     ).execute()
+
+
+def _advanced_menu() -> str | None:
+    """고급 서브메뉴 — 첫 화면과 같은 dossier Textual 메뉴."""
+    return _menu_select("고급 기능", _advanced_menu_choices())
 
 # ── 스캔 위자드 ────────────────────────────────────────────────
 
@@ -613,14 +636,7 @@ def _settings_menu_choices() -> list:
 
 
 def _settings_menu() -> str | None:
-    return inquirer.select(
-        message="설정",
-        choices=_settings_menu_choices(),
-        pointer="\u276f",
-        qmark="\u2699\ufe0f",
-        amark="\u2705",
-        instruction="(↑↓ 방향키)",
-    ).execute()
+    return _menu_select("설정", _settings_menu_choices())
 
 
 # NOW-3: scan SCOPE first (AI auto recommended), advanced execution shapes
@@ -969,7 +985,7 @@ def _show_plugin_summary(
     )
 
     console.print()
-    console.print(Panel(table, title="스캔 설정 확인", border_style=CYAN))
+    console.print(Panel(table, title="스캔 설정 확인", border_style=BRASS))
     for line in plugin_lines:
         console.print(f"  {line}")
     console.print()
@@ -1047,7 +1063,7 @@ def report_menu() -> dict | None:
             table = Table(
                 title="\U0001f4cb 최근 스캔 목록",
                 show_header=True, header_style="bold",
-                border_style=CYAN, expand=False,
+                border_style=BRASS, expand=False,
             )
             table.add_column("ID", style="bold cyan")
             table.add_column("대상")
@@ -1454,7 +1470,7 @@ def _execute_scan(params: dict) -> None:
             title=f"\U0001f50d 취약점 목록 — {params['target']}",
             show_header=True,
             header_style="bold",
-            border_style=CYAN,
+            border_style=BRASS,
             expand=False,
         )
         _detail_table.add_column("심각도", no_wrap=True, width=12)
@@ -1544,7 +1560,7 @@ def _show_results(params: dict) -> None:
                     info.add_row("\U0001f4c5 시작:", str(scan.started_at))
                     info.add_row("\u2705 상태:", f"[green]{scan.status}[/green]")
                     info.add_row("\U0001f50d 발견:", f"[bold]{len(findings)}[/bold]개")
-                    console.print(Panel(info, title=f"스캔 #{scan_id}", border_style=CYAN))
+                    console.print(Panel(info, title=f"스캔 #{scan_id}", border_style=BRASS))
 
                     if findings:
                         # Severity 테이블
@@ -1600,7 +1616,7 @@ def _show_results(params: dict) -> None:
                     table = Table(
                         title="\U0001f4cb 최근 스캔 목록",
                         show_header=True, header_style="bold",
-                        border_style=CYAN, expand=False,
+                        border_style=BRASS, expand=False,
                     )
                     table.add_column("ID", style="bold cyan", no_wrap=True)
                     table.add_column("대상", no_wrap=True)
@@ -1988,7 +2004,7 @@ def _industry_view_results() -> None:
         title="\U0001f4ca 산업 스캔 결과 파일",
         show_header=True,
         header_style="bold",
-        border_style=CYAN,
+        border_style=BRASS,
     )
     table.add_column("파일명", style="cyan")
     table.add_column("유형")
@@ -2045,7 +2061,7 @@ def _industry_outreach_menu() -> None:
         }
         table = Table(
             title="\U0001f4e4 아웃리치 큐",
-            show_header=True, header_style="bold", border_style=CYAN,
+            show_header=True, header_style="bold", border_style=BRASS,
         )
         table.add_column("ID (앞 8자)", style="dim")
         table.add_column("기업명")
@@ -2135,7 +2151,7 @@ def _show_industry_summary(result: object) -> None:
 
     grade_table = Table(
         title="\U0001f4ca 보안 등급 분포",
-        show_header=True, header_style="bold", border_style=CYAN,
+        show_header=True, header_style="bold", border_style=BRASS,
     )
     grade_table.add_column("등급", width=8)
     grade_table.add_column("기업 수", justify="right")

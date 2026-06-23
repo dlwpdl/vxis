@@ -93,8 +93,8 @@ class ScanTUI(App):
     #detail {
         width: 1fr;
         background: $surface;
-        border: round $secondary;
-        border-title-color: $secondary;
+        border: round $primary;
+        border-title-color: $primary;
         border-title-align: left;
         padding: 0 1;
         margin-left: 1;

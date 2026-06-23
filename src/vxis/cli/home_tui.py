@@ -1,15 +1,17 @@
-"""VXIS interactive home — a Textual screen (dossier identity) for the main menu.
+"""VXIS interactive menus — Textual screens (dossier identity) for the home and
+every submenu, so the whole menu flow is one designed surface (not a stock
+InquirerPy list anywhere). Brass is the single chrome accent.
 
-The stock InquirerPy list (emoji bullets + a dashed separator) reads as a generic
-library widget no matter the colour. This makes the entry a *designed* surface
-matching the scan TUI: a brass wordmark panel + a bordered menu with label +
-description rows and a brass highlight bar.
+- run_home_menu() -> action ('scan'|'results'|...|'exit'); the framed home with
+  the wordmark banner + label/description rows.
+- run_menu(title, items) -> selected value | None; a generic brass menu for
+  submenus (advanced / settings / ...). `items` = list of (value, label).
 
-``run_home_menu()`` returns the chosen action
-('scan'|'results'|'report'|'advanced'|'settings'|'exit'), or 'exit' on quit. The
-caller falls back to the InquirerPy menu off-TTY / when textual is unavailable.
+Off-TTY / no textual, the caller falls back to InquirerPy.
 """
 from __future__ import annotations
+
+from typing import Any
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -27,8 +29,8 @@ __     __ __  __ ___  ____
    \_/    /_/\_\_____|____/
 """
 
-# (action value, label, one-line description)
-_MENU: list[tuple[str, str, str]] = [
+# (action value, label, one-line description) for the home screen.
+_HOME: list[tuple[str, str, str]] = [
     ("scan", "Scan", "run an autonomous assessment"),
     ("results", "Results", "browse past scans & findings"),
     ("report", "Report", "generate / export a report"),
@@ -38,7 +40,7 @@ _MENU: list[tuple[str, str, str]] = [
 ]
 
 
-def _row(label: str, desc: str) -> Text:
+def _home_row(label: str, desc: str) -> Text:
     row = Text()
     row.append(f"  {label:<11}", style="bold")
     if desc:
@@ -46,7 +48,10 @@ def _row(label: str, desc: str) -> Text:
     return row
 
 
-class VxisHome(App):
+class VxisMenu(App):
+    """A framed, navigable dossier menu. Returns the selected item id from run()
+    (or None on quit/back). Brass chrome throughout."""
+
     CSS = """
     Screen { background: $background; align: center middle; }
     #wrap { width: 66; height: auto; }
@@ -60,7 +65,8 @@ class VxisHome(App):
     }
     #menu {
         background: $surface;
-        border: round $secondary;
+        border: round $primary;
+        border-title-color: $primary;
         border-title-align: left;
         padding: 1 1;
         height: auto;
@@ -70,19 +76,29 @@ class VxisHome(App):
         text-style: bold;
     }
     """
-    BINDINGS = [("q", "quit_home", "Quit"), ("escape", "quit_home", "Quit")]
+    BINDINGS = [("q", "quit_menu", "Quit"), ("escape", "quit_menu", "Back")]
+
+    def __init__(
+        self,
+        *,
+        items: list[tuple[str, Any]],
+        title: str = "MENU",
+        show_banner: bool = False,
+    ) -> None:
+        super().__init__()
+        self._items = items  # (id, prompt-renderable)
+        self._menu_title = title
+        self._show_banner = show_banner
 
     def compose(self) -> ComposeResult:
         with Vertical(id="wrap"):
-            banner = Static(_WORDMARK.strip("\n"), id="banner")
-            banner.border_title = "VXIS"
-            banner.border_subtitle = "autonomous pentesting"
-            yield banner
-            menu = OptionList(
-                *[Option(_row(lbl, desc), id=val) for val, lbl, desc in _MENU],
-                id="menu",
-            )
-            menu.border_title = "MAIN"
+            if self._show_banner:
+                banner = Static(_WORDMARK.strip("\n"), id="banner")
+                banner.border_title = "VXIS"
+                banner.border_subtitle = "autonomous pentesting"
+                yield banner
+            menu = OptionList(*[Option(prompt, id=ident) for ident, prompt in self._items], id="menu")
+            menu.border_title = self._menu_title
             yield menu
         yield Footer()
 
@@ -95,13 +111,31 @@ class VxisHome(App):
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         self.exit(event.option.id)
 
-    def action_quit_home(self) -> None:
-        self.exit("exit")
+    def action_quit_menu(self) -> None:
+        self.exit(None)
+
+
+class VxisHome(VxisMenu):
+    """The home screen — the main menu with the wordmark banner."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            items=[(val, _home_row(lbl, desc)) for val, lbl, desc in _HOME],
+            title="MAIN",
+            show_banner=True,
+        )
 
 
 def run_home_menu() -> str | None:
-    """Run the Textual home; return the chosen action ('exit' on quit)."""
+    """Run the home; return the chosen action ('exit'/None on quit)."""
     return VxisHome().run()
 
 
-__all__ = ["VxisHome", "run_home_menu"]
+def run_menu(title: str, items: list[tuple[str, str]]) -> str | None:
+    """Run a generic dossier submenu. `items` = (value, label). Returns the
+    selected value, or None on quit/back."""
+    options = [(value, Text("  " + label)) for value, label in items]
+    return VxisMenu(items=options, title=title.upper(), show_banner=False).run()
+
+
+__all__ = ["VxisMenu", "VxisHome", "run_home_menu", "run_menu"]
