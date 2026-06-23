@@ -32,6 +32,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 from vxis.agent.egress_policy import blocked_policy_data, evaluate_shell_egress
+from vxis.agent.text_clean import strip_terminal_noise
 from vxis.agent.tool_registry import ToolResult
 from vxis.ghost.routing import wrap_shell_command_for_ghost
 
@@ -126,7 +127,11 @@ async def _run_docker(*args: str, timeout: float = 30.0) -> tuple[int, str, str]
         proc.kill()
         await proc.wait()
         raise
-    return proc.returncode or 0, stdout_b.decode("utf-8", "replace"), stderr_b.decode("utf-8", "replace")
+    return (
+        proc.returncode or 0,
+        strip_terminal_noise(stdout_b.decode("utf-8", "replace")),
+        strip_terminal_noise(stderr_b.decode("utf-8", "replace")),
+    )
 
 
 def _pick_local_port() -> int:
@@ -249,8 +254,8 @@ async def _execute_via_docker_exec(
             "timeout": True,
             "transport": "docker_exec",
         }
-    stdout = stdout_b.decode("utf-8", "replace")
-    stderr = stderr_b.decode("utf-8", "replace")
+    stdout = strip_terminal_noise(stdout_b.decode("utf-8", "replace"))
+    stderr = strip_terminal_noise(stderr_b.decode("utf-8", "replace"))
     exit_code = proc.returncode or 0
     return {
         "ok": exit_code == 0,
@@ -374,7 +379,7 @@ def _extract_marked_output(
         return None
     output_start = start_idx + len(start_marker)
     output_end = start_idx + end_match.start()
-    output = pane[output_start:output_end].strip("\r\n")
+    output = strip_terminal_noise(pane[output_start:output_end].strip("\r\n"))
     return int(end_match.group(1)), output
 
 
