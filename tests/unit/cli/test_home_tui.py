@@ -101,3 +101,28 @@ async def test_text_input_returns_value_and_esc_cancels():
     async with app2.run_test() as pilot:
         await pilot.press("escape")
     assert app2.return_value is None
+
+
+def test_menu_row_strips_emoji_splits_name_and_desc():
+    from vxis.cli.home_tui import _menu_row
+
+    plain = _menu_row("🔍  AI 자율 스캔  [권장]    외부 공격자 시점으로 자율 점검").plain
+    assert "🔍" not in plain
+    assert "AI 자율 스캔" in plain
+    assert "외부 공격자" in plain
+
+
+def test_menu_row_truncates_long_description_to_one_line():
+    from vxis.cli.home_tui import _menu_row
+
+    plain = _menu_row("Name    " + "x" * 200).plain
+    assert "…" in plain
+    assert len(plain) < 120  # truncated → won't wrap
+
+
+def test_menu_row_name_only_strips_emoji():
+    from vxis.cli.home_tui import _menu_row
+
+    plain = _menu_row("⚙️  설정").plain
+    assert "설정" in plain
+    assert "⚙" not in plain

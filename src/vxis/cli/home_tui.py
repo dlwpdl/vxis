@@ -11,6 +11,7 @@ Off-TTY / no textual, the caller falls back to InquirerPy.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from rich.text import Text
@@ -48,13 +49,39 @@ def _home_row(label: str, desc: str) -> Text:
     return row
 
 
+# Emoji / variation-selector / ZWJ ranges — stripped from submenu labels so the
+# Textual menu reads clean (the InquirerPy choice strings bundle an icon).
+_EMOJI_RE = re.compile(
+    "[\U0001f000-\U0001faff\U00002600-\U000027bf\U00002b00-\U00002bff"
+    "\U0001f1e6-\U0001f1ff️‍]+"
+)
+
+
+def _menu_row(raw: str, *, max_desc: int = 60) -> Text:
+    """Clean a bundled InquirerPy choice name ("<emoji>  Name    description") into
+    a tidy dossier row: emoji removed, name bold + description dimmed, description
+    truncated so it stays on ONE line (no ugly wrap)."""
+    text = _EMOJI_RE.sub("", str(raw)).strip()
+    # Choices put a wide gap (3+ spaces) between the name and its description.
+    parts = re.split(r"\s{3,}", text, maxsplit=1)
+    name = re.sub(r"\s{2,}", " ", parts[0]).strip()
+    desc = re.sub(r"\s{2,}", " ", parts[1]).strip() if len(parts) > 1 else ""
+    row = Text()
+    row.append("  " + name, style="bold")
+    if desc:
+        if len(desc) > max_desc:
+            desc = desc[: max_desc - 1].rstrip() + "…"
+        row.append("   " + desc, style=MUTED)
+    return row
+
+
 class VxisMenu(App):
     """A framed, navigable dossier menu. Returns the selected item id from run()
     (or None on quit/back). Brass chrome throughout."""
 
     CSS = """
     Screen { background: $background; align: center middle; }
-    #wrap { width: 66; height: auto; }
+    #wrap { width: 88; height: auto; max-width: 96%; }
     #banner {
         color: $primary;
         text-align: center;
@@ -136,7 +163,7 @@ def run_menu(title: str, items: list[tuple[Any, str]]) -> Any:
     object (e.g. a sentinel). Returns the selected value, or None on quit/back."""
     # OptionList ids must be strings, so key options by index and map back to the
     # original (possibly non-string) value.
-    options = [(str(idx), Text("  " + label)) for idx, (_v, label) in enumerate(items)]
+    options = [(str(idx), _menu_row(label)) for idx, (_v, label) in enumerate(items)]
     result = VxisMenu(items=options, title=title.upper(), show_banner=False).run()
     if result is None:
         return None
