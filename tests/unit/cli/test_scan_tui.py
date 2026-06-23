@@ -225,6 +225,38 @@ async def test_detail_border_title_follows_drilled_node():
         assert str(app.query_one("#detail", RichLog).border_title) == "W1"
 
 
+async def test_i_key_focuses_message_box():
+    from textual.widgets import Input
+
+    from vxis.agent.operator_inbox import OperatorInbox
+
+    app = ScanTUI(target="t", operator_inbox=OperatorInbox())
+    async with app.run_test() as pilot:
+        await pilot.press("i")
+        await pilot.pause()
+        assert app.focused is app.query_one("#cmd", Input)
+
+
+async def test_operator_message_queues_directive_for_the_brain():
+    """Typing a directive + Enter queues it in the operator inbox (the scan loop
+    drains it next iteration) and clears the input."""
+    from textual.widgets import Input
+
+    from vxis.agent.operator_inbox import OperatorInbox
+
+    inbox = OperatorInbox()
+    app = ScanTUI(target="t", operator_inbox=inbox)
+    async with app.run_test() as pilot:
+        await pilot.press("i")
+        await pilot.pause()
+        cmd = app.query_one("#cmd", Input)
+        cmd.value = "focus on /admin and try JWT alg:none"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert cmd.value == ""  # cleared after send
+    assert inbox.drain() == ["focus on /admin and try JWT alg:none"]
+
+
 async def test_feed_event_never_raises_on_garbage():
     app = ScanTUI(target="t")
     async with app.run_test():

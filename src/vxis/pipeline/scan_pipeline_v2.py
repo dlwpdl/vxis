@@ -883,6 +883,7 @@ class ScanPipeline:
         kind: TargetKind = TargetKind.WEB,
         target_hints: dict[str, str] | None = None,
         box_mode: str | None = None,  # Production runtime currently resolves all modes to black.
+        operator_inbox: Any = None,  # mid-scan operator → Brain steering (TUI Input)
     ) -> ScanContext:
         """Run a Strix-parity single-loop scan against the target."""
         started = time.monotonic()
@@ -1035,6 +1036,7 @@ class ScanPipeline:
                 brain=self.brain,
                 target_kind=kind,
                 event_callback=self._emit,
+                operator_inbox=operator_inbox,
             )
             for note in runtime.shared_notes[:3]:
                 loop.state.add_shared_note(note)

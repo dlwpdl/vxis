@@ -740,6 +740,7 @@ def scan(
                 resume_from=resume,
                 kind=_kind,
                 box_mode=_box_flag_to_mode(box),
+                operator_inbox=operator_inbox,
             )
         finally:
             if refresh_task is not None:
@@ -775,6 +776,12 @@ def scan(
         build_target_scope_enforcer(target, scope_arg=None),
         approve_destructive=approve_destructive,
     )
+    from vxis.agent.operator_inbox import OperatorInbox
+
+    # Mid-scan operator → Brain steering: one inbox shared by the TUI Input
+    # (submit) and the scan loop (drain). _run() closes over it; the TUI gets it
+    # directly. Harmless when --no-tui (nothing submits to it).
+    operator_inbox = OperatorInbox()
     use_tui = _should_use_tui(tui, interactive)
     _tui_reason = _tui_skip_reason(tui, interactive)
     if _tui_reason:
@@ -795,6 +802,7 @@ def scan(
                 brain=brain_label,
                 box_mode=_box_flag_to_mode(box) or "black",
                 ghost=display_ghost,
+                operator_inbox=operator_inbox,
             )
 
             def _tui_sink(event_type, data):

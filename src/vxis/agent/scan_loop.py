@@ -52,6 +52,7 @@ class ScanAgentLoop(
         critic_interval: int = 6,
         target_kind: Any = None,
         event_callback: Callable[[str, dict[str, Any]], None] | None = None,
+        operator_inbox: Any = None,
     ) -> None:
         self.state = ScanLoopState(target=target, max_iters=max_iters)
         self.registry = registry
@@ -59,6 +60,8 @@ class ScanAgentLoop(
         self.critic_interval = critic_interval
         self._last_critic_iter = 0
         self._event_callback = event_callback
+        # Mid-scan operator → Brain steering (TUI → thread-safe inbox → loop).
+        self._operator_inbox = operator_inbox
         self.hard_max_iters = hard_max_iters if hard_max_iters is not None else max_iters
         self.adaptive_budget = adaptive_budget
         self.extend_iters = max(0, extend_iters)

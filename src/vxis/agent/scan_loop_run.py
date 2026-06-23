@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from vxis.agent.operator_inbox import inject_operator_directives
 from vxis.agent.scan_loop_policy import _DESKTOP_SKILLS
 from vxis.agent.scan_loop_execution_monitor import ScanLoopExecutionMonitorMixin
 from vxis.agent.scan_loop_run_auto import ScanLoopAutoOrchestrationMixin
@@ -161,6 +162,11 @@ class ScanLoopRunMixin(
 
         while not self.state.completed and self.state.iteration < self.state.max_iters:
             self.state.iteration += 1
+            # Mid-scan operator steering: fold any human directives into the
+            # Brain's context BEFORE it decides this iteration's action.
+            _n_ops = inject_operator_directives(self.state, getattr(self, "_operator_inbox", None))
+            if _n_ops:
+                self._emit_control_plane(f"operator directive injected (+{_n_ops})")
             self._emit_iteration_status("Brain choosing next action")
             # LLM memory compression: when history grows beyond token
             # threshold, older messages are summarized by the LLM. Recent

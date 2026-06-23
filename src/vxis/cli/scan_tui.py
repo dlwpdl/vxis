@@ -29,7 +29,7 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal
-from textual.widgets import Footer, Header, RichLog, Static, Tree
+from textual.widgets import Footer, Header, Input, RichLog, Static, Tree
 
 from vxis.agent.attack_taxonomy import attack_category
 from vxis.agent.llm_cost import summarize_usage
@@ -100,10 +100,19 @@ class ScanTUI(App):
         margin-left: 1;
     }
     #status { height: 1; dock: bottom; background: $panel; color: $text; padding: 0 1; }
+    #cmd {
+        height: 3;
+        background: $surface;
+        border: round $primary;
+        border-title-color: $primary;
+        border-title-align: left;
+        margin: 0 1;
+    }
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("e", "expand_all", "Expand"),
+        ("i", "focus_input", "Message"),
     ]
 
     def __init__(
@@ -115,8 +124,11 @@ class ScanTUI(App):
         box_mode: str = "",
         ghost: bool = False,
         scan_runner: Any = None,
+        operator_inbox: Any = None,
     ) -> None:
         super().__init__()
+        # Mid-scan operator steering: the Input submits here; the scan loop drains it.
+        self._operator_inbox = operator_inbox
         self.model = ScanEventModel()
         self._raw: dict[int, list[tuple[str, dict]]] = {}
         # Stable key -> TreeNode map so _sync() can reconcile in place instead of
@@ -151,6 +163,9 @@ class ScanTUI(App):
             tree.root.expand()
             yield tree
             yield RichLog(id="detail", markup=True, wrap=True, highlight=False)
+        cmd = Input(placeholder="message the agent…  (i to focus · ⏎ to send)", id="cmd")
+        cmd.border_title = "STEER"
+        yield cmd
         yield Static(self._status_text(), id="status")
         yield Footer()
 
@@ -473,6 +488,31 @@ class ScanTUI(App):
     def action_expand_all(self) -> None:
         try:
             self.query_one("#tree", Tree).root.expand_all()
+        except Exception:
+            pass
+
+    # -- operator steering (mid-scan chat) ----------------------------------
+
+    def action_focus_input(self) -> None:
+        """Jump to the message box to steer the agent mid-scan."""
+        try:
+            self.query_one("#cmd", Input).focus()
+        except Exception:
+            pass
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Operator pressed ⏎ in the message box — queue the directive for the
+        Brain (drained at the next iteration) and echo it into the detail pane."""
+        text = event.value
+        accepted = self._operator_inbox is not None and self._operator_inbox.submit(text)
+        event.input.value = ""
+        if accepted:
+            log = self.query_one("#detail", RichLog)
+            self._narrative_started = True
+            log.write(f"[{_BRASS}]▸ operator:[/] {text}  [dim](queued for the next decision)[/dim]")
+        # hand focus back to the tree so ↑/↓ navigation resumes immediately
+        try:
+            self.query_one("#tree", Tree).focus()
         except Exception:
             pass
 
