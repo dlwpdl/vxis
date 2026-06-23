@@ -29,6 +29,11 @@ PROFILE_DISPLAY = {
         "실제 피해 가능성까지 승인 범위 안에서 확인",
         "bold cyan",
     ),
+    "bugbounty": (
+        "버그바운티",
+        "승인 범위 안에서 PoC, 재현 명령, 체인 검증을 우선",
+        "bold magenta",
+    ),
     "stealth": (
         "조용한 점검",
         "요청을 줄이고 천천히 확인",

@@ -162,6 +162,10 @@ class Finding(BaseModel):
         default=None,
         description="Actual exploit payload, command transcript, or HTTP exchange",
     )
+    replay_command: str | None = Field(
+        default=None,
+        description="Copy-paste replay command or raw HTTP request for reproduction",
+    )
 
     # --- Classification ---
     severity: Severity = Field(description="Scanner-assessed severity level")

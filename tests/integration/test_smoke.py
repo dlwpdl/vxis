@@ -105,6 +105,7 @@ def test_config_loads() -> None:
 
     assert config.active_profile == "crown"
     assert "crown" in config.profiles
+    assert "bugbounty" in config.profiles
     assert "standard" in config.profiles
     # Verify the remaining built-in core profiles are present.
     assert "passive" in config.profiles

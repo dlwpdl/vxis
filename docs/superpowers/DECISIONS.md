@@ -1,5 +1,23 @@
 # VXIS Decisions
 
+## 2026-06-23 - Narrow/deep bug bounty core before Strix parity
+
+Decision: VXIS v1 prioritizes authorized web black-box testing that produces a
+validated exploit chain, accepted finding evidence, and bilingual report or bug
+bounty export. Strix remains a benchmark for sandbox UX, compact artifacts,
+source-aware scanning, and CI polish, but broad Strix parity is lower priority
+than verifier-backed depth.
+
+Reason: VXIS's durable advantage is the choke point around policy, scope,
+evidence contracts, verifier status, chain scoring, and report discipline. A
+broad product surface without runtime proof would recreate the placeholder drift
+that recent cleanup removed.
+
+Obsolete when: benchmark evidence shows that a broader source-aware or
+multi-agent production surface improves confirmed findings, chain depth, and
+repro completeness without increasing false positives, context load, or public
+surface drift.
+
 ## 2026-06-19 - Production wiring only
 
 Decision: public surfaces such as CLI, MCP, dashboard routes, registries, reports,

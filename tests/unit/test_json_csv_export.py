@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-from vxis.models.finding import CVSSVector, Finding, Severity
+from vxis.models.finding import CVSSVector, Finding, FindingStatus, Severity
 from vxis.report.csv_export import CSVExporter
 from vxis.report.generator import ReportData
 from vxis.report.json_export import JSONExporter
@@ -221,6 +221,78 @@ class TestJSONExporterReport:
         assert data["total_findings"] == 0
         assert data["findings"] == []
         assert data["risk_score"] == 0.0
+
+
+class TestJSONExporterBugBounty:
+    """Tests for JSONExporter.export_bugbounty."""
+
+    def test_export_bugbounty_contains_only_accepted_replayable_findings(
+        self, tmp_path: Path
+    ) -> None:
+        accepted = make_finding(
+            id="f-accepted",
+            status=FindingStatus.confirmed,
+            impact="The attacker can extract account records from the orders API.",
+            technical_analysis="Payload response differed from the baseline control request.",
+            poc_description="Send the replay command and compare the 200 response to baseline 403.",
+            poc_script_code="GET /api/orders?id=1%20OR%201=1 HTTP/1.1\nHost: target.test",
+            replay_command="curl -i 'https://target.test/api/orders?id=1%20OR%201=1'",
+            raw_data={
+                "acceptance_status": "accepted",
+                "request_or_payload": "id=1 OR 1=1",
+                "response_or_effect": "200 response includes other user order rows",
+                "control_comparison": "id=1 returns one row; payload returns many rows",
+            },
+        )
+        suppressed = make_finding(
+            id="f-open",
+            status=FindingStatus.open,
+            impact="Looks interesting but has not been accepted.",
+            replay_command="curl -i https://target.test/admin",
+            poc_script_code="GET /admin HTTP/1.1\nHost: target.test",
+        )
+        report = make_report_data(findings=[accepted, suppressed])
+        out = tmp_path / "bugbounty.json"
+
+        JSONExporter().export_bugbounty(report, out)
+        data = json.loads(out.read_text(encoding="utf-8"))
+
+        assert data["schema_version"] == "vxis.bugbounty.v1"
+        assert data["export_type"] == "bugbounty"
+        assert data["summary"]["accepted_findings"] == 1
+        assert data["summary"]["suppressed_findings"] == 1
+        assert data["summary"]["severity_counts"]["high"] == 1
+        assert [finding["id"] for finding in data["findings"]] == ["f-accepted"]
+        exported = data["findings"][0]
+        assert exported["accepted"] is True
+        assert exported["impact"].startswith("The attacker can extract")
+        assert exported["reproduction"]["replay_command"].startswith("curl -i")
+        assert exported["reproduction"]["control_comparison"].startswith("id=1 returns")
+
+    def test_export_bugbounty_extracts_raw_http_replay_when_command_missing(
+        self, tmp_path: Path
+    ) -> None:
+        finding = make_finding(
+            id="f-http",
+            status=FindingStatus.confirmed,
+            impact="Authenticated data is exposed through a direct object reference.",
+            poc_script_code=(
+                "GET /api/users/2 HTTP/1.1\n"
+                "Host: target.test\n\n"
+                "HTTP/1.1 200 OK\n"
+                '{"email":"victim@example.com"}'
+            ),
+        )
+        report = make_report_data(findings=[finding])
+        out = tmp_path / "bugbounty.json"
+
+        JSONExporter().export_bugbounty(report, out)
+        data = json.loads(out.read_text(encoding="utf-8"))
+
+        assert data["summary"]["accepted_findings"] == 1
+        assert data["findings"][0]["reproduction"]["replay_command"] == (
+            "GET /api/users/2 HTTP/1.1"
+        )
 
 
 # ---------------------------------------------------------------------------

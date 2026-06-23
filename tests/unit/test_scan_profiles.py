@@ -13,6 +13,7 @@ def test_crown_is_default_core_profile() -> None:
     assert config.active_profile == "crown"
     assert config.profiles["crown"].intent == "crown_jewel"
     assert config.profiles["crown"].is_business_profile is False
+    assert config.profiles["bugbounty"].intent == "bug_bounty_validation"
 
 
 def test_business_profiles_are_scaffolded_without_replacing_crown() -> None:
@@ -28,6 +29,8 @@ def test_business_profiles_are_scaffolded_without_replacing_crown() -> None:
 def test_profile_alias_resolution() -> None:
     config = VXISConfig()
 
+    assert resolve_scan_profile("bug-bounty", config.profiles).name == "bugbounty"
+    assert resolve_scan_profile("bb", config.profiles).name == "bugbounty"
     assert resolve_scan_profile("vc", config.profiles).name == "vc-portfolio-monitor"
     assert resolve_scan_profile("vc-baseline", config.profiles).name == "vc-portfolio-monitor"
     assert resolve_scan_profile("b2b-standard", config.profiles).name == "continuous-devsec"

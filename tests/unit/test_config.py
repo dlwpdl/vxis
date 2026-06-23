@@ -59,6 +59,7 @@ class TestDefaultProfiles:
     def test_default_profiles_exist(self, config: VXISConfig) -> None:
         assert set(config.profiles.keys()) == {
             "crown",
+            "bugbounty",
             "passive",
             "stealth",
             "standard",
@@ -82,6 +83,14 @@ class TestDefaultProfiles:
     def test_aggressive_max_concurrency_at_least_8(self, config: VXISConfig) -> None:
         aggressive = config.profiles["aggressive"]
         assert aggressive.max_concurrency >= 8
+
+    def test_bugbounty_profile_is_active_core_with_poc_export(self, config: VXISConfig) -> None:
+        bugbounty = config.profiles["bugbounty"]
+        assert bugbounty.is_business_profile is False
+        assert bugbounty.is_scaffold is False
+        assert bugbounty.intent == "bug_bounty_validation"
+        assert "bug_bounty_export" in bugbounty.assessment_modules
+        assert bugbounty.max_concurrency > config.profiles["crown"].max_concurrency
 
     def test_passive_rate_limit_is_zero(self, config: VXISConfig) -> None:
         """Passive profile makes no direct network requests; rate limit is 0."""

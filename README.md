@@ -1,12 +1,23 @@
-# VXIS — AI-Powered Autonomous Pentesting Platform
+# VXIS - Autonomous Validated Exploit Engine
 
-> Strix-parity single-loop Brain-First pentesting. Build what a senior penetration tester does, but run it autonomously against any target.
+> Target -> autonomous validated exploit chain -> bilingual report. VXIS learns from Strix-style agent UX, but it is not a Strix clone; the v1 product is narrow, deep, and evidence-gated.
 
 ## What is VXIS?
 
-VXIS is an autonomous penetration testing platform where a single LLM "Brain" (via ReAct loop) drives an entire security assessment end-to-end. It uses real scanner binaries (sqlmap, nuclei, ffuf, nikto, gobuster) inside a Docker sandbox plus custom Python scripts — just like a human red-team engineer would — instead of hardcoded phase pipelines.
+VXIS is an autonomous penetration testing engine for authorized web black-box assessments. A single LLM "Brain" drives the scan loop, uses browser/proxy/HTTP tools plus sandboxed scanner binaries, verifies high-value findings, links exploit chains, and produces professional bilingual reports.
 
-## Core principle — Brain-First
+The public v1 surface is intentionally small:
+
+- Web black-box autonomous scan
+- Bug bounty profile and replayable PoC export
+- Verifier-backed findings and chain gates
+- NCC-style bilingual HTML report
+- Reproducible benchmark notes
+- MCP scan integration
+
+Source-aware, mobile, game, hardware, and cloud-console runtimes stay in planned/incubator status until they have working runtime tools, scope gates, report evidence, benchmark coverage, and regression tests.
+
+## Core principle - verified Brain-First
 
 ```
 Phase 시작
@@ -21,7 +32,7 @@ Phase 완료
 ```
 
 **금지**: 하드코딩된 엔드포인트/페이로드, Brain 없이 코드 로직만으로 공격, Brain을 "헬퍼"로 취급.
-**필수**: Brain이 매 iteration의 핵심 의사결정자.
+**필수**: Brain이 매 iteration의 핵심 의사결정자이며, high/critical finding은 재현 가능한 evidence contract를 통과해야 함.
 
 ## Architecture at a glance
 
@@ -33,7 +44,7 @@ User → CLI (src/vxis/cli/main.py)
            → ToolRegistry.dispatch                            ← 11 BrainTools
              ├── Control: finish_scan / think / wait
              ├── Hands/Eyes/X-Ray: http_request / browser_render / intercept_proxy
-             ├── Strix-power:   shell_exec / python_exec      ← Docker sandbox
+             ├── Sandbox:       shell_exec / python_exec      ← Docker scanner sandbox
              └── Finding CRUD:  report_finding / query_findings / link_chain
            → ScanContext (findings + chains + score)
      → ReportGenerator → NCC-style HTML report
@@ -45,13 +56,17 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the detailed design rationale, and 
 
 ```bash
 # 1. Install dependencies
-poetry install
+uv sync --extra dev --extra export
 
-# 2. Build the Strix-power sandbox image (one-time, ~10 min, ~980MB)
+# 2. Build the sandbox image (one-time)
 docker build -t vxis/sandbox:latest docker/sandbox/
 
-# 3. Run a scan
-poetry run vxis scan http://localhost:3000 --profile standard --output reports/juice.html
+# 3. Run the deep default profile
+uv run vxis scan http://localhost:3000 --profile crown --output reports/juice.html
+
+# 4. Run bug bounty mode and export accepted PoCs
+uv run vxis scan http://localhost:3000 --profile bugbounty --output reports/juice-bb.html
+uv run vxis export <scan_id> --format bugbounty --output reports/juice-bugbounty.json
 ```
 
 **Benchmark targets** (Docker-local):
@@ -68,6 +83,7 @@ poetry run vxis scan http://localhost:3000 --profile standard --output reports/j
 | `docs/superpowers/plans/` | Current implementation plan only |
 | `docs/superpowers/DECISIONS.md` | Dated project decisions and why they were made |
 | `docs/superpowers/benchmarks/` | Benchmark capture + scan artifacts |
+| `incubator/` | Experimental work that is not production-wired yet |
 | `tests/` | pytest suite (unit + agent + pipeline + slow) |
 | `alembic/` | Database migrations (SQLAlchemy + Alembic) |
 | `scripts/` | Operational scripts |
@@ -83,5 +99,6 @@ poetry run vxis scan http://localhost:3000 --profile standard --output reports/j
 - 외부 펜테스트 툴 포크 금지 — 100% 자체 구현 (Strix·PentAGI 등은 permissive 라이선스지만 own-IP 위해 개념만 참고)
 - Hands/X-Ray/Controller/Finding 모듈 사용, raw `httpx` 금지
 - Enterprise 스캔 시 injection은 마지막에 **approval gate** 필수
+- public surface는 실제 runtime/test가 있는 기능만 노출
 
 Full rules → [`CLAUDE.md`](CLAUDE.md)

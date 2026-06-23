@@ -308,6 +308,7 @@ def _build_finding_from_dict(
     technical_body = str(d.get("technical_analysis", ""))
     poc_description = str(d.get("poc_description", ""))
     poc_script_code = str(d.get("poc_script_code", ""))
+    replay_command = str(d.get("replay_command", "")).strip()
     remediation_body = str(d.get("remediation_steps") or d.get("remediation", ""))
 
     # Live-scan auto-findings are English-only: the Brain does not yet produce
@@ -384,6 +385,25 @@ def _build_finding_from_dict(
         if _verdict == "UNCONFIRMED"
         else FindingStatus.open
     )
+    raw_data = {
+        key: value
+        for key, value in {
+            "acceptance_status": d.get("acceptance_status"),
+            "impact": impact_body,
+            "technical_analysis": technical_body,
+            "poc_description": poc_description,
+            "poc_script_code": poc_script_code,
+            "request_or_payload": d.get("request_or_payload"),
+            "response_or_effect": d.get("response_or_effect"),
+            "control_comparison": d.get("control_comparison"),
+            "replay_command": replay_command,
+            "proof": d.get("proof"),
+            "verifier_verdict": d.get("verifier_verdict"),
+            "verifier_confidence": d.get("verifier_confidence"),
+            "verifier_reasoning": d.get("verifier_reasoning"),
+        }.items()
+        if value not in (None, "", [], {})
+    }
 
     return Finding(
         id=str(d.get("id", "VXIS-0000")),
@@ -395,6 +415,7 @@ def _build_finding_from_dict(
         technical_analysis=technical_field,
         poc_description=poc_field,
         poc_script_code=poc_script_code or None,
+        replay_command=replay_command or None,
         severity=severity,
         status=_status,
         finding_type=_canonical_finding_type(str(d.get("finding_type", "generic"))),
@@ -405,6 +426,7 @@ def _build_finding_from_dict(
         evidence=evidence_list,
         remediation=remediation_field,
         references=[],
+        raw_data=raw_data or None,
     )
 
 

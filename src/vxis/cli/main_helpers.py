@@ -82,6 +82,8 @@ def _convert_finding_records(records) -> list:
 
         evidence = [Evidence(**e) for e in (rec.evidence or [])]
         references = [Reference(**r) for r in (rec.references or [])]
+        raw_data = rec.raw_data if isinstance(rec.raw_data, dict) else {}
+        primary_evidence = evidence[0].content if evidence else None
 
         findings.append(
             Finding(
@@ -89,6 +91,11 @@ def _convert_finding_records(records) -> list:
                 scan_id=str(rec.scan_id),
                 title=rec.title,
                 description=rec.description,
+                impact=raw_data.get("impact"),
+                technical_analysis=raw_data.get("technical_analysis"),
+                poc_description=raw_data.get("poc_description"),
+                poc_script_code=raw_data.get("poc_script_code") or primary_evidence,
+                replay_command=raw_data.get("replay_command"),
                 severity=Severity(rec.severity),
                 status=FindingStatus(rec.status),
                 target=rec.target,
@@ -112,6 +119,7 @@ def _convert_finding_records(records) -> list:
                 analyst_notes=rec.analyst_notes,
                 discovered_at=rec.discovered_at,
                 updated_at=rec.updated_at,
+                raw_data=raw_data or None,
             )
         )
     return findings

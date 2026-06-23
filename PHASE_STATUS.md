@@ -1,114 +1,88 @@
-# Phase Status — Migration Roadmap
+# Phase Status - Current Runtime Direction
 
-> Where VXIS is in its multi-phase evolution from hardcoded-phase pipeline to Strix-parity Brain-First architecture. Updated 2026-04-10.
+> Updated 2026-06-23. VXIS is no longer described as "Strix parity first." The
+> current direction is narrower and deeper: authorized target -> autonomous
+> validated exploit chain -> bilingual report or bug bounty PoC export.
 
-## Overall progress: ~90% of total roadmap
+## Current State In One Line
 
-| Phase | Weight | Progress | Contribution |
-|---|---:|---:|---:|
-| **A — Strix-parity single loop** | 20% | ✅ 100% | 20% |
-| **B — Tuning + Playbook + Memory** | 25% | ✅ 100% | 25% |
-| **C — Verifier + Belief + Egress** | 25% | ✅ 100% | 25% |
-| **D — Dashboard + Smart History + Exploit Depth** | 20% | 🔥 ~90% | ~18% |
-| **E — Strix patterns (1tool/msg, compression, hybrid brain)** | 10% | 🔧 In progress | ~2% |
-| **Total** | 100% | | **~90%** |
+Single Brain loop, one tool per turn, sandbox-backed web black-box testing,
+scope/policy gates, high/critical evidence contract, verifier-aware finding
+status, attack-chain pressure, NCC-style report, and `bugbounty` profile/export.
 
-**Fast context recovery**: read [`docs/chapters/`](docs/chapters/README.md)
-in order. Each chapter is one decision or milestone with context → problem →
-decision → execution → result → lessons learned → next.
+## Production Public Surface
 
-Current state in one line:
-> 23 tools, Strix-pattern single loop (1 tool/message, LLM compression at 90K tokens, 3-tier smart history), vector exhaustion toward crown jewels, adversarial verifier, MITRE ATT&CK mapping (16 techniques), enterprise egress filter, auto-orchestration safety net, NCC-style HTML report with verification summary + MITRE table.
+| Surface | Status | Notes |
+|---|---|---|
+| Web black-box scan | Production | `vxis scan <target>` through `ScanPipelineV2` and `ScanAgentLoop` |
+| Deep chain profile | Production | `--profile crown` |
+| Bug bounty profile | Production | `--profile bugbounty`, aliases `bug-bounty`, `bug_bounty`, `bb` |
+| Bug bounty export | Production | `vxis export <scan_id> --format bugbounty` emits accepted replayable findings |
+| NCC-style HTML report | Production | Bilingual-ready report path remains the professional deliverable |
+| MCP scan integration | Production | Keep to working scan/primitive tools only |
+| Benchmark notes | Production contract | Same-environment comparison notes live under `docs/superpowers/benchmarks/` |
 
-## Latest benchmark — Juice Shop (2026-04-10)
+## Recently Completed
 
-```
-CRITICAL: SQLi auth bypass (admin JWT + password hash)
-brain_decisions: 50, llm_calls: 55
-MITRE: 8 techniques / 6 tactics
-```
+- Added `bugbounty` as an active core profile with stricter authorized-scope
+  runtime policy and researcher-oriented modules.
+- Added high/critical evidence contract requirements for request/payload,
+  response/effect, control comparison, replay command/raw HTTP, repeat,
+  negative/refutation, and impact.
+- Added `Finding.replay_command` and metadata carry-through so report/export
+  artifacts can preserve replayable evidence.
+- Added lightweight bug bounty JSON export filtered to accepted replayable
+  findings.
+- Updated CLI/dashboard/profile help to expose bug bounty mode without exposing
+  source/mobile/game/runtime placeholders.
 
-## Phase A — Strix-Parity Single-Loop Migration (COMPLETE ✅)
+## Direction Compared With Strix
 
-**Goal:** Kill the 14-Phase `ScanPipeline` orchestrator. Make a single persistent Brain ReAct loop the owner of an entire scan end-to-end.
+VXIS should borrow useful Strix product patterns:
 
-**Result:** `brain_decision_count: 0 → 20`. Single `ScanAgentLoop` replaced 5234-line pipeline with a ~360-line v2 shim. All architectural criteria met. Finding quality deferred to Phase B.
+- sandbox-first execution
+- compact run artifacts
+- resumable state
+- clear CLI/CI UX
+- source-aware scan once tools are real
 
-**Key artifacts:**
-- `src/vxis/agent/scan_loop.py` — ScanAgentLoop (now ~1127 lines with Phase B-E additions)
-- `src/vxis/pipeline/scan_pipeline_v2.py` — ~505 line shim
-- `src/vxis/agent/brain.py` — AgentBrain with `think_in_loop()` (~2186 lines)
-- `src/vxis/agent/tool_registry.py` — BrainTool protocol + ToolRegistry
+VXIS should not clone Strix's broad multi-agent graph as the first move. The
+asset to protect is the narrower choke point: policy, verifier, evidence
+contract, scoring, and report discipline.
 
-## Phase B — Tuning + Playbook + Memory (COMPLETE ✅)
+## In Progress
 
-**Goal:** Get the loop to actually find vulnerabilities. Prompt engineering, scanner integration, playbook system, fingerprinting, cross-scan memory.
+- Target-derived vector candidate generation from discovered routes, forms,
+  parameters, and technologies.
+- Finish-gate pressure for unattempted high-value vectors and missing chains.
+- Benchmark baseline: same-environment Strix vs VXIS comparison across Juice
+  Shop, WebGoat, and one local repo/source target when source tools are promoted.
+- CI-friendly scan output after engine-quality benchmarks stabilize.
 
-**Result:** 0 → 8+ findings on Juice Shop. Key additions:
-- `LOOP_PROMPT_ADAPTER` rewrite with Strix-style explicit tool guidance
-- `fingerprint_target` tool — auto-detect stack → load matching playbook
-- `list_playbooks` / `load_playbook` tools — 11 playbook files (injection, auth, xss, etc.)
-- `query_scan_memory` tool — cross-scan episodic memory KB
-- Auto-hint system: Brain gets nudged when probe output contains likely findings
-- Dual-brain critic: stronger model reviews weaker model's work every N iterations
+## Planned Or Incubator
 
-## Phase C — Verifier + Belief + Egress (COMPLETE ✅)
+These are not production/public promises until promoted with tool registration,
+scope gate, report evidence, benchmark target, and regression tests:
 
-**Goal:** Reduce false positives, add enterprise safety, structured belief tracking.
+1. Source-aware white/grey-box scanning.
+2. Mobile runtime analysis.
+3. Game runtime analysis.
+4. Hardware/firmware runtime analysis.
+5. Cloud-console session automation.
+6. Multi-agent swarm orchestration beyond narrow validator subtasks.
 
-**Result:** Zero false positives on benchmark targets. Key additions:
-- **Adversarial verifier** (`verify_finding` tool) — stronger model attempts to refute each finding before confirming. Verdicts: CONFIRMED / UNCONFIRMED / REFUTED
-- **Belief state tracking** — `ScanLoopState.verdict_counts` + `refuted_findings` / `confirmed_findings`
-- **Enterprise egress filter** (`src/vxis/agent/egress.py`) — strict allowlist mode (`VXIS_EGRESS_STRICT=1`) blocks sandbox outbound traffic to non-target hosts
-- **MITRE ATT&CK mapping** (`src/vxis/agent/tools/mitre_data.py`) — 16 techniques across web attack surface, auto-inferred from finding_type
-- **NCC report enrichment** — Verification Summary section + MITRE ATT&CK Coverage table in HTML report
+## Current Success Gates
 
-## Phase D — Dashboard + Smart History + Exploit Depth (90% 🔥)
+- Public docs mention only production-wired surfaces or explicitly mark planned
+  work as incubator.
+- High/critical findings without replayable evidence are rejected.
+- Bug bounty export contains accepted findings only.
+- Public registries do not expose source/mobile/game/hardware placeholders.
+- Benchmarks record confirmed findings, high/critical count, false positives,
+  chain depth, wall time, LLM requests/tokens, and repro completeness.
 
-**Goal:** Prevent Brain amnesia at high iteration counts, deepen exploit chains, improve scan dashboard.
+## Historical Note
 
-**Key additions:**
-- **Scan dashboard** — compact progress summary injected every iteration, compensates for history window limits
-- **Smart 3-tier history** (`AgentBrain._build_smart_history()`):
-  - Tier 1 (FULL): last 3 iterations — full detail
-  - Tier 2 (COMPACT): older iterations — tool:name + summary only
-  - Tier 3 (PINNED): high-value messages regardless of age (dashboard, critic, findings, verify)
-- **Browser tools** (7 new tools): `browser_navigate`, `browser_analyze_dom`, `browser_click`, `browser_fill_form`, `browser_screenshot`, `browser_eval_js`, `browser_get_cookies`
-- **Auto-orchestration safety net**: auto-login (SQLi creds), auto-ffuf (dir bruteforce at iter 10), auto-nuclei (at iter 12), auto-sqlmap (at iter 18+ on 500-error endpoints)
-- **Vector exhaustion pins**: `finish_scan` is rejected with 0 findings, 2+ findings require at least one chain, and `max_iters` timeout is scored as incomplete.
-- **First-class vector state**: `ScanLoopState.vector_candidates` and `attempt_outcomes` preserve candidate priority, attempts, status, tool, and summary; high-priority unattempted candidates can block `finish_scan`.
-- **5D score fidelity**: benchmark/growth-loop now compares the same pipeline-emitted score, including attempted vector IDs and auto sandbox invocations.
-
-**Remaining:** Target-specific candidate generation from discovered evidence, final tuning on exploit chain depth, dashboard format refinement.
-
-## Phase E — Strix Patterns (In Progress 🔧)
-
-**Goal:** Full Strix-equivalent patterns for maximum scan quality.
-
-**Implemented so far:**
-- **1 tool per message** — `actions = actions[:1]`, Brain must see result before next decision
-- **LLM memory compression** — at 90K tokens, older messages are chunked and summarized by LLM (preserves security-relevant details). 15 most recent messages always kept verbatim.
-- **Think-first pattern** — system prompt enforces `think` tool usage when uncertain
-
-**Remaining:**
-- Hybrid brain (cheap executor + expensive strategist)
-- Further compression tuning
-
-## Phase D (original) — Domain Expansion (Future)
-
-1. **Game runtime** — Unity memory hooking, emulator control (16-phase original spec)
-2. **Mobile runtime** — Frida / Objection for APK dynamic analysis (19-phase original spec)
-3. **Firmware / Hardware** — CAN bus, RF, smart meter bench rigs
-4. **Cloud console** — AWS / Azure / GCP session automation beyond API-only
-
-## Historical baseline
-
-Pre-migration benchmark for reference:
-
-| Metric | Juice Shop (pre-migration) | Current (Phase D) |
-|---|---:|---:|
-| Wall time | 311.8 s | — |
-| Findings | 10 | CRITICAL SQLi + auth bypass |
-| `brain_decision_count` | 0 | 50 |
-| `llm_call_count` | 10+ | 55 |
-| MITRE techniques | 0 | 8 techniques / 6 tactics |
+Earlier phase documents used "Strix parity" as the headline for the Brain-first
+migration away from hardcoded phases. That migration remains useful context, but
+the current product promise is verified exploit depth rather than broad parity.

@@ -32,6 +32,7 @@ def test_ceiling_blocks_exploitation_below_lateral():
 
 def test_ceiling_allows_exploitation_at_lateral_and_full():
     assert tool_blocked_by_ceiling("shell_exec", PROFILE_POLICY_TABLE["crown"]) is False  # lateral
+    assert tool_blocked_by_ceiling("shell_exec", PROFILE_POLICY_TABLE["bugbounty"]) is False
     assert tool_blocked_by_ceiling("python_exec", PROFILE_POLICY_TABLE["aggressive"]) is False  # full
 
 
@@ -82,6 +83,7 @@ def test_skill_ceiling_blocks_active_below_lateral():
 
 def test_skill_ceiling_allows_active_at_lateral_and_full():
     assert skill_blocked_by_ceiling("test_injection", PROFILE_POLICY_TABLE["crown"]) is False  # lateral
+    assert skill_blocked_by_ceiling("test_injection", PROFILE_POLICY_TABLE["bugbounty"]) is False
     assert skill_blocked_by_ceiling("test_injection", PROFILE_POLICY_TABLE["aggressive"]) is False  # full
 
 

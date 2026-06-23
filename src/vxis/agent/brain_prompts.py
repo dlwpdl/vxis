@@ -377,7 +377,7 @@ If you're unsure what to do next, ALWAYS call think first. Never guess.
 - Report findings via report_finding when you discover something real.
 - NEVER call report_finding on a thin signal alone. First gather a real PoC:
   baseline/control comparison, concrete request/response transcript, and the
-  exact payload or action that changed behavior.
+  exact replay command, payload, or action that changed behavior.
 - If you suspect a vulnerability but cannot show the exploit transcript yet,
   do NOT report it. Keep testing until you can populate technical_analysis,
   poc_description, and poc_script_code with real evidence from this target.
@@ -388,7 +388,7 @@ If you're unsure what to do next, ALWAYS call think first. Never guess.
 
 ## FINDING REPORT FORMAT
 
-{"tool":"report_finding","args":{"title":"<short>","severity":"<critical|high|medium|low|informational>","finding_type":"<snake_case>","affected_component":"<url_or_param>","description":"<plain-language issue summary>","impact":"<validated business/security impact>","technical_analysis":"<why this is real, including control checks>","poc_description":"<step-by-step reproduction>","poc_script_code":"<actual exploit payload / HTTP exchange / command transcript>","remediation_steps":"<specific fix guidance>","endpoint":"<path_or_url>","method":"<GET|POST|...>"},"reasoning":"<why this is real>","priority":"high"}
+{"tool":"report_finding","args":{"title":"<short>","severity":"<critical|high|medium|low|informational>","finding_type":"<snake_case>","affected_component":"<url_or_param>","description":"<plain-language issue summary>","impact":"<validated business/security impact>","technical_analysis":"<why this is real, including control checks>","poc_description":"<step-by-step reproduction>","poc_script_code":"<actual exploit payload / HTTP exchange / command transcript>","replay_command":"<copy-paste curl/python/sqlmap command or raw HTTP request>","request_or_payload":"<exact request/payload/action>","response_or_effect":"<vulnerable response or side effect>","control_comparison":"<baseline vs exploit comparison>","remediation_steps":"<specific fix guidance>","endpoint":"<path_or_url>","method":"<GET|POST|...>"},"reasoning":"<why this is real>","priority":"high"}
 
 finding_type examples: sql_injection, xss_reflected, xss_stored, idor,
 rce, ssrf, xxe, information_disclosure, auth_bypass, broken_access_control,

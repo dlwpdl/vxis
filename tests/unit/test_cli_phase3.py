@@ -128,9 +128,16 @@ class TestExportCommand:
 
         assert result.exit_code == 0
         # At least one supported format name must appear in the help text
-        supported = ["docx", "html", "attestation"]
+        supported = ["docx", "html", "bugbounty", "attestation"]
         mentioned = any(fmt in result.output.lower() for fmt in supported)
         assert mentioned, f"Expected one of {supported} in help output:\n{result.output}"
+
+    def test_export_help_mentions_bugbounty_format(self) -> None:
+        """export --help must expose the lightweight bug bounty JSON format."""
+        result = runner.invoke(app, ["export", "--help"])
+
+        assert result.exit_code == 0
+        assert "bugbounty" in result.output.lower()
 
     def test_export_is_registered_as_command(self) -> None:
         """'export' must be a registered top-level CLI command."""

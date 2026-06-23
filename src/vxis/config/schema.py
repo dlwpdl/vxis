@@ -109,6 +109,37 @@ def _default_profiles() -> dict[str, ScanProfile]:
             nmap_timing=3,
             nuclei_rate=25,
         ),
+        "bugbounty": ScanProfile(
+            name="bugbounty",
+            public_name="VXIS Bug Bounty Mode",
+            description=(
+                "Researcher-focused web black-box mode. Prioritizes aggressive "
+                "authorized recon, sandbox-backed PoCs, validated exploit chains, "
+                "and concise replayable bug-bounty artifacts."
+            ),
+            family="core",
+            intent="bug_bounty_validation",
+            status="active",
+            assessment_modules=[
+                "agentic_discovery",
+                "sandbox_backed_recon",
+                "validated_poc_artifacts",
+                "attack_chain_validation",
+                "bug_bounty_export",
+            ],
+            report_sections=[
+                "accepted_findings",
+                "repro_steps",
+                "replay_commands",
+                "evidence_transcript",
+                "attack_chains",
+            ],
+            rate_limit=100,
+            max_concurrency=7,
+            nmap_timing=4,
+            nuclei_rate=60,
+            skip_plugins=["destructive"],
+        ),
         "passive": ScanProfile(
             name="passive",
             description=(
@@ -378,6 +409,9 @@ _PROFILE_ALIASES: dict[str, str] = {
     "agentic": "crown",
     "crown-jewel": "crown",
     "crown_jewel": "crown",
+    "bug-bounty": "bugbounty",
+    "bug_bounty": "bugbounty",
+    "bb": "bugbounty",
     "devsec": "continuous-devsec",
     "continuous": "continuous-devsec",
     "b2b": "continuous-devsec",

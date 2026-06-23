@@ -44,6 +44,23 @@ POC_ATTEMPT_MARKERS: tuple[str, ...] = (
     "baseline",
 )
 
+# ── Replay markers — signals that the proof can be replayed by a reviewer ─────
+
+POC_REPLAY_MARKERS: tuple[str, ...] = (
+    "curl ",
+    "http ",
+    "https ",
+    "python ",
+    "python3 ",
+    "sqlmap",
+    "nuclei",
+    "ffuf",
+    "replay_command",
+    "replay command",
+    "reproduce:",
+    "repro:",
+)
+
 # ── Result markers — signals of an observed server response ──────────────────
 # Union of finding_tools._POC_RESULT_MARKERS and verifier_tools._RESULT_MARKERS.
 # finding_tools had: response_status, status_code, response_excerpt, observed_delta,

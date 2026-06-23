@@ -897,6 +897,7 @@ class ScanOrchestrator:
                             finding.analyst_severity.value if finding.analyst_severity else None
                         ),
                         analyst_notes=finding.analyst_notes,
+                        raw_data=finding.raw_data,
                         discovered_at=finding.discovered_at,
                         updated_at=finding.updated_at,
                     )

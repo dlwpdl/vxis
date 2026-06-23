@@ -22,6 +22,7 @@ from vxis.agent.tool_registry import ToolResult
 from vxis.agent.tools._poc_signals import (
     CONTROL_MARKERS as _CONTROL_MARKERS,
     HTTP_MARKERS as _HTTP_MARKERS,
+    POC_REPLAY_MARKERS as _POC_REPLAY_MARKERS,
     POC_RESULT_MARKERS as _RESULT_MARKERS,
     finding_type_needs_control as _finding_type_needs_control,
 )
@@ -137,6 +138,11 @@ results, and plist dumps. That is the correct shape, not a gap."""
 
 def _looks_like_http_exchange(blob: str) -> bool:
     return any(marker in blob for marker in _HTTP_MARKERS)
+
+
+def _has_replay_signal(blob: str) -> bool:
+    lower = str(blob or "").lower()
+    return _looks_like_http_exchange(blob) or any(marker.lower() in lower for marker in _POC_REPLAY_MARKERS)
 
 
 def _has_observed_result(blob: str) -> bool:
@@ -411,6 +417,20 @@ class VerifyFindingTool:
                         "preflight_blocked": True,
                     },
                     summary="verify_finding: REFUTED (high) — PoC lacks attempt/result transcript",
+                )
+            if not _has_replay_signal("\n".join([poc_description, poc_script_code])):
+                return ToolResult(
+                    ok=True,
+                    data={
+                        "verdict": "REFUTED",
+                        "confidence": "high",
+                        "reasoning": "PoC transcript does not include a replay command or raw HTTP exchange a reviewer can reproduce.",
+                        "finding_type": finding_type,
+                        "affected_component": component,
+                        "used_stronger_model": False,
+                        "preflight_blocked": True,
+                    },
+                    summary="verify_finding: REFUTED (high) — PoC lacks replayable command",
                 )
             combined = "\n".join([technical_analysis, poc_description, poc_script_code])
             doctrine_flags = _doctrine_flags(combined)

@@ -24,6 +24,7 @@ from vxis.agent.tool_registry import ToolResult
 from vxis.agent.tools._poc_signals import (
     CONTROL_MARKERS as _CONTROL_MARKERS,
     POC_ATTEMPT_MARKERS as _POC_ATTEMPT_MARKERS,
+    POC_REPLAY_MARKERS as _POC_REPLAY_MARKERS,
     POC_RESULT_MARKERS as _POC_RESULT_MARKERS,
     finding_type_needs_control as _finding_type_needs_control,
 )
@@ -91,6 +92,10 @@ _NEGATIVE_MARKERS = (
     "not reflected",
 )
 _HTTP_STATUS_LINE_RE = re.compile(r"(?m)^\s*HTTP/\d(?:\.\d)?\s+\d{3}\b", re.IGNORECASE)
+_HTTP_REQUEST_LINE_RE = re.compile(
+    r"(?m)^\s*(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+\S+(?:\s+HTTP/\d(?:\.\d)?)?\s*$",
+    re.IGNORECASE,
+)
 _STATUS_ASSIGNMENT_RE = re.compile(
     r"\b(?:status|status_code|response_status|code)\b\s*[=:]\s*[\"']?\d{3}\b",
     re.IGNORECASE,
@@ -570,6 +575,24 @@ def _coalesce_report_fields(kwargs: dict[str, Any]) -> dict[str, str]:
     impact = str(kwargs.get("impact") or description or "").strip()
     method = str(kwargs.get("method", "")).strip()
     endpoint = str(kwargs.get("endpoint") or kwargs.get("affected_component") or "").strip()
+    replay_command = _normalize_poc_transcript(
+        kwargs.get("replay_command")
+        or kwargs.get("replay")
+        or kwargs.get("reproduction_command")
+        or ""
+    )
+    request_or_payload = _normalize_poc_transcript(
+        kwargs.get("request_or_payload") or kwargs.get("request") or kwargs.get("payload") or ""
+    )
+    response_or_effect = _normalize_poc_transcript(
+        kwargs.get("response_or_effect") or kwargs.get("response") or kwargs.get("effect") or ""
+    )
+    control_comparison = _normalize_poc_transcript(
+        kwargs.get("control_comparison")
+        or kwargs.get("control")
+        or kwargs.get("baseline_comparison")
+        or ""
+    )
     return {
         "description": description,
         "impact": impact,
@@ -579,6 +602,10 @@ def _coalesce_report_fields(kwargs: dict[str, Any]) -> dict[str, str]:
         "remediation_steps": remediation_steps,
         "method": method,
         "endpoint": endpoint,
+        "replay_command": replay_command,
+        "request_or_payload": request_or_payload,
+        "response_or_effect": response_or_effect,
+        "control_comparison": control_comparison,
     }
 
 
@@ -619,37 +646,72 @@ def _normalize_extra_evidence(value: Any) -> list[dict[str, str]]:
 def _evaluate_high_severity_poc(
     *,
     finding_type: str,
+    impact: str = "",
     technical_analysis: str,
     poc_description: str,
     poc_script_code: str,
+    replay_command: str = "",
+    request_or_payload: str = "",
+    response_or_effect: str = "",
+    control_comparison: str = "",
 ) -> dict[str, Any]:
     combined = "\n".join(
         part
-        for part in (technical_analysis, poc_description, poc_script_code)
+        for part in (
+            impact,
+            technical_analysis,
+            poc_description,
+            poc_script_code,
+            replay_command,
+            request_or_payload,
+            response_or_effect,
+            control_comparison,
+        )
         if str(part or "").strip()
     )
     lower = combined.lower()
-    poc_lower = str(poc_script_code or "").lower()
-    has_attempt = any(marker.lower() in poc_lower for marker in _POC_ATTEMPT_MARKERS)
-    has_observed_status = _HTTP_STATUS_LINE_RE.search(str(poc_script_code or "")) is not None
+    request_blob = "\n".join((str(request_or_payload or ""), str(poc_script_code or "")))
+    response_blob = "\n".join((str(response_or_effect or ""), str(poc_script_code or "")))
+    poc_lower = request_blob.lower()
+    response_lower = response_blob.lower()
+    replay_lower = str(replay_command or "").lower()
+    has_request = (
+        bool(str(request_or_payload or "").strip())
+        or _HTTP_REQUEST_LINE_RE.search(request_blob) is not None
+        or any(marker.lower() in poc_lower for marker in _POC_ATTEMPT_MARKERS)
+    )
+    has_replay_command = (
+        bool(str(replay_command or "").strip())
+        or _HTTP_REQUEST_LINE_RE.search(str(poc_script_code or "")) is not None
+        or any(marker.lower() in replay_lower for marker in _POC_REPLAY_MARKERS)
+        or any(marker.lower() in poc_lower for marker in _POC_REPLAY_MARKERS)
+    )
+    has_observed_status = _HTTP_STATUS_LINE_RE.search(response_blob) is not None
     has_observed_status = (
-        has_observed_status or _STATUS_ASSIGNMENT_RE.search(str(poc_script_code or "")) is not None
+        has_observed_status or _STATUS_ASSIGNMENT_RE.search(response_blob) is not None
     )
     has_result = has_observed_status or any(
-        marker.lower() in poc_lower for marker in _POC_RESULT_MARKERS
+        marker.lower() in response_lower for marker in _POC_RESULT_MARKERS
     )
     repeat_count = _artifact_repeat_count(combined)
     has_repeat = repeat_count >= 2
     has_negative = _artifact_has_negative_result(combined)
-    needs_control = _finding_type_needs_control(finding_type)
-    has_control = any(marker in lower for marker in _CONTROL_MARKERS)
+    needs_control = True
+    has_control = bool(str(control_comparison or "").strip()) or any(
+        marker in lower for marker in _CONTROL_MARKERS
+    )
+    has_impact = bool(str(impact or "").strip())
     missing: list[str] = []
-    if not has_attempt:
-        missing.append("exploit_attempt")
+    if not has_impact:
+        missing.append("impact_statement")
+    if not has_request:
+        missing.append("request_or_payload")
     if not has_result:
-        missing.append("observed_result")
-    if needs_control and not has_control:
-        missing.append("control_or_baseline")
+        missing.append("response_or_effect")
+    if not has_control:
+        missing.append("control_comparison")
+    if not has_replay_command:
+        missing.append("replay_command")
     if not has_repeat:
         missing.append("repeat_reproduction")
     if not has_negative:
@@ -657,10 +719,13 @@ def _evaluate_high_severity_poc(
     return {
         "ok": not missing,
         "missing": missing,
-        "has_attempt": has_attempt,
+        "has_attempt": has_request,
+        "has_request": has_request,
         "has_result": has_result,
         "needs_control": needs_control,
         "has_control": has_control,
+        "has_replay_command": has_replay_command,
+        "has_impact": has_impact,
         "repeat_count": repeat_count,
         "has_repeat": has_repeat,
         "has_negative": has_negative,
@@ -702,6 +767,22 @@ class ReportFindingTool:
             "poc_script_code": {
                 "type": "string",
                 "description": "Actual exploit payload / HTTP exchange / command transcript with control, repeat_count>=2, and negative result",
+            },
+            "replay_command": {
+                "type": "string",
+                "description": "Copy-paste replay command, script invocation, or raw HTTP request that reproduces the issue",
+            },
+            "request_or_payload": {
+                "type": "string",
+                "description": "Exact request, payload, or action used to trigger the issue",
+            },
+            "response_or_effect": {
+                "type": "string",
+                "description": "Observed vulnerable response or side effect",
+            },
+            "control_comparison": {
+                "type": "string",
+                "description": "Baseline/control result compared with the vulnerable result",
             },
             "evidence": {
                 "type": "string",
@@ -782,18 +863,24 @@ class ReportFindingTool:
             )
         proof = _evaluate_high_severity_poc(
             finding_type=str(kwargs["finding_type"]),
+            impact=normalized["impact"],
             technical_analysis=normalized["technical_analysis"],
             poc_description=normalized["poc_description"],
             poc_script_code=normalized["poc_script_code"],
+            replay_command=normalized["replay_command"],
+            request_or_payload=normalized["request_or_payload"],
+            response_or_effect=normalized["response_or_effect"],
+            control_comparison=normalized["control_comparison"],
         )
         if severity in ("high", "critical") and not proof["ok"]:
             missing = ", ".join(proof["missing"])
             return ToolResult(
                 ok=False,
                 summary=(
-                    "report_finding: HIGH/CRITICAL findings require a replayable PoC "
-                    "with exploit attempt, observed result, control/baseline, "
-                    f"repeat_count>=2, and negative/refutation result. Missing: {missing}."
+                    "report_finding: HIGH/CRITICAL findings require a replayable "
+                    "evidence contract with request/payload, response/effect, "
+                    "control comparison, replay command or raw HTTP exchange, "
+                    f"repeat_count>=2, negative/refutation result, and impact. Missing: {missing}."
                 ),
                 error="weak_poc",
                 data={"proof": proof},
@@ -912,6 +999,10 @@ class ReportFindingTool:
             "technical_analysis": normalized["technical_analysis"],
             "poc_description": normalized["poc_description"],
             "poc_script_code": normalized["poc_script_code"],
+            "replay_command": normalized["replay_command"],
+            "request_or_payload": normalized["request_or_payload"],
+            "response_or_effect": normalized["response_or_effect"],
+            "control_comparison": normalized["control_comparison"],
             "evidence": normalized["poc_script_code"],
             "remediation": normalized["remediation_steps"],
             "remediation_steps": normalized["remediation_steps"],
@@ -920,6 +1011,9 @@ class ReportFindingTool:
             "cwe": str(kwargs.get("cwe", "")),
             "extra_evidence": normalized_extra_evidence,
             "proof": proof if severity in ("high", "critical") else {},
+            "acceptance_status": "accepted"
+            if severity not in ("high", "critical") or proof.get("ok")
+            else "rejected",
             # NOW-1/1.3: adversarial-verifier verdict stamped by _verify_and_gate.
             # Blank verdict (info / verify_finding absent / legacy) => kept, not excluded.
             "verifier_verdict": str(kwargs.get("verifier_verdict", "")),

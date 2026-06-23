@@ -225,9 +225,10 @@ async def test_report_finding_rejects_high_with_weak_poc_transcript():
 
     assert result.ok is False
     assert result.error == "weak_poc"
-    assert "exploit_attempt" in result.data["proof"]["missing"]
-    assert "observed_result" in result.data["proof"]["missing"]
-    assert "control_or_baseline" in result.data["proof"]["missing"]
+    assert "request_or_payload" in result.data["proof"]["missing"]
+    assert "response_or_effect" in result.data["proof"]["missing"]
+    assert "control_comparison" in result.data["proof"]["missing"]
+    assert "replay_command" in result.data["proof"]["missing"]
 
 
 @pytest.mark.asyncio
@@ -682,8 +683,8 @@ async def test_no_hash_falls_back_to_existing_dedup() -> None:
     )
 
 
-# Fix 2 — _evaluate_high_severity_poc must use _finding_type_needs_control()
-# instead of hardcoded needs_control=True.
+# Bug bounty evidence contract — high/critical findings need a complete replayable
+# proof packet regardless of vulnerability family.
 
 _MISCONFIG_POC = (
     "GET /.env HTTP/1.1\n"
@@ -699,28 +700,26 @@ _MISCONFIG_POC = (
 )
 
 
-def test_evaluate_poc_misconfig_does_not_require_control() -> None:
-    """misconfiguration/information_disclosure findings must not be
-    rejected as 'weak_poc' purely because they lack a control/baseline —
-    only injection/auth types require a control."""
+def test_evaluate_poc_misconfig_high_requires_control_and_replayable_proof() -> None:
+    """Disclosure-style high findings still need replayable proof and a control."""
     result = _evaluate_high_severity_poc(
         finding_type="misconfiguration",
+        impact="A public .env file exposes reusable production credentials.",
         technical_analysis="The .env file is publicly accessible and returns real credentials.",
         poc_description="Direct GET to /.env returns DB_PASSWORD and API_KEY in plaintext.",
         poc_script_code=_MISCONFIG_POC,
     )
-    assert result["needs_control"] is False, (
-        "misconfiguration does not require a control/baseline — needs_control should be False"
-    )
-    assert "control_or_baseline" not in result["missing"], (
-        "misconfiguration PoC must NOT be rejected for missing control_or_baseline"
-    )
+    assert result["needs_control"] is True
+    assert result["has_control"] is True
+    assert result["has_replay_command"] is True
+    assert result["missing"] == []
 
 
 def test_evaluate_poc_auth_still_requires_control() -> None:
     """auth/injection types must still require a control comparison."""
     result = _evaluate_high_severity_poc(
         finding_type="auth_bypass",
+        impact="Forged token grants an authenticated admin session.",
         technical_analysis="Forged token accepted.",
         poc_description="Send forged token, get 200.",
         poc_script_code=(

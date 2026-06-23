@@ -58,6 +58,14 @@ def test_resolve_crown_is_lateral():
     assert resolve_policy(_Cfg("crown")).exploitation_ceiling == "lateral"
 
 
+def test_resolve_bugbounty_is_lateral_strict_authorized():
+    p = resolve_policy(_Cfg("bug-bounty"))
+    assert p.exploitation_ceiling == "lateral"
+    assert p.scope_strictness == "strict-authorized"
+    assert p.tenant_isolation is True
+    assert p.deferred_mutation_approval is True
+
+
 def test_resolve_aggressive_is_full_lab():
     p = resolve_policy(_Cfg("aggressive"))
     assert p.exploitation_ceiling == "full"

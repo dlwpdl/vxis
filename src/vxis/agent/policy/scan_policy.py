@@ -68,6 +68,14 @@ PROFILE_POLICY_TABLE: dict[str, ScanPolicy] = {
         evasion_allowed=False,
         deferred_mutation_approval=True,
     ),
+    "bugbounty": ScanPolicy(
+        exploitation_ceiling="lateral",
+        scope_strictness="strict-authorized",
+        tenant_isolation=True,
+        secret_handling="encrypt-redact",
+        evasion_allowed=False,
+        deferred_mutation_approval=True,
+    ),
     "aggressive": ScanPolicy(
         exploitation_ceiling="full",
         scope_strictness="lab-allowlist",

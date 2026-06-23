@@ -36,8 +36,9 @@ from vxis.cli.skillopt import skillopt_app
 
 
 PROFILE_HELP = (
-    "Scan profile: crown | passive (no direct contact; third-party intel only) | "
-    "stealth | standard | aggressive | continuous-devsec | "
+    "Scan profile: crown | bugbounty (researcher PoC export) | "
+    "passive (no direct contact; third-party intel only) | stealth | standard | "
+    "aggressive | continuous-devsec | "
     "vc-portfolio-monitor | pre-investment-dd | remediation-verification | "
     "compliance-mapping (add-on: maps findings to SOC-2/ISO 27001/ISMS-P, no active testing) | "
     "p1-adversary-emulation (engagement-gated live adversary emulation)"
@@ -1342,7 +1343,7 @@ def export(
         "docx",
         "--format",
         "-f",
-        help="Output format: docx | html | json | csv | attestation",
+        help="Output format: docx | html | json | csv | bugbounty | attestation",
     ),
     output: Optional[Path] = typer.Option(
         None,
@@ -1351,8 +1352,8 @@ def export(
         help="Output file path (default: ./<scan_id>.<format>)",
     ),
 ) -> None:
-    """Export scan results to DOCX, HTML, JSON, CSV, or attestation letter."""
-    supported_formats = {"docx", "html", "json", "csv", "attestation"}
+    """Export scan results to DOCX, HTML, JSON, CSV, bug bounty JSON, or attestation letter."""
+    supported_formats = {"docx", "html", "json", "csv", "bugbounty", "attestation"}
     if format not in supported_formats:
         err_console.print(
             f"[bold red]Unsupported format:[/bold red] '{format}'. "
@@ -1363,7 +1364,14 @@ def export(
         _require_optional_dependency("docx", "export", f"vxis export --format {format}")
 
     # Resolve default output path
-    ext_map = {"docx": "docx", "html": "html", "json": "json", "csv": "csv", "attestation": "docx"}
+    ext_map = {
+        "docx": "docx",
+        "html": "html",
+        "json": "json",
+        "csv": "csv",
+        "bugbounty": "bugbounty.json",
+        "attestation": "docx",
+    }
     ext = ext_map[format]
     out_path = output or Path(f"{scan_id}.{ext}")
 
@@ -1428,6 +1436,11 @@ def export(
 
             exporter = JSONExporter()
             generated = exporter.export_report(report_data, out_path)
+        elif format == "bugbounty":
+            from vxis.report.json_export import JSONExporter
+
+            exporter = JSONExporter()
+            generated = exporter.export_bugbounty(report_data, out_path)
         elif format == "csv":
             from vxis.report.csv_export import CSVExporter
 

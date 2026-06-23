@@ -17,6 +17,7 @@ def test_poc_signals_module_exists() -> None:
     from vxis.agent.tools import _poc_signals
 
     assert hasattr(_poc_signals, "POC_RESULT_MARKERS")
+    assert hasattr(_poc_signals, "POC_REPLAY_MARKERS")
     assert hasattr(_poc_signals, "CONTROL_MARKERS")
 
 
@@ -39,6 +40,14 @@ def test_canonical_result_markers_includes_http_status_strings() -> None:
 
     assert "200 OK" in POC_RESULT_MARKERS
     assert "500 Internal Server Error" in POC_RESULT_MARKERS
+
+
+def test_canonical_replay_markers_include_cli_replay_commands() -> None:
+    from vxis.agent.tools._poc_signals import POC_REPLAY_MARKERS
+
+    lower = [m.lower() for m in POC_REPLAY_MARKERS]
+    assert "curl " in lower
+    assert "replay_command" in lower
 
 
 def test_canonical_control_markers_includes_observed_delta() -> None:
@@ -66,7 +75,11 @@ def test_canonical_control_markers_includes_verifier_extras() -> None:
 def test_finding_tools_imports_from_poc_signals() -> None:
     """finding_tools must consume the canonical sets, not its own copies."""
     import vxis.agent.tools.finding_tools as ft
-    from vxis.agent.tools._poc_signals import POC_RESULT_MARKERS, CONTROL_MARKERS
+    from vxis.agent.tools._poc_signals import (
+        CONTROL_MARKERS,
+        POC_REPLAY_MARKERS,
+        POC_RESULT_MARKERS,
+    )
 
     assert ft._POC_RESULT_MARKERS is POC_RESULT_MARKERS, (
         "finding_tools._POC_RESULT_MARKERS must be the same object as "
@@ -76,12 +89,17 @@ def test_finding_tools_imports_from_poc_signals() -> None:
         "finding_tools._CONTROL_MARKERS must be the same object as "
         "_poc_signals.CONTROL_MARKERS (imported, not redefined)"
     )
+    assert ft._POC_REPLAY_MARKERS is POC_REPLAY_MARKERS
 
 
 def test_verifier_tools_imports_from_poc_signals() -> None:
     """verifier_tools must consume the canonical sets, not its own copies."""
     import vxis.agent.tools.verifier_tools as vt
-    from vxis.agent.tools._poc_signals import POC_RESULT_MARKERS, CONTROL_MARKERS
+    from vxis.agent.tools._poc_signals import (
+        CONTROL_MARKERS,
+        POC_REPLAY_MARKERS,
+        POC_RESULT_MARKERS,
+    )
 
     assert vt._RESULT_MARKERS is POC_RESULT_MARKERS, (
         "verifier_tools._RESULT_MARKERS must be the same object as "
@@ -91,6 +109,7 @@ def test_verifier_tools_imports_from_poc_signals() -> None:
         "verifier_tools._CONTROL_MARKERS must be the same object as "
         "_poc_signals.CONTROL_MARKERS (imported, not redefined)"
     )
+    assert vt._POC_REPLAY_MARKERS is POC_REPLAY_MARKERS
 
 
 def test_finding_type_needs_control_single_sourced() -> None:
