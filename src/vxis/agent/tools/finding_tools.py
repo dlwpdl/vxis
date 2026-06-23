@@ -26,7 +26,10 @@ from vxis.agent.tools._poc_signals import (
     POC_ATTEMPT_MARKERS as _POC_ATTEMPT_MARKERS,
     POC_REPLAY_MARKERS as _POC_REPLAY_MARKERS,
     POC_RESULT_MARKERS as _POC_RESULT_MARKERS,
-    finding_type_needs_control as _finding_type_needs_control,
+    # Re-exported so the predicate is single-sourced from _poc_signals (enforced
+    # by test_finding_type_needs_control_single_sourced); ruff can't see that
+    # test-level use, hence the noqa.
+    finding_type_needs_control as _finding_type_needs_control,  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
