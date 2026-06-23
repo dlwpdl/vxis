@@ -2580,6 +2580,8 @@ def _run_brain_first_scan_from_tui(
             instruction_file=None,
             engagement=None,
             approve_destructive=False,
+            budget_usd=None,
+            budget_tokens=None,
         )
     except typer.Exit as exc:
         if exc.exit_code not in (0, None):

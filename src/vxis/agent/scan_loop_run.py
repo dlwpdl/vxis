@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from vxis.agent.cost_budget import budget_exceeded
 from vxis.agent.operator_inbox import inject_operator_directives
 from vxis.agent.scan_loop_policy import _DESKTOP_SKILLS
 from vxis.agent.scan_loop_execution_monitor import ScanLoopExecutionMonitorMixin
@@ -25,6 +26,33 @@ class ScanLoopRunMixin(
     ScanLoopScheduledSkillsMixin,
     ScanLoopExecutionMonitorMixin,
 ):
+    def _cost_budget_exceeded(self) -> bool:
+        """True when an operator cost/token cap is set AND reached this scan."""
+        if not getattr(self, "_cost_budget_usd", None) and not getattr(self, "_token_budget", None):
+            return False
+        try:
+            from vxis.agent.brain_metrics import get_llm_usage_stats
+
+            rows = get_llm_usage_stats().get("rows") or []
+        except Exception:
+            return False
+        return budget_exceeded(rows, getattr(self, "_cost_budget_usd", None), getattr(self, "_token_budget", None))
+
+    def _finalize_cost_exhausted_scan(self) -> None:
+        """Graceful stop on a budget cap — mark completed so the pipeline reports
+        the partial findings (not a 'hit max_iters' failure). An intentional
+        operator cap, not a premature finish."""
+        self.state.completed = True
+        caps = []
+        if getattr(self, "_cost_budget_usd", None):
+            caps.append(f"${self._cost_budget_usd:.2f}")
+        if getattr(self, "_token_budget", None):
+            caps.append(f"{self._token_budget:,} tok")
+        try:
+            self._emit_control_plane(f"cost budget reached ({' / '.join(caps)}) — finalizing scan")
+        except Exception:
+            pass
+
     async def run(self) -> dict[str, Any]:
         import json as _json
         import re as _re
@@ -35,6 +63,16 @@ class ScanLoopRunMixin(
             reset_memory_compression_stats()
         except Exception:
             pass
+        # Per-scan LLM usage reset so a cost/token budget measures THIS scan only
+        # (the usage ledger is process-global). Gated on a budget being set to
+        # avoid changing non-budget runs.
+        if getattr(self, "_cost_budget_usd", None) or getattr(self, "_token_budget", None):
+            try:
+                from vxis.agent.brain_metrics import reset_llm_usage_stats
+
+                reset_llm_usage_stats()
+            except Exception:
+                pass
         from vxis.interaction.surface import TargetKind as _TK
 
         self.state.add_message("system", f"Scan started on {self.state.target}")
@@ -167,6 +205,11 @@ class ScanLoopRunMixin(
             _n_ops = inject_operator_directives(self.state, getattr(self, "_operator_inbox", None))
             if _n_ops:
                 self._emit_control_plane(f"operator directive injected (+{_n_ops})")
+            # Mid-scan cost/token budget: stop BEFORE spending another decision if
+            # the operator cap is reached. Findings still finalize + report.
+            if self._cost_budget_exceeded():
+                self._finalize_cost_exhausted_scan()
+                break
             self._emit_iteration_status("Brain choosing next action")
             # LLM memory compression: when history grows beyond token
             # threshold, older messages are summarized by the LLM. Recent

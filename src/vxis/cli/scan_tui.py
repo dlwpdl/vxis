@@ -36,7 +36,6 @@ from vxis.agent.llm_cost import summarize_usage
 from vxis.agent.scan_event_model import ScanEventModel
 from vxis.agent.tui_renderers import render_detail
 from vxis.cli.theme import BRASS as _BRASS
-from vxis.cli.theme import CYAN as _CYAN
 from vxis.cli.theme import GREEN as _GREEN
 from vxis.cli.theme import HAIR as _HAIR
 from vxis.cli.theme import vxis_textual_theme
@@ -528,17 +527,35 @@ class ScanTUI(App):
         except Exception:
             rows = []
         summary = summarize_usage(rows)
-        cost = (
-            f"~${summary['total_cost_usd']:.4f} · {summary['total_tokens']:,} tok"
-            if rows else "~$0 · 0 tok"
-        )
+        spent_usd = float(summary["total_cost_usd"]) if rows else 0.0
+        total_tok = summary["total_tokens"] if rows else 0
+        # Budget: show spent/target and colour the segment as it nears the cap.
+        try:
+            from vxis.agent.cost_budget import resolve_cost_budget
+
+            max_usd, max_tok = resolve_cost_budget()
+        except Exception:
+            max_usd, max_tok = None, None
+
+        def _budget_colour(ratio: float) -> str:
+            return _BRASS if ratio < 0.75 else ("yellow" if ratio < 0.9 else "#D97777")
+
+        if max_usd:
+            cost_color = _budget_colour(spent_usd / max_usd)
+            cost = f"~${spent_usd:.4f} / ${max_usd:.2f} · {total_tok:,} tok"
+        elif max_tok:
+            cost_color = _budget_colour(total_tok / max_tok)
+            cost = f"~${spent_usd:.4f} · {total_tok:,}/{max_tok:,} tok"
+        else:
+            cost_color = _BRASS
+            cost = f"~${spent_usd:.4f} · {total_tok:,} tok"
         found = sum(it.found for it in self.model.iterations)
         state = f"[{_GREEN}]● done[/]" if self._done else f"[{_BRASS}]● running[/]"
         found_txt = f"{found} findings"
         found_str = f"[{_GREEN}]{found_txt}[/]" if found else f"[dim]{found_txt}[/dim]"
         sep = f"  [{_HAIR}]│[/]  "
         return (
-            f" {state}{sep}[{_BRASS}]{cost}[/]{sep}[{_CYAN}]box {m['box_mode']}[/]"
+            f" {state}{sep}[{cost_color}]{cost}[/]{sep}box {m['box_mode']}"
             f"{sep}inject {m['injection_mode']}"
             f"{sep}ghost {'on' if m['ghost'] else 'off'}"
             f"{sep}[dim]{m['context']}[/dim]{sep}brain {m['brain_decisions']}"

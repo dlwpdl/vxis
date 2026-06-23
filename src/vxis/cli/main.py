@@ -332,6 +332,17 @@ def scan(
         "--approve-destructive",
         help="Pre-approve approval_required destructive actions for this run (fail-closed by default).",
     ),
+    budget_usd: Optional[float] = typer.Option(
+        None,
+        "--budget-usd",
+        help="Stop the scan once estimated LLM spend reaches this many USD "
+        "(Strix-style cap); findings still finalize + report.",
+    ),
+    budget_tokens: Optional[int] = typer.Option(
+        None,
+        "--budget-tokens",
+        help="Stop the scan once total LLM tokens reach this cap.",
+    ),
 ) -> None:
     """Run a Brain-First security scan against the target.
 
@@ -342,6 +353,13 @@ def scan(
     --manifest: 여러 타겟을 한 번에 스캔 (scan.yml)
     """
     profile = normalize_scan_profile_name(profile)
+    # Cost/token budget → env so resolve_cost_budget() picks it up at loop build.
+    import os as _os_budget
+
+    if budget_usd is not None:
+        _os_budget.environ["VXIS_SCAN_MAX_USD"] = str(budget_usd)
+    if budget_tokens is not None:
+        _os_budget.environ["VXIS_SCAN_MAX_TOKENS"] = str(budget_tokens)
     try:
         p1_engagement = require_profile_engagement(profile, engagement)
     except P1ProfileGateError as exc:

@@ -53,6 +53,8 @@ class ScanAgentLoop(
         target_kind: Any = None,
         event_callback: Callable[[str, dict[str, Any]], None] | None = None,
         operator_inbox: Any = None,
+        cost_budget_usd: float | None = None,
+        token_budget: int | None = None,
     ) -> None:
         self.state = ScanLoopState(target=target, max_iters=max_iters)
         self.registry = registry
@@ -62,6 +64,9 @@ class ScanAgentLoop(
         self._event_callback = event_callback
         # Mid-scan operator → Brain steering (TUI → thread-safe inbox → loop).
         self._operator_inbox = operator_inbox
+        # Mid-scan cost/token budget (Strix-style cap); None = no cap.
+        self._cost_budget_usd = cost_budget_usd
+        self._token_budget = token_budget
         self.hard_max_iters = hard_max_iters if hard_max_iters is not None else max_iters
         self.adaptive_budget = adaptive_budget
         self.extend_iters = max(0, extend_iters)

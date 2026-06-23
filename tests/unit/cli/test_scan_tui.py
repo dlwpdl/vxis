@@ -257,6 +257,15 @@ async def test_operator_message_queues_directive_for_the_brain():
     assert inbox.drain() == ["focus on /admin and try JWT alg:none"]
 
 
+async def test_status_bar_shows_budget_spent_over_target(monkeypatch):
+    monkeypatch.setenv("VXIS_SCAN_MAX_USD", "2.00")
+    monkeypatch.delenv("VXIS_SCAN_MAX_TOKENS", raising=False)
+    app = ScanTUI(target="t")
+    async with app.run_test():
+        status = str(app.query_one("#status", Static).render())
+    assert "/ $2.00" in status  # spent / target rendered when a budget is set
+
+
 async def test_feed_event_never_raises_on_garbage():
     app = ScanTUI(target="t")
     async with app.run_test():

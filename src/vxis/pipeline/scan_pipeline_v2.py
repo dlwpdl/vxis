@@ -1020,11 +1020,16 @@ class ScanPipeline:
 
             # 7. Create + run the ScanAgentLoop
             max_iters, hard_max_iters, extend_iters = _resolve_scan_loop_budget()
+            from vxis.agent.cost_budget import resolve_cost_budget
+
+            budget_usd, budget_tokens = resolve_cost_budget()
             logger.info(
-                "scan loop budget: soft=%d hard=%d extend=%d",
+                "scan loop budget: soft=%d hard=%d extend=%d cost_usd=%s tokens=%s",
                 max_iters,
                 hard_max_iters,
                 extend_iters,
+                budget_usd,
+                budget_tokens,
             )
             loop = ScanAgentLoop(
                 target=ctx.target,
@@ -1037,6 +1042,8 @@ class ScanPipeline:
                 target_kind=kind,
                 event_callback=self._emit,
                 operator_inbox=operator_inbox,
+                cost_budget_usd=budget_usd,
+                token_budget=budget_tokens,
             )
             for note in runtime.shared_notes[:3]:
                 loop.state.add_shared_note(note)
