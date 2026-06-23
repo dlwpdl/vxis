@@ -455,11 +455,9 @@ def _back_choices(choices: list, back_label: str = "← 뒤로") -> list:
 
 
 def _select_back(message: str, choices: list, **kwargs):
-    """inquirer.select with a "← 뒤로" entry. Returns the value, _BACK (go
-    back), or None (Esc/Ctrl-C = abort)."""
-    kwargs.setdefault("pointer", "❯")
-    kwargs.setdefault("amark", "✅")
-    return inquirer.select(message=message, choices=_back_choices(choices), **kwargs).execute()
+    """A dossier Textual menu (with a "← 뒤로" entry) when usable; InquirerPy
+    otherwise. Returns the value, _BACK (go back), or None (abort)."""
+    return _menu_select(message, _back_choices(choices))
 
 
 def _run_wizard_steps(steps: list, state: dict) -> bool:
@@ -607,7 +605,7 @@ def _menu_select(title: str, choices: list) -> str | None:
             from vxis.cli.home_tui import run_menu
 
             items = [
-                (str(c["value"]), str(c.get("name", c["value"])))
+                (c["value"], str(c.get("name", c["value"])))
                 for c in choices
                 if isinstance(c, dict) and "value" in c
             ]
@@ -617,6 +615,40 @@ def _menu_select(title: str, choices: list) -> str | None:
     return inquirer.select(
         message=title, choices=choices, instruction="(↑↓ 방향키)",
     ).execute()
+
+
+def _text_input(title: str, prompt: str = "", *, default: str = "", validate=None) -> str | None:
+    """A dossier Textual text prompt (matches the menus) when usable; InquirerPy
+    otherwise. Returns the entered string, or None on cancel."""
+    import sys
+
+    use_textual = False
+    try:
+        from vxis.cli.main import _textual_available
+
+        use_textual = sys.stdout.isatty() and _textual_available()
+    except Exception:
+        use_textual = False
+    if use_textual:
+        try:
+            from vxis.cli.home_tui import run_input
+
+            value = run_input(title, prompt, default)
+            if value is None:
+                return None
+            if validate and not validate(value):
+                return _text_input(title, prompt, default=default, validate=validate)
+            return value
+        except Exception:
+            pass
+    kwargs = {"message": title}
+    if prompt:
+        kwargs["instruction"] = prompt
+    if default:
+        kwargs["default"] = default
+    if validate:
+        kwargs["validate"] = validate
+    return inquirer.text(**kwargs).execute()
 
 
 def _advanced_menu() -> str | None:
@@ -692,14 +724,7 @@ def scan_wizard() -> dict | None:
         return _code_scan_wizard(cat)
 
     # Step 2: 타겟 입력
-    target = inquirer.text(
-        message="스캔 대상을 입력하세요",
-        qmark="\U0001f3af",
-        amark="\u2705",
-        instruction="(도메인, IP, 또는 CIDR)",
-        validate=lambda val: len(val.strip()) > 0,
-        invalid_message="대상을 입력해주세요",
-    ).execute()
+    target = _text_input("스캔 대상", "도메인, IP, 또는 CIDR", validate=lambda v: len(v.strip()) > 0)
 
     if not target:
         return None

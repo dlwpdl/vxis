@@ -16,7 +16,7 @@ from typing import Any
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
-from textual.widgets import Footer, OptionList, Static
+from textual.widgets import Footer, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
 from vxis.cli.theme import MUTED, vxis_textual_theme
@@ -131,11 +131,61 @@ def run_home_menu() -> str | None:
     return VxisHome().run()
 
 
-def run_menu(title: str, items: list[tuple[str, str]]) -> str | None:
-    """Run a generic dossier submenu. `items` = (value, label). Returns the
-    selected value, or None on quit/back."""
-    options = [(value, Text("  " + label)) for value, label in items]
-    return VxisMenu(items=options, title=title.upper(), show_banner=False).run()
+def run_menu(title: str, items: list[tuple[Any, str]]) -> Any:
+    """Run a generic dossier submenu. `items` = (value, label) — value may be any
+    object (e.g. a sentinel). Returns the selected value, or None on quit/back."""
+    # OptionList ids must be strings, so key options by index and map back to the
+    # original (possibly non-string) value.
+    options = [(str(idx), Text("  " + label)) for idx, (_v, label) in enumerate(items)]
+    result = VxisMenu(items=options, title=title.upper(), show_banner=False).run()
+    if result is None:
+        return None
+    return items[int(result)][0]
 
 
-__all__ = ["VxisMenu", "VxisHome", "run_home_menu", "run_menu"]
+class VxisInput(App):
+    """A single-field dossier text prompt (for the scan wizard's target etc.).
+    run() returns the entered string, or None on Esc."""
+
+    CSS = """
+    Screen { background: $background; align: center middle; }
+    #wrap { width: 72; height: auto; }
+    #prompt { color: $text; padding: 0 1; margin-bottom: 1; }
+    #field { border: round $primary; }
+    """
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, *, title: str, prompt: str = "", default: str = "") -> None:
+        super().__init__()
+        self._field_title = title
+        self._prompt = prompt
+        self._default = default
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="wrap"):
+            if self._prompt:
+                yield Static(self._prompt, id="prompt")
+            field = Input(value=self._default, id="field")
+            field.border_title = self._field_title
+            yield field
+        yield Footer()
+
+    def on_mount(self) -> None:
+        self.register_theme(vxis_textual_theme())
+        self.theme = "vxis"
+        self.title = "VXIS"
+        self.query_one("#field", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.exit(event.value)
+
+    def action_cancel(self) -> None:
+        self.exit(None)
+
+
+def run_input(title: str, prompt: str = "", default: str = "") -> str | None:
+    """Run a dossier text prompt; return the entered string (None on Esc)."""
+    return VxisInput(title=title.upper(), prompt=prompt, default=default).run()
+
+
+__all__ = ["VxisMenu", "VxisHome", "VxisInput", "run_home_menu", "run_menu", "run_input"]

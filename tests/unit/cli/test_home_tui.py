@@ -67,3 +67,37 @@ async def test_run_menu_quit_returns_none():
     async with app.run_test() as pilot:
         await pilot.press("escape")
     assert app.return_value is None
+
+
+async def test_indexed_menu_round_trips_to_original_value():
+    """run_menu keys options by index so it can return non-string values (e.g.
+    the _BACK sentinel). This exercises that index -> original-value round-trip."""
+    from rich.text import Text
+
+    from vxis.cli.home_tui import VxisMenu
+
+    sentinel = object()
+    items = [(sentinel, "Back"), ("real-value", "Pick me")]
+    options = [(str(i), Text(label)) for i, (_v, label) in enumerate(items)]
+    app = VxisMenu(items=options, title="X")
+    async with app.run_test() as pilot:
+        await pilot.press("down")
+        await pilot.press("enter")
+    assert items[int(app.return_value)][0] == "real-value"
+
+
+async def test_text_input_returns_value_and_esc_cancels():
+    from vxis.cli.home_tui import VxisInput
+
+    app = VxisInput(title="TARGET", prompt="domain / IP")
+    async with app.run_test() as pilot:
+        from textual.widgets import Input
+
+        app.query_one("#field", Input).value = "http://localhost:3000"
+        await pilot.press("enter")
+    assert app.return_value == "http://localhost:3000"
+
+    app2 = VxisInput(title="TARGET")
+    async with app2.run_test() as pilot:
+        await pilot.press("escape")
+    assert app2.return_value is None
