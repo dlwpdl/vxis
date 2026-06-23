@@ -31,3 +31,13 @@ def test_input_wizard_uses_styled_shim():
     assert interactive.inquirer.__class__.__name__ == "_StyledInquirer"
     assert interactive._VXIS_PROMPT_STYLE is not None
     assert callable(interactive.inquirer.select)
+
+
+def test_select_routes_through_textual_proxy():
+    # Every list menu (inquirer.select) is rendered as the dossier Textual menu;
+    # the shim returns a proxy whose .execute() picks Textual or InquirerPy.
+    from vxis.cli import interactive
+
+    proxy = interactive.inquirer.select(message="m", choices=[{"name": "A", "value": "a"}])
+    assert proxy.__class__.__name__ == "_TextualSelectProxy"
+    assert hasattr(proxy, "execute")

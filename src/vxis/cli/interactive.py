@@ -26,12 +26,61 @@ console = Console()
 _VXIS_PROMPT_STYLE = vxis_inquirer_style()
 
 
+class _TextualSelectProxy:
+    """Returned by the inquirer shim for `select`, so EVERY list menu in this
+    module renders as the dossier Textual menu (matching the home) — with a
+    fallback to the real InquirerPy select off-TTY / when textual is missing.
+    Preserves non-string choice values (e.g. the _BACK sentinel) via run_menu."""
+
+    def __init__(self, factory, args, kwargs):
+        self._factory = factory
+        self._args = args
+        self._kwargs = kwargs
+
+    def execute(self):
+        import sys
+
+        choices = self._kwargs.get("choices")
+        if choices is None and len(self._args) > 1:
+            choices = self._args[1]
+        message = self._kwargs.get("message") or (self._args[0] if self._args else "")
+        use_textual = False
+        try:
+            from vxis.cli.main import _textual_available
+
+            use_textual = sys.stdout.isatty() and _textual_available()
+        except Exception:
+            use_textual = False
+        if use_textual and choices:
+            try:
+                from vxis.cli.home_tui import run_menu
+
+                items = []
+                for choice in choices:
+                    if isinstance(choice, Separator):
+                        continue
+                    if isinstance(choice, dict) and "value" in choice:
+                        items.append((choice["value"], str(choice.get("name", choice["value"]))))
+                    else:
+                        items.append((choice, str(choice)))
+                if items:
+                    return run_menu(str(message), items)
+            except Exception:
+                pass
+        return self._factory(*self._args, **self._kwargs).execute()
+
+
 class _StyledInquirer:
+    """Shadow `inquirer`: inject the dossier style into every prompt, and render
+    `select` (list menus) as the Textual dossier menu via _TextualSelectProxy."""
+
     def __getattr__(self, name: str):
         factory = getattr(_inquirer, name)
 
         def _make(*args, **kwargs):
             kwargs.setdefault("style", _VXIS_PROMPT_STYLE)
+            if name == "select":
+                return _TextualSelectProxy(factory, args, kwargs)
             return factory(*args, **kwargs)
 
         return _make
