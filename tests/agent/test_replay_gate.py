@@ -81,9 +81,53 @@ async def test_machine_replay_gate_passes_on_marker_delta() -> None:
 
 
 @pytest.mark.asyncio
-async def test_machine_replay_gate_blocks_unsafe_methods() -> None:
+async def test_machine_replay_gate_accepts_specific_non_security_word_marker() -> None:
+    async def dispatch(name: str, args: dict) -> ToolResult:
+        body = "orderId=42" if "orderId" in str(args.get("path", "")) else "empty cart"
+        return ToolResult(ok=True, data={"status": 200, "body_preview": body})
+
     gate = await machine_replay_gate(
         finding={
+            "severity": "high",
+            "control_comparison": "GET /cart HTTP/1.1\nHost: example\n\n",
+            "request_or_payload": "GET /cart?show=orderId HTTP/1.1\nHost: example\n\n",
+            "response_or_effect": "orderId=42",
+        },
+        target="http://localhost:3000",
+        dispatch=dispatch,
+    )
+
+    assert gate["status"] == "passed"
+    assert gate["matched_markers"] == ["orderId=42"]
+
+
+@pytest.mark.asyncio
+async def test_machine_replay_gate_turns_dispatch_exception_into_blocked_oracle() -> None:
+    async def dispatch(name: str, args: dict) -> ToolResult:
+        raise TimeoutError("network blip")
+
+    gate = await machine_replay_gate(
+        finding={
+            "severity": "high",
+            "control_comparison": "GET /cart HTTP/1.1\nHost: example\n\n",
+            "request_or_payload": "GET /cart?show=orderId HTTP/1.1\nHost: example\n\n",
+            "response_or_effect": "orderId=42",
+        },
+        target="http://localhost:3000",
+        dispatch=dispatch,
+    )
+
+    assert gate["status"] == "blocked_oracle"
+    assert gate["reason"] == "http replay failed: TimeoutError"
+
+
+@pytest.mark.asyncio
+async def test_machine_replay_gate_blocks_unsafe_methods(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level("WARNING")
+    gate = await machine_replay_gate(
+        finding={
+            "id": "VXIS-0007",
+            "title": "POST login bypass",
             "severity": "critical",
             "control_comparison": "POST /login HTTP/1.1\nHost: example\n\n{}",
             "request_or_payload": "POST /login HTTP/1.1\nHost: example\n\n{}",
@@ -93,3 +137,4 @@ async def test_machine_replay_gate_blocks_unsafe_methods() -> None:
     )
 
     assert gate["status"] == "blocked_policy"
+    assert "VXIS-0007" in caplog.text

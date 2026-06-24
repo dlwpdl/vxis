@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
 
 HIGH_SEVERITIES = {"critical", "high"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -23,6 +26,7 @@ _SKIP_MARKER_PREFIXES = (
     "control",
     "repeat_count",
 )
+_CONCRETE_MARKER_RE = re.compile(r"[0-9<>{}\[\]\":=/@._$-]")
 
 
 def replay_gate_passed(finding: dict[str, Any]) -> bool:
@@ -106,7 +110,9 @@ def _candidate_markers(*values: Any) -> list[str]:
             lower = marker.lower()
             if len(marker) < 4 or lower.startswith(_SKIP_MARKER_PREFIXES):
                 continue
-            if not any(token in lower for token in ("<", "{", "token", "session", "admin", "error", "uid=", "role")):
+            if not _CONCRETE_MARKER_RE.search(marker) and not any(
+                token in lower for token in ("token", "session", "admin", "error", "uid=", "role")
+            ):
                 continue
             marker = marker[:160]
             if marker not in seen:
@@ -144,10 +150,22 @@ async def machine_replay_gate(
     control_args = control_requests[0]
     replay_args = replay_requests[-1]
     if str(control_args.get("method", "")).upper() not in SAFE_METHODS or str(replay_args.get("method", "")).upper() not in SAFE_METHODS:
+        logger.warning(
+            "replay gate blocked unsafe method for high/critical finding id=%s title=%s",
+            finding.get("id", ""),
+            str(finding.get("title", ""))[:80],
+        )
         return {"status": "blocked_policy", "method": "machine_http", "reason": "unsafe method requires operator policy"}
 
-    control = await dispatch("http_request", control_args)
-    replay = await dispatch("http_request", replay_args)
+    try:
+        control = await dispatch("http_request", control_args)
+        replay = await dispatch("http_request", replay_args)
+    except Exception as exc:
+        return {
+            "status": "blocked_oracle",
+            "method": "machine_http",
+            "reason": f"http replay failed: {type(exc).__name__}",
+        }
     control_data = getattr(control, "data", {}) if getattr(control, "ok", False) else {}
     replay_data = getattr(replay, "data", {}) if getattr(replay, "ok", False) else {}
     control_status = int(control_data.get("status") or 0)
