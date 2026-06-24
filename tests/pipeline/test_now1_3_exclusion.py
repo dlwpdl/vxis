@@ -82,6 +82,23 @@ def test_should_include_excludes_unconfirmed_only_at_high_critical():
     assert _should_include_in_report({"verifier_verdict": "refuted", "severity": "medium"}) is False
 
 
+def test_should_include_logs_blocked_policy_replay_exclusion(caplog):
+    caplog.set_level("WARNING")
+    assert (
+        _should_include_in_report(
+            {
+                "id": "VXIS-0001",
+                "verifier_verdict": "CONFIRMED",
+                "severity": "critical",
+                "acceptance_status": "needs_replay_gate",
+                "replay_gate": {"status": "blocked_policy"},
+            }
+        )
+        is False
+    )
+    assert "replay-excluded high finding: VXIS-0001 (blocked_policy)" in caplog.text
+
+
 def test_reconcile_chains_drops_chains_through_excluded_findings():
     # F3 (review fix): a chain that pivots through a withheld (report-excluded)
     # finding must not be asserted as a fabricated edge in the attack graph.

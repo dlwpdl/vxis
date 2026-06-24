@@ -452,6 +452,15 @@ def _should_include_in_report(d: dict[str, Any]) -> bool:
     if verdict == "REFUTED":
         return False
     if acceptance == "needs_replay_gate" and severity in {"high", "critical"}:
+        replay_gate = d.get("replay_gate")
+        replay_status = (
+            str(replay_gate.get("status", "")) if isinstance(replay_gate, dict) else ""
+        )
+        if replay_status == "blocked_policy":
+            logger.warning(
+                "replay-excluded high finding: %s (blocked_policy)",
+                d.get("id") or d.get("title") or "<unknown>",
+            )
         return False
     return not (verdict == "UNCONFIRMED" and severity in {"high", "critical"})
 
