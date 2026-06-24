@@ -43,6 +43,14 @@ def test_build_finding_confirmed_maps_to_status_confirmed():
     assert f.status == FindingStatus.confirmed
 
 
+def test_build_finding_needs_replay_gate_demotes_confirmed_high():
+    d = _fd("CONFIRMED")
+    d["severity"] = "high"
+    d["acceptance_status"] = "needs_replay_gate"
+    f = _build_finding_from_dict(d, "scan-1", "http://t")
+    assert f.status == FindingStatus.unconfirmed
+
+
 def test_build_finding_unconfirmed_maps_to_status_unconfirmed():
     f = _build_finding_from_dict(_fd("UNCONFIRMED"), "scan-1", "http://t")
     assert f.status == FindingStatus.unconfirmed
@@ -64,6 +72,9 @@ def test_should_include_excludes_unconfirmed_only_at_high_critical():
     assert _should_include_in_report({"verifier_verdict": "UNCONFIRMED", "severity": "medium"}) is True
     assert _should_include_in_report({"verifier_verdict": "UNCONFIRMED", "severity": "low"}) is True
     assert _should_include_in_report({"verifier_verdict": "CONFIRMED", "severity": "high"}) is True
+    assert _should_include_in_report(
+        {"verifier_verdict": "CONFIRMED", "severity": "high", "acceptance_status": "needs_replay_gate"}
+    ) is False
     assert _should_include_in_report({"verifier_verdict": "", "severity": "high"}) is True
     assert _should_include_in_report({"severity": "critical"}) is True  # blank / legacy kept
     # F5: REFUTED never ships, at any severity (defense-in-depth)

@@ -646,6 +646,43 @@ def _normalize_extra_evidence(value: Any) -> list[dict[str, str]]:
     return normalized
 
 
+def _normalize_replay_gate(value: Any, *, machine: bool = False) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    normalized: dict[str, Any] = {}
+    for key in ("status", "method", "reason"):
+        raw = str(value.get(key, "")).strip()
+        if raw:
+            normalized[key] = raw[:500]
+    if not machine and str(normalized.get("status", "")).lower() == "passed":
+        normalized["status"] = "blocked_oracle"
+        normalized["reason"] = "ignored caller-attested replay pass"
+    for key in ("control_status", "replay_status"):
+        try:
+            normalized[key] = int(value[key])
+        except (KeyError, TypeError, ValueError):
+            pass
+    markers = value.get("matched_markers")
+    if isinstance(markers, list):
+        normalized["matched_markers"] = [str(item)[:120] for item in markers[:20]]
+    return normalized
+
+
+def _finding_acceptance_status(
+    *, severity: str, proof: dict[str, Any], replay_gate: dict[str, Any], verifier_verdict: Any
+) -> str:
+    if severity not in ("high", "critical"):
+        return "accepted"
+    if not proof.get("ok"):
+        return "rejected"
+    if (
+        str(verifier_verdict or "").upper() == "CONFIRMED"
+        and str(replay_gate.get("status", "")).lower() == "passed"
+    ):
+        return "accepted"
+    return "needs_replay_gate"
+
+
 def _evaluate_high_severity_poc(
     *,
     finding_type: str,
@@ -899,6 +936,10 @@ class ReportFindingTool:
         new_component = _normalize(kwargs["affected_component"])
         new_base = _base_path(kwargs["affected_component"])
         normalized_extra_evidence = _normalize_extra_evidence(kwargs.get("extra_evidence"))
+        normalized_replay_gate = _normalize_replay_gate(
+            kwargs.get("replay_gate"),
+            machine=bool(kwargs.get("_replay_gate_machine")),
+        )
 
         for existing in findings:
             ex_type = _normalize(_canonical_finding_type(existing["finding_type"]))
@@ -975,6 +1016,17 @@ class ReportFindingTool:
                     existing["verified"] = True
                     existing["verifier_confidence"] = str(kwargs.get("verifier_confidence", ""))
                     existing["verifier_reasoning"] = str(kwargs.get("verifier_reasoning", ""))
+                if normalized_replay_gate and (
+                    str(normalized_replay_gate.get("status", "")).lower() == "passed"
+                    or not existing.get("replay_gate")
+                ):
+                    existing["replay_gate"] = normalized_replay_gate
+                existing["acceptance_status"] = _finding_acceptance_status(
+                    severity=str(existing.get("severity", "")).lower(),
+                    proof=existing.get("proof", {}),
+                    replay_gate=existing.get("replay_gate", {}),
+                    verifier_verdict=existing.get("verifier_verdict", ""),
+                )
                 return ToolResult(
                     ok=True,
                     data={
@@ -1013,10 +1065,14 @@ class ReportFindingTool:
             "method": normalized["method"],
             "cwe": str(kwargs.get("cwe", "")),
             "extra_evidence": normalized_extra_evidence,
+            "replay_gate": normalized_replay_gate,
             "proof": proof if severity in ("high", "critical") else {},
-            "acceptance_status": "accepted"
-            if severity not in ("high", "critical") or proof.get("ok")
-            else "rejected",
+            "acceptance_status": _finding_acceptance_status(
+                severity=severity,
+                proof=proof,
+                replay_gate=normalized_replay_gate,
+                verifier_verdict=kwargs.get("verifier_verdict", ""),
+            ),
             # NOW-1/1.3: adversarial-verifier verdict stamped by _verify_and_gate.
             # Blank verdict (info / verify_finding absent / legacy) => kept, not excluded.
             "verifier_verdict": str(kwargs.get("verifier_verdict", "")),

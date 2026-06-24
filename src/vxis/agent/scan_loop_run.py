@@ -541,6 +541,7 @@ class ScanLoopRunMixin(
                 # UNCONFIRMED proceeds and spawns a recursive gap branch; only REFUTED
                 # blocks the dispatch. (All-severity gating is NOW-1/1.2.)
                 if name == "report_finding" and isinstance(args, dict):
+                    args.pop("_replay_gate_machine", None)
                     try:
                         _verify_block = await self._verify_and_gate(
                             args,
@@ -574,6 +575,22 @@ class ScanLoopRunMixin(
                             f"Auto-verifier refuted finding: {args.get('title', 'report_finding')}"
                         )
                         continue
+                    if str(args.get("severity", "")).lower() in {"critical", "high"}:
+                        from vxis.agent.replay_gate import machine_replay_gate
+
+                        _replay_dispatch = (
+                            self.registry.dispatch
+                            if getattr(self.registry, "has_tool", lambda _name: False)(
+                                "http_request"
+                            )
+                            else None
+                        )
+                        args["replay_gate"] = await machine_replay_gate(
+                            finding=args,
+                            target=str(self.state.target),
+                            dispatch=_replay_dispatch,
+                        )
+                        args["_replay_gate_machine"] = True
 
                 if name == "report_finding" and isinstance(args, dict):
                     _refuted_match = self._matches_refuted_memory_pattern(args)
@@ -769,6 +786,7 @@ class ScanLoopRunMixin(
                         _latest_title = next(iter(_latest_titles)) if _latest_titles else ""
                         if len(_latest_titles) == 1 and _latest_title in {
                             "needs_chains",
+                            "needs_replay_gate",
                             "unfinished_branches",
                             "unattempted_candidates",
                         }:
@@ -1336,6 +1354,41 @@ class ScanLoopRunMixin(
                             logger.warning(
                                 "iter %d: finish_scan rejected (0 findings)",
                                 self.state.iteration,
+                            )
+                            continue
+                        from vxis.agent.replay_gate import blocking_replay_gate_findings
+
+                        _replay_blockers = blocking_replay_gate_findings(_fin_findings)
+                        if _replay_blockers:
+                            _replay_block = "\n  ".join(
+                                f"{item['id']} [{item['severity'].upper()}] {item['title']} "
+                                f"verifier={item['verifier_verdict'] or 'missing'} "
+                                f"replay_gate={item['replay_gate_status'] or 'missing'}"
+                                for item in _replay_blockers[:8]
+                            )
+                            self._reject_finish_scan(
+                                title="needs_replay_gate",
+                                reason=(
+                                    "finish_scan was attempted while high/critical findings lacked "
+                                    "confirmed deterministic replay evidence."
+                                ),
+                                action_hint=(
+                                    "Replay each high/critical finding, attach replay_gate.status=passed, "
+                                    "or downgrade findings that no longer reproduce."
+                                ),
+                                summary=(
+                                    "finish_scan REJECTED — high/critical findings need deterministic replay gate pass.\n"
+                                    f"  {_replay_block}"
+                                ),
+                                data={
+                                    "needs_replay_gate": True,
+                                    "replay_gate_blockers": _replay_blockers,
+                                },
+                            )
+                            logger.warning(
+                                "iter %d: finish_scan rejected (%d replay-gate blockers)",
+                                self.state.iteration,
+                                len(_replay_blockers),
                             )
                             continue
                         if _fin_desired > 0 and len(_fin_chains) < _fin_desired:

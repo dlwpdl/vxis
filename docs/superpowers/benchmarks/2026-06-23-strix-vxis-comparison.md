@@ -4,7 +4,7 @@ Status: pending full same-environment run.
 
 This file is the single comparison record for the current direction decision:
 Strix is the product/UX benchmark, while VXIS should win on accepted evidence,
-exploit chain depth, policy gates, and reproducible reporting.
+related-impact depth, policy gates, and reproducible reporting.
 
 ## Environment
 
@@ -32,7 +32,7 @@ exploit chain depth, policy gates, and reproducible reporting.
 | confirmed findings | Findings with replayable proof accepted by verifier or VXIS evidence contract |
 | critical/high count | Accepted critical/high findings only |
 | false positives | Reported findings that cannot be reproduced or lack controls |
-| chain depth | Longest validated exploit chain length |
+| related-evidence depth | Longest validated chain of related evidence and impact |
 | time | Wall-clock scan time |
 | LLM requests/tokens | Provider request and token counts where available |
 | repro completeness | Whether request, response/effect, control, replay command, and impact are present |
@@ -63,14 +63,14 @@ directory and token/cost artifacts here.
 
 ### Juice Shop
 
-| Tool | confirmed findings | critical/high | false positives | chain depth | time | LLM requests/tokens | repro completeness |
+| Tool | confirmed findings | critical/high | false positives | related-evidence depth | time | LLM requests/tokens | repro completeness |
 |---|---:|---:|---:|---:|---:|---:|---|
 | Strix | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 | VXIS | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 
 ### WebGoat
 
-| Tool | confirmed findings | critical/high | false positives | chain depth | time | LLM requests/tokens | repro completeness |
+| Tool | confirmed findings | critical/high | false positives | related-evidence depth | time | LLM requests/tokens | repro completeness |
 |---|---:|---:|---:|---:|---:|---:|---|
 | Strix | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 | VXIS | TBD | TBD | TBD | TBD | TBD | TBD | TBD |

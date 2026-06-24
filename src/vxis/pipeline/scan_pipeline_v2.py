@@ -378,8 +378,11 @@ def _build_finding_from_dict(
     # NOW-1/1.3: carry the adversarial-verifier verdict into Finding.status so the
     # DB/dashboard regeneration paths inherit it; blank verdict stays `open`.
     _verdict = str(d.get("verifier_verdict", "")).upper()
+    _acceptance = str(d.get("acceptance_status", "")).lower()
     _status = (
-        FindingStatus.confirmed
+        FindingStatus.unconfirmed
+        if _acceptance == "needs_replay_gate"
+        else FindingStatus.confirmed
         if _verdict == "CONFIRMED"
         else FindingStatus.unconfirmed
         if _verdict == "UNCONFIRMED"
@@ -442,10 +445,13 @@ def _should_include_in_report(d: dict[str, Any]) -> bool:
     """
     verdict = str(d.get("verifier_verdict", "")).upper()
     severity = str(d.get("severity", "")).lower()
+    acceptance = str(d.get("acceptance_status", "")).lower()
     # REFUTED never ships (review fix F5, defense-in-depth): the gate already
     # blocks REFUTED before report_finding, but exclude here too in case any
     # path persists one.
     if verdict == "REFUTED":
+        return False
+    if acceptance == "needs_replay_gate" and severity in {"high", "critical"}:
         return False
     return not (verdict == "UNCONFIRMED" and severity in {"high", "critical"})
 

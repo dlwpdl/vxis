@@ -48,6 +48,21 @@ class RunSkillTool:
         return ToolResult(ok=True, summary=f"ran skill {kwargs.get('skill', '?')}", data={})
 
 
+class ReplayHttpTool:
+    name = "http_request"
+    description = "machine replay http"
+    input_schema = {"type": "object", "properties": {"method": {"type": "string"}}, "required": ["method"]}
+
+    async def run(self, **kwargs) -> ToolResult:
+        path = str(kwargs.get("path") or kwargs.get("url") or "")
+        body = (
+            "search:<img src=x onerror=alert(1)>"
+            if "%3Cimg" in path or "<img" in path
+            else "search:test"
+        )
+        return ToolResult(ok=True, summary="HTTP 200", data={"status": 200, "body_preview": body})
+
+
 @pytest.fixture(autouse=True)
 def _isolate_findings():
     _reset_findings()
@@ -1894,6 +1909,7 @@ async def test_short_smoke_can_finish_after_single_high_finding_once_branch_guar
     reg = ToolRegistry()
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
+    reg.register(ReplayHttpTool())
 
     decisions = iter([
         [("report_finding", {
@@ -1906,7 +1922,11 @@ async def test_short_smoke_can_finish_after_single_high_finding_once_branch_guar
             "technical_analysis": "Negative control baseline was not reflected as markup; payload reflection reproduced twice. repeat_count=2",
             "poc_description": "Replay a benign search, then inject an HTML payload twice and observe reflected execution content.",
             "poc_script_code": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nnegative control: search:test not reflected\\n\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>\\n\\nrepeat_count=2\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>",
+            "response_or_effect": "search:<img src=x onerror=alert(1)>",
+            "control_comparison": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nsearch:test",
+            "request_or_payload": "GET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example",
             "remediation_steps": "Apply output encoding and context-aware templating.",
+            "verifier_verdict": "CONFIRMED",
         })],
     ])
 
@@ -1921,6 +1941,46 @@ async def test_short_smoke_can_finish_after_single_high_finding_once_branch_guar
     result = await loop.run()
 
     assert result["completed"] is True
+
+
+@pytest.mark.asyncio
+async def test_finish_scan_rejected_when_high_finding_lacks_machine_replay_gate():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "reflected xss",
+            "severity": "high",
+            "finding_type": "xss_reflected",
+            "affected_component": "/search?q=test",
+            "description": "script payload reflected",
+            "impact": "Attacker can execute script in the victim browser and act in their session context.",
+            "technical_analysis": "Negative control baseline was not reflected as markup; payload reflection reproduced twice. repeat_count=2",
+            "poc_description": "Replay a benign search, then inject an HTML payload twice and observe reflected execution content.",
+            "poc_script_code": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nnegative control: search:test not reflected\\n\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>\\n\\nrepeat_count=2\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>",
+            "remediation_steps": "Apply output encoding and context-aware templating.",
+            "verifier_verdict": "CONFIRMED",
+            "replay_gate": {"status": "passed", "method": "brain_attested"},
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=4)
+    loop._decide = fake_decide  # type: ignore
+    result = await loop.run()
+
+    assert result["completed"] is False
+    assert any(
+        item["stage"] == "judge" and item["title"] == "needs_replay_gate"
+        for item in result["review_queue"]
+    )
 
 
 @pytest.mark.asyncio

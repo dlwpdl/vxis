@@ -2272,7 +2272,7 @@ class AgentBrain:
                     get_max_output_tokens(model, default=4000),
                     int(policy.output_token_cap or 8000),
                 ),
-                "system": system,
+                "system": self._anthropic_cached_system(system),
                 "messages": [{"role": "user", "content": user_content}],
             }
         ).encode("utf-8")
@@ -2299,3 +2299,13 @@ class AgentBrain:
         except Exception as exc:
             logger.warning("Anthropic agent call failed: %s", exc)
             return None
+
+    @staticmethod
+    def _anthropic_cached_system(system: str) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": "text",
+                "text": system,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]

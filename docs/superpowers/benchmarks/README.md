@@ -19,7 +19,7 @@ Same-environment Strix vs VXIS comparisons must record:
 - confirmed findings
 - critical/high count
 - false positives
-- chain depth
+- related-evidence depth
 - wall time
 - LLM requests/tokens
 - repro completeness

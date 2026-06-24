@@ -265,6 +265,47 @@ async def test_report_finding_normalizes_escaped_poc_transcript():
 
 
 @pytest.mark.asyncio
+async def test_high_finding_acceptance_status_requires_replay_gate():
+    tool = ReportFindingTool()
+    high_args = {
+        "title": "Reflected XSS",
+        "severity": "high",
+        "finding_type": "xss_reflected",
+        "affected_component": "/search",
+        "description": "Payload is reflected into the response.",
+        "impact": "Victim browser script execution.",
+        "technical_analysis": (
+            "Negative control baseline did not reflect script markup. Payload reflection was "
+            "reproduced twice with active markup. repeat_count=2"
+        ),
+        "poc_description": (
+            "Replay benign search, then replay payload search twice and compare response body."
+        ),
+        "poc_script_code": (
+            "GET /search?q=test HTTP/1.1\nHost: example\n\n"
+            "HTTP/1.1 200 OK\n\nnegative control: search:test; not reflected as script\n\n"
+            "repeat_count=2\n"
+            "GET /search?q=%3Cscript%3Ealert(1)%3C/script%3E HTTP/1.1\nHost: example\n\n"
+            "HTTP/1.1 200 OK\n\nsearch:<script>alert(1)</script>"
+        ),
+        "remediation_steps": "Apply context-aware output encoding.",
+        "verifier_verdict": "CONFIRMED",
+    }
+
+    assert (await tool.run(**high_args)).ok is True
+    assert _get_findings()[0]["acceptance_status"] == "needs_replay_gate"
+
+    high_args["replay_gate"] = {"status": "passed", "method": "raw_http"}
+    assert (await tool.run(**high_args)).ok is True
+    assert _get_findings()[0]["acceptance_status"] == "needs_replay_gate"
+
+    _reset_for_tests()
+    high_args["_replay_gate_machine"] = True
+    assert (await tool.run(**high_args)).ok is True
+    assert _get_findings()[0]["acceptance_status"] == "accepted"
+
+
+@pytest.mark.asyncio
 async def test_report_finding_allows_medium_with_descriptive_evidence():
     tool = ReportFindingTool()
     result = await tool.run(

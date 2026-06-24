@@ -982,6 +982,13 @@ class ScanLoopDecisionPolicyMixin:
         open_candidates = self._dag_remaining_high_yield_candidates(findings)
         if open_candidates:
             return False
+        try:
+            from vxis.agent.replay_gate import blocking_replay_gate_findings
+
+            if blocking_replay_gate_findings(findings):
+                return False
+        except Exception:
+            return False
         desired = self._desired_chain_count(findings)
         if desired > 0 and len(chains) < desired:
             return False
@@ -1001,6 +1008,7 @@ class ScanLoopDecisionPolicyMixin:
             if item.stage == "judge" and item.title in {
                 "unfinished_branches",
                 "needs_chains",
+                "needs_replay_gate",
                 "unattempted_candidates",
                 "premature_finish",
             }:
@@ -1201,6 +1209,11 @@ class ScanLoopDecisionPolicyMixin:
                 return (
                     "Build or validate an attack chain next. Link confirmed findings together or push a "
                     "post-exploit branch until it proves a concrete pivot."
+                )
+            if title == "needs_replay_gate":
+                return (
+                    "Replay every high/critical finding through the verifier path, attach replay_gate.status=passed, "
+                    "or downgrade findings that no longer reproduce."
                 )
             if title == "unfinished_branches":
                 return "Close the highest-priority open branch by proving, exhausting, or blocking it with evidence."

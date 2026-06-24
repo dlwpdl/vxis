@@ -2,10 +2,10 @@
 
 ## Goal
 
-Keep VXIS as a lean autonomous validation engine: target in, Brain-controlled
-web black-box runtime loop, accepted exploit evidence out. Prioritize bug bounty
-speed, verifier-backed findings, exploit-chain depth, and professional bilingual
-reporting over broad Strix clone behavior.
+Keep VXIS as a lean autonomous validation helper: authorized system in,
+Brain-controlled web black-box runtime loop, accepted evidence out. Prioritize
+researcher assistance, verifier-backed findings, related-impact depth, and
+professional bilingual reporting over broad Strix clone behavior.
 
 ## Live Architecture
 
@@ -15,9 +15,10 @@ reporting over broad Strix clone behavior.
 - Tools: `ToolRegistry` BrainTools only
 - Findings: per-scan `FindingStore`, `report_finding`, `verify_finding`,
   `link_chain`
-- Profiles: `crown` for deep chain hunting, `bugbounty` for concise replayable
-  PoC artifacts
+- Profiles: `crown` for deep related-impact validation, `bugbounty` for concise
+  replayable PoC artifacts
 - Reports: NCC-style HTML plus `--format bugbounty` accepted-finding JSON
+- Cost: Anthropic director calls mark the stable system prompt cacheable
 - MCP: working primitive and scan tools only; no deleted phase wrappers
 - Development boundary: incomplete feature work lives under top-level
   `incubator/` until it is complete, tested, and intentionally moved into
@@ -28,19 +29,23 @@ reporting over broad Strix clone behavior.
 - Borrow: sandbox-first execution, compact artifacts, resumable state, skill
   loading, source-aware scan UX, and CI-friendly output.
 - VXIS difference: stricter policy/scope gates, verifier-backed acceptance,
-  replayable high/critical evidence contract, chain/scoring pressure, bilingual
-  NCC-style reporting.
+  replayable high/critical evidence contract, related-evidence scoring pressure,
+  bilingual NCC-style reporting.
 - Avoid: broad public parity, specialist-agent fleets, source/mobile/game
   placeholders, and docs that imply runtime support before tools are promoted.
 
 ## Immediate Priorities
 
-1. Keep `bugbounty` profile and export aligned with accepted-finding evidence.
-2. Generate vector candidates from discovered routes, forms, params, and tech.
-3. Refuse `finish_scan` when high-value candidates are unattempted or chains are
-   missing for multi-finding scans.
-4. Capture same-environment Strix vs VXIS benchmark results in one dated file.
-5. Keep source-aware work in `incubator/` until tools, gates, reports,
+1. Keep prompt caching working before adding parallel runtime complexity.
+2. Implement the deterministic replay gate spec:
+   `docs/superpowers/specs/2026-06-24-deterministic-replay-gate.md`.
+3. Capture one trigger benchmark where cached single-loop plateaus before
+   promoting any SDK worker substrate.
+4. Keep `incubator/sdk_runtime` worker-only; never move the director onto SDK.
+5. Generate vector candidates from discovered routes, forms, params, and tech.
+6. Refuse `finish_scan` when high-value candidates are unattempted or related
+   evidence is missing for multi-finding scans.
+7. Keep source-aware work in `incubator/` until tools, gates, reports,
    benchmark targets, and regression tests are complete.
 
 ## Non-Goals

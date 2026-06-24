@@ -1,16 +1,16 @@
-# VXIS - Autonomous Validated Exploit Engine
+# VXIS - Autonomous Security Validation Assistant
 
-> Target -> autonomous validated exploit chain -> bilingual report. VXIS learns from Strix-style agent UX, but it is not a Strix clone; the v1 product is narrow, deep, and evidence-gated.
+> Authorized system -> evidence-guided validation -> reproducible findings -> bilingual report. VXIS learns from Strix-style agent UX, but it is not a Strix clone; the v1 product is a narrow, deep helper for security verification.
 
 ## What is VXIS?
 
-VXIS is an autonomous penetration testing engine for authorized web black-box assessments. A single LLM "Brain" drives the scan loop, uses browser/proxy/HTTP tools plus sandboxed scanner binaries, verifies high-value findings, links exploit chains, and produces professional bilingual reports.
+VXIS is an autonomous security validation assistant for authorized web black-box assessments. A single LLM "Brain" drives the scan loop, uses browser/proxy/HTTP tools plus sandboxed scanner binaries, validates high-value findings, connects related evidence, and produces professional bilingual reports.
 
 The public v1 surface is intentionally small:
 
-- Web black-box autonomous scan
-- Bug bounty profile and replayable PoC export
-- Verifier-backed findings and chain gates
+- Web black-box validation scan
+- Bug bounty helper profile and replayable PoC export
+- Verifier-backed findings and evidence gates
 - NCC-style bilingual HTML report
 - Reproducible benchmark notes
 - MCP scan integration
@@ -21,17 +21,17 @@ Source-aware, mobile, game, hardware, and cloud-console runtimes stay in planned
 
 ```
 Phase 시작
-  → Brain이 타겟 현재 상태 분석
-  → Brain이 공격 전략 결정
-  → Brain이 페이로드 생성
+  → Brain이 허가된 범위의 현재 상태 분석
+  → Brain이 검증 전략 결정
+  → Brain이 재현 절차와 확인 요청 생성
   → Hands/Eyes/X-Ray 또는 shell_exec/python_exec로 실행
   → 결과를 Brain이 해석
   → 다음 행동을 Brain이 결정
-  → 체이닝하여 Crown Jewel까지 도달
+  → 관련 증거를 연결하여 영향 범위 확인
 Phase 완료
 ```
 
-**금지**: 하드코딩된 엔드포인트/페이로드, Brain 없이 코드 로직만으로 공격, Brain을 "헬퍼"로 취급.
+**금지**: 하드코딩된 엔드포인트/페이로드, Brain 없이 코드 로직만으로 검증, Brain을 단순 "헬퍼"로 축소.
 **필수**: Brain이 매 iteration의 핵심 의사결정자이며, high/critical finding은 재현 가능한 evidence contract를 통과해야 함.
 
 ## Architecture at a glance
@@ -61,10 +61,10 @@ uv sync --extra dev --extra export
 # 2. Build the sandbox image (one-time)
 docker build -t vxis/sandbox:latest docker/sandbox/
 
-# 3. Run the deep default profile
+# 3. Run the deep validation profile
 uv run vxis scan http://localhost:3000 --profile crown --output reports/juice.html
 
-# 4. Run bug bounty mode and export accepted PoCs
+# 4. Run bug bounty helper mode and export accepted PoCs
 uv run vxis scan http://localhost:3000 --profile bugbounty --output reports/juice-bb.html
 uv run vxis export <scan_id> --format bugbounty --output reports/juice-bugbounty.json
 ```

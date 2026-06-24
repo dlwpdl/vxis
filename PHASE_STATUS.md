@@ -1,22 +1,23 @@
 # Phase Status - Current Runtime Direction
 
 > Updated 2026-06-23. VXIS is no longer described as "Strix parity first." The
-> current direction is narrower and deeper: authorized target -> autonomous
-> validated exploit chain -> bilingual report or bug bounty PoC export.
+> current direction is narrower and deeper: authorized system -> assisted
+> validation -> reproducible evidence -> bilingual report or bug bounty PoC export.
 
 ## Current State In One Line
 
-Single Brain loop, one tool per turn, sandbox-backed web black-box testing,
+Single Brain loop, one tool per turn, sandbox-backed web black-box validation,
 scope/policy gates, high/critical evidence contract, verifier-aware finding
-status, attack-chain pressure, NCC-style report, and `bugbounty` profile/export.
+status, related-evidence pressure, NCC-style report, and `bugbounty`
+profile/export.
 
 ## Production Public Surface
 
 | Surface | Status | Notes |
 |---|---|---|
-| Web black-box scan | Production | `vxis scan <target>` through `ScanPipelineV2` and `ScanAgentLoop` |
-| Deep chain profile | Production | `--profile crown` |
-| Bug bounty profile | Production | `--profile bugbounty`, aliases `bug-bounty`, `bug_bounty`, `bb` |
+| Web black-box validation scan | Production | `vxis scan <authorized-system>` through `ScanPipelineV2` and `ScanAgentLoop` |
+| Deep validation profile | Production | `--profile crown` |
+| Bug bounty helper profile | Production | `--profile bugbounty`, aliases `bug-bounty`, `bug_bounty`, `bb` |
 | Bug bounty export | Production | `vxis export <scan_id> --format bugbounty` emits accepted replayable findings |
 | NCC-style HTML report | Production | Bilingual-ready report path remains the professional deliverable |
 | MCP scan integration | Production | Keep to working scan/primitive tools only |
@@ -56,7 +57,8 @@ contract, scoring, and report discipline.
   parameters, and technologies.
 - Finish-gate pressure for unattempted high-value vectors and missing chains.
 - Benchmark baseline: same-environment Strix vs VXIS comparison across Juice
-  Shop, WebGoat, and one local repo/source target when source tools are promoted.
+  Shop, WebGoat, and one local repo/source validation target when source tools
+  are promoted.
 - CI-friendly scan output after engine-quality benchmarks stabilize.
 
 ## Planned Or Incubator
@@ -79,10 +81,11 @@ scope gate, report evidence, benchmark target, and regression tests:
 - Bug bounty export contains accepted findings only.
 - Public registries do not expose source/mobile/game/hardware placeholders.
 - Benchmarks record confirmed findings, high/critical count, false positives,
-  chain depth, wall time, LLM requests/tokens, and repro completeness.
+  related-evidence depth, wall time, LLM requests/tokens, and repro completeness.
 
 ## Historical Note
 
 Earlier phase documents used "Strix parity" as the headline for the Brain-first
 migration away from hardcoded phases. That migration remains useful context, but
-the current product promise is verified exploit depth rather than broad parity.
+the current product promise is assisted verification depth rather than broad
+parity.

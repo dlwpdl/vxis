@@ -5,15 +5,18 @@
 > status. This file lists production-wired behavior first; planned/incubator
 > work is explicitly labeled.
 
-## Core - Narrow, Deep Autonomous Web Testing
+## Core - Narrow, Deep Autonomous Web Validation
 
 ### Single persistent ReAct loop
 
 One LLM Brain owns the scan end to end through `AgentBrain.think_in_loop()` and
 `ScanAgentLoop`. VXIS uses Strix-style lessons such as one tool per turn,
 sandbox execution, compact run state, and developer-friendly CLI output, but the
-VXIS product center is stricter: verified findings, exploit chains, policy
-gates, bilingual reporting, and reproducible benchmarks.
+VXIS product center is stricter: verified findings, related-evidence chains, policy
+gates, bilingual reporting, and reproducible benchmarks. In user-facing terms,
+VXIS is a validation helper: it supports authorized security work by turning
+observations into reproducible evidence, not by treating systems as arbitrary
+objects to attack.
 
 **CLI:** `vxis scan http://target.example --profile crown`
 
@@ -21,8 +24,8 @@ gates, bilingual reporting, and reproducible benchmarks.
 
 | Profile | Use |
 |---|---|
-| `crown` | Deep validated chain hunting toward crown-jewel impact |
-| `bugbounty` | Researcher-oriented mode with aggressive recon and concise PoC artifacts |
+| `crown` | Deep validation of related evidence toward material impact |
+| `bugbounty` | Researcher helper mode with thorough recon and concise PoC artifacts |
 | `passive` | No direct target contact; third-party intel only |
 | `stealth` / `standard` / `aggressive` | Legacy noise/speed presets still supported |
 
@@ -35,7 +38,7 @@ Aliases for `bugbounty`: `bug-bounty`, `bug_bounty`, `bb`.
 | Control | `finish_scan`, `think`, `wait` | Loop management and scratchpad reasoning |
 | Primitive | `http_request`, `browser_render`, `intercept_proxy` | HTTP, browser, and proxy-backed evidence collection |
 | Sandbox | `shell_exec`, `python_exec` | Isolated command execution for sqlmap, nuclei, ffuf, custom Python, and replay scripts |
-| Finding CRUD | `report_finding`, `query_findings`, `link_chain` | Submit verified vulnerabilities, query state, and assert exploit chains |
+| Finding CRUD | `report_finding`, `query_findings`, `link_chain` | Submit verified vulnerabilities, query state, and relate evidence |
 
 ### Evidence contract
 
@@ -51,7 +54,7 @@ High and critical findings are rejected unless they include:
 
 The bug bounty export only emits accepted, replayable findings.
 
-### Bug bounty export
+### Bug bounty helper export
 
 ```bash
 vxis scan http://localhost:3000 --profile bugbounty --output reports/juice-bb.html
@@ -73,18 +76,18 @@ coverage where available, and Korean/English-ready finding text.
 ### Scope and policy gates
 
 Runtime policy is resolved per profile. `bugbounty` allows deeper sandbox-backed
-recon and lateral validation inside strict authorized scope, while still
+recon and related-impact validation inside strict authorized scope, while still
 deferring risky mutation outside target policy.
 
 ### Mutation and injection controls
 
-The Hands layer queues mutating HTTP verbs for review, and exploitation-class
-vectors require explicit authorization unless the target is a known local
+The Hands layer queues mutating HTTP verbs for review, and exploit-validation
+vectors require explicit authorization unless the system is a known local
 benchmark or the operator enables the appropriate bypass.
 
 ### Fail-closed public surface
 
-Production Brain scans are black-box web scans. Unsupported or future surfaces
+Production Brain scans are black-box web validation scans. Unsupported or future surfaces
 must fail closed instead of registering placeholder tools.
 
 ## Observability
@@ -150,4 +153,4 @@ tools, scope gates, report evidence, benchmark targets, and regression tests:
 - Not a broad Strix clone.
 - Not a one-shot CVE scanner.
 - Not a promise to test every domain surface today.
-- Not legal to run against targets you do not own or have authorization to test.
+- Not legal to run against systems you do not own or have authorization to test.
