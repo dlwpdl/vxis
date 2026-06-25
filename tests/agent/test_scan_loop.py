@@ -2405,6 +2405,49 @@ async def test_global_no_progress_halts_varied_low_value_actions():
 
 
 @pytest.mark.asyncio
+async def test_authenticated_401_requeues_attempt_auth_once():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    run_skill = RunSkillTool()
+    reg.register(run_skill)
+
+    class HttpRequestTool:
+        name = "http_request"
+        description = "http"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            return ToolResult(ok=True, summary="HTTP 401 login required", data={"status": 401})
+
+    reg.register(HttpRequestTool())
+
+    decisions = iter([
+        [("http_request", {"url": "http://localhost:3000/api/me"})],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=4)
+    loop.state.record_auth_identities([{"name": "alice", "token": "tok"}])
+    loop._decide = fake_decide  # type: ignore
+    loop._run_auto_orchestration = AsyncMock(return_value=(False, False, False))  # type: ignore[method-assign]
+    loop._maybe_execute_director_action = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    await loop.run()
+
+    assert any(call.get("skill") == "attempt_auth" for call in run_skill.calls)
+    assert any(
+        isinstance(message.get("content"), dict)
+        and "AUTH SESSION CHECK" in str(message["content"].get("hint", ""))
+        for message in loop.state.messages
+    )
+
+
+@pytest.mark.asyncio
 async def test_finish_scan_rejected_when_high_priority_candidates_unattempted():
     reg = ToolRegistry()
     reg.register(FinishTool())

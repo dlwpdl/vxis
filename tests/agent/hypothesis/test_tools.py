@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from vxis.agent.hypothesis.dag import HypothesisNode, HypothesisDAG
+from vxis.agent.scan_loop_state import ScanLoopState
 from vxis.agent.tool_registry import BrainTool
 from vxis.agent.tools.hypothesis_tools import (
     AddChildHypothesisTool,
@@ -116,6 +117,33 @@ async def test_add_child_tool_links_parent_and_prioritize_returns_child() -> Non
     assert dag.nodes["root"].child_ids == ["child-1"]
     assert dag.nodes["child-1"].parent_ids == ["root"]
     assert selected.data["hypothesis"]["node_id"] == "child-1"
+
+
+@pytest.mark.asyncio
+async def test_add_child_tool_can_declare_crown_jewel_branch() -> None:
+    dag = HypothesisDAG()
+    dag.add(root_hypothesis())
+    state = ScanLoopState(target="http://localhost:3000", max_iters=3)
+    state.hypothesis_dag = dag
+
+    added = await AddChildHypothesisTool(dag=dag, state=state).run(
+        parent_id="root",
+        claim="admin API may expose all orders",
+        prior=0.82,
+        vector_class="idor",
+        decision_class="exploit",
+        node_id="crown-1",
+        branch_id="branch:crown-1",
+        crown_jewel="full order data exfiltration",
+        objective="Prove cross-user order access.",
+        next_step="Replay with two identities against /api/orders.",
+    )
+
+    assert added.ok is True
+    branch = state.branches["branch:crown-1"]
+    assert branch.crown_jewel == "full order data exfiltration"
+    assert branch.role == "post_exploit_worker"
+    assert added.data["branch"]["id"] == "branch:crown-1"
 
 
 @pytest.mark.asyncio

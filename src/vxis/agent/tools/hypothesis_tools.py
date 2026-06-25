@@ -223,6 +223,10 @@ class AddChildHypothesisTool(_HypothesisToolBase):
             "surface_id": {"type": ["string", "null"]},
             "evidence": {"type": ["string", "array", "null"]},
             "node_id": {"type": ["string", "null"]},
+            "branch_id": {"type": ["string", "null"]},
+            "crown_jewel": {"type": ["string", "null"]},
+            "objective": {"type": ["string", "null"]},
+            "next_step": {"type": ["string", "null"]},
             "created_iter": {"type": "integer", "default": 0},
         },
         "required": ["parent_id", "claim", "prior"],
@@ -257,12 +261,33 @@ class AddChildHypothesisTool(_HypothesisToolBase):
         except Exception as exc:
             return _error("add_child_hypothesis_failed", str(exc))
 
+        branch_data = None
+        crown_jewel = _optional_text(kwargs.get("crown_jewel"))
+        ensure_branch = getattr(self._state, "ensure_branch", None)
+        if crown_jewel and callable(ensure_branch):
+            branch_id = _optional_text(kwargs.get("branch_id")) or node_id
+            priority = max(1, min(100, int(round(child.prior * 100))))
+            branch = ensure_branch(
+                branch_id,
+                _optional_text(kwargs.get("vector_class")) or branch_id,
+                claim,
+                priority=priority,
+                role="post_exploit_worker",
+                objective=_optional_text(kwargs.get("objective"))
+                or f"Drive hypothesis {node_id} to {crown_jewel}.",
+                next_step=_optional_text(kwargs.get("next_step")) or claim,
+                crown_jewel=crown_jewel,
+                evidence="; ".join(child.evidence),
+            )
+            branch_data = branch.to_dict()
+
         return ToolResult(
             ok=True,
             data={
                 "hypothesis": child.brief(),
                 "parent": self.dag.nodes[parent_id].brief(),
                 "total_nodes": len(self.dag.nodes),
+                "branch": branch_data,
             },
             summary=f"added child hypothesis {child.node_id} under {parent_id}",
         )

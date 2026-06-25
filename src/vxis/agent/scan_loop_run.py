@@ -167,6 +167,7 @@ class ScanLoopRunMixin(
         _finish_rejection_streak = 0
         _halt_due_ignored_replan = False
         _halt_due_no_progress = False
+        _reauth_queued = False
         # Phase 4: track every shell_exec / python_exec invocation so the
         # scoring layer can credit VC for sandbox-based attacks. Each entry
         # is {"tool": name, "cmd"|"code": str}. Brain gets rewarded for
@@ -193,7 +194,9 @@ class ScanLoopRunMixin(
                     alias or skill_name,
                 )
                 return False
-            if rerouted != requested:
+            if alias:
+                queue_params["_skill_override"] = rerouted
+            elif rerouted != requested:
                 queue_params["_skill_override"] = rerouted
             elif queue_params.get("_skill_override") == requested:
                 queue_params.pop("_skill_override", None)
@@ -1082,6 +1085,40 @@ class ScanLoopRunMixin(
                                 _promote_params,
                                 alias=_promote_alias,
                             )
+
+                _http_status_code = 0
+                if name == "http_request" and isinstance(result.data, dict):
+                    try:
+                        _http_status_code = int(
+                            result.data.get("status") or result.data.get("status_code") or 0
+                        )
+                    except (TypeError, ValueError):
+                        _http_status_code = 0
+
+                if (
+                    name == "http_request"
+                    and not _reauth_queued
+                    and "run_skill" in self.registry.list_tools()
+                    and getattr(self.state, "auth_identities", [])
+                    and _http_status_code in {401, 403}
+                ):
+                    if _queue_skill(
+                        "attempt_auth",
+                        self.state.iteration + 1,
+                        {"reason": "authenticated request returned 401/403"},
+                        alias=f"reauth::{self.state.iteration}",
+                    ):
+                        _reauth_queued = True
+                        self.state.add_message(
+                            "system",
+                            {
+                                "hint": (
+                                    "AUTH SESSION CHECK: authenticated HTTP request returned "
+                                    "401/403; queued attempt_auth once to refresh or revalidate "
+                                    "the session before more post-auth replay."
+                                ),
+                            },
+                        )
 
                 _post_progress_marker = self._execution_progress_marker()
                 if _post_progress_marker != _pre_progress_marker:
