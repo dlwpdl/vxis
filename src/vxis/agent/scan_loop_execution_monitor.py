@@ -36,6 +36,9 @@ class ScanLoopExecutionMonitorMixin:
             return 4
         return 3
 
+    def _global_no_progress_threshold(self) -> int:
+        return self._execution_stall_threshold() * 5
+
     @staticmethod
     def _execution_monitor_key(action_key: str) -> str:
         return hashlib.sha256(action_key.encode("utf-8", "ignore")).hexdigest()[:12]

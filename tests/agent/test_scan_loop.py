@@ -2355,6 +2355,56 @@ async def test_execution_monitor_resets_after_progress():
 
 
 @pytest.mark.asyncio
+async def test_global_no_progress_halts_varied_low_value_actions():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+
+    class HttpRequestTool:
+        name = "http_request"
+        description = "http"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            return ToolResult(ok=True, summary="HTTP 404 unchanged", data={"status": 404})
+
+    reg.register(HttpRequestTool())
+
+    counter = {"n": 0}
+
+    async def fake_decide(state):
+        counter["n"] += 1
+        return [("http_request", {"url": f"http://localhost:3000/noop-{counter['n']}"})]
+
+    loop = ScanAgentLoop(
+        target="http://localhost:3000",
+        registry=reg,
+        max_iters=40,
+        brain=SimpleNamespace(_provider="ollama", _model="qwen-30b"),
+    )
+    loop._focus_branch = lambda: None  # type: ignore[method-assign]
+    loop._decide = fake_decide  # type: ignore
+    loop._run_scheduled_skills = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    loop._run_auto_orchestration = AsyncMock(return_value=(False, False, False))  # type: ignore[method-assign]
+    loop._maybe_execute_director_action = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    result = await loop.run()
+
+    assert result["completed"] is False
+    assert result["iterations"] < loop.state.max_iters
+    assert any(
+        item["stage"] == "monitor"
+        and item["verdict"] == "HALTED"
+        and item["title"] == "global_no_progress"
+        for item in result["review_history"]
+    )
+    assert any(
+        isinstance(message.get("content"), dict)
+        and "GLOBAL NO-PROGRESS HALT" in str(message["content"].get("hint", ""))
+        for message in loop.state.messages
+    )
+
+
+@pytest.mark.asyncio
 async def test_finish_scan_rejected_when_high_priority_candidates_unattempted():
     reg = ToolRegistry()
     reg.register(FinishTool())

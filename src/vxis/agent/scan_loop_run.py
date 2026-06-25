@@ -99,6 +99,7 @@ class ScanLoopRunMixin(
         _call_counts: dict[str, int] = {}
         _stagnant_action_counts: dict[str, int] = {}
         _stagnant_monitor_keys: set[str] = set()
+        _global_no_progress_count = 0
 
         # Phase B fix: baseline tracking + auto-finding extraction.
         # When Brain runs a probe that returns "status size path" rows, we
@@ -165,6 +166,7 @@ class ScanLoopRunMixin(
         _replan_ignore_counts: dict[str, int] = {}
         _finish_rejection_streak = 0
         _halt_due_ignored_replan = False
+        _halt_due_no_progress = False
         # Phase 4: track every shell_exec / python_exec invocation so the
         # scoring layer can credit VC for sandbox-based attacks. Each entry
         # is {"tool": name, "cmd"|"code": str}. Brain gets rewarded for
@@ -1086,7 +1088,41 @@ class ScanLoopRunMixin(
                     _call_counts.clear()
                     _stagnant_action_counts.clear()
                     _stagnant_monitor_keys.clear()
+                    _global_no_progress_count = 0
                 else:
+                    if name not in {"finish_scan", "think", "wait"}:
+                        _global_no_progress_count += 1
+                    if _global_no_progress_count >= self._global_no_progress_threshold():
+                        _halt_msg = (
+                            "GLOBAL NO-PROGRESS HALT: dispatched "
+                            f"{_global_no_progress_count} consecutive non-finish actions "
+                            "without findings, confirmed evidence, terminal branches, callbacks, "
+                            "retrievals, or review progress."
+                        )
+                        self.state.record_review_decision(
+                            stage="monitor",
+                            verdict="HALTED",
+                            title="global_no_progress",
+                            reason=_halt_msg,
+                            action_hint=(
+                                "Resume with a narrower hypothesis, a concrete evidence target, "
+                                "or a manually selected high-value branch."
+                            ),
+                            blocked_action=name,
+                            affected_component=self.state.target,
+                        )
+                        self.state.add_message(
+                            "system",
+                            {
+                                "hint": (
+                                    f"{_halt_msg} Stopping early instead of burning the "
+                                    "remaining iteration/cost budget."
+                                ),
+                            },
+                        )
+                        self._emit_control_plane(_halt_msg)
+                        _halt_due_no_progress = True
+                        break
                     _stagnant_count = _stagnant_action_counts.get(key, 0) + 1
                     _stagnant_action_counts[key] = _stagnant_count
                     if self._maybe_emit_execution_monitor(
@@ -1669,6 +1705,8 @@ class ScanLoopRunMixin(
                         self.state.completed = True
                         break
             if _halt_due_ignored_replan:
+                break
+            if _halt_due_no_progress:
                 break
             # Track which tools Brain actually called this iteration
             for name, _ in actions:
