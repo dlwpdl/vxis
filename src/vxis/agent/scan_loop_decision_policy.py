@@ -2277,7 +2277,9 @@ class ScanLoopDecisionPolicyMixin:
             rerouted = skill
         return rerouted, self._normalize_skill_params(rerouted, params)
 
-    def _forced_replan_action(self, rejection_title: str) -> tuple[str, dict[str, Any], str] | None:
+    def _suggested_replan_action(
+        self, rejection_title: str
+    ) -> tuple[str, dict[str, Any], str] | None:
         title = str(rejection_title or "").strip().lower()
         if title == "needs_chains" and "link_chain" in self.registry.list_tools():
             candidates = self._suggest_chain_candidates(limit=1)
@@ -2295,7 +2297,7 @@ class ScanLoopDecisionPolicyMixin:
                             cand,
                         ),
                     },
-                    f"forcing chain link {cand['source_id']} -> {cand['target_id']}",
+                    f"suggesting chain link {cand['source_id']} -> {cand['target_id']}",
                 )
         if title == "unfinished_branches":
             focus = self._focus_branch()
@@ -2305,7 +2307,7 @@ class ScanLoopDecisionPolicyMixin:
             if focus is not None:
                 forced = self._forced_branch_action(focus)
                 if forced is not None:
-                    return forced[0], forced[1], f"forcing branch advancement on {focus.id}"
+                    return forced[0], forced[1], f"suggesting branch advancement on {focus.id}"
             try:
                 from vxis.agent.tools.finding_tools import _get_findings
 
@@ -2320,7 +2322,7 @@ class ScanLoopDecisionPolicyMixin:
                     return (
                         forced[0],
                         forced[1],
-                        f"forcing deeper retry on {family} family via {retryable_candidates[0].id}",
+                        f"suggesting deeper retry on {family} family via {retryable_candidates[0].id}",
                     )
             family_candidates = self._dag_remaining_high_yield_candidates(findings)
             if family_candidates:
@@ -2330,7 +2332,7 @@ class ScanLoopDecisionPolicyMixin:
                     return (
                         forced[0],
                         forced[1],
-                        f"forcing remaining {family} family exploration via {family_candidates[0].id}",
+                        f"suggesting remaining {family} family exploration via {family_candidates[0].id}",
                     )
         if title == "unattempted_candidates":
             try:
@@ -2346,13 +2348,13 @@ class ScanLoopDecisionPolicyMixin:
                     return (
                         forced[0],
                         forced[1],
-                        f"forcing retryable candidate {retryable_candidates[0].id}",
+                        f"suggesting retryable candidate {retryable_candidates[0].id}",
                     )
             open_candidates = self._dag_remaining_high_yield_candidates(findings)
             if open_candidates:
                 forced = self._forced_candidate_action(open_candidates[0])
                 if forced is not None:
-                    return forced[0], forced[1], f"forcing first attempt on {open_candidates[0].id}"
+                    return forced[0], forced[1], f"suggesting first attempt on {open_candidates[0].id}"
         return None
 
     @staticmethod

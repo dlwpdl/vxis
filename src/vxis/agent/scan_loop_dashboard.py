@@ -151,6 +151,8 @@ def build_scan_dashboard(loop: Any) -> str:
             )
             if b.objective:
                 lines.append(f"     objective: {b.objective[: 80 if local_strict else 110]}")
+            if b.crown_jewel:
+                lines.append(f"     crown: {b.crown_jewel[: 80 if local_strict else 110]}")
             if b.next_step:
                 lines.append(f"     next: {b.next_step[: 80 if local_strict else 110]}")
             if b.last_report:
@@ -552,6 +554,11 @@ def build_scan_dashboard(loop: Any) -> str:
         lines.append(
             f"\n>> PRIMARY GOAL: drive branch {b.id} toward {b.crown_jewel or 'real impact'}."
         )
+        if b.crown_jewel:
+            lines.append(
+                "   Crown distance: prove a control/payload delta that reaches this crown, "
+                "or mark the path exhausted."
+            )
         if b.objective:
             lines.append(f"   Objective: {b.objective}")
         if b.next_step:
@@ -565,11 +572,11 @@ def build_scan_dashboard(loop: Any) -> str:
             if forced is not None and forced[0] == "agent_graph":
                 instruction = str(forced[1].get("instruction") or "").strip()
                 lines.append(
-                    f'   Forced next action: agent_graph(action="run", '
+                    f'   Suggested agent_graph action: agent_graph(action="run", '
                     f'agent_id="{forced[1].get("agent_id", "")}")'
                 )
                 if instruction:
-                    lines.append(f"   Forced instruction: {instruction[:140]}")
+                    lines.append(f"   Suggested instruction: {instruction[:140]}")
             elif b.blocker:
                 lines.append(
                     '   Resolve blocker by calling agent_graph(action="finish", '

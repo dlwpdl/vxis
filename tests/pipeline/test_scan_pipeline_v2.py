@@ -436,6 +436,15 @@ async def test_scan_pipeline_v2_copies_findings_from_store_into_ctx():
                 "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
             ),
             remediation_steps="Use parameterized queries for authentication.",
+            verifier_verdict="CONFIRMED",
+            replay_gate={
+                "status": "passed",
+                "method": "machine_http_replay",
+                "control_status": 401,
+                "replay_status": 200,
+                "matched_markers": ["Set-Cookie: session=admin"],
+            },
+            _replay_gate_machine=True,
         )
         return fake_loop_result
 

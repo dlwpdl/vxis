@@ -162,7 +162,6 @@ class ScanLoopRunMixin(
         _all_skill_names = {s[0] for s in _skill_sequence}
         _skill_promotion_replays: set[str] = set()
         _auth_token: str | None = None
-        _priority_action_lane: tuple[str, dict[str, Any], str] | None = None
         # Phase 4: track every shell_exec / python_exec invocation so the
         # scoring layer can credit VC for sandbox-based attacks. Each entry
         # is {"tool": name, "cmd"|"code": str}. Brain gets rewarded for
@@ -227,20 +226,7 @@ class ScanLoopRunMixin(
                 )
             except Exception as exc:
                 logger.debug("sdk background absorption skipped: %s", exc)
-            if _priority_action_lane is not None:
-                self.state.add_message(
-                    "system",
-                    {
-                        "hint": (
-                            f"PRIORITY ACTION LANE: execute {_priority_action_lane[0]} next "
-                            f"because the judge escalated this path: {_priority_action_lane[2]}"
-                        ),
-                    },
-                )
-                actions = [(_priority_action_lane[0], dict(_priority_action_lane[1]))]
-                _priority_action_lane = None
-            else:
-                actions = await self._decide(self.state)
+            actions = await self._decide(self.state)
             if not actions:
                 _consecutive_empty += 1
                 _min_iters = min(50, self.state.max_iters // 2)
@@ -792,18 +778,21 @@ class ScanLoopRunMixin(
                         }:
                             _chain_candidates = self._suggest_chain_candidates(limit=3)
                             _auto_linked = await self._maybe_auto_link_suggested_chain()
-                            _forced_action = self._forced_replan_action(_latest_title)
+                            _suggested_action = self._suggested_replan_action(_latest_title)
                             _replan_hint = self._judge_replan_hint()
                             _candidate_text = ""
                             _auto_link_text = ""
-                            _forced_text = ""
+                            _suggested_text = ""
                             if _auto_linked is not None:
                                 _auto_link_text = (
                                     f" Auto-linked {_auto_linked['source_id']} -> {_auto_linked['target_id']} "
                                     f"toward {_auto_linked['crown_jewel']}."
                                 )
-                            if _forced_action is not None:
-                                _forced_text = f" Forced next action: {_forced_action[0]} ({_forced_action[2]})."
+                            if _suggested_action is not None:
+                                _suggested_text = (
+                                    f" Suggested next action: {_suggested_action[0]} "
+                                    f"({_suggested_action[2]})."
+                                )
                             if _chain_candidates:
                                 _candidate_lines = [
                                     f"{item['source_id']} -> {item['target_id']} ({item['crown_jewel']})"
@@ -816,7 +805,7 @@ class ScanLoopRunMixin(
                                 )
                             _replan_msg = (
                                 "JUDGE REPLAN REQUIRED: finish_scan was rejected repeatedly for the same reason. "
-                                f"Last rejection: {_latest_title}.{_auto_link_text}{_forced_text} {_replan_hint}{_candidate_text}"
+                                f"Last rejection: {_latest_title}.{_auto_link_text}{_suggested_text} {_replan_hint}{_candidate_text}"
                             )
                             self.state.add_message(
                                 "tool",
@@ -831,12 +820,12 @@ class ScanLoopRunMixin(
                                             "last_rejection_title": _latest_title,
                                             "auto_linked_chain": _auto_linked,
                                             "chain_candidates": _chain_candidates,
-                                            "forced_action": {
-                                                "tool": _forced_action[0],
-                                                "args": _forced_action[1],
-                                                "reason": _forced_action[2],
+                                            "suggested_action": {
+                                                "tool": _suggested_action[0],
+                                                "args": _suggested_action[1],
+                                                "reason": _suggested_action[2],
                                             }
-                                            if _forced_action is not None
+                                            if _suggested_action is not None
                                             else None,
                                         },
                                     },
@@ -864,13 +853,9 @@ class ScanLoopRunMixin(
                                     status="blocked",
                                     summary=_replan_msg,
                                     blocker="judge replan required",
-                                )
+                            )
                             self._emit_control_plane(_replan_msg)
-                            if _forced_action is not None:
-                                _priority_action_lane = _forced_action
-                                name, args = _forced_action[0], _forced_action[1]
-                            else:
-                                continue
+                            continue
 
                 _pre_progress_marker = self._execution_progress_marker()
                 self._emit_action_progress(name, args, "Executing")

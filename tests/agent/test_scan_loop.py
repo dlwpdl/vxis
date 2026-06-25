@@ -329,6 +329,25 @@ def test_local_strict_scan_dashboard_is_compact():
     assert dashboard.count("Branch ") <= 4
 
 
+def test_scan_dashboard_surfaces_crown_objective_distance():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-IMPACT",
+        "DB impact",
+        priority=102,
+        role="post_exploit_worker",
+        phase="data_access",
+        objective="Extract meaningful backend data.",
+        next_step="Dump users/auth tables.",
+        crown_jewel="DB dump",
+    )
+    dashboard = loop._build_scan_dashboard()
+
+    assert "crown: DB dump" in dashboard
+    assert "Crown distance: prove a control/payload delta" in dashboard
+
+
 def test_local_strict_compacts_finding_payload_before_verifier():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
     loop.brain = SimpleNamespace(_provider="llamacpp", _model="local-qwen")
@@ -1423,7 +1442,7 @@ def test_mark_family_probe_retryable_revives_xss_candidate():
 
 
 @pytest.mark.asyncio
-async def test_forced_replan_uses_remaining_family_candidate_when_branch_cannot_advance():
+async def test_suggested_replan_uses_remaining_family_candidate_when_branch_cannot_advance():
     reg = ToolRegistry()
     class _RunSkill:
         name = "run_skill"
@@ -1454,14 +1473,14 @@ async def test_forced_replan_uses_remaining_family_candidate_when_branch_cannot_
         "affected_component": "/rest/user/login",
         "description": "auth foothold",
     })
-    forced = loop._forced_replan_action("unfinished_branches")
+    forced = loop._suggested_replan_action("unfinished_branches")
     assert forced is not None
     assert forced[0] == "run_skill"
     assert forced[1]["skill"] in {"test_injection", "test_xss", "test_ssrf", "enumerate_endpoints", "test_infra"}
 
 
 @pytest.mark.asyncio
-async def test_forced_replan_prioritizes_retryable_family_candidate():
+async def test_suggested_replan_prioritizes_retryable_family_candidate():
     reg = ToolRegistry()
     class _RunSkill:
         name = "run_skill"
@@ -1490,7 +1509,7 @@ async def test_forced_replan_prioritizes_retryable_family_candidate():
             "data": {"accessible": [{"path": "/search?q=test", "status": 200, "size": 123}]},
         },
     })
-    forced = loop._forced_replan_action("unattempted_candidates")
+    forced = loop._suggested_replan_action("unattempted_candidates")
     assert forced is not None
     assert forced[0] == "run_skill"
     assert forced[1]["skill"] == "test_xss"
@@ -2255,7 +2274,7 @@ async def test_memory_refuted_pattern_suppresses_repeat_report_finding():
 
 
 @pytest.mark.asyncio
-async def test_repeated_finish_unattempted_candidates_forces_run_skill_replan():
+async def test_repeated_finish_unattempted_candidates_suggests_brain_replan():
     reg = ToolRegistry()
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
@@ -2289,21 +2308,21 @@ async def test_repeated_finish_unattempted_candidates_forces_run_skill_replan():
 
     loop._decide = fake_decide  # type: ignore
     loop._dag_finish_blocking_branches = lambda: []  # type: ignore[method-assign]
+    loop._run_scheduled_skills = AsyncMock(return_value=None)  # type: ignore[method-assign]
     result = await loop.run()
 
-    assert run_skill.calls, "judge replan should force a concrete skill when finish repeats on unattempted candidates"
-    assert any(call.get("skill") == "attempt_auth" for call in run_skill.calls)
+    assert not run_skill.calls
     assert result["completed"] in {False, True}
     assert any(
         isinstance(m.get("content"), dict)
-        and ((m["content"].get("result") or {}).get("data") or {}).get("forced_action")
+        and ((m["content"].get("result") or {}).get("data") or {}).get("suggested_action")
         for m in loop.state.messages
         if m.get("role") == "tool" and isinstance(m.get("content"), dict) and m["content"].get("name") == "finish_scan"
     )
 
 
 @pytest.mark.asyncio
-async def test_repeated_finish_unfinished_branches_forces_post_auth_enum_replan():
+async def test_repeated_finish_unfinished_branches_suggests_post_auth_replan():
     reg = ToolRegistry()
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
@@ -2340,13 +2359,22 @@ async def test_repeated_finish_unfinished_branches_forces_post_auth_enum_replan(
             return [("finish_scan", {})]
 
     loop._decide = fake_decide  # type: ignore
+    loop._run_scheduled_skills = AsyncMock(return_value=None)  # type: ignore[method-assign]
     result = await loop.run()
 
     assert result["completed"] is False
-    assert run_skill.calls, "judge replan should force branch advancement when finish repeats on unfinished branches"
+    assert not run_skill.calls
     assert any(
-        call.get("skill") in {"post_auth_enum", "test_idor", "test_api_security", "test_business_logic"}
-        for call in run_skill.calls
+        item["stage"] == "judge"
+        and item["blocked_action"] == "finish_scan"
+        and item["title"] == "unfinished_branches"
+        for item in result["review_history"]
+    )
+    assert any(
+        isinstance(m.get("content"), dict)
+        and ((m["content"].get("result") or {}).get("data") or {}).get("suggested_action")
+        for m in loop.state.messages
+        if m.get("role") == "tool" and isinstance(m.get("content"), dict) and m["content"].get("name") == "finish_scan"
     )
 
 

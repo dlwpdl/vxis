@@ -2394,7 +2394,7 @@ def test_agent_graph_branch_prefers_protocol_run_when_tool_registered():
     assert forced == ("agent_graph", {"action": "run", "agent_id": "agent-0001"})
     loop.state.branches["agent:agent-0001"].priority = 99
     dashboard = loop._build_scan_dashboard()
-    assert 'Forced next action: agent_graph(action="run", agent_id="agent-0001")' in dashboard
+    assert 'Suggested agent_graph action: agent_graph(action="run", agent_id="agent-0001")' in dashboard
 
 
 def test_agent_graph_branch_stops_forcing_run_after_limit_blocker():
