@@ -257,7 +257,7 @@ _WEB_VECTOR_FAMILY_RULES: tuple[tuple[str, tuple[str, ...], tuple[str, ...]], ..
     ("idor", ("idor", "object", "access_control"), ("idor", "broken_access_control")),
     (
         "disclosure",
-        ("secret", "file", "git", "debug", "config", "disclosure"),
+        ("secret", "file", "git", "debug", "config", "exposed", "disclosure"),
         ("information_disclosure", "misconfiguration"),
     ),
     ("xss", ("xss",), ("xss", "xss_reflected", "xss_stored", "xss_dom")),

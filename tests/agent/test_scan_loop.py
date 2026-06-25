@@ -348,6 +348,29 @@ def test_scan_dashboard_surfaces_crown_objective_distance():
     assert "Crown distance: prove a control/payload delta" in dashboard
 
 
+def test_open_crown_goal_keeps_post_exploit_branch_finish_blocking_until_depth():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    branch = loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-IMPACT",
+        "DB impact",
+        priority=38,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0002",
+        objective="Extract meaningful backend data.",
+        next_step="Dump users/auth tables.",
+        crown_jewel="DB dump",
+    )
+    branch.attempts = 2
+
+    assert loop._branch_expected_yield_score(branch) < 65
+    assert loop._branch_has_finish_blocking_yield(branch) is True
+
+    branch.attempts = 3
+    assert loop._branch_has_finish_blocking_yield(branch) is False
+
+
 def test_local_strict_compacts_finding_payload_before_verifier():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
     loop.brain = SimpleNamespace(_provider="llamacpp", _model="local-qwen")

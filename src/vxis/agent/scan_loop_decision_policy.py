@@ -380,21 +380,38 @@ class ScanLoopDecisionPolicyMixin:
         if branch.owner == "agent_graph":
             return branch.status not in _TERMINAL_BRANCH_STATUSES
         score = self._branch_expected_yield_score(branch)
+        family = self._branch_family(branch)
         if branch.owner == "memory" or branch.id.startswith(("carry:", "memory:")):
             return score >= 82
+        if family != "disclosure" and self._branch_has_open_crown_goal(branch):
+            return True
         if branch.source_finding_id:
             return score >= 65
         if (
-            self._branch_family(branch) == "disclosure"
+            family == "disclosure"
             and self._has_stronger_foothold_than_disclosure()
         ):
             return score >= 78
         if (
-            self._branch_family(branch) == "disclosure"
+            family == "disclosure"
             and self._disclosure_campaign_lacks_reusable_material()
         ):
             return score >= 82
         return branch.attempts < 2 or score >= 78
+
+    @staticmethod
+    def _branch_has_open_crown_goal(branch: BranchState) -> bool:
+        if not str(branch.crown_jewel or "").strip():
+            return False
+        if branch.attempts >= 3:
+            return False
+        if str(branch.role or "").lower() == "post_exploit_worker":
+            return True
+        return str(branch.phase or "").lower() in {
+            "privilege_probe",
+            "data_access",
+            "chain_closure",
+        }
 
     def _campaign_groups_for_ui(self, limit: int = 4) -> list[dict[str, Any]]:
         groups: list[dict[str, Any]] = []
@@ -1221,6 +1238,31 @@ class ScanLoopDecisionPolicyMixin:
                 return "Exercise at least one unresolved high-priority vector candidate with a concrete payload."
         return "Perform one concrete high-signal action before attempting finish_scan again."
 
+    def _run_skill_action(
+        self,
+        requested_skill: str,
+        *,
+        target: str,
+        hint_blob: str = "",
+        params: dict[str, Any] | None = None,
+        retry_candidate: VectorCandidate | None = None,
+    ) -> tuple[str, dict[str, Any]] | None:
+        skill = self._pivoted_skill_name(requested_skill)
+        if not skill:
+            return None
+        action_params = (
+            dict(params)
+            if params is not None
+            else self._best_skill_params(skill, hint_blob=hint_blob)
+        )
+        if retry_candidate is not None and retry_candidate.status == "retryable":
+            next_round = self._next_retry_round(skill, retry_candidate)
+            if next_round is not None:
+                action_params["round"] = next_round
+        if skill == "attempt_auth" and not action_params:
+            action_params = {}
+        return ("run_skill", {"skill": skill, "target_url": target, "params": action_params})
+
     def _forced_candidate_action(
         self, candidate: VectorCandidate
     ) -> tuple[str, dict[str, Any]] | None:
@@ -1232,23 +1274,20 @@ class ScanLoopDecisionPolicyMixin:
         kind = self._target_kind_name()
         family = self._candidate_family(candidate)
         if kind == "desktop":
-            if any(token in blob for token in ("secret", "storage", "keychain", "token")):
-                skill = self._pivoted_skill_name("test_local_storage_secrets")
-                if skill:
-                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
-            if any(token in blob for token in ("deep", "link", "url", "scheme")):
-                skill = self._pivoted_skill_name("test_deeplink_abuse")
-                if skill:
-                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
-            if any(token in blob for token in ("signature", "trust", "entitlement", "binary")):
-                skill = self._pivoted_skill_name("test_signature_audit")
-                if skill:
-                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
-            skill = self._pivoted_skill_name("test_ipc_injection") or self._pivoted_skill_name(
-                "test_binary_protections"
-            )
-            if skill:
-                return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            for tokens, skills in (
+                (("secret", "storage", "keychain", "token"), ("test_local_storage_secrets",)),
+                (("deep", "link", "url", "scheme"), ("test_deeplink_abuse",)),
+                (("signature", "trust", "entitlement", "binary"), ("test_signature_audit",)),
+                ((), ("test_ipc_injection", "test_binary_protections")),
+            ):
+                if tokens and not any(token in blob for token in tokens):
+                    continue
+                for requested in skills:
+                    action = self._run_skill_action(
+                        requested, target=target, hint_blob=blob, params={}
+                    )
+                    if action is not None:
+                        return action
             return None
         if kind != "web":
             return None
@@ -1263,74 +1302,10 @@ class ScanLoopDecisionPolicyMixin:
         }
         family_skill = family_skill_map.get(family)
         if family_skill:
-            skill = self._pivoted_skill_name(family_skill)
-            if skill:
-                params = self._best_skill_params(skill, hint_blob=blob)
-                if candidate.status == "retryable":
-                    next_round = self._next_retry_round(skill, candidate)
-                    if next_round is not None:
-                        params["round"] = next_round
-                if skill == "attempt_auth" and not params:
-                    params = {}
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
-        if any(token in blob for token in ("auth", "login", "credential", "session")):
-            skill = self._pivoted_skill_name("attempt_auth")
-            if skill:
-                params = self._best_skill_params(skill, hint_blob=blob)
-                if skill == "attempt_auth" and not params:
-                    params = {}
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
-            return None
-        if any(
-            token in blob for token in ("idor", "access_control", "broken_access_control", "object")
-        ):
-            skill = self._pivoted_skill_name("test_idor")
-            if skill:
-                params = self._best_skill_params(skill, hint_blob=blob)
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
-            return None
-        if any(token in blob for token in ("sqli", "sql", "injection", "nosql", "ssti")):
-            skill = self._pivoted_skill_name("test_injection")
-            if skill:
-                params = self._best_skill_params(skill, hint_blob=blob)
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
-            return None
-        if any(token in blob for token in ("xss",)):
-            skill = self._pivoted_skill_name("test_xss")
-            if skill:
-                return (
-                    "run_skill",
-                    {
-                        "skill": skill,
-                        "target_url": target,
-                        "params": self._best_skill_params(skill, hint_blob=blob),
-                    },
-                )
-            return None
-        if any(token in blob for token in ("ssrf",)):
-            skill = self._pivoted_skill_name("test_ssrf")
-            if skill:
-                return (
-                    "run_skill",
-                    {
-                        "skill": skill,
-                        "target_url": target,
-                        "params": self._best_skill_params(skill, hint_blob=blob),
-                    },
-                )
-            return None
-        if any(
-            token in blob
-            for token in ("secret", "file", "git", "debug", "config", "exposed", "disclosure")
-        ):
-            skill = self._pivoted_skill_name("test_sensitive_files")
-            if skill:
-                return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
-            return None
-        skill = self._pivoted_skill_name("enumerate_endpoints")
-        if skill:
-            return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
-        return None
+            return self._run_skill_action(
+                family_skill, target=target, hint_blob=blob, retry_candidate=candidate
+            )
+        return self._run_skill_action("enumerate_endpoints", target=target, params={})
 
     def _forced_branch_action(self, branch: BranchState) -> tuple[str, dict[str, Any]] | None:
         allowed = self._platform_allowed_skills()
@@ -1389,27 +1364,23 @@ class ScanLoopDecisionPolicyMixin:
                     args["instruction"] = instruction
                 return ("agent_graph", args)
             for declared_skill in self._declared_agent_graph_branch_skills(branch):
-                skill = self._pivoted_skill_name(declared_skill)
-                if not skill:
-                    continue
-                params = self._best_skill_params(skill, hint_blob=blob)
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
+                action = self._run_skill_action(declared_skill, target=target, hint_blob=blob)
+                if action is not None:
+                    return action
         if kind == "desktop":
-            if any(token in blob for token in ("secret", "storage", "keychain")):
-                skill = self._pivoted_skill_name("test_local_storage_secrets")
-                if skill:
-                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
-            if any(token in blob for token in ("ipc", "deeplink", "url scheme")):
-                skill = self._pivoted_skill_name("test_ipc_injection") or self._pivoted_skill_name(
-                    "test_deeplink_abuse"
-                )
-                if skill:
-                    return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
-            skill = self._pivoted_skill_name("test_signature_audit") or self._pivoted_skill_name(
-                "test_binary_protections"
-            )
-            if skill:
-                return ("run_skill", {"skill": skill, "target_url": target, "params": {}})
+            for tokens, skills in (
+                (("secret", "storage", "keychain"), ("test_local_storage_secrets",)),
+                (("ipc", "deeplink", "url scheme"), ("test_ipc_injection", "test_deeplink_abuse")),
+                ((), ("test_signature_audit", "test_binary_protections")),
+            ):
+                if tokens and not any(token in blob for token in tokens):
+                    continue
+                for requested in skills:
+                    action = self._run_skill_action(
+                        requested, target=target, hint_blob=blob, params={}
+                    )
+                    if action is not None:
+                        return action
             return None
         if kind != "web":
             return None
@@ -1424,39 +1395,17 @@ class ScanLoopDecisionPolicyMixin:
                     "http_request",
                     {"method": "GET", "url": target.rstrip("/") + "/rest/user/whoami"},
                 )
-            skill = self._pivoted_skill_name("post_auth_enum")
-            if skill:
-                params = self._best_skill_params(skill, hint_blob=blob)
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
-            return None
+            return self._run_skill_action("post_auth_enum", target=target, hint_blob=blob)
         if any(
             token in blob for token in ("idor", "access_control", "broken access control", "object")
         ):
-            skill = self._pivoted_skill_name("test_idor")
-            if skill:
-                params = self._best_skill_params(skill, hint_blob=blob)
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
-            return None
+            return self._run_skill_action("test_idor", target=target, hint_blob=blob)
         if any(token in blob for token in ("auth", "login", "session", "token")):
-            skill = self._pivoted_skill_name("attempt_auth")
-            if skill:
-                params = self._best_skill_params(skill, hint_blob=blob)
-                if skill == "attempt_auth" and not params:
-                    params = {}
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
-            return None
+            return self._run_skill_action("attempt_auth", target=target, hint_blob=blob)
         if any(token in blob for token in ("admin", "data", "profile", "account")):
-            skill = self._pivoted_skill_name("post_auth_enum")
-            if skill:
-                params = self._best_skill_params(skill, hint_blob=blob)
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
-            return None
+            return self._run_skill_action("post_auth_enum", target=target, hint_blob=blob)
         if any(token in blob for token in ("sqli", "sql", "injection", "nosql", "ssti")):
-            skill = self._pivoted_skill_name("test_injection")
-            if skill:
-                params = self._best_skill_params(skill, hint_blob=blob)
-                return ("run_skill", {"skill": skill, "target_url": target, "params": params})
-            return None
+            return self._run_skill_action("test_injection", target=target, hint_blob=blob)
         return None
 
     def _agent_graph_service_followup_create_action(
