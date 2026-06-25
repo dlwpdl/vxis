@@ -35,6 +35,23 @@ class VerifyTool:
         )
 
 
+class ConfirmingVerifyTool:
+    name = "verify_finding"
+    description = "verify confirmed"
+    input_schema = {"type": "object"}
+
+    async def run(self, **kwargs) -> ToolResult:
+        return ToolResult(
+            ok=True,
+            summary="verify_finding: CONFIRMED (high)",
+            data={
+                "verdict": "CONFIRMED",
+                "confidence": "high",
+                "reasoning": "Evidence is sufficient.",
+            },
+        )
+
+
 class RunSkillTool:
     name = "run_skill"
     description = "execute prebuilt skill"
@@ -348,6 +365,57 @@ def test_scan_dashboard_surfaces_crown_objective_distance():
     assert "Crown distance: prove a control/payload delta" in dashboard
 
 
+@pytest.mark.asyncio
+async def test_scan_dashboard_keeps_crown_distance_under_chain_pressure():
+    await ReportFindingTool().run(
+        title="Finding one",
+        severity="low",
+        finding_type="information_disclosure",
+        affected_component="/one",
+        description="one",
+    )
+    await ReportFindingTool().run(
+        title="Finding two",
+        severity="low",
+        finding_type="information_disclosure",
+        affected_component="/two",
+        description="two",
+    )
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-IMPACT",
+        "DB impact",
+        priority=102,
+        role="post_exploit_worker",
+        phase="data_access",
+        objective="Extract meaningful backend data.",
+        next_step="Dump users/auth tables.",
+        crown_jewel="DB dump",
+    )
+
+    dashboard = loop._build_scan_dashboard()
+
+    assert "Crown distance: prove a control/payload delta" in dashboard
+
+
+def test_scan_dashboard_surfaces_auth_state_without_tokens():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    loop.state.record_auth_identities([
+        {
+            "name": "alice",
+            "role": "admin",
+            "token": "SECRET_TOKEN_123",
+            "headers": {"Cookie": "session=SECRET_TOKEN_123"},
+        }
+    ])
+
+    dashboard = loop._build_scan_dashboard()
+
+    assert "Auth state: authenticated (alice/admin)" in dashboard
+    assert "SECRET_TOKEN_123" not in dashboard
+
+
 def test_open_crown_goal_keeps_post_exploit_branch_finish_blocking_until_depth():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
     branch = loop.state.ensure_branch(
@@ -369,6 +437,28 @@ def test_open_crown_goal_keeps_post_exploit_branch_finish_blocking_until_depth()
 
     branch.attempts = 3
     assert loop._branch_has_finish_blocking_yield(branch) is False
+
+
+def test_dag_finish_readds_active_crown_branch_outside_untested_nodes():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
+    branch = loop.state.ensure_branch(
+        "web:sqli:db-impact",
+        "WEB-SQLI-IMPACT",
+        "DB impact",
+        priority=38,
+        role="post_exploit_worker",
+        phase="data_access",
+        source_finding_id="VXIS-0002",
+        objective="Extract meaningful backend data.",
+        next_step="Dump users/auth tables.",
+        crown_jewel="DB dump",
+    )
+    branch.status = "active"
+    branch.attempts = 1
+
+    blockers = loop._dag_finish_blocking_branches()
+
+    assert any(item.id == branch.id for item in blockers)
 
 
 def test_local_strict_compacts_finding_payload_before_verifier():
@@ -2026,6 +2116,61 @@ async def test_finish_scan_rejected_when_high_finding_lacks_machine_replay_gate(
 
 
 @pytest.mark.asyncio
+async def test_non_web_high_finding_uses_verifier_replay_gate_not_http_replay():
+    from vxis.agent.tools.finding_tools import _get_findings
+
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+    reg.register(ConfirmingVerifyTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "Local secret exposed",
+            "severity": "high",
+            "finding_type": "information_disclosure",
+            "affected_component": "/tmp/App.app/Contents/Resources/config.json",
+            "description": "Bundled app config exposes a credential.",
+            "impact": "Credential material can be extracted from the local app bundle.",
+            "technical_analysis": "Control file has no secret; target config contains api_key=abc. repeat_count=2. Negative result: clean control has no api_key.",
+            "poc_description": "Read the bundled config and compare it to a clean control file twice.",
+            "poc_script_code": (
+                "PAYLOAD: cat /tmp/App.app/Contents/Resources/config.json -> api_key=abc\n"
+                "CONTROL: cat /tmp/clean-config.json -> no api_key\n"
+                "repeat_count=2\n"
+                "NEGATIVE_RESULT: clean control did not expose api_key"
+            ),
+            "request_or_payload": "cat /tmp/App.app/Contents/Resources/config.json",
+            "response_or_effect": "response_excerpt: api_key=abc",
+            "control_comparison": "control_result: /tmp/clean-config.json contains no api_key",
+            "replay_command": "cat /tmp/App.app/Contents/Resources/config.json",
+            "remediation_steps": "Remove secrets from bundled resources.",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(
+        target="/Applications/Fake.app",
+        registry=reg,
+        max_iters=4,
+        target_kind="desktop",
+    )
+    loop._decide = fake_decide  # type: ignore
+    loop._run_scheduled_skills = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    await loop.run()
+
+    findings = _get_findings()
+    assert findings
+    assert findings[0]["acceptance_status"] == "accepted"
+    assert findings[0]["replay_gate"]["method"] == "verifier_confirmed_non_web"
+
+
+@pytest.mark.asyncio
 async def test_auto_chain_links_information_disclosure_to_weak_auth():
     reg = ToolRegistry()
     reg.register(FinishTool())
@@ -2417,6 +2562,115 @@ async def test_repeated_finish_unfinished_branches_suggests_post_auth_replan():
         item["stage"] == "judge"
         and item["verdict"] == "HALTED"
         and item["title"] == "judge_replan_ignored"
+        for item in result["review_history"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_repeated_finish_alternating_rejections_halts_title_agnostic():
+    class FailingFinishTool:
+        name = "finish_scan"
+        description = "finish"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            return ToolResult(ok=False, summary="not finished")
+
+    reg = ToolRegistry()
+    reg.register(FailingFinishTool())
+    reg.register(ReportFindingTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "seed finding",
+            "severity": "low",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "seed finding",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=8)
+    loop.state.record_review_decision(
+        stage="judge",
+        verdict="REJECTED",
+        title="needs_replay_gate",
+        reason="seed",
+        blocked_action="finish_scan",
+    )
+    loop.state.record_review_decision(
+        stage="judge",
+        verdict="REJECTED",
+        title="unfinished_branches",
+        reason="seed",
+        blocked_action="finish_scan",
+    )
+    loop._decide = fake_decide  # type: ignore
+    loop._dag_finish_blocking_branches = lambda: []  # type: ignore[method-assign]
+    loop._run_scheduled_skills = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    result = await loop.run()
+
+    assert result["completed"] is False
+    assert result["iterations"] < loop.state.max_iters
+    assert any(
+        item["stage"] == "judge"
+        and item["verdict"] == "HALTED"
+        and item["title"] == "judge_replan_ignored"
+        for item in result["review_history"]
+    )
+    assert any(
+        isinstance(m.get("content"), dict)
+        and ((m["content"].get("result") or {}).get("data") or {}).get(
+            "finish_rejection_streak"
+        )
+        for m in loop.state.messages
+        if m.get("role") == "tool"
+        and isinstance(m.get("content"), dict)
+        and m["content"].get("name") == "finish_scan"
+    )
+
+
+@pytest.mark.asyncio
+async def test_finish_gate_exception_fails_closed():
+    reg = ToolRegistry()
+    reg.register(FinishTool())
+    reg.register(ReportFindingTool())
+
+    decisions = iter([
+        [("report_finding", {
+            "title": "seed finding",
+            "severity": "low",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "seed finding",
+        })],
+    ])
+
+    async def fake_decide(state):
+        try:
+            return next(decisions)
+        except StopIteration:
+            return [("finish_scan", {})]
+
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=4)
+    loop._decide = fake_decide  # type: ignore
+    loop._desired_chain_count = lambda _findings: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[method-assign]
+    loop._run_scheduled_skills = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    result = await loop.run()
+
+    assert result["completed"] is False
+    assert any(
+        item["stage"] == "judge"
+        and item["blocked_action"] == "finish_scan"
+        and item["title"] == "finish_gate_error"
         for item in result["review_history"]
     )
 

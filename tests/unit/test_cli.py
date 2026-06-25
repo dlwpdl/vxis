@@ -260,6 +260,12 @@ class TestScanCommand:
 
         assert result.exit_code == 1
 
+    def test_scan_resume_fails_loudly_until_checkpointing_exists(self):
+        result = runner.invoke(app, ["scan", "example.com", "--resume", "state.json"])
+
+        assert result.exit_code != 0
+        assert "not implemented" in result.output
+
     def test_scan_no_report_flag_suppresses_report_path(self):
         """With --no-report the report path message is not shown."""
         mock_result = self._make_mock_result()

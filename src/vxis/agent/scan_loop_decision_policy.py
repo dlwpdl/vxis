@@ -58,6 +58,9 @@ class ScanLoopDecisionPolicyMixin:
             if branch.owner == "agent_graph":
                 blockers.append(branch)
                 continue
+            if self._branch_has_open_crown_goal(branch):
+                blockers.append(branch)
+                continue
             if branch.id not in blocker_ids and branch.source_candidate_id not in blocker_ids:
                 if (
                     branch.owner == "memory"

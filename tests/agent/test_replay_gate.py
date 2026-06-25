@@ -122,7 +122,29 @@ async def test_machine_replay_gate_turns_dispatch_exception_into_blocked_oracle(
 
 
 @pytest.mark.asyncio
-async def test_machine_replay_gate_blocks_unsafe_methods(caplog: pytest.LogCaptureFixture) -> None:
+async def test_machine_replay_gate_accepts_confirmed_unsafe_methods_without_refiring() -> None:
+    async def dispatch(name: str, args: dict) -> ToolResult:  # pragma: no cover - must not run
+        raise AssertionError("unsafe requests must not be replayed")
+
+    gate = await machine_replay_gate(
+        finding={
+            "id": "VXIS-0007",
+            "title": "POST login bypass",
+            "severity": "critical",
+            "verifier_verdict": "CONFIRMED",
+            "control_comparison": "POST /login HTTP/1.1\nHost: example\n\n{}",
+            "request_or_payload": "POST /login HTTP/1.1\nHost: example\n\n{}",
+        },
+        target="http://localhost:3000",
+        dispatch=dispatch,
+    )
+
+    assert gate["status"] == "passed"
+    assert gate["method"] == "verifier_confirmed_unsafe_http"
+
+
+@pytest.mark.asyncio
+async def test_machine_replay_gate_blocks_unconfirmed_unsafe_methods(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level("WARNING")
     gate = await machine_replay_gate(
         finding={

@@ -265,7 +265,7 @@ def scan(
     resume: Optional[str] = typer.Option(
         None,
         "--resume",
-        help="Resume from checkpoint file",
+        help="Checkpoint resume is not implemented; passing this exits with an error.",
     ),
     interactive: bool = typer.Option(
         False,
@@ -349,10 +349,14 @@ def scan(
     \b
     기본: LLM API Brain이 단일 scan loop를 자율 실행
     --interactive: Claude Code가 Brain (stdin/stdout JSON 프로토콜)
-    --resume: 이전 스캔의 체크포인트에서 재개
+    --resume: 아직 지원하지 않음 (전달 시 명시 에러)
     --manifest: 여러 타겟을 한 번에 스캔 (scan.yml)
     """
     profile = normalize_scan_profile_name(profile)
+    if resume:
+        raise typer.BadParameter(
+            "--resume is not implemented yet; checkpoint resume is disabled."
+        )
     # Cost/token budget → env so resolve_cost_budget() picks it up at loop build.
     import os as _os_budget
 

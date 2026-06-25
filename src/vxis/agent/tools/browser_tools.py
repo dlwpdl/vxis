@@ -516,9 +516,19 @@ class BrowserGetCookiesTool:
             cookies = await _page.get_cookies()
         except Exception as e:
             return ToolResult(ok=False, summary=f"browser_get_cookies: {e}", error=str(e))
+        bridged = 0
+        try:
+            from vxis.agent.tools.hands_tools import import_browser_cookies
+
+            bridged = await import_browser_cookies(
+                str(getattr(getattr(_page, "_page", None), "url", "") or ""),
+                cookies,
+            )
+        except Exception:
+            logger.debug("browser_get_cookies: cookie bridge failed", exc_info=True)
 
         return ToolResult(
             ok=True,
-            data={"cookies": cookies},
+            data={"cookies": cookies, "bridged_to_http_session": bridged},
             summary=f"{len(cookies)} cookie(s): {', '.join(c.get('name','') for c in cookies[:10])}",
         )

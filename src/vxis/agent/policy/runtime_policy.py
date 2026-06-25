@@ -26,7 +26,7 @@ _INJECTION_DECISION: ContextVar[str | None] = ContextVar(
 
 # Exploitation primitives: arbitrary shell / code execution. Require ceiling
 # >= 'lateral'; below that (none / read-only) they are refused at dispatch.
-_EXPLOITATION_TOOLS = frozenset({"shell_exec", "python_exec"})
+_EXPLOITATION_TOOLS = frozenset({"shell_exec", "python_exec", "nmap_scan"})
 
 
 def set_active_policy(policy: ScanPolicy | None) -> Token:

@@ -117,6 +117,17 @@ def build_scan_dashboard(loop: Any) -> str:
     for name, status in tested_vectors.items():
         lines.append(f"  {status} {name}")
 
+    auth_identities = [i for i in getattr(s, "auth_identities", []) if isinstance(i, dict)]
+    if auth_identities:
+        principals = ", ".join(
+            str(i.get("name") or i.get("email") or "authenticated")[:40]
+            + (f"/{str(i.get('role'))[:24]}" if i.get("role") else "")
+            for i in auth_identities[:4]
+        )
+        lines.append(f"Auth state: authenticated ({principals})")
+    else:
+        lines.append("Auth state: anonymous/no verified session")
+
     # Durable vector candidate queue. This is the stateful contract: Brain
     # must drive each plausible vector to found/clean/blocked/dead instead
     # of merely picking from a tool list and forgetting failed hypotheses.
@@ -549,7 +560,7 @@ def build_scan_dashboard(loop: Any) -> str:
     _chain_pressure = len(reported) >= 2 and not existing_chains
     open_candidates = [c for c in s.open_vector_candidates() if c.attempts == 0]
     retry_candidates = [c for c in s.open_vector_candidates() if c.attempts > 0]
-    if active_branches and not _chain_pressure:
+    if active_branches:
         b = active_branches[0]
         lines.append(
             f"\n>> PRIMARY GOAL: drive branch {b.id} toward {b.crown_jewel or 'real impact'}."

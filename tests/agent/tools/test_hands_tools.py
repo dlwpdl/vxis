@@ -7,6 +7,7 @@ from vxis.agent.tools.hands_tools import (
     HttpRequestTool,
     BrowserRenderTool,
     InterceptProxyTool,
+    import_browser_cookies,
     _reset_for_tests,
 )
 
@@ -92,6 +93,44 @@ async def test_http_request_tool_passes_identity_to_session_manager():
     )
     assert result.ok is True
     assert result.data["identity"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_import_browser_cookies_uses_shared_origin_session():
+    fake_manager = MagicMock()
+    fake_manager.import_cookies = AsyncMock(return_value=1)
+
+    with patch("vxis.agent.tools.hands_tools._get_session_manager", return_value=fake_manager):
+        count = await import_browser_cookies(
+            "http://x/login",
+            [{"name": "sessionid", "value": "abc", "domain": "x", "path": "/"}],
+        )
+
+    assert count == 1
+    fake_manager.import_cookies.assert_awaited_once_with(
+        "http://x",
+        [{"name": "sessionid", "value": "abc", "domain": "x", "path": "/"}],
+        identity=None,
+        proxy=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_session_manager_import_cookies_updates_target_session():
+    from vxis.interaction.hands import AuthState, SessionManager
+
+    mgr = SessionManager()
+    try:
+        count = await mgr.import_cookies(
+            "http://example.test",
+            [{"name": "sessionid", "value": "abc", "domain": "example.test", "path": "/"}],
+        )
+        session = await mgr.get_session("http://example.test")
+        assert count == 1
+        assert session.cookies["sessionid"] == "abc"
+        assert session.auth_state == AuthState.AUTHENTICATED
+    finally:
+        await mgr.close_all()
 
 
 @pytest.mark.asyncio

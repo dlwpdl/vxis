@@ -739,6 +739,27 @@ class TargetSession:
     def cookies(self) -> dict[str, str]:
         return dict(self._client.cookies)
 
+    def import_cookies(self, cookies: list[dict[str, Any]]) -> int:
+        count = 0
+        for cookie in cookies:
+            if not isinstance(cookie, dict):
+                continue
+            name = str(cookie.get("name") or "").strip()
+            value = str(cookie.get("value") or "")
+            if not name:
+                continue
+            self._client.cookies.set(
+                name,
+                value,
+                domain=str(cookie.get("domain") or ""),
+                path=str(cookie.get("path") or "/"),
+            )
+            count += 1
+        if count:
+            self.auth_state = AuthState.AUTHENTICATED
+            self.csrf.update_from_cookies(self._client.cookies)
+        return count
+
     def get_fingerprint(self) -> dict[str, Any]:
         """타겟 핑거프린트 요약."""
         all_tech: set[str] = set()
@@ -987,6 +1008,17 @@ class SessionManager:
                 ghost_layer.is_active(),
             )
         return self._sessions[key]
+
+    async def import_cookies(
+        self,
+        base_url: str,
+        cookies: list[dict[str, Any]],
+        *,
+        identity: str | None = None,
+        **kwargs: Any,
+    ) -> int:
+        session = await self.get_session(base_url, identity=identity, **kwargs)
+        return session.import_cookies(cookies)
 
     async def close_session(self, base_url: str, *, identity: str | None = None) -> None:
         key = self._session_key(base_url, identity)

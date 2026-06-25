@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 from vxis.agent.tool_registry import ToolResult
 from vxis.interaction.hands import SessionManager
@@ -36,6 +37,26 @@ def _reset_for_tests() -> None:
     global _session_manager
     _session_manager = None
     reset_proxy_runtime_for_tests()
+
+
+async def import_browser_cookies(
+    base_url: str,
+    cookies: list[dict[str, Any]],
+    *,
+    identity: str | None = None,
+) -> int:
+    """Bridge Playwright cookies into the shared http_request session."""
+    if not base_url or not cookies:
+        return 0
+    parsed = urlparse(base_url)
+    if parsed.scheme and parsed.netloc:
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+    return await _get_session_manager().import_cookies(
+        base_url,
+        cookies,
+        identity=identity,
+        proxy=get_active_proxy_url(),
+    )
 
 
 # ── HttpRequestTool ─────────────────────────────────────────────────────

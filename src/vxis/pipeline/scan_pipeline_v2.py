@@ -894,13 +894,15 @@ class ScanPipeline:
         target: str,
         app_context_en: str = "",
         app_context_ko: str = "",
-        resume_from: str | None = None,  # Phase A: ignored, kept for signature compat
+        resume_from: str | None = None,
         kind: TargetKind = TargetKind.WEB,
         target_hints: dict[str, str] | None = None,
         box_mode: str | None = None,  # Production runtime currently resolves all modes to black.
         operator_inbox: Any = None,  # mid-scan operator → Brain steering (TUI Input)
     ) -> ScanContext:
         """Run a Strix-parity single-loop scan against the target."""
+        if resume_from:
+            raise ValueError("resume_from is not implemented; checkpoint resume is disabled")
         started = time.monotonic()
 
         # 1. Prepare target runtime through the platform launcher layer.

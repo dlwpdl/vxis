@@ -27,11 +27,13 @@ def test_ceiling_blocks_exploitation_below_lateral():
     # none (FAIL_CLOSED_DEFAULT) and read-only (standard/prod) both block shell/python
     assert tool_blocked_by_ceiling("shell_exec", FAIL_CLOSED_DEFAULT) is True
     assert tool_blocked_by_ceiling("python_exec", FAIL_CLOSED_DEFAULT) is True
+    assert tool_blocked_by_ceiling("nmap_scan", FAIL_CLOSED_DEFAULT) is True
     assert tool_blocked_by_ceiling("shell_exec", PROFILE_POLICY_TABLE["standard"]) is True
 
 
 def test_ceiling_allows_exploitation_at_lateral_and_full():
     assert tool_blocked_by_ceiling("shell_exec", PROFILE_POLICY_TABLE["crown"]) is False  # lateral
+    assert tool_blocked_by_ceiling("nmap_scan", PROFILE_POLICY_TABLE["crown"]) is False
     assert tool_blocked_by_ceiling("shell_exec", PROFILE_POLICY_TABLE["bugbounty"]) is False
     assert tool_blocked_by_ceiling("python_exec", PROFILE_POLICY_TABLE["aggressive"]) is False  # full
 
@@ -140,6 +142,7 @@ def test_readonly_blocks_exploitation_attack_skills_and_mutating_http():
     # readonly = "GET/HEAD only"; everything that can mutate is refused at dispatch
     assert injection_action_blocked("shell_exec", {}, "readonly") is True
     assert injection_action_blocked("python_exec", {}, "readonly") is True
+    assert injection_action_blocked("nmap_scan", {}, "readonly") is True
     assert injection_action_blocked("run_skill", {"skill": "test_injection"}, "readonly") is True
     for method in ("POST", "post", "PUT", "PATCH", "DELETE"):
         assert injection_action_blocked("http_request", {"method": method}, "readonly") is True, method

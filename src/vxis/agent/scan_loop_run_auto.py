@@ -357,6 +357,36 @@ class ScanLoopAutoOrchestrationMixin:
                                             self.state.add_message("user", finding_msg)
                                             logger.info("auto-login SUCCESS: %s → token found, JWT=%s",
                                                        email, jwt_payload[:100])
+                                            cookie_header = "; ".join(
+                                                f"{c.get('name')}={c.get('value')}"
+                                                for c in snap.cookies
+                                                if c.get("name") and c.get("value")
+                                            )
+                                            self.state.record_auth_identities([
+                                                {
+                                                    "name": email,
+                                                    "email": email if "@" in email else "",
+                                                    "token": str(token_cookies[0].get("value") or ""),
+                                                    "headers": {"Cookie": cookie_header}
+                                                    if cookie_header
+                                                    else {},
+                                                    "source": "auto_login_browser",
+                                                }
+                                            ])
+                                            try:
+                                                from vxis.agent.tools.hands_tools import (
+                                                    import_browser_cookies,
+                                                )
+
+                                                await import_browser_cookies(
+                                                    _login_target,
+                                                    snap.cookies,
+                                                )
+                                            except Exception:
+                                                logger.debug(
+                                                    "auto-login cookie bridge failed",
+                                                    exc_info=True,
+                                                )
 
                                             # Auto-report this finding
                                             evidence = (

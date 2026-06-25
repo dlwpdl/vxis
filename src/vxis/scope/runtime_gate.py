@@ -17,6 +17,23 @@ _ACTIVE: ContextVar[ScopeEnforcer | None] = ContextVar("vxis_active_scope_enforc
 _APPROVE: ContextVar[bool] = ContextVar("vxis_scope_approve_destructive", default=False)
 
 _URL_RE = re.compile(r"https?://[^\s'\"<>]+", re.IGNORECASE)
+_BARE_TARGET_RE = re.compile(
+    r"(?<![@\w.-])("
+    r"localhost|"
+    r"(?:\d{1,3}\.){3}\d{1,3}|"
+    r"(?:[a-z0-9-]+\.)+[a-z]{2,}"
+    r")(?::\d{1,5})?(?:/[^\s'\"<>)]*)?",
+    re.IGNORECASE,
+)
+_NETWORK_HINT_RE = re.compile(
+    r"\b(?:curl|wget|nmap|nc|netcat|telnet|ssh|ftp|ffuf|gobuster|nikto|sqlmap|"
+    r"httpx|requests|aiohttp|urllib|socket|connect|open_connection)\b",
+    re.IGNORECASE,
+)
+_PYTHON_SYMBOL_TARGET_RE = re.compile(
+    r"^(?:socket|requests|httpx|aiohttp|urllib|asyncio)\.[A-Za-z_]\w*$",
+    re.IGNORECASE,
+)
 _TARGET_KEYS = ("url", "target_url", "base_url", "target")
 
 
@@ -83,6 +100,12 @@ def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateD
 
     urls = _extract_urls(tool_name, args)
     if not urls:
+        if tool_name in {"shell_exec", "python_exec"} and _payload_looks_networked(args):
+            return ScopeGateDecision(
+                allowed=False,
+                reason=f"{tool_name} contains network tooling but no parseable URL/host target",
+                policy="deny",
+            )
         return None
     method = str(args.get("method") or "GET")
     body = args.get("body") if isinstance(args.get("body"), dict) else None
@@ -123,10 +146,19 @@ def _extract_urls(tool_name: str, args: dict[str, Any]) -> list[str]:
     text = str(args.get("command") or args.get("code") or "")
     if text:
         out.extend(_URL_RE.findall(text))
+        if tool_name in {"shell_exec", "python_exec"} and _NETWORK_HINT_RE.search(text):
+            out.extend(_BARE_TARGET_RE.findall(text))
     seen: set[str] = set()
     deduped: list[str] = []
     for u in out:
-        if u not in seen:
-            seen.add(u)
-            deduped.append(u)
+        clean = str(u).strip().rstrip("),.;")
+        if tool_name == "python_exec" and _PYTHON_SYMBOL_TARGET_RE.match(clean):
+            continue
+        if clean and clean not in seen:
+            seen.add(clean)
+            deduped.append(clean)
     return deduped
+
+
+def _payload_looks_networked(args: dict[str, Any]) -> bool:
+    return bool(_NETWORK_HINT_RE.search(str(args.get("command") or args.get("code") or "")))

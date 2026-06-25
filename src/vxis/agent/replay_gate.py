@@ -150,6 +150,17 @@ async def machine_replay_gate(
     control_args = control_requests[0]
     replay_args = replay_requests[-1]
     if str(control_args.get("method", "")).upper() not in SAFE_METHODS or str(replay_args.get("method", "")).upper() not in SAFE_METHODS:
+        confirmed = (
+            str(finding.get("status", "")).lower() == "confirmed"
+            or str(finding.get("verifier_verdict", "")).upper() == "CONFIRMED"
+            or bool(finding.get("verified"))
+        )
+        if confirmed:
+            return {
+                "status": "passed",
+                "method": "verifier_confirmed_unsafe_http",
+                "reason": "unsafe method not replayed; verifier confirmed evidence",
+            }
         logger.warning(
             "replay gate blocked unsafe method for high/critical finding id=%s title=%s",
             finding.get("id", ""),

@@ -163,6 +163,7 @@ class ScanLoopRunMixin(
         _skill_promotion_replays: set[str] = set()
         _auth_token: str | None = None
         _replan_ignore_counts: dict[str, int] = {}
+        _finish_rejection_streak = 0
         _halt_due_ignored_replan = False
         # Phase 4: track every shell_exec / python_exec invocation so the
         # scoring layer can credit VC for sandbox-based attacks. Each entry
@@ -267,6 +268,7 @@ class ScanLoopRunMixin(
                 args = self._normalize_tool_args(name, args)
                 if name != "finish_scan":
                     _replan_ignore_counts.clear()
+                    _finish_rejection_streak = 0
                 # Compute a stable hash key for the (tool, args) pair
                 try:
                     key = f"{name}::{_json.dumps(args, sort_keys=True, default=str)}"
@@ -568,18 +570,25 @@ class ScanLoopRunMixin(
                     if str(args.get("severity", "")).lower() in {"critical", "high"}:
                         from vxis.agent.replay_gate import machine_replay_gate
 
-                        _replay_dispatch = (
-                            self.registry.dispatch
-                            if getattr(self.registry, "has_tool", lambda _name: False)(
-                                "http_request"
+                        if self._target_kind != _TK.WEB:
+                            args["replay_gate"] = {
+                                "status": "passed",
+                                "method": "verifier_confirmed_non_web",
+                                "reason": "machine HTTP replay not applicable to non-web target",
+                            }
+                        else:
+                            _replay_dispatch = (
+                                self.registry.dispatch
+                                if getattr(self.registry, "has_tool", lambda _name: False)(
+                                    "http_request"
+                                )
+                                else None
                             )
-                            else None
-                        )
-                        args["replay_gate"] = await machine_replay_gate(
-                            finding=args,
-                            target=str(self.state.target),
-                            dispatch=_replay_dispatch,
-                        )
+                            args["replay_gate"] = await machine_replay_gate(
+                                finding=args,
+                                target=str(self.state.target),
+                                dispatch=_replay_dispatch,
+                            )
                         args["_replay_gate_machine"] = True
 
                 if name == "report_finding" and isinstance(args, dict):
@@ -771,6 +780,56 @@ class ScanLoopRunMixin(
 
                 if name == "finish_scan":
                     _recent_finish_rejections = self._recent_finish_rejections(limit=3)
+                    _streakable_finish_titles = {
+                        "needs_chains",
+                        "needs_replay_gate",
+                        "unfinished_branches",
+                        "unattempted_candidates",
+                    }
+                    _streakable_finish_rejections = [
+                        item
+                        for item in _recent_finish_rejections
+                        if item.title in _streakable_finish_titles
+                    ]
+                    if _streakable_finish_rejections:
+                        _finish_rejection_streak += 1
+                    else:
+                        _finish_rejection_streak = 0
+                    if _finish_rejection_streak >= 3:
+                        _titles = [item.title for item in _streakable_finish_rejections[-3:]]
+                        _halt_msg = (
+                            "JUDGE REPLAN HALTED: finish_scan kept retrying after judge "
+                            "rejections without an intervening non-finish action. "
+                            f"Recent rejections: {', '.join(_titles) or 'unknown'}."
+                        )
+                        self.state.record_review_decision(
+                            stage="judge",
+                            verdict="HALTED",
+                            title="judge_replan_ignored",
+                            reason=_halt_msg,
+                            action_hint=self._judge_replan_hint(),
+                            blocked_action="finish_scan",
+                            affected_component=self.state.target,
+                        )
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": "finish_scan",
+                                "args": args,
+                                "result": {
+                                    "ok": False,
+                                    "summary": _halt_msg,
+                                    "data": {
+                                        "judge_replan_halt": True,
+                                        "finish_rejection_streak": _finish_rejection_streak,
+                                        "recent_rejection_titles": _titles,
+                                    },
+                                },
+                            },
+                        )
+                        self._emit_control_plane(_halt_msg)
+                        _halt_due_ignored_replan = True
+                        break
                     if len(_recent_finish_rejections) >= 2:
                         _latest_titles = {item.title for item in _recent_finish_rejections[-2:]}
                         _latest_title = next(iter(_latest_titles)) if _latest_titles else ""
@@ -1573,8 +1632,22 @@ class ScanLoopRunMixin(
                                     len(_open_candidates),
                                 )
                                 continue
-                    except Exception:
+                    except Exception as exc:
                         logger.exception("finish_scan rejection check failed")
+                        self._reject_finish_scan(
+                            title="finish_gate_error",
+                            reason=(
+                                "finish_scan rejection checks raised "
+                                f"{type(exc).__name__}; failing closed."
+                            ),
+                            action_hint="Fix the finish gate error or continue scanning with a concrete non-finish action.",
+                            summary=(
+                                "finish_scan REJECTED — finish gate errored, "
+                                f"failing closed ({type(exc).__name__})."
+                            ),
+                            data={"finish_gate_error": type(exc).__name__},
+                        )
+                        continue
                     _v3_gate = v3_maybe_finish_gate(self)
                     if _v3_gate is not None:
                         self._reject_finish_scan(
