@@ -162,6 +162,8 @@ class ScanLoopRunMixin(
         _all_skill_names = {s[0] for s in _skill_sequence}
         _skill_promotion_replays: set[str] = set()
         _auth_token: str | None = None
+        _replan_ignore_counts: dict[str, int] = {}
+        _halt_due_ignored_replan = False
         # Phase 4: track every shell_exec / python_exec invocation so the
         # scoring layer can credit VC for sandbox-based attacks. Each entry
         # is {"tool": name, "cmd"|"code": str}. Brain gets rewarded for
@@ -263,6 +265,8 @@ class ScanLoopRunMixin(
             actions = actions[:1]
             for name, args in actions:
                 args = self._normalize_tool_args(name, args)
+                if name != "finish_scan":
+                    _replan_ignore_counts.clear()
                 # Compute a stable hash key for the (tool, args) pair
                 try:
                     key = f"{name}::{_json.dumps(args, sort_keys=True, default=str)}"
@@ -807,6 +811,52 @@ class ScanLoopRunMixin(
                                 "JUDGE REPLAN REQUIRED: finish_scan was rejected repeatedly for the same reason. "
                                 f"Last rejection: {_latest_title}.{_auto_link_text}{_suggested_text} {_replan_hint}{_candidate_text}"
                             )
+                            _suggested_payload = (
+                                {
+                                    "tool": _suggested_action[0],
+                                    "args": _suggested_action[1],
+                                    "reason": _suggested_action[2],
+                                }
+                                if _suggested_action is not None
+                                else None
+                            )
+                            _ignored_count = _replan_ignore_counts.get(_latest_title, 0) + 1
+                            _replan_ignore_counts[_latest_title] = _ignored_count
+                            if _ignored_count >= 2:
+                                _halt_msg = (
+                                    "JUDGE REPLAN HALTED: finish_scan was retried after the same judge "
+                                    f"replan without any intervening non-finish action. Last rejection: {_latest_title}. "
+                                    "Stopping early instead of burning the remaining iteration/cost budget."
+                                )
+                                self.state.record_review_decision(
+                                    stage="judge",
+                                    verdict="HALTED",
+                                    title="judge_replan_ignored",
+                                    reason=_halt_msg,
+                                    action_hint=_replan_hint,
+                                    blocked_action="finish_scan",
+                                    affected_component=self.state.target,
+                                )
+                                self.state.add_message(
+                                    "tool",
+                                    {
+                                        "name": "finish_scan",
+                                        "args": args,
+                                        "result": {
+                                            "ok": False,
+                                            "summary": _halt_msg,
+                                            "data": {
+                                                "judge_replan_halt": True,
+                                                "last_rejection_title": _latest_title,
+                                                "ignored_count": _ignored_count,
+                                                "suggested_action": _suggested_payload,
+                                            },
+                                        },
+                                    },
+                                )
+                                self._emit_control_plane(_halt_msg)
+                                _halt_due_ignored_replan = True
+                                break
                             self.state.add_message(
                                 "tool",
                                 {
@@ -820,13 +870,7 @@ class ScanLoopRunMixin(
                                             "last_rejection_title": _latest_title,
                                             "auto_linked_chain": _auto_linked,
                                             "chain_candidates": _chain_candidates,
-                                            "suggested_action": {
-                                                "tool": _suggested_action[0],
-                                                "args": _suggested_action[1],
-                                                "reason": _suggested_action[2],
-                                            }
-                                            if _suggested_action is not None
-                                            else None,
+                                            "suggested_action": _suggested_payload,
                                         },
                                     },
                                 },
@@ -857,6 +901,8 @@ class ScanLoopRunMixin(
                             self._emit_control_plane(_replan_msg)
                             continue
 
+                if _halt_due_ignored_replan:
+                    break
                 _pre_progress_marker = self._execution_progress_marker()
                 self._emit_action_progress(name, args, "Executing")
                 result = await self.registry.dispatch(name, args)
@@ -1549,6 +1595,8 @@ class ScanLoopRunMixin(
                     if result.ok:
                         self.state.completed = True
                         break
+            if _halt_due_ignored_replan:
+                break
             # Track which tools Brain actually called this iteration
             for name, _ in actions:
                 _tools_used.add(name)

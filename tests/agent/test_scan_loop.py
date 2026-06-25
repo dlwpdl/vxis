@@ -2312,10 +2312,23 @@ async def test_repeated_finish_unattempted_candidates_suggests_brain_replan():
     result = await loop.run()
 
     assert not run_skill.calls
-    assert result["completed"] in {False, True}
+    assert result["completed"] is False
+    assert result["iterations"] < loop.state.max_iters
     assert any(
         isinstance(m.get("content"), dict)
         and ((m["content"].get("result") or {}).get("data") or {}).get("suggested_action")
+        for m in loop.state.messages
+        if m.get("role") == "tool" and isinstance(m.get("content"), dict) and m["content"].get("name") == "finish_scan"
+    )
+    assert any(
+        item["stage"] == "judge"
+        and item["verdict"] == "HALTED"
+        and item["title"] == "judge_replan_ignored"
+        for item in result["review_history"]
+    )
+    assert any(
+        isinstance(m.get("content"), dict)
+        and ((m["content"].get("result") or {}).get("data") or {}).get("judge_replan_halt")
         for m in loop.state.messages
         if m.get("role") == "tool" and isinstance(m.get("content"), dict) and m["content"].get("name") == "finish_scan"
     )
@@ -2363,6 +2376,7 @@ async def test_repeated_finish_unfinished_branches_suggests_post_auth_replan():
     result = await loop.run()
 
     assert result["completed"] is False
+    assert result["iterations"] < loop.state.max_iters
     assert not run_skill.calls
     assert any(
         item["stage"] == "judge"
@@ -2375,6 +2389,12 @@ async def test_repeated_finish_unfinished_branches_suggests_post_auth_replan():
         and ((m["content"].get("result") or {}).get("data") or {}).get("suggested_action")
         for m in loop.state.messages
         if m.get("role") == "tool" and isinstance(m.get("content"), dict) and m["content"].get("name") == "finish_scan"
+    )
+    assert any(
+        item["stage"] == "judge"
+        and item["verdict"] == "HALTED"
+        and item["title"] == "judge_replan_ignored"
+        for item in result["review_history"]
     )
 
 
