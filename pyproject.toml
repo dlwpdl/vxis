@@ -44,7 +44,7 @@ export = [
     "python-docx>=1.1,<2",
 ]
 pdf = [
-    "weasyprint>=68,<69",
+    "weasyprint>=68,<70",
 ]
 browser = [
     "playwright>=1.49",  # CPR Eyes — Playwright + CDP 브라우저
