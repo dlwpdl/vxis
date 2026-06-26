@@ -36,17 +36,17 @@ def test_nuclei_maps_to_broad_coverage() -> None:
     assert len(vectors) >= 2, f"nuclei should credit >=2 vectors, got: {vectors}"
 
 
-def test_ffuf_maps_to_info_disclosure() -> None:
-    """ffuf / gobuster — 디렉토리 브루트포스 → INFO 발견 벡터."""
+def test_ffuf_maps_to_recon_vector() -> None:
+    """ffuf / gobuster — 디렉토리 브루트포스 → endpoint recon 벡터."""
     from vxis.pipeline.scan_pipeline_v2 import _sandbox_cmd_to_vectors
-    assert "WEB-INFO-001" in _sandbox_cmd_to_vectors("ffuf -u http://t/FUZZ -w wordlist.txt")
-    assert "WEB-INFO-001" in _sandbox_cmd_to_vectors("gobuster dir -u http://t")
+    assert "WEB-AC-005" in _sandbox_cmd_to_vectors("ffuf -u http://t/FUZZ -w wordlist.txt")
+    assert "WEB-AC-005" in _sandbox_cmd_to_vectors("gobuster dir -u http://t")
 
 
 def test_nikto_maps_to_misconfig() -> None:
     """nikto — 웹 서버 misconfig 탐지."""
     from vxis.pipeline.scan_pipeline_v2 import _sandbox_cmd_to_vectors
-    assert "WEB-MISC-001" in _sandbox_cmd_to_vectors("nikto -h http://target")
+    assert "WEB-MISCONF-001" in _sandbox_cmd_to_vectors("nikto -h http://target")
 
 
 def test_unknown_command_returns_empty() -> None:
@@ -68,7 +68,45 @@ def test_jwt_python_code_maps_to_jwt_vector() -> None:
     """python_exec 에서 jwt 라이브러리 사용 → JWT 벡터 credit."""
     from vxis.pipeline.scan_pipeline_v2 import _sandbox_cmd_to_vectors
     code = "import jwt\ntoken = jwt.encode({'alg': 'none'}, '', algorithm='none')"
-    assert "WEB-JWT-001" in _sandbox_cmd_to_vectors(code)
+    vectors = _sandbox_cmd_to_vectors(code)
+    assert "WEB-AUTH-003" in vectors
+    assert "WEB-AUTH-004" in vectors
+
+
+def test_pipeline_web_vector_references_exist_in_registry() -> None:
+    """Pipeline mappings must not invent vector IDs outside the registry."""
+    from vxis.pipeline.scan_pipeline_v2 import (
+        _PYTHON_CODE_VECTORS,
+        _SANDBOX_TOOL_VECTORS,
+        _WEB_FINDING_TYPE_TO_VECTOR,
+        _WEB_SKILL_TO_VECTORS,
+    )
+    from vxis.scoring.vectors import WEB_VECTORS
+
+    registered = {vector.id for vector in WEB_VECTORS}
+    referenced: set[str] = set()
+    for _, vectors in _SANDBOX_TOOL_VECTORS:
+        referenced.update(vectors)
+    for _, vectors in _PYTHON_CODE_VECTORS:
+        referenced.update(vectors)
+    for vectors in _WEB_SKILL_TO_VECTORS.values():
+        referenced.update(vectors)
+    referenced.update(_WEB_FINDING_TYPE_TO_VECTOR.values())
+
+    assert referenced <= registered
+
+
+def test_finding_type_mapping_uses_canonical_registry_ids() -> None:
+    """Common finding types map to current registry IDs, not legacy aliases."""
+    from vxis.pipeline.scan_pipeline_v2 import _finding_type_to_vector
+
+    assert _finding_type_to_vector("idor") == "WEB-AC-001"
+    assert _finding_type_to_vector("jwt_alg_none") == "WEB-AUTH-004"
+    assert _finding_type_to_vector("mass_assignment") == "WEB-API-001"
+    assert _finding_type_to_vector("graphql_introspection_enabled") == "WEB-API-003"
+    assert _finding_type_to_vector("open_redirect") == "WEB-MISCONF-006"
+    assert _finding_type_to_vector("path_traversal") == "WEB-AC-004"
+    assert _finding_type_to_vector("business_logic") == "WEB-BIZ-001"
 
 
 # ─── Integration: _compute_vxis_score reads sandbox_invocations ────────────

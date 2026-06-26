@@ -150,6 +150,14 @@ def test_has_persistence_ethos() -> None:
     )
 
 
+def test_has_boundary_confusion_hint_without_checklist() -> None:
+    """Technique breadth is a hint, not a forced traversal list."""
+    lowered = AGENT_SYSTEM_PROMPT.lower()
+    assert "token-boundary" in lowered
+    assert "websocket" in lowered
+    assert "change auth" in lowered or "data, or execution impact" in lowered
+
+
 def test_no_mechanical_checklist_but_has_absolutism() -> None:
     """핵심 재정합: (HOW 자유) + (WHAT 절대) 이중축 검증.
 

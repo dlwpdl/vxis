@@ -496,22 +496,22 @@ _finding_dict_to_finding_object = _build_finding_from_dict
 # that `python -c "import jwt"` doesn't also match a made-up `jwt` command.
 _SANDBOX_TOOL_VECTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("sqlmap", ("WEB-SQLI-001",)),
-    ("nuclei", ("WEB-INFO-001", "WEB-MISC-001")),
-    ("nikto", ("WEB-MISC-001", "WEB-INFO-001")),
+    ("nuclei", ("WEB-MISCONF-001", "WEB-MISCONF-003", "WEB-INFRA-005")),
+    ("nikto", ("WEB-MISCONF-001", "WEB-MISCONF-003")),
     ("wapiti", ("WEB-SQLI-001", "WEB-XSS-001")),
     ("hydra", ("WEB-AUTH-001",)),
-    ("ffuf", ("WEB-INFO-001",)),
-    ("gobuster", ("WEB-INFO-001",)),
-    ("dirsearch", ("WEB-INFO-001",)),
-    ("wfuzz", ("WEB-INFO-001",)),
+    ("ffuf", ("WEB-AC-005",)),
+    ("gobuster", ("WEB-AC-005",)),
+    ("dirsearch", ("WEB-AC-005",)),
+    ("wfuzz", ("WEB-AC-005",)),
 )
 
 # Python code fingerprints — substring match on source.
 _PYTHON_CODE_VECTORS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("import jwt", ("WEB-JWT-001",)),
-    ("jwt.encode", ("WEB-JWT-001",)),
-    ("jwt.decode", ("WEB-JWT-001",)),
-    ("alg.*none", ("WEB-JWT-001",)),
+    ("import jwt", ("WEB-AUTH-003", "WEB-AUTH-004")),
+    ("jwt.encode", ("WEB-AUTH-003", "WEB-AUTH-004")),
+    ("jwt.decode", ("WEB-AUTH-003", "WEB-AUTH-004")),
+    ("alg.*none", ("WEB-AUTH-004",)),
 )
 
 
@@ -549,21 +549,35 @@ def _sandbox_cmd_to_vectors(cmd: str) -> list[str]:
 # skills added to the mapping never made it into the dispatch frozenset,
 # producing a permanent VC penalty (commit history: see Phase-F → smoke C1).
 _WEB_SKILL_TO_VECTORS: dict[str, list[str]] = {
-    "enumerate_endpoints": ["WEB-INFO-001", "WEB-INFO-002"],
-    "test_sensitive_files": ["WEB-INFO-001"],
-    "test_infra": ["WEB-MISC-001", "WEB-INFO-001"],
-    "attempt_auth": ["WEB-AUTH-001"],
-    "post_auth_enum": ["WEB-BAC-001"],
-    "test_injection": ["WEB-SQLI-001", "WEB-CMDI-001"],
-    "test_xss": ["WEB-XSS-001", "WEB-XSS-002"],
-    "test_ssrf": ["WEB-SSRF-001"],
-    "test_idor": ["WEB-IDOR-001"],
-    "test_auth_deep": ["WEB-JWT-001", "WEB-AUTH-001"],
+    "enumerate_endpoints": ["WEB-AC-005"],
+    "test_sensitive_files": ["WEB-CRYPTO-003", "WEB-INFRA-005"],
+    "test_infra": [
+        "WEB-INFRA-001",
+        "WEB-INFRA-003",
+        "WEB-INFRA-004",
+        "WEB-INFRA-005",
+        "WEB-MISCONF-001",
+    ],
+    "attempt_auth": ["WEB-AUTH-001", "WEB-AUTH-002"],
+    "post_auth_enum": ["WEB-AC-001", "WEB-AC-002", "WEB-AC-003"],
+    "test_injection": [
+        "WEB-SQLI-001",
+        "WEB-SQLI-002",
+        "WEB-SQLI-003",
+        "WEB-SSTI-001",
+        "WEB-CMDI-001",
+        "WEB-NOSQL-001",
+        "WEB-XXE-001",
+    ],
+    "test_xss": ["WEB-XSS-001", "WEB-XSS-002", "WEB-XSS-003", "WEB-XSS-004"],
+    "test_ssrf": ["WEB-SSRF-001", "WEB-SSRF-002", "WEB-SSRF-003"],
+    "test_idor": ["WEB-AC-001", "WEB-AC-002", "WEB-AC-003"],
+    "test_auth_deep": ["WEB-AUTH-003", "WEB-AUTH-004", "WEB-AUTH-005", "WEB-AUTH-008"],
     "test_csrf": ["WEB-CSRF-001"],
-    "test_misconfig": ["WEB-MISC-001"],
-    "test_api_security": ["WEB-BAC-001", "WEB-IDOR-001"],
-    "test_business_logic": ["WEB-LOGIC-001"],
-    "test_crypto": ["WEB-CRYPTO-001"],
+    "test_misconfig": ["WEB-MISCONF-001", "WEB-MISCONF-003", "WEB-MISCONF-004", "WEB-MISCONF-005"],
+    "test_api_security": ["WEB-API-001", "WEB-API-002", "WEB-API-003", "WEB-API-005", "WEB-API-009"],
+    "test_business_logic": ["WEB-BIZ-001", "WEB-BIZ-002", "WEB-BIZ-003", "WEB-BIZ-005"],
+    "test_crypto": ["WEB-CRYPTO-001", "WEB-CRYPTO-002", "WEB-CRYPTO-003", "WEB-CRYPTO-004"],
 }
 
 _DESKTOP_SKILL_TO_VECTORS: dict[str, list[str]] = {
@@ -589,6 +603,91 @@ _DESKTOP_SKILL_TO_VECTORS: dict[str, list[str]] = {
 }
 
 
+_WEB_FINDING_TYPE_TO_VECTOR: dict[str, str] = {
+    "sql_injection": "WEB-SQLI-001",
+    "sqli": "WEB-SQLI-001",
+    "sqli_blind": "WEB-SQLI-002",
+    "sqli_time": "WEB-SQLI-003",
+    "xss_reflected": "WEB-XSS-001",
+    "xss_stored": "WEB-XSS-002",
+    "ssrf": "WEB-SSRF-001",
+    "ssrf_possible": "WEB-SSRF-001",
+    "ssrf_cloud_metadata": "WEB-SSRF-001",
+    "ssrf_cloud_metadata_credentials": "WEB-SSRF-001",
+    "idor": "WEB-AC-001",
+    "broken_access_control": "WEB-AC-003",
+    "information_disclosure": "WEB-MISCONF-003",
+    "path_traversal": "WEB-AC-004",
+    "auth_bypass": "WEB-AUTH-001",
+    "weak_auth": "WEB-AUTH-001",
+    "default_credentials": "WEB-AUTH-002",
+    "csrf": "WEB-CSRF-001",
+    "xxe": "WEB-XXE-001",
+    "rce": "WEB-CMDI-001",
+    "command_injection": "WEB-CMDI-001",
+    "cmdi": "WEB-CMDI-001",
+    "error_oracle": "WEB-MISCONF-003",
+    "misconfiguration": "WEB-MISCONF-001",
+    "security_misconfiguration": "WEB-MISCONF-001",
+    "missing_security_header": "WEB-MISCONF-004",
+    "server_version_disclosure": "WEB-MISCONF-003",
+    "tech_disclosure": "WEB-MISCONF-003",
+    "cors_misconfiguration": "WEB-MISCONF-005",
+    "debug_endpoint_exposed": "WEB-MISCONF-001",
+    "verbose_error": "WEB-MISCONF-003",
+    "open_redirect": "WEB-MISCONF-006",
+    "jwt_confusion": "WEB-AUTH-003",
+    "jwt_alg_confusion": "WEB-AUTH-003",
+    "jwt_alg_none": "WEB-AUTH-004",
+    "jwt_claim_tampering": "WEB-AUTH-004",
+    "weak_crypto": "WEB-CRYPTO-001",
+    "business_logic": "WEB-BIZ-001",
+    "race_condition": "WEB-BIZ-003",
+    "sensitive_data_exposure": "WEB-CRYPTO-003",
+    "graphql_introspection_enabled": "WEB-API-003",
+    "openapi_schema_exposed": "WEB-API-003",
+    "openapi_unauthenticated_data_endpoint": "WEB-API-009",
+    "preauth_admin_route_exposure": "WEB-API-009",
+    "unauthenticated_action_api_read": "WEB-API-009",
+    "mass_assignment": "WEB-API-001",
+    "no_rate_limit": "WEB-API-002",
+    "verb_tampering": "WEB-API-005",
+    "param_pollution": "WEB-API-005",
+    "deserialization": "WEB-DESER-001",
+    "insecure_deserialization": "WEB-DESER-001",
+    "file_upload": "WEB-UPLOAD-001",
+    "unrestricted_file_upload": "WEB-UPLOAD-001",
+    "client_side_source_map_exposure": "WEB-CRYPTO-003",
+    "client_side_postmessage_origin_missing": "WEB-XSS-003",
+    "client_side_prototype_pollution_sink": "WEB-INJECT-022",
+}
+
+
+def _finding_type_to_vector(finding_type: str) -> str | None:
+    """Return the canonical WEB vector ID for a finding type, if known."""
+    ft = str(finding_type or "").strip().lower()
+    if not ft:
+        return None
+    direct = _WEB_FINDING_TYPE_TO_VECTOR.get(ft)
+    if direct:
+        return direct
+    if ft.startswith("xss_browser_confirmed_dom") or ft.startswith("xss_dom"):
+        return "WEB-XSS-003"
+    if ft.startswith("xss_browser_confirmed_mxss") or "mxss" in ft:
+        return "WEB-XSS-004"
+    if ft.startswith("xss_"):
+        return "WEB-XSS-001"
+    if "bopla" in ft or "property" in ft or "excessive_data" in ft:
+        return "WEB-API-008"
+    if "bfla" in ft or "function" in ft or "admin_route" in ft:
+        return "WEB-API-009"
+    if "secret" in ft or "credential" in ft:
+        return "WEB-CRYPTO-003"
+    if "git" in ft:
+        return "WEB-INFRA-005"
+    return None
+
+
 def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
     """Compute VXIS score using the full 5-dimension ScoringEngine.
 
@@ -600,31 +699,6 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
         from vxis.scoring.tracker import ScoreTracker
 
         tracker = ScoreTracker(target_type=ctx.kind.value)
-
-        # Map finding types to vector IDs
-        _type_to_vector = {
-            "sql_injection": "WEB-SQLI-001",
-            "xss_reflected": "WEB-XSS-001",
-            "xss_stored": "WEB-XSS-002",
-            "xss": "WEB-XSS-001",
-            "ssrf": "WEB-SSRF-001",
-            "idor": "WEB-IDOR-001",
-            "broken_access_control": "WEB-BAC-001",
-            "information_disclosure": "WEB-INFO-001",
-            "path_traversal": "WEB-TRAV-001",
-            "auth_bypass": "WEB-AUTH-001",
-            "weak_auth": "WEB-AUTH-001",
-            "csrf": "WEB-CSRF-001",
-            "xxe": "WEB-XXE-001",
-            "rce": "WEB-RCE-001",
-            "command_injection": "WEB-CMDI-001",
-            "error_oracle": "WEB-INFO-002",
-            "misconfiguration": "WEB-MISC-001",
-            "open_redirect": "WEB-REDIR-001",
-            "jwt_confusion": "WEB-JWT-001",
-            "weak_crypto": "WEB-CRYPTO-001",
-            "business_logic": "WEB-LOGIC-001",
-        }
 
         # Severity → exploitation level (module-level _SEV_TO_LEVEL covers both
         # "info" from evidence.schema and "informational" from models.finding)
@@ -680,14 +754,15 @@ def _compute_vxis_score(ctx: Any) -> tuple[float, str]:
             sev = f.severity.value if hasattr(f.severity, "value") else str(f.severity)
             fid = f.id if hasattr(f, "id") else str(getattr(f, "id", ""))
 
-            vector_id = _type_to_vector.get(ftype, f"WEB-{ftype.upper()[:8]}-001")
+            vector_id = _finding_type_to_vector(ftype)
             level = _sev_to_level.get(sev, 0)
 
-            tracker.record_vector_attempt(vector_id)
-            if level >= 1:
-                tracker.vectors_found.add(vector_id)
+            if vector_id:
+                tracker.record_vector_attempt(vector_id)
+                if level >= 1:
+                    tracker.vectors_found.add(vector_id)
+                tracker.finding_vectors[fid] = vector_id
             tracker.exploitation_levels[fid] = level
-            tracker.finding_vectors[fid] = vector_id
 
             # Evidence count from finding
             evidence_count = 0

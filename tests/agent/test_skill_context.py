@@ -31,6 +31,36 @@ def test_render_skill_context_contains_execution_and_validation() -> None:
     assert "run_skill" in rendered
 
 
+def test_auth_deep_card_covers_token_boundary_confusion() -> None:
+    rendered = render_skill_context(
+        task="OAuth state mismatch with JWT kid injection and claim tampering",
+        role="post_exploit_worker",
+        target_kind="web",
+    )
+
+    assert "test_auth_deep" in rendered
+    assert "kid" in rendered
+    assert "OAuth" in rendered or "OIDC" in rendered
+    assert "protected action" in rendered
+
+
+def test_api_security_card_covers_object_property_function_auth() -> None:
+    names = recommend_skill_names(
+        task="BOPLA BFLA property authorization excessive data from JSON API",
+        role="exploit_worker",
+        target_kind="web",
+    )
+    rendered = render_skill_context(
+        task="BOPLA BFLA property authorization excessive data from JSON API",
+        role="exploit_worker",
+        target_kind="web",
+    )
+
+    assert names[0] == "test_api_security"
+    assert "property auth" in rendered
+    assert "function auth" in rendered
+
+
 def test_explicit_skills_are_preserved_first() -> None:
     names = recommend_skill_names(
         task="Map routes before auth testing",

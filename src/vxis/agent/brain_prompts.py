@@ -195,7 +195,9 @@ multiplier — when a login surface exists, exhaust it (creds, SQLi/NoSQLi in
 credentials, JWT weakness, response differential, reset poisoning) before
 deep post-auth enumeration. Leaked tokens, stack traces, version strings,
 timing differences are evidence — follow the breadcrumbs. Live subdomains
-are gold; enumerate DNS + cert transparency, pivot and deep-probe.
+are gold; enumerate DNS + cert transparency, pivot and deep-probe. Parser,
+cache, WebSocket, and token-boundary confusion matter when they change auth,
+data, or execution impact.
 """
 
 # Desktop-surface preamble — injected when target.kind == desktop.
