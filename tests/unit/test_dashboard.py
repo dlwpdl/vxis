@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine  # noqa: E402
 
 from vxis.core.db import create_engine, get_session, init_db  # noqa: E402
 from vxis.dashboard.app import app  # noqa: E402
+from vxis.dashboard.auth import SESSION_COOKIE, ensure_default_admin  # noqa: E402
 from vxis.models.db_models import FindingRecord, ScanRecord  # noqa: E402
 
 
@@ -101,10 +102,29 @@ def seeded_engine() -> Generator[tuple[AsyncEngine, int, int], None, None]:
 
 
 @pytest.fixture()
-def client(seeded_engine) -> Generator[TestClient, None, None]:  # type: ignore[no-untyped-def]
+def client(seeded_engine, monkeypatch) -> Generator[TestClient, None, None]:  # type: ignore[no-untyped-def]
     """TestClient wired to the seeded in-memory DB engine."""
     engine, scan_id, finding_id = seeded_engine
+    monkeypatch.setenv("VXIS_DASHBOARD_AUTH_DISABLED", "1")
     app.state.engine = engine
+    with TestClient(app, raise_server_exceptions=True) as c:
+        yield c
+
+
+@pytest.fixture()
+def auth_engine() -> Generator[AsyncEngine, None, None]:
+    engine = _build_engine()
+    asyncio.run(init_db(engine))
+    asyncio.run(ensure_default_admin(engine, password="secret-password"))
+    yield engine
+    asyncio.run(engine.dispose())
+
+
+@pytest.fixture()
+def auth_client(auth_engine, monkeypatch) -> Generator[TestClient, None, None]:  # type: ignore[no-untyped-def]
+    monkeypatch.delenv("VXIS_DASHBOARD_AUTH_DISABLED", raising=False)
+    monkeypatch.delenv("VXIS_DASHBOARD_TOKEN", raising=False)
+    app.state.engine = auth_engine
     with TestClient(app, raise_server_exceptions=True) as c:
         yield c
 
@@ -134,6 +154,35 @@ def test_health_endpoint(client: TestClient) -> None:
 def test_health_version(client: TestClient) -> None:
     response = client.get("/health")
     assert "version" in response.json()
+
+
+# ---------------------------------------------------------------------------
+# Authentication
+# ---------------------------------------------------------------------------
+
+def test_dashboard_redirects_browser_without_auth(auth_client: TestClient) -> None:
+    response = auth_client.get("/", headers={"accept": "text/html"}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/login"
+
+
+def test_dashboard_accepts_bearer_token(auth_client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("VXIS_DASHBOARD_TOKEN", "dashboard-token")
+    response = auth_client.get("/", headers={"authorization": "Bearer dashboard-token"})
+    assert response.status_code == 200
+
+
+def test_dashboard_login_creates_session(auth_client: TestClient) -> None:
+    response = auth_client.post(
+        "/login",
+        data={"username": "admin", "password": "secret-password"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert SESSION_COOKIE in auth_client.cookies
+
+    response = auth_client.get("/")
+    assert response.status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +222,13 @@ def test_index_shows_at_least_one_scan_row(client: TestClient) -> None:
 def test_index_empty_state_not_shown_when_scans_exist(client: TestClient) -> None:
     response = client.get("/")
     assert "No scans yet" not in response.text
+
+
+def test_scan_new_includes_scan_type_select(client: TestClient) -> None:
+    response = client.get("/scan/new")
+    assert response.status_code == 200
+    assert 'name="scan_type"' in response.text
+    assert 'value="external"' in response.text
 
 
 # ---------------------------------------------------------------------------

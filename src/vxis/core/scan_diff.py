@@ -145,7 +145,7 @@ async def compare_scans(
     Returns:
         A :class:`ScanDiffResult` with categorised findings.
     """
-    from vxis.cli.main import _convert_finding_records
+    from vxis.core.finding_records import convert_finding_records
 
     engine = create_engine(db_url)
     try:
@@ -160,8 +160,8 @@ async def compare_scans(
             )
             records_b = list(result_b.scalars().all())
 
-        findings_a = _convert_finding_records(records_a)
-        findings_b = _convert_finding_records(records_b)
+        findings_a = convert_finding_records(records_a)
+        findings_b = convert_finding_records(records_b)
 
         return compare_finding_lists(findings_a, findings_b)
     finally:

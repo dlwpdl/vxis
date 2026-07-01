@@ -1,24 +1,13 @@
 """Chain primitives — attack graph construction and path analysis.
 
-Algorithmic only — no LLM calls. Uses NetworkX when available, falls back to
-an adjacency-dict implementation otherwise.
+Algorithmic only — no LLM calls. Uses an adjacency-dict implementation.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 logger = logging.getLogger(__name__)
-
-try:
-    import networkx as nx  # type: ignore
-
-    _HAS_NX = True
-except Exception:  # pragma: no cover
-    nx = None  # type: ignore[assignment]
-    _HAS_NX = False
-
 
 _SEVERITY_WEIGHTS: dict[str, int] = {
     "informational": 1,
@@ -34,8 +23,7 @@ def chain_graph_from_findings(findings: list[dict]) -> dict:
     """Build a finding graph keyed by id → neighbors.
 
     Edges are inferred from shared affected_component, URL host, or
-    finding_type synergy. Returns a dict (not an nx.Graph) for easy
-    serialization, but mirrors an nx DiGraph if NetworkX is installed.
+    finding_type synergy. Returns a dict for easy serialization.
     """
     nodes: dict[str, dict] = {}
     adjacency: dict[str, list[str]] = {}
@@ -71,18 +59,7 @@ def chain_graph_from_findings(findings: list[dict]) -> dict:
                 adjacency[a_id].append(b_id)
                 adjacency[b_id].append(a_id)
 
-    graph: dict[str, Any] = {"nodes": nodes, "adjacency": adjacency}
-
-    if _HAS_NX:
-        g = nx.DiGraph()
-        for fid, data in nodes.items():
-            g.add_node(fid, **data)
-        for src, dsts in adjacency.items():
-            for dst in dsts:
-                g.add_edge(src, dst)
-        graph["_nx"] = g
-
-    return graph
+    return {"nodes": nodes, "adjacency": adjacency}
 
 
 def _synergy(type_a: str, type_b: str) -> bool:

@@ -154,9 +154,9 @@ class TestScanCommandHelp:
         """scan registers the --profile option."""
         assert "--profile" in scan_option_names()
 
-    def test_scan_help_shows_plugins_option(self):
-        """scan registers the --plugins option."""
-        assert "--plugins" in scan_option_names()
+    def test_scan_help_hides_plugins_option(self):
+        """scan no longer exposes the old no-op --plugins option."""
+        assert "--plugins" not in scan_option_names()
 
     def test_scan_help_shows_no_report_option(self):
         """scan registers the --no-report flag."""
@@ -276,34 +276,6 @@ class TestScanCommand:
         assert result.exit_code == 0
         # The "Report would be written to" message should not appear
         assert "Report would be written to" not in result.output
-
-
-# ---------------------------------------------------------------------------
-# report command
-# ---------------------------------------------------------------------------
-
-
-class TestReportCommand:
-    def test_report_help_exits_zero(self):
-        """report --help exits with code 0."""
-        result = runner.invoke(app, ["report", "--help"])
-        assert result.exit_code == 0
-
-    def test_report_cmd_exits_zero(self):
-        """report command exits with code 0 when report generates successfully."""
-
-        def close_coroutine(coro):
-            coro.close()
-            return None
-
-        with patch("vxis.cli.main.asyncio.run", side_effect=close_coroutine):
-            result = runner.invoke(app, ["report", "42"])
-        assert result.exit_code == 0
-
-    def test_report_cmd_mentions_scan_id(self):
-        """report output includes the provided scan ID."""
-        result = runner.invoke(app, ["report", "abc-123"])
-        assert "abc-123" in result.output
 
 
 # ---------------------------------------------------------------------------

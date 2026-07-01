@@ -64,14 +64,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VXIS_SLACK_WEBHOOK: ${{ secrets.VXIS_SLACK_WEBHOOK }}
         run: |
-          ARGS="--mode weekly"
+          ARGS=(--mode weekly)
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            ARGS="$ARGS --dry-run"
+            ARGS+=(--dry-run)
           fi
           if [ -n "${{ github.event.inputs.repo }}" ]; then
-            ARGS="$ARGS --repo ${{ github.event.inputs.repo }}"
+            ARGS+=(--repo "${{ github.event.inputs.repo }}")
           fi
-          python -m tools.upstream_watch $ARGS
+          python -m tools.upstream_watch "${ARGS[@]}"
 
       - name: Commit digest and state
         run: |
@@ -96,7 +96,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ISSUE_FILE=$(ls -t tools/upstream_watch/digests/issue-*.md 2>/dev/null | head -1)
+          ISSUE_FILE=$(python - <<'PYEOF'
+          from pathlib import Path
+          files = sorted(
+              Path("tools/upstream_watch/digests").glob("issue-*.md"),
+              key=lambda p: p.stat().st_mtime,
+              reverse=True,
+          )
+          print(files[0] if files else "")
+          PYEOF
+          )
           if [ -n "$ISSUE_FILE" ] && [ -s "$ISSUE_FILE" ]; then
             gh issue create \
               --title "Upstream Watch: $(date -u +%Y-%m-%d) — High-priority items" \
@@ -120,10 +129,21 @@ jobs:
               out.write_text(latest.read_text(encoding="utf-8"))
               print(f"Exported {latest.name} to {out}")
           PYEOF
-          git config user.name "vxis-growth[bot]" || true
-          git config user.email "vxis-growth@users.noreply.github.com" || true
-          git add .vxis/signals/inbox/ 2>/dev/null || true
-          if ! git diff --staged --quiet 2>/dev/null; then
-            git commit -m "chore(signals): upstream-watch batch $(date -u +%Y-%m-%d)" || true
-            git push || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f .vxis/signals/inbox/ 2>/dev/null || true
+          if git diff --cached --quiet -- .vxis/signals/inbox; then
+            echo "No upstream signal inbox changes"
+          else
+            git commit -m "chore: upstream signal inbox $(date -u +%Y-%m-%dT%H)"
+            git pull --rebase origin main
+            git push
           fi
+
+      - name: Archive exported upstream signals
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-watch-signal-inbox
+          path: .vxis/signals/inbox/
+          if-no-files-found: ignore

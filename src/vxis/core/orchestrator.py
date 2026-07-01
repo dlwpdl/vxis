@@ -30,7 +30,7 @@ from vxis.core.events import (
 from vxis.core.enricher import FindingEnricher
 from vxis.core.rate_limiter import GlobalRateLimiter
 from vxis.core.fp_pipeline import FPPipeline
-from vxis.core.logger import AuditLogger
+from vxis.core.logger import AuditLogger, redact_command
 from vxis.core.normalizer import FindingDeduplicator, FindingFactory
 from vxis.core.resilience import ResilientRunner, ToolExecutionError, classify_result
 from vxis.core.scanner import run_tool
@@ -508,7 +508,7 @@ class ScanOrchestrator:
             logger.debug(
                 "Running plugin '%s': command=%r, timeout=%ds.",
                 plugin_name,
-                command_str,
+                redact_command(command_str, plugin_name=plugin_name),
                 timeout,
             )
 

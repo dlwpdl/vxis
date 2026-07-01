@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from vxis.core.logger import AuditLogger
+from vxis.core.logger import AuditLogger, redact_command
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +84,24 @@ class TestLogToolRun:
         assert rec["exit_code"] == 0
         assert rec["elapsed_seconds"] == pytest.approx(3.14)
         assert "timestamp" in rec
+
+    def test_log_tool_run_redacts_ad_password_flag(self, tmp_path: Path) -> None:
+        logger = AuditLogger(tmp_path / "audit.jsonl")
+        logger.log_tool_run(
+            scan_id="scan-001",
+            plugin_name="netexec",
+            target="10.0.0.5",
+            command="nxc smb 10.0.0.5 -u alice -p SuperSecret123 --shares",
+        )
+
+        rec = _read_lines(tmp_path / "audit.jsonl")[0]
+        assert "SuperSecret123" not in rec["command"]
+        assert "-p ***" in rec["command"]
+
+    def test_redact_command_handles_secret_flag_at_start(self) -> None:
+        redacted = redact_command("--password SuperSecret run")
+        assert "SuperSecret" not in redacted
+        assert redacted == "--password *** run"
 
     def test_log_tool_run_optional_fields_can_be_none(self, tmp_path: Path) -> None:
         logger = AuditLogger(tmp_path / "audit.jsonl")

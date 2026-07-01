@@ -20,6 +20,7 @@ from sqlalchemy import case, func, select
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from vxis.core.db import create_engine, get_session, init_db
+from vxis.core.finding_records import convert_finding_records
 from vxis.models.db_models import FindingRecord, ScanRecord
 from vxis.report.charts import severity_bar_svg, severity_donut_svg
 
@@ -65,7 +66,7 @@ _PUBLIC_PATHS: set[str] = {"/health", "/login", "/logout"}
 
 
 def _get_dashboard_token() -> str | None:
-    """Return the configured dashboard token, or None if auth is disabled.
+    """Return the configured dashboard token, or None if bearer auth is unset.
 
     Reads from ``VXIS_DASHBOARD_TOKEN`` env var each time so that tests
     (or runtime config changes) take effect without restarting.
@@ -73,14 +74,20 @@ def _get_dashboard_token() -> str | None:
     return os.environ.get("VXIS_DASHBOARD_TOKEN") or None
 
 
+def _dashboard_auth_disabled() -> bool:
+    return os.environ.get("VXIS_DASHBOARD_AUTH_DISABLED", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 class _TokenAuthMiddleware(BaseHTTPMiddleware):
-    """Require a Bearer token or ``?token=`` query param when a dashboard token is configured."""
+    """Require a session cookie or Bearer token unless auth is explicitly disabled."""
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[override]
-        token = _get_dashboard_token()
-
-        # If no token is configured, auth is disabled — pass everything through.
-        if token is None:
+        if _dashboard_auth_disabled():
             return await call_next(request)
 
         path = request.url.path
@@ -89,14 +96,18 @@ class _TokenAuthMiddleware(BaseHTTPMiddleware):
         if path in _PUBLIC_PATHS:
             return await call_next(request)
 
-        # Check Authorization header (Bearer <token>).
-        auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer ") and auth_header[7:] == token:
-            return await call_next(request)
+        from vxis.dashboard.auth import current_user
 
-        # Check query parameter ``?token=<token>``.
-        query_token = request.query_params.get("token")
-        if query_token == token:
+        try:
+            if await current_user(request) is not None:
+                return await call_next(request)
+        except Exception:
+            pass
+
+        # Check Authorization header (Bearer <token>).
+        token = _get_dashboard_token()
+        auth_header = request.headers.get("authorization", "")
+        if token is not None and auth_header.startswith("Bearer ") and auth_header[7:] == token:
             return await call_next(request)
 
         # Unauthenticated — decide between JSON 401 or redirect to login page.
@@ -211,13 +222,13 @@ async def index(request: Request) -> HTMLResponse:
     )
 
 
-@app.get("/scan/{scan_id}", response_class=HTMLResponse)
-async def scan_detail(request: Request, scan_id: str) -> HTMLResponse:
+@app.get("/scan/{scan_id:int}", response_class=HTMLResponse)
+async def scan_detail(request: Request, scan_id: int) -> HTMLResponse:
     """Scan detail page — charts, filters, and findings table."""
     engine = _get_engine(request)
 
     async with get_session(engine) as session:
-        scan_result = await session.execute(select(ScanRecord).where(ScanRecord.id == int(scan_id)))
+        scan_result = await session.execute(select(ScanRecord).where(ScanRecord.id == scan_id))
         scan: ScanRecord | None = scan_result.scalar_one_or_none()
 
         if scan is None:
@@ -230,7 +241,7 @@ async def scan_detail(request: Request, scan_id: str) -> HTMLResponse:
 
         findings_result = await session.execute(
             select(FindingRecord)
-            .where(FindingRecord.scan_id == int(scan_id))
+            .where(FindingRecord.scan_id == scan_id)
             .order_by(FindingRecord.effective_severity)
         )
         findings: list[FindingRecord] = list(findings_result.scalars().all())
@@ -337,15 +348,6 @@ async def export_report(
     from datetime import date
     from pathlib import Path as FilePath
 
-    from vxis.models.finding import (
-        CVSSVector,
-        Evidence,
-        Finding,
-        FindingStatus,
-        MitreAttack,
-        Reference,
-        Severity,
-    )
     from vxis.report.generator import ReportData, ReportGenerator
 
     engine = _get_engine(request)
@@ -362,49 +364,7 @@ async def export_report(
         )
         records: list[FindingRecord] = list(findings_result.scalars().all())
 
-    # Convert FindingRecord ORM rows back to Pydantic Finding models
-    findings: list[Finding] = []
-    for rec in records:
-        cvss = None
-        if rec.cvss_score is not None and rec.cvss_vector:
-            cvss = CVSSVector(vector_string=rec.cvss_vector, base_score=rec.cvss_score)
-
-        mitre = None
-        if rec.mitre_attack:
-            mitre = MitreAttack(**rec.mitre_attack)
-
-        evidence = [Evidence(**e) for e in (rec.evidence or [])]
-        references = [Reference(**r) for r in (rec.references or [])]
-
-        findings.append(
-            Finding(
-                id=str(rec.id),
-                scan_id=str(rec.scan_id),
-                title=rec.title,
-                description=rec.description,
-                severity=Severity(rec.severity),
-                status=FindingStatus(rec.status),
-                target=rec.target,
-                affected_component=rec.affected_component or "",
-                port=rec.port,
-                protocol=rec.protocol,
-                finding_type=rec.finding_type,
-                cvss=cvss,
-                cve_ids=rec.cve_ids or [],
-                cwe_ids=rec.cwe_ids or [],
-                mitre_attack=mitre,
-                source_plugin=rec.source_plugin,
-                source_plugins=rec.source_plugins or [],
-                confidence=rec.confidence,
-                evidence=evidence,
-                remediation=rec.remediation,
-                references=references,
-                analyst_severity=Severity(rec.analyst_severity) if rec.analyst_severity else None,
-                analyst_notes=rec.analyst_notes,
-                discovered_at=rec.discovered_at,
-                updated_at=rec.updated_at,
-            )
-        )
+    findings = convert_finding_records(records)
 
     safe_target = scan.target.replace("/", "_")
     scan_date = scan.started_at.strftime("%Y-%m-%d") if scan.started_at else str(date.today())
@@ -430,7 +390,13 @@ async def export_report(
             )
             return HTMLResponse(content=error_html, status_code=503)  # type: ignore[return-value]
 
-        tmp_path = FilePath(tempfile.mktemp(suffix=".docx", prefix=f"vxis_report_{scan_id}_"))
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=".docx",
+            delete=False,
+            prefix=f"vxis_report_{scan_id}_",
+        )
+        tmp.close()
+        tmp_path = FilePath(tmp.name)
         DOCXReportGenerator().generate(report_data, tmp_path)
         filename = f"vxis_report_{safe_target}_{scan_id}.docx"
         return FileResponse(
@@ -453,7 +419,13 @@ async def export_report(
             )
             return HTMLResponse(content=error_html, status_code=503)  # type: ignore[return-value]
 
-        tmp_path = FilePath(tempfile.mktemp(suffix=".docx", prefix=f"vxis_attestation_{scan_id}_"))
+        tmp = tempfile.NamedTemporaryFile(
+            suffix=".docx",
+            delete=False,
+            prefix=f"vxis_attestation_{scan_id}_",
+        )
+        tmp.close()
+        tmp_path = FilePath(tmp.name)
         AttestationGenerator().generate(report_data, tmp_path)
         filename = f"vxis_attestation_{safe_target}_{scan_id}.docx"
         return FileResponse(
@@ -695,13 +667,11 @@ async def login_submit(request: Request):  # type: ignore[no-untyped-def]
     password = str(form.get("password", ""))
     submitted_token = str(form.get("token", ""))
 
-    # Optional dashboard token still honoured (kept in URL for middleware).
+    # Optional dashboard token still honoured for login, never kept in the URL.
     token = _get_dashboard_token()
-    token_qs = ""
     if token is not None:
         if submitted_token != token:
             return RedirectResponse(url="/login?error=invalid", status_code=303)
-        token_qs = f"?token={token}"
 
     if not username or not password:
         return RedirectResponse(url="/login?error=invalid", status_code=303)
@@ -714,7 +684,7 @@ async def login_submit(request: Request):  # type: ignore[no-untyped-def]
     if user is None or not verify_password(password, user.password_hash):
         return RedirectResponse(url="/login?error=invalid", status_code=303)
 
-    response = RedirectResponse(url=f"/{token_qs}", status_code=303)
+    response = RedirectResponse(url="/", status_code=303)
     set_session_cookie(response, user.id)
     return response
 
@@ -736,30 +706,19 @@ async def logout(request: Request):  # type: ignore[no-untyped-def]
 @app.get("/scan/new", response_class=HTMLResponse)
 async def scan_new_page(request: Request) -> HTMLResponse:
     """Scan start form page."""
-    scan_types = [
-        (
-            "zero_touch",
-            "제로터치 (Passive)",
-            "\U0001f50d",
-            "대상에 접촉 없이 OSINT만으로 정보 수집",
-        ),
-        ("external", "외부 스캔", "\U0001f310", "웹/네트워크 취약점 + SSL/DNS 진단"),
-        ("internal", "내부 스캔", "\U0001f3e2", "AD/내부 네트워크 환경 진단"),
-        ("code", "코드 스캔", "\U0001f4bb", "소스코드 + 의존성 + CI/CD 보안"),
-        ("cloud", "클라우드", "\u2601\ufe0f", "AWS/Azure/GCP 설정 감사"),
-        ("full", "전체 스캔", "\U0001f680", "모든 플러그인 실행"),
-    ]
+    from vxis.dashboard.scan_manager import SCAN_TYPE_LABELS
+
     return templates.TemplateResponse(
         request,
         "scan_new.html",
-        {"scan_types": scan_types},
+        {"scan_types": SCAN_TYPE_LABELS},
     )
 
 
 @app.post("/api/scan/start", response_class=HTMLResponse)
 async def scan_start_api(request: Request) -> HTMLResponse:
     """Start a scan from dashboard form. Returns redirect to live view."""
-    from vxis.dashboard.scan_manager import scan_manager, SCAN_TYPE_LABELS
+    from vxis.dashboard.scan_manager import scan_manager
 
     form = await request.form()
     target = str(form.get("target", "")).strip()
@@ -778,8 +737,6 @@ async def scan_start_api(request: Request) -> HTMLResponse:
         profile=profile or None,
     )
 
-    # Return HTMX redirect to live page
-    SCAN_TYPE_LABELS.get(scan_type, scan_type)
     return HTMLResponse(
         f'<script>window.location.href="/scan/{managed.scan_id}/live";</script>'
         f'<p class="text-cyan-400">스캔 시작됨: {managed.scan_id} → 라이브 페이지로 이동 중...</p>',

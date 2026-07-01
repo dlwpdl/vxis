@@ -51,7 +51,7 @@ jobs:
         run: |
           # 수동 실행이면 입력값 사용
           if [ -n "${{ github.event.inputs.mode }}" ]; then
-            echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+            echo "mode=${{ github.event.inputs.mode }}" >> "$GITHUB_OUTPUT"
           else
             # cron 스케줄에 따라 모드 결정
             HOUR=$(date -u +%H)
@@ -59,18 +59,18 @@ jobs:
             MONTH=$(date -u +%m)
 
             if [ "$HOUR" = "04" ] && [ "$DAY" = "01" ] && [ "$MONTH" = "01" ]; then
-              echo "mode=yearly" >> $GITHUB_OUTPUT
+              echo "mode=yearly" >> "$GITHUB_OUTPUT"
             elif [ "$HOUR" = "03" ] && [ "$DAY" = "01" ]; then
-              echo "mode=quarterly" >> $GITHUB_OUTPUT
+              echo "mode=quarterly" >> "$GITHUB_OUTPUT"
             elif [ "$HOUR" = "02" ] && [ "$DAY" = "01" ]; then
-              echo "mode=monthly" >> $GITHUB_OUTPUT
+              echo "mode=monthly" >> "$GITHUB_OUTPUT"
             elif [ "$HOUR" = "01" ]; then
-              echo "mode=weekly" >> $GITHUB_OUTPUT
+              echo "mode=weekly" >> "$GITHUB_OUTPUT"
             else
-              echo "mode=daily" >> $GITHUB_OUTPUT
+              echo "mode=daily" >> "$GITHUB_OUTPUT"
             fi
           fi
-          echo "Determined mode: $(cat $GITHUB_OUTPUT | grep mode)"
+          echo "Determined mode: $(grep mode "$GITHUB_OUTPUT")"
 
       - name: Run Domain Intelligence
         env:
@@ -81,26 +81,23 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           MODE="${{ steps.mode.outputs.mode }}"
-          ARGS="--mode $MODE"
+          ARGS=(--mode "$MODE")
 
           if [ "${{ github.event.inputs.collect_only }}" = "true" ]; then
-            ARGS="--collect-only"
+            ARGS=(--collect-only)
           fi
 
-          echo "실행: python -m tools.domain_intel $ARGS"
-          python -m tools.domain_intel $ARGS
+          echo "실행: python -m tools.domain_intel ${ARGS[*]}"
+          python -m tools.domain_intel "${ARGS[@]}"
 
-      - name: Commit results
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tools/domain_intel/digests/ tools/domain_intel/signals_cache/ 2>/dev/null || true
-          if ! git diff --staged --quiet; then
-            MODE="${{ steps.mode.outputs.mode }}"
-            git commit -m "chore: domain intelligence $MODE report $(date -u +%Y-%m-%d)"
-            git pull --rebase origin main
-            git push
-          fi
+      - name: Archive results
+        uses: actions/upload-artifact@v4
+        with:
+          name: domain-intel-results
+          path: |
+            tools/domain_intel/digests/
+            tools/domain_intel/signals_cache/
+          if-no-files-found: ignore
 
       # Growth Layer integration: export digest CVEs as JSONL signals
       - name: Export CVEs to signal inbox
@@ -160,8 +157,21 @@ jobs:
           else:
               print(f"No CVEs found in {latest.name}")
           PYEOF
-          git add .vxis/signals/inbox/ 2>/dev/null || true
-          if ! git diff --staged --quiet 2>/dev/null; then
-            git commit -m "chore(signals): domain-intel batch $(date -u +%Y-%m-%d)" || true
-            git push || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f .vxis/signals/inbox/ 2>/dev/null || true
+          if git diff --cached --quiet -- .vxis/signals/inbox; then
+            echo "No domain-intel signal inbox changes"
+          else
+            git commit -m "chore: domain-intel signal inbox $(date -u +%Y-%m-%dT%H)"
+            git pull --rebase origin main
+            git push
           fi
+
+      - name: Archive exported CVE signals
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: domain-intel-signal-inbox
+          path: .vxis/signals/inbox/
+          if-no-files-found: ignore

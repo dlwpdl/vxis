@@ -16,9 +16,27 @@ Design constraints:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+_SECRET_FLAG_RE = re.compile(
+    r"(?i)((?:^|\s)(?:--?(?:pass|password)|--?[A-Za-z0-9_-]*(?:secret|token|key)[A-Za-z0-9_-]*)[=\s]+)([^\s]+)"
+)
+_SECRET_ASSIGN_RE = re.compile(
+    r"(?i)\b((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|secret[_-]?key)=)([^\s]+)"
+)
+_SHORT_PASSWORD_FLAG_RE = re.compile(r"(?i)((?:^|\s)-p\s+)([^\s]+)")
+_SHORT_PASSWORD_PLUGINS = {"bloodhound", "certipy", "netexec"}
+
+
+def redact_command(command: str, *, plugin_name: str = "") -> str:
+    redacted = _SECRET_FLAG_RE.sub(r"\1***", str(command))
+    redacted = _SECRET_ASSIGN_RE.sub(r"\1***", redacted)
+    if plugin_name in _SHORT_PASSWORD_PLUGINS:
+        redacted = _SHORT_PASSWORD_FLAG_RE.sub(r"\1***", redacted)
+    return redacted
 
 
 class AuditLogger:
@@ -84,7 +102,7 @@ class AuditLogger:
                 "scan_id": scan_id,
                 "plugin_name": plugin_name,
                 "target": target,
-                "command": command,
+                "command": redact_command(command, plugin_name=plugin_name),
                 "exit_code": exit_code,
                 "elapsed_seconds": elapsed_seconds,
             }

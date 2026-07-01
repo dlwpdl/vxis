@@ -104,12 +104,14 @@ INFO   1   VXIS-003 Missing Security Headers /
 The current pipeline reports **chain count** in the live UI but not chain length. The
 HTML report contains the chain expansion. For Task 14 the comparison value is **chain
 count** (Juice Shop = 9, WebGoat = 4) plus, if extracted from the HTML, the longest
-chain's edge count. Both reports are committed under `artifacts/2026-04-08/` so the
-Task 14 sub-agent can re-derive max depth from them with the same parser.
+chain's edge count. The reports are generated under `artifacts/2026-04-08/`; that
+directory is local/CI output and is not tracked.
 
 ---
 
 ## Raw output paths
+
+These paths are generated artifacts, not committed source files.
 
 | File | Path |
 |---|---|
@@ -420,6 +422,8 @@ grep VXIS_BENCHMARK /tmp/pm_js.log /tmp/pm_wg.log
 ```
 
 ### Re-run artifact paths
+
+These paths are generated artifacts, not committed source files.
 
 | File | Path |
 |---|---|

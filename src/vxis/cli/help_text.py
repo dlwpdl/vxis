@@ -33,7 +33,6 @@ python tools/growth_loop_runner.py --targets dvwa --until 06:00
 vxis scan http://localhost:8081                    # LLM API Brain 자율 실행
 vxis scan http://localhost:8081 --interactive      # Claude Code가 Brain (MCP)
 vxis scan http://localhost:8081 -g                 # Ghost 익명화 켜기
-vxis scan http://localhost:8081 --resume <ckpt>    # 체크포인트 재개
 vxis scan http://app.acme.com --approve-destructive # 파괴적 액션 사전 승인(기본 차단)
 ```
 
@@ -63,7 +62,7 @@ vxis scan http://localhost:3000 --allow-inject      # 인젝션 승인 게이트
 ## 리포트
 
 ```bash
-vxis report <SCAN_ID> -o reports/output.html
+vxis export <SCAN_ID> --format html -o reports/output.html
 vxis export <SCAN_ID> --format docx                # DOCX/JSON/CSV/Attestation
 ```
 

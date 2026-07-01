@@ -175,8 +175,15 @@ def require_role(required: str) -> Callable:
 # ---------------------------------------------------------------------------
 
 
-async def ensure_default_admin(engine) -> UserRecord | None:  # type: ignore[no-untyped-def]
-    """Create a default ``admin/admin`` user if no users exist."""
+async def ensure_default_admin(
+    engine,
+    password: str | None = None,
+) -> UserRecord | None:  # type: ignore[no-untyped-def]
+    """Create the first admin only when an explicit password is provided."""
+    password = password or os.environ.get("VXIS_DASHBOARD_ADMIN_PASSWORD")
+    if not password:
+        return None
+
     async with get_session(engine) as session:
         existing = (await session.execute(select(UserRecord))).scalars().first()
         if existing is not None:
@@ -185,7 +192,7 @@ async def ensure_default_admin(engine) -> UserRecord | None:  # type: ignore[no-
             username="admin",
             email=None,
             role="admin",
-            password_hash=hash_password("admin"),
+            password_hash=hash_password(password),
         )
         session.add(admin)
         await session.flush()

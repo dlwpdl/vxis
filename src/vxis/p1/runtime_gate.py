@@ -116,10 +116,10 @@ def _extract_targets(tool_name: str, args: dict[str, Any]) -> list[str]:
     for key in ("url", "target_url", "base_url", "target"):
         value = args.get(key)
         if isinstance(value, str) and value.strip():
-            return [value.strip()]
+            return [_normalize_target(value.strip())]
     if tool_name in {"shell_exec", "python_exec"}:
         text = str(args.get("command") or args.get("code") or "")
-        return _dedupe(_URL_RE.findall(text) + _IP_RE.findall(text))
+        return _dedupe(_URL_RE.findall(text) + [_normalize_target(ip) for ip in _IP_RE.findall(text)])
     return []
 
 
@@ -140,3 +140,10 @@ def _dedupe(values: list[str]) -> list[str]:
             seen.add(cleaned)
             out.append(cleaned)
     return out
+
+
+def _normalize_target(value: str) -> str:
+    cleaned = value.rstrip("),.;")
+    if cleaned.startswith(("http://", "https://")):
+        return cleaned
+    return f"http://{cleaned}"

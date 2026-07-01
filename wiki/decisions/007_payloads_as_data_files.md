@@ -98,7 +98,7 @@ Phase 3-9 (12 non-rotation skills) 검증 (2026-04-17):
 Phase 10/11 통합 검증 (2026-04-20, Juice Shop):
 - Phase 10/11 smoke 6/6 pass (`/tmp/_phase_10_11_smoke.py`): 13 techniques × 4 modes × {apply → loader sees → dedup → revert → byte-identical} + schema gate rejects malformed.
 - 40/40 loader tests pass (TestRotationContract 재설계: legacy-const 참조 제거, counts 고정).
-- Juice Shop 실측 델타 (vs ADR-008 조정 baseline 432.33): **-56.6 → ±65pt 노이즈 범위 내 → pass**. 세부: VC -0.05, ER -6.6, CI -50 (LLM 비결정성 — 베이스라인 3 chains, 오늘 0), FP -40 (ADR-008 smoothing 예측값 그대로), CO 0. 아티팩트: `benchmarks/juice_shop/after_phase11_2026-04-20.score.json`.
+- Juice Shop 실측 델타 (vs ADR-008 조정 baseline 432.33): **-56.6 → ±65pt 노이즈 범위 내 → pass**. 세부: VC -0.05, ER -6.6, CI -50 (LLM 비결정성 — 베이스라인 3 chains, 오늘 0), FP -40 (ADR-008 smoothing 예측값 그대로), CO 0. score snapshot은 `benchmarks/juice_shop/` 아래 생성 산출물로 남기고 추적하지 않는다.
 
 `feedback_test_score_sync_process.md` 의 "behavior-preserving refactor" 조항이 이 gate 를 정식화.
 

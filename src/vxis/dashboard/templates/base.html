@@ -151,40 +151,6 @@
         Phases
       </a>
 
-      <a href="/scan/new"
-         class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                {% if request.url.path == '/scan/new' %}bg-sidebar-active text-cyan-400{% else %}text-gray-400 hover:bg-sidebar-hover hover:text-gray-100{% endif %}">
-        <!-- Crosshair / target icon -->
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/>
-          <line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/>
-          <line x1="12" y1="22" x2="12" y2="18"/>
-        </svg>
-        New Scan
-      </a>
-
-      <a href="/plugins"
-         class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                {% if request.url.path == '/plugins' %}bg-sidebar-active text-cyan-400{% else %}text-gray-400 hover:bg-sidebar-hover hover:text-gray-100{% endif %}">
-        <!-- Layers / plugin icon -->
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/>
-          <path d="M2 12l10 5 10-5"/>
-        </svg>
-        Plugins
-      </a>
-
-      <a href="/kb"
-         class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                {% if '/kb' in request.url.path %}bg-sidebar-active text-cyan-400{% else %}text-gray-400 hover:bg-sidebar-hover hover:text-gray-100{% endif %}">
-        <!-- Book icon -->
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-          <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-        </svg>
-        Knowledge Base
-      </a>
-
       {% if request.state.user and request.state.user.role == 'admin' %}
       <a href="/users"
          class="flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors

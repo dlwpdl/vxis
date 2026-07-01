@@ -4,7 +4,7 @@ Brain이 체이닝한 공격 경로를 SVG 그래프로 렌더링한다.
 리포트에 인라인으로 삽입되어 공격자가 어떻게
 초기 진입 → 횡이동 → 권한상승 → Crown Jewel에 도달했는지 보여준다.
 
-순수 SVG + networkx 레이아웃. 외부 JS 의존성 없음.
+순수 SVG 레이아웃. 외부 JS 의존성 없음.
 """
 
 from __future__ import annotations

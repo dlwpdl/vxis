@@ -31,7 +31,6 @@ import json
 import logging
 import os
 import sys
-import traceback
 from dataclasses import asdict, is_dataclass
 from typing import Any, Awaitable, Callable
 
@@ -51,6 +50,7 @@ INVALID_REQUEST = -32600
 METHOD_NOT_FOUND = -32601
 INVALID_PARAMS = -32602
 INTERNAL_ERROR = -32603
+_DEFAULT_TOOL_ALLOWLIST = "pattern_*,kb_*,chain_*,phase_*,scope_*"
 
 
 # ---------------------------------------------------------------------------
@@ -519,7 +519,9 @@ def _split_patterns(value: str) -> list[str]:
 
 def _tool_policy_patterns() -> tuple[list[str], list[str]]:
     allow_raw = (
-        os.environ.get("VXIS_MCP_TOOL_ALLOWLIST") or os.environ.get("MCP_TOOL_ALLOWLIST") or "*"
+        os.environ.get("VXIS_MCP_TOOL_ALLOWLIST")
+        or os.environ.get("MCP_TOOL_ALLOWLIST")
+        or _DEFAULT_TOOL_ALLOWLIST
     )
     deny_raw = os.environ.get("VXIS_MCP_TOOL_DENYLIST") or os.environ.get("MCP_TOOL_DENYLIST") or ""
     return _split_patterns(allow_raw), _split_patterns(deny_raw)
@@ -639,12 +641,12 @@ async def handle_request(request: dict[str, Any]) -> dict[str, Any] | None:
                 },
             }
         except Exception as exc:
-            tb = traceback.format_exc()
+            print(f"Tool execution error in {tool_name}: {exc}", file=sys.stderr)
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
                 "result": {
-                    "content": [{"type": "text", "text": f"Tool execution error: {exc}\n\n{tb}"}],
+                    "content": [{"type": "text", "text": "Tool execution error."}],
                     "isError": True,
                 },
             }

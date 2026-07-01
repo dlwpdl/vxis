@@ -6,8 +6,7 @@ when_to_read: 스코어 비교 시 FP 차원 해석 / 판정 수 부족 / baseli
 updated: 2026-04-17
 sources:
   - ../../../.claude/projects/-Users-eliot-Desktop---vxis/memory/feedback_test_score_sync_process.md
-  - ../../benchmarks/juice_shop/baseline_2026-04-17.score.json
-  - ../../benchmarks/juice_shop/after_phase1_2026-04-17.score.json
+  - historical Juice Shop score snapshots generated under benchmarks/juice_shop/
 related:
   - ./006_code_freeze_data_only_updates.md
   - ./007_payloads_as_data_files.md

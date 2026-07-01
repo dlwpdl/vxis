@@ -15,9 +15,11 @@ build/
 /data/
 reports/
 report_*.html
+/-
 docs/superpowers/benchmarks/artifacts/
 
-# Benchmark runs — keep score.json as evidence, skip large HTML + verbose logs
+# Benchmark runs — generated output
+benchmarks/juice_shop/*.score.json
 benchmarks/**/*.html
 benchmarks/**/*.log
 
@@ -35,5 +37,13 @@ logs/
 .vxis/retrospectives/
 .vxis/signals/inbox/ingest-*.jsonl
 .vxis/signals/inbox/upstream-*.md
+.vxis/signals/inbox/domain-*.md
+.vxis/signals/inbox/cve-*.json
+.vxis/signals/pending/
 .vxis/signals/processed/
+.vxis/signals/rejected/
 .vxis/signals/test-pending/
+
+# Domain intel raw/generated output
+tools/domain_intel/signals_cache/
+tools/domain_intel/digests/

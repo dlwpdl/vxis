@@ -1645,4 +1645,5 @@ class ScanPipeline:
         )
         gen = ReportGenerator()
         gen.generate_html_file(data, output_path)
+        ctx.report_path = str(output_path)
         logger.info("Report written to: %s", output_path)

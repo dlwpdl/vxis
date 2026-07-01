@@ -9,7 +9,7 @@ Protocol:
     VXIS → stdout: {"type": "complete", ...}       — 스캔 완료
 
 Usage:
-    vxis agent-scan https://target.com --brain=claude-code
+    vxis scan https://target.com --interactive
 """
 
 from __future__ import annotations
