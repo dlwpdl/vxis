@@ -47,7 +47,7 @@ proxy = [
     "mitmproxy>=11.0",   # CPR X-Ray — 트래픽 인터셉트
 ]
 sdk = [
-    "openai-agents==0.14.6",
+    "openai-agents==0.17.7",
 ]
 
 [project.scripts]
