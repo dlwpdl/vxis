@@ -267,13 +267,25 @@ def run_preflight(
     """
     result = PreflightResult()
 
-    # 1. Target 도달
-    result.target_reachable, result.target_latency_ms = check_target_reachable(target, kind=kind)
-    if not result.target_reachable:
-        if kind == "desktop":
-            result.errors.append(f"Desktop target not found on disk: {target}")
+    # Ghost preflight must not contact the target before the routed transport is active.
+    result.proxy_pool_size = check_proxy_pool()
+    if ghost:
+        if result.proxy_pool_size:
+            result.target_reachable = True
+            result.warnings.append("Target reachability probe deferred to Ghost transport")
         else:
-            result.errors.append(f"Target unreachable: {target}")
+            result.errors.append(
+                "Ghost mode requires a non-empty VXIS_PROXY_POOL; refusing direct fallback"
+            )
+    else:
+        result.target_reachable, result.target_latency_ms = check_target_reachable(
+            target, kind=kind
+        )
+        if not result.target_reachable:
+            if kind == "desktop":
+                result.errors.append(f"Desktop target not found on disk: {target}")
+            else:
+                result.errors.append(f"Target unreachable: {target}")
 
     # 2. Brain 백엔드
     result.brain_backend, result.brain_ready = check_brain(interactive=interactive)
@@ -289,13 +301,5 @@ def run_preflight(
     result.github_token = check_github_token()
     if not result.github_token:
         result.warnings.append("GITHUB_TOKEN not set — upstream/news integrations may be limited")
-
-    # 5. Proxy pool (Ghost 모드)
-    result.proxy_pool_size = check_proxy_pool()
-    if ghost and result.proxy_pool_size == 0:
-        result.warnings.append(
-            "Ghost mode enabled but VXIS_PROXY_POOL is empty — "
-            "only UA/timing evasion will be applied (no IP rotation)"
-        )
 
     return result

@@ -92,11 +92,11 @@ def _make_scan_id() -> str:
 # Both must be mapped explicitly so neither accidentally falls through to
 # dict.get(key, default=0) and masks future mapping errors.
 _SEV_TO_LEVEL: dict[str, int] = {
-    "critical": 3,       # exploit successful + post-exploit
-    "high": 2,           # exploit successful
-    "medium": 1,         # vulnerability confirmed
-    "low": 0,            # recon only
-    "info": 0,           # evidence.schema.Severity.INFO.value
+    "critical": 3,  # exploit successful + post-exploit
+    "high": 2,  # exploit successful
+    "medium": 1,  # vulnerability confirmed
+    "low": 0,  # recon only
+    "info": 0,  # evidence.schema.Severity.INFO.value
     "informational": 0,  # models.finding.Severity.informational.value
 }
 
@@ -284,7 +284,7 @@ def _build_finding_from_dict(
         "high": _FindingSeverity.high,
         "medium": _FindingSeverity.medium,
         "low": _FindingSeverity.low,
-        "info": _FindingSeverity.informational,           # evidence.schema value
+        "info": _FindingSeverity.informational,  # evidence.schema value
         "informational": _FindingSeverity.informational,  # models.finding value
     }
     severity = sev_map.get(str(d.get("severity", "medium")).lower(), _FindingSeverity.medium)
@@ -351,21 +351,22 @@ def _build_finding_from_dict(
         )
 
     cvss_score_by_sev = {
-        _EvidenceSeverity.CRITICAL: 9.5,
-        _EvidenceSeverity.HIGH: 7.5,
-        _EvidenceSeverity.MEDIUM: 5.5,
-        _EvidenceSeverity.LOW: 3.5,
-        _EvidenceSeverity.INFO: 1.0,
+        _EvidenceSeverity.CRITICAL: 9.8,
+        _EvidenceSeverity.HIGH: 8.1,
+        _EvidenceSeverity.MEDIUM: 4.6,
+        _EvidenceSeverity.LOW: 2.6,
+        _EvidenceSeverity.INFO: 0.0,
     }
     # Severity-appropriate CVSS vector templates so that LOW/INFO findings do not
     # carry the 9.8-Critical vector string and mislabel themselves in any
-    # vector-string renderer.  Templates are approximate; base_score is authoritative.
+    # vector-string renderer. Scores below are the CVSS 3.1 base scores for these
+    # exact generic vectors; callers with real metrics should provide richer CVSS data.
     _cvss_vector_by_sev = {
-        _EvidenceSeverity.CRITICAL: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",   # 9.8
-        _EvidenceSeverity.HIGH:     "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",   # 8.1
-        _EvidenceSeverity.MEDIUM:   "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:U/C:L/I:L/A:N",   # 4.6
-        _EvidenceSeverity.LOW:      "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:U/C:L/I:N/A:N",   # 2.4
-        _EvidenceSeverity.INFO:     "CVSS:3.1/AV:N/AC:H/PR:H/UI:R/S:U/C:N/I:N/A:N",   # 0.0
+        _EvidenceSeverity.CRITICAL: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",  # 9.8
+        _EvidenceSeverity.HIGH: "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",  # 8.1
+        _EvidenceSeverity.MEDIUM: "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:U/C:L/I:L/A:N",  # 4.6
+        _EvidenceSeverity.LOW: "CVSS:3.1/AV:N/AC:H/PR:L/UI:R/S:U/C:L/I:N/A:N",  # 2.6
+        _EvidenceSeverity.INFO: "CVSS:3.1/AV:N/AC:H/PR:H/UI:R/S:U/C:N/I:N/A:N",  # 0.0
     }
     cvss = CVSSVector(
         vector_string=_cvss_vector_by_sev[_ev_severity],
@@ -453,9 +454,7 @@ def _should_include_in_report(d: dict[str, Any]) -> bool:
         return False
     if acceptance == "needs_replay_gate" and severity in {"high", "critical"}:
         replay_gate = d.get("replay_gate")
-        replay_status = (
-            str(replay_gate.get("status", "")) if isinstance(replay_gate, dict) else ""
-        )
+        replay_status = str(replay_gate.get("status", "")) if isinstance(replay_gate, dict) else ""
         if replay_status == "blocked_policy":
             logger.warning(
                 "replay-excluded high finding: %s (blocked_policy)",
@@ -480,6 +479,32 @@ def _reconcile_chains(
             continue
         out.append({"finding_ids": list(c.get("finding_ids", [])), "raw": c})
     return out
+
+
+def _copy_store_results_to_context(ctx: ScanContext) -> None:
+    """Preserve reportable findings and valid chains from the active scan store."""
+    excluded_ids: set[str] = set()
+    existing_ids = {finding.id for finding in ctx.findings}
+    for data in _get_finding_dicts():
+        try:
+            if _should_include_in_report(data):
+                if str(data.get("id", "")) not in existing_ids:
+                    ctx.findings.append(
+                        _build_finding_from_dict(
+                            data,
+                            scan_id=ctx.scan_id,
+                            target=ctx.target,
+                            kind=ctx.kind,
+                        )
+                    )
+            else:
+                excluded_ids.add(str(data.get("id", "")))
+        except Exception:
+            logger.exception("Failed to convert finding dict: %s", data.get("id", "?"))
+    try:
+        ctx.attack_chains = _reconcile_chains(_get_chain_dicts(), excluded_ids)
+    except Exception:
+        ctx.attack_chains = []
 
 
 # Back-compat alias — older callers reference the legacy name. New code should
@@ -575,7 +600,13 @@ _WEB_SKILL_TO_VECTORS: dict[str, list[str]] = {
     "test_auth_deep": ["WEB-AUTH-003", "WEB-AUTH-004", "WEB-AUTH-005", "WEB-AUTH-008"],
     "test_csrf": ["WEB-CSRF-001"],
     "test_misconfig": ["WEB-MISCONF-001", "WEB-MISCONF-003", "WEB-MISCONF-004", "WEB-MISCONF-005"],
-    "test_api_security": ["WEB-API-001", "WEB-API-002", "WEB-API-003", "WEB-API-005", "WEB-API-009"],
+    "test_api_security": [
+        "WEB-API-001",
+        "WEB-API-002",
+        "WEB-API-003",
+        "WEB-API-005",
+        "WEB-API-009",
+    ],
     "test_business_logic": ["WEB-BIZ-001", "WEB-BIZ-002", "WEB-BIZ-003", "WEB-BIZ-005"],
     "test_crypto": ["WEB-CRYPTO-001", "WEB-CRYPTO-002", "WEB-CRYPTO-003", "WEB-CRYPTO-004"],
 }
@@ -1035,6 +1066,7 @@ class ScanPipeline:
             ctx.launcher_notes = list(runtime.shared_notes)  # type: ignore[attr-defined]
             ctx.target_hints = dict(target_hints or {})  # type: ignore[attr-defined]
             ghost_activated_here = False
+            _activated = False
 
             # Ghost activation — preserve behavior from legacy pipeline
             try:
@@ -1044,36 +1076,43 @@ class ScanPipeline:
                 _activated, target = parse_ghost_trigger(runtime.resolved_target, self.config)
                 ctx.target = target
                 if _activated and _evasion_blocked_by_policy(ctx.policy):
-                    # NOW-2/2a: the active ScanPolicy profile forbids evasion — do
-                    # not flip the ghost singleton (capability-ceiling enforced).
-                    _activated = False
                     ctx.runtime_profile["metadata"]["ghost_blocked_by_policy"] = True  # type: ignore[index]
-                    self._emit("ghost", {"active": False, "blocked_by_policy": True, "target": ctx.target})
-                    logger.info(
-                        "[Ghost] evasion not permitted by scan policy — skipping anonymization for target=%s",
-                        ctx.target,
+                    self._emit(
+                        "ghost", {"active": False, "blocked_by_policy": True, "target": ctx.target}
+                    )
+                    raise RuntimeError(
+                        "Ghost requested but forbidden by the active scan policy"
                     )
                 if _activated:
                     proxy_pool = _ghost_proxy_pool_from_config(self.config)
                     ghost_layer.activate(proxy_pool=proxy_pool)
+                    valid_proxy_count = len(getattr(ghost_layer, "_proxy_pool", []) or [])
+                    if valid_proxy_count == 0:
+                        ghost_layer.deactivate()
+                        raise RuntimeError(
+                            "Ghost requested but no usable proxy is configured; refusing direct fallback"
+                        )
                     ghost_activated_here = True
                     ctx.runtime_profile["metadata"]["ghost_active"] = True  # type: ignore[index]
-                    ctx.runtime_profile["metadata"]["ghost_proxy_count"] = len(proxy_pool)  # type: ignore[index]
+                    ctx.runtime_profile["metadata"]["ghost_proxy_count"] = valid_proxy_count  # type: ignore[index]
                     self._emit(
                         "ghost",
                         {
                             "active": True,
-                            "proxy_count": len(proxy_pool),
+                            "proxy_count": valid_proxy_count,
                             "target": ctx.target,
                         },
                     )
                     logger.info(
                         "[Ghost] activated for ScanPipelineV2 target=%s proxies=%d",
                         ctx.target,
-                        len(proxy_pool),
+                        valid_proxy_count,
                     )
             except Exception:
-                logger.exception("Ghost activation failed — continuing without ghost transport")
+                if _activated:
+                    logger.exception("Ghost activation failed — aborting to prevent direct egress")
+                    raise
+                logger.exception("Ghost trigger parsing failed")
 
             # 3. Reset per-scan state (findings + brain counters + playbook dedup)
             _reset_finding_store()
@@ -1287,7 +1326,20 @@ class ScanPipeline:
                     except Exception:
                         logger.exception("Ghost deactivation failed after scan_loop error")
                 _set_finding_event_callback(None)
-                # Still attach a score so the CLI doesn't crash
+                _copy_store_results_to_context(ctx)
+                ctx.scan_loop_completed = False  # type: ignore[attr-defined]
+                ctx.scan_loop_error = str(exc) or type(exc).__name__  # type: ignore[attr-defined]
+                ctx.scan_status = (  # type: ignore[attr-defined]
+                    "partial" if ctx.findings or ctx.attack_chains else "failed"
+                )
+                ctx.phase_logs = [
+                    {
+                        "name": "scan_loop",
+                        "status": "failed",
+                        "error": ctx.scan_loop_error,  # type: ignore[attr-defined]
+                        "duration": time.monotonic() - started,
+                    }
+                ]
                 ctx.vxis_score = _SimpleScore(total=0.0, grade="F")
                 return ctx
 
@@ -1315,6 +1367,13 @@ class ScanPipeline:
             # Phase C belief state: surface verdict counts + confirmed/refuted lists.
             verdict_counts = loop_result.get("verdict_counts", {}) or {}
             ctx.scan_loop_completed = bool(loop_result.get("completed", False))  # type: ignore[attr-defined]
+            ctx.scan_loop_error = (  # type: ignore[attr-defined]
+                ""
+                if ctx.scan_loop_completed  # type: ignore[attr-defined]
+                else str(
+                    loop_result.get("stop_reason") or "ScanAgentLoop stopped before finish_scan"
+                )
+            )
             ctx.scan_loop_iterations = int(loop_result.get("iterations", 0) or 0)  # type: ignore[attr-defined]
             ctx.verdict_counts = verdict_counts  # type: ignore[attr-defined]
             ctx.confirmed_findings = loop_result.get("confirmed_findings", []) or []  # type: ignore[attr-defined]
@@ -1346,30 +1405,20 @@ class ScanPipeline:
                     )
                 )
 
-            # 6. Copy findings from the in-memory store into ctx.findings
-            finding_dicts = _get_finding_dicts()
-            _excluded_finding_ids: set[str] = set()
-            for d in finding_dicts:
-                try:
-                    f = _build_finding_from_dict(
-                        d, scan_id=ctx.scan_id, target=ctx.target, kind=ctx.kind
-                    )
-                    # NOW-1/1.3: withhold UNCONFIRMED (high/critical) findings from the
-                    # rendered report; they stay in the raw store for learning / MITRE.
-                    if _should_include_in_report(d):
-                        ctx.findings.append(f)
-                    else:
-                        _excluded_finding_ids.add(str(d.get("id", "")))
-                except Exception:
-                    logger.exception("Failed to convert finding dict: %s", d.get("id", "?"))
-
-            # 7. Copy chains into ctx.attack_chains, dropping any chain that pivots
-            # through a withheld finding so the attack graph asserts no fake edge.
-            chain_dicts = _get_chain_dicts()
-            try:
-                ctx.attack_chains = _reconcile_chains(chain_dicts, _excluded_finding_ids)
-            except Exception:
-                ctx.attack_chains = []
+            # 6–7. Preserve findings and chains even when the loop stopped incomplete.
+            _copy_store_results_to_context(ctx)
+            ctx.scan_status = (  # type: ignore[attr-defined]
+                "completed"
+                if ctx.scan_loop_completed  # type: ignore[attr-defined]
+                else "partial"
+                if ctx.findings or ctx.attack_chains
+                else "failed"
+            )
+            if not ctx.scan_loop_completed:  # type: ignore[attr-defined]
+                self._emit(
+                    "error",
+                    {"stage": "scan_loop", "error": ctx.scan_loop_error},  # type: ignore[attr-defined]
+                )
 
             # 7.5 Shutdown browser if Eyes was used during the scan
             try:
@@ -1389,19 +1438,12 @@ class ScanPipeline:
             if self.enable_deferred_approval and getattr(ctx, "deferred_actions", None):
                 await self._run_deferred_gate(ctx)
 
-            # 9. Generate the HTML report
-            if self._generate_report_enabled:
-                try:
-                    await self._generate_report(ctx)
-                except Exception:
-                    logger.exception("Report generation failed — continuing")
-
-            # 10. Compute VXIS score
+            # 9. Compute VXIS score
             score_value, grade = _compute_vxis_score(ctx)
             ctx.vxis_score = _SimpleScore(total=score_value, grade=grade)
             self._emit("score", {"total": score_value, "grade": grade})
 
-            # 10a. Dump full 5-dim breakdown next to the HTML report for benchmark comparison.
+            # 9a. Dump full 5-dim breakdown next to the HTML report for benchmark comparison.
             detail = getattr(ctx, "score_detail", None)
             report_path = getattr(self, "_report_output_path", None) or getattr(
                 self, "report_output_path", None
@@ -1420,7 +1462,10 @@ class ScanPipeline:
                 ctx.phase_logs = [
                     {
                         "name": "scan_loop",
-                        "status": "done",
+                        "status": "done"
+                        if ctx.scan_loop_completed  # type: ignore[attr-defined]
+                        else "failed",
+                        "error": ctx.scan_loop_error,  # type: ignore[attr-defined]
                         "duration": time.monotonic() - started,
                     }
                 ]
@@ -1523,6 +1568,13 @@ class ScanPipeline:
             except Exception:
                 logger.exception("Failed to record scan memory")
 
+            # Report only after MITRE coverage and cross-scan aggregation are attached.
+            if self._generate_report_enabled:
+                try:
+                    await self._generate_report(ctx)
+                except Exception:
+                    logger.exception("Report generation failed — continuing")
+
             # Local self-improvement loop: capture a per-scan retrospective with
             # review queue, open branches, verdict pressure, and suggested code
             # areas. This is runtime-local and intentionally separate from the
@@ -1623,8 +1675,16 @@ class ScanPipeline:
             company_name="VXIS Security",
             author="VXIS Autonomous Brain",
             executive_summary=(
-                (getattr(ctx, "final_report_sections", {}) or {}).get("executive_summary")
-                or f"Phase A scan completed: {len(ctx.findings)} finding(s)|||Phase A 스캔 완료: {len(ctx.findings)}건 발견"
+                (
+                    f"Partial scan: {len(ctx.findings)} finding(s) preserved before failure"
+                    f"|||부분 스캔: 실패 전 발견 {len(ctx.findings)}건 보존"
+                )
+                if getattr(ctx, "scan_status", "completed") != "completed"
+                else (
+                    (getattr(ctx, "final_report_sections", {}) or {}).get("executive_summary")
+                    or f"Phase A scan completed: {len(ctx.findings)} finding(s)"
+                    f"|||Phase A 스캔 완료: {len(ctx.findings)}건 발견"
+                )
             ),
             methodology=(
                 (getattr(ctx, "final_report_sections", {}) or {}).get("methodology")

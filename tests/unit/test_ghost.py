@@ -1,5 +1,6 @@
 """GhostLayer 유닛 테스트."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -325,3 +326,71 @@ async def test_ghost_verifier_handles_failure():
 
     assert result["detected_ip"] is None
     assert result["error"] is not None
+
+
+def test_ghost_preflight_requires_proxy_and_never_probes_target(monkeypatch):
+    from vxis.cli import preflight
+
+    monkeypatch.delenv("VXIS_PROXY_POOL", raising=False)
+    with (
+        patch.object(preflight, "check_target_reachable") as target_probe,
+        patch.object(preflight, "check_brain", return_value=("test", True)),
+        patch.object(preflight, "check_docker", return_value=True),
+        patch.object(preflight, "check_github_token", return_value=True),
+    ):
+        result = preflight.run_preflight("https://example.com", ghost=True)
+
+    target_probe.assert_not_called()
+    assert result.can_scan is False
+    assert any("proxy" in error.lower() for error in result.errors)
+
+
+def test_ghost_preflight_defers_target_probe_when_proxy_configured(monkeypatch):
+    from vxis.cli import preflight
+
+    monkeypatch.setenv("VXIS_PROXY_POOL", "socks5://127.0.0.1:9050")
+    with (
+        patch.object(preflight, "check_target_reachable") as target_probe,
+        patch.object(preflight, "check_brain", return_value=("test", True)),
+        patch.object(preflight, "check_docker", return_value=True),
+        patch.object(preflight, "check_github_token", return_value=True),
+    ):
+        result = preflight.run_preflight("https://example.com", ghost=True)
+
+    target_probe.assert_not_called()
+    assert result.can_scan is True
+    assert any("deferred" in warning.lower() for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_scan_pipeline_ghost_fails_closed_when_policy_forbids(monkeypatch):
+    from vxis.pipeline.scan_pipeline_v2 import ScanPipeline
+
+    monkeypatch.setenv("VXIS_PROXY_POOL", "socks5://127.0.0.1:9050")
+    pipe = ScanPipeline(
+        brain=MagicMock(),
+        config=SimpleNamespace(active_profile="standard", proxy_pool=[]),
+        enable_policy=True,
+        generate_report=False,
+    )
+
+    with pytest.raises(RuntimeError, match="policy"):
+        await pipe.run("ghost://example.com")
+
+
+@pytest.mark.asyncio
+async def test_scan_pipeline_ghost_rejects_invalid_proxy_pool(monkeypatch):
+    from vxis.ghost.layer import ghost_layer
+    from vxis.pipeline.scan_pipeline_v2 import ScanPipeline
+
+    monkeypatch.setenv("VXIS_PROXY_POOL", "not-a-proxy")
+    pipe = ScanPipeline(
+        brain=MagicMock(),
+        config=SimpleNamespace(active_profile="stealth", proxy_pool=[]),
+        enable_policy=True,
+        generate_report=False,
+    )
+
+    with pytest.raises(RuntimeError, match="usable proxy"):
+        await pipe.run("ghost://example.com")
+    assert ghost_layer.is_active() is False

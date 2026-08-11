@@ -73,6 +73,13 @@ def test_resolve_aggressive_is_full_lab():
     assert p.secret_handling == "plaintext-lab"
 
 
+def test_resolve_stealth_allows_ghost_without_expanding_readonly_ceiling():
+    p = resolve_policy(_Cfg("stealth"))
+    assert p.exploitation_ceiling == "read-only"
+    assert p.scope_strictness == "strict-authorized"
+    assert p.evasion_allowed is True
+
+
 def test_resolve_p1_alias_is_full():
     assert resolve_policy(_Cfg("p1")).exploitation_ceiling == "full"
 

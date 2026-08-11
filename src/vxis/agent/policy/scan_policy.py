@@ -59,6 +59,8 @@ _PROD_READONLY = ScanPolicy(
     deferred_mutation_approval=True,
 )
 
+_STEALTH_READONLY = _PROD_READONLY.model_copy(update={"evasion_allowed": True})
+
 PROFILE_POLICY_TABLE: dict[str, ScanPolicy] = {
     "crown": ScanPolicy(
         exploitation_ceiling="lateral",
@@ -105,7 +107,7 @@ PROFILE_POLICY_TABLE: dict[str, ScanPolicy] = {
     "remediation-verification": _PROD_READONLY,
     "passive": _PROD_READONLY,
     "standard": _PROD_READONLY,
-    "stealth": _PROD_READONLY,
+    "stealth": _STEALTH_READONLY,
     "compliance-mapping": ScanPolicy(
         exploitation_ceiling="none",
         scope_strictness="strict-authorized",
