@@ -135,9 +135,9 @@ def _resolve_policy(brain: Any) -> Any:
     return get_compression_policy(provider, model)
 
 
-def _is_local_strict(brain: Any) -> bool:
+def _is_local_strict(brain: Any, policy: Any) -> bool:
     provider = str(getattr(brain, "_provider", "") or "").lower()
-    return provider in {"llamacpp", "ollama"}
+    return provider in {"llamacpp", "ollama"} and int(policy.context_window or 0) <= 16_384
 
 
 def _effective_policy_for_runtime(policy: Any, brain: Any) -> tuple[int, int, int, int]:
@@ -151,7 +151,7 @@ def _effective_policy_for_runtime(policy: Any, brain: Any) -> tuple[int, int, in
     preserve_recent = int(policy.preserve_recent_messages)
     chunk_size = int(policy.chunk_size)
     summary_words = int(policy.summary_max_words)
-    if _is_local_strict(brain):
+    if _is_local_strict(brain, policy):
         threshold = min(threshold, 2200)
         preserve_recent = min(preserve_recent, 3)
         chunk_size = min(chunk_size, 3)

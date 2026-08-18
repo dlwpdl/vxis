@@ -69,11 +69,12 @@ The no-args TUI path supports scan start -> AI autonomous scan -> `Local Runtime
 It sets `UPSTREAM_LLM_PROVIDER=llamacpp`, `UPSTREAM_LLM_MODEL`, and
 `VXIS_LLAMACPP_BASE_URL`, asks for the runtime context window
 (`VXIS_LLAMACPP_CONTEXT`), then verifies `GET /v1/models` before delegating to
-the same Brain-first pipeline used by `vxis scan`. Local runtimes use a tighter
-history-compression profile than cloud models. The TUI prefers a running
+the same Brain-first pipeline used by `vxis scan`. Context is detected from the
+selected model's runtime metadata and can be confirmed or overridden up to
+262144 tokens. Runtimes up to 16K use a tighter history-compression profile.
+The TUI prefers a running
 compact proxy at `http://127.0.0.1:8090`, otherwise it falls back to
-`http://localhost:8080`. The llama.cpp context default is `8192`; keep it
-matched to `llama-server -c/--ctx-size`.
+`http://localhost:8080`; detection failure safely falls back to `8192`.
 
 Start llama.cpp separately first:
 

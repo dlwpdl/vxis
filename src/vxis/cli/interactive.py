@@ -2466,16 +2466,6 @@ def _select_local_llm() -> tuple[str, str, str] | None:
         return None
     base_url = base_url.strip().rstrip("/")
     health = _fetch_llamacpp_health(base_url)
-    context_default = _default_llamacpp_context(health)
-
-    if _prompt_context_window(
-        message="llama.cpp context window (-c/--ctx-size와 맞추세요)",
-        env_key="VXIS_LLAMACPP_CONTEXT",
-        default=context_default,
-        minimum=512,
-        maximum=131072,
-    ) is None:
-        return None
 
     detected_models: list[str] = []
     try:
@@ -2522,6 +2512,19 @@ def _select_local_llm() -> tuple[str, str, str] | None:
         model = custom_model.strip()
 
     if not model:
+        return None
+
+    from vxis.llm.model_registry import detect_llamacpp_context
+
+    detect_llamacpp_context.cache_clear()
+    context_default = detect_llamacpp_context(base_url, model) or _default_llamacpp_context(health)
+    if _prompt_context_window(
+        message="llama.cpp context window (-c/--ctx-size와 맞추세요)",
+        env_key="VXIS_LLAMACPP_CONTEXT",
+        default=context_default,
+        minimum=512,
+        maximum=262144,
+    ) is None:
         return None
     return ("llamacpp", model, base_url)
 

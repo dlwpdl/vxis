@@ -21,6 +21,19 @@ def test_local_worker_budget_is_tighter_than_frontier_director() -> None:
     assert worker.max_skill_chars <= 700
 
 
+def test_large_local_context_uses_the_detected_capacity() -> None:
+    director = resolve_context_budget(
+        "director",
+        provider="llamacpp",
+        model="local-35b",
+        context_window=64_000,
+    )
+
+    assert director.local_profile is False
+    assert director.context_window == 64_000
+    assert director.max_prompt_tokens > 32_000
+
+
 def test_fit_lines_to_token_budget_prefers_recent_signal() -> None:
     lines = [f"old {i} " + ("A" * 900) for i in range(30)]
     lines.append("latest confirmed SQL injection evidence")

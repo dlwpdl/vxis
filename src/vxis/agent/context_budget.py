@@ -107,7 +107,7 @@ def resolve_context_budget(
         model=model_name,
         context_window=context_window,
     )
-    local_profile = provider_name in _LOCAL_PROVIDERS or resolved_window <= 16_384
+    local_profile = resolved_window <= 16_384
     ceilings = _LOCAL_ROLE_CEILINGS if local_profile else _FRONTIER_ROLE_CEILINGS
     role_ceiling = ceilings[role_name]
     window_fraction = _ROLE_CONTEXT_FRACTIONS[role_name]

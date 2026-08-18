@@ -14,7 +14,12 @@ Sources:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import lru_cache
+import json
 import os
+import re
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True)
@@ -350,6 +355,84 @@ def flagship(provider: str) -> str | None:
     return _FLAGSHIP.get((provider or "").strip().lower())
 
 
+def _context_from_llamacpp_model(item: object) -> int | None:
+    if not isinstance(item, dict):
+        return None
+    status = item.get("status")
+    if not isinstance(status, dict):
+        return None
+
+    args = status.get("args")
+    if isinstance(args, list):
+        for index, raw in enumerate(args):
+            arg = str(raw)
+            if arg in {"-c", "--ctx-size"} and index + 1 < len(args):
+                value = str(args[index + 1]).strip()
+                if value.isdigit() and int(value) > 0:
+                    return max(512, int(value))
+            match = re.fullmatch(r"(?:-c|--ctx-size)=(\d+)", arg)
+            if match and int(match.group(1)) > 0:
+                return max(512, int(match.group(1)))
+
+    preset = status.get("preset")
+    if isinstance(preset, str):
+        match = re.search(r"(?m)^\s*ctx-size\s*=\s*(\d+)\s*$", preset)
+        if match and int(match.group(1)) > 0:
+            return max(512, int(match.group(1)))
+    return None
+
+
+def _context_from_llamacpp_payload(payload: object, model_id: str) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+
+    settings = payload.get("default_generation_settings")
+    if isinstance(settings, dict):
+        value = settings.get("n_ctx")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return max(512, value)
+        if isinstance(value, str) and value.strip().isdigit() and int(value.strip()) > 0:
+            return max(512, int(value.strip()))
+
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return None
+
+    wanted = (model_id or "").strip().casefold()
+    matches = [
+        item for item in data
+        if isinstance(item, dict) and str(item.get("id", "")).strip().casefold() == wanted
+    ]
+    candidates = matches or (data if len(data) == 1 else [])
+    contexts = {
+        value
+        for item in candidates
+        if (value := _context_from_llamacpp_model(item)) is not None
+    }
+    return next(iter(contexts)) if len(contexts) == 1 else None
+
+
+@lru_cache(maxsize=32)
+def detect_llamacpp_context(base_url: str, model_id: str) -> int | None:
+    """Best-effort detection of the server's actual per-request context size."""
+    base_url = (base_url or "").strip().rstrip("/")
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+
+    for path in ("/props", "/v1/models"):
+        try:
+            req = Request(base_url + path, method="GET")
+            with urlopen(req, timeout=0.75) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+        except Exception:
+            continue
+        context = _context_from_llamacpp_payload(payload, model_id)
+        if context is not None:
+            return context
+    return None
+
+
 def _runtime_context_window(provider: str, model_id: str) -> int:
     """Resolve the effective runtime context window for compression decisions."""
     provider = (provider or "").lower()
@@ -358,6 +441,11 @@ def _runtime_context_window(provider: str, model_id: str) -> int:
         override = os.environ.get("VXIS_LLAMACPP_CONTEXT", "").strip()
         if override.isdigit():
             return max(512, int(override))
+        base_url = os.environ.get("VXIS_LLAMACPP_BASE_URL", "").strip()
+        if base_url:
+            detected = detect_llamacpp_context(base_url, model_id)
+            if detected is not None:
+                return detected
         return min(get_context_window(model_id, default=8_192), 8_192)
 
     if provider == "ollama":
@@ -379,6 +467,7 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
 
     if provider == "llamacpp":
         threshold = max(900, min(context_window - 768, int(context_window * 0.45)))
+        large_runtime = context_window > 16_384
         return CompressionPolicy(
             context_window=context_window,
             compress_threshold_tokens=threshold,
@@ -387,8 +476,8 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
             summary_max_words=180,
             recent_full_iterations=1,
             output_token_cap=max(512, min(2_048, int(context_window * 0.18))),
-            allow_long_context=False,
-            profile="local-small",
+            allow_long_context=large_runtime,
+            profile="local-large" if large_runtime else "local-small",
         )
 
     if provider == "ollama":
@@ -456,4 +545,5 @@ __all__ = [
     "supports_json_mode",
     "list_models",
     "flagship",
+    "detect_llamacpp_context",
 ]

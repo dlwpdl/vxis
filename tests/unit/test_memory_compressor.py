@@ -1,12 +1,29 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from unittest.mock import patch
 
 from vxis.agent.memory_compressor import compress_history
 from vxis.agent.memory_compressor import _effective_policy_for_runtime
 from vxis.agent.memory_compressor import get_memory_compression_stats
 from vxis.agent.memory_compressor import reset_memory_compression_stats
 from vxis.llm.model_registry import get_compression_policy
+from vxis.llm.model_registry import detect_llamacpp_context
+
+
+class _Response:
+    def __init__(self, payload: dict) -> None:
+        self._body = json.dumps(payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self) -> bytes:
+        return self._body
 
 
 class _StubBrain:
@@ -32,6 +49,31 @@ def test_llamacpp_compression_policy_is_aggressive() -> None:
     assert policy.output_token_cap <= 2048
     assert policy.allow_long_context is False
     assert policy.profile == "local-small"
+
+
+def test_llamacpp_policy_detects_large_runtime_context(monkeypatch) -> None:
+    monkeypatch.delenv("VXIS_LLAMACPP_CONTEXT", raising=False)
+    monkeypatch.setenv("VXIS_LLAMACPP_BASE_URL", "http://localhost:8080")
+    detect_llamacpp_context.cache_clear()
+    models = {
+        "data": [{
+            "id": "local-model",
+            "status": {"args": ["llama-server", "--ctx-size", "262144"]},
+        }],
+    }
+
+    router_props = {"default_generation_settings": {"n_ctx": 0}}
+    with patch(
+        "vxis.llm.model_registry.urlopen",
+        side_effect=[_Response(router_props), _Response(models)],
+    ):
+        policy = get_compression_policy("llamacpp", "local-model")
+
+    assert policy.context_window == 262_144
+    assert policy.compress_threshold_tokens > 100_000
+    assert policy.allow_long_context is True
+    assert policy.profile == "local-large"
+    detect_llamacpp_context.cache_clear()
 
 
 def test_cloud_compression_policy_is_segmented() -> None:
@@ -91,6 +133,19 @@ def test_local_runtime_policy_is_more_aggressive_than_registry_defaults() -> Non
     assert preserve_recent < base.preserve_recent_messages
     assert chunk_size < base.chunk_size
     assert summary_words < base.summary_max_words
+
+
+def test_large_local_runtime_keeps_context_scaled_policy(monkeypatch) -> None:
+    monkeypatch.setenv("VXIS_LLAMACPP_CONTEXT", "64000")
+    brain = _StubBrain("llamacpp", "local-model")
+    base = get_compression_policy(brain._provider, brain._model)
+
+    assert _effective_policy_for_runtime(base, brain) == (
+        base.compress_threshold_tokens,
+        base.preserve_recent_messages,
+        base.chunk_size,
+        base.summary_max_words,
+    )
 
 
 def test_cloud_runtime_policy_keeps_registry_defaults() -> None:

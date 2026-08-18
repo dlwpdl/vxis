@@ -37,9 +37,10 @@ without being trusted as the root orchestrator.
 `model_registry.get_compression_policy(provider, model)` is the canonical
 source for provider-specific context behavior.
 
-- `llamacpp`: small local profile. Uses `VXIS_LLAMACPP_CONTEXT` with an `8192`
-  default, keeps only the most recent full iteration, compresses early, caps
-  output tightly, and ignores `VXIS_LONG_CONTEXT`.
+- `llamacpp`: explicit `VXIS_LLAMACPP_CONTEXT` wins; otherwise VXIS detects the
+  selected server model's active context from `/props` or `/v1/models`, with an
+  `8192` fallback. Runtimes up to 16K use aggressive local compaction; larger
+  runtimes scale prompt/compression budgets and may honor `VXIS_LONG_CONTEXT`.
 - `ollama`: medium local profile. Uses `VXIS_OLLAMA_CONTEXT`, keeps two recent
   full iterations, and compresses earlier than cloud models.
 - Cloud providers: large profile. Keeps more recent full history, delays
