@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class LLMResponse:
     """통합 LLM 응답."""
+
     text: str
     provider: str  # "claude-cli", "gemini-cli", "codex-cli", "together-api", etc.
     model: str
@@ -34,6 +35,7 @@ class LLMResponse:
 
 
 # ── CLI Providers (구독 기반, $0) ────────────────────────────────
+
 
 def _call_claude_cli(system: str, user: str, max_tokens: int = 4096) -> LLMResponse | None:
     """Claude Code CLI를 통해 구독 토큰 사용."""
@@ -47,7 +49,9 @@ def _call_claude_cli(system: str, user: str, max_tokens: int = 4096) -> LLMRespo
     try:
         result = subprocess.run(
             [claude_bin, "--print", "-p", prompt],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode == 0 and result.stdout.strip():
             return LLMResponse(
@@ -73,7 +77,9 @@ def _call_gemini_cli(system: str, user: str, max_tokens: int = 4096) -> LLMRespo
     try:
         result = subprocess.run(
             [gemini_bin, "-p", prompt],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode == 0 and result.stdout.strip():
             return LLMResponse(
@@ -99,7 +105,9 @@ def _call_codex_cli(system: str, user: str, max_tokens: int = 4096) -> LLMRespon
     try:
         result = subprocess.run(
             [codex_bin, "-p", prompt],
-            capture_output=True, text=True, timeout=120,
+            capture_output=True,
+            text=True,
+            timeout=120,
         )
         if result.returncode == 0 and result.stdout.strip():
             return LLMResponse(
@@ -116,10 +124,12 @@ def _call_codex_cli(system: str, user: str, max_tokens: int = 4096) -> LLMRespon
 
 # ── API Providers (유료) ────────────────────────────────────────
 
+
 def _call_api(system: str, user: str, max_tokens: int = 4096) -> LLMResponse | None:
     """upstream_watch의 LLM 모듈을 재활용 (Together.ai + fallback chain)."""
     try:
         from tools.upstream_watch.llm import chat
+
         response = chat(system_prompt=system, user_prompt=user, max_tokens=max_tokens)
         if response:
             return LLMResponse(
@@ -146,6 +156,7 @@ _CLI_PROVIDERS = [
 _API_PROVIDERS = [
     ("api", _call_api),
 ]
+
 
 # User can override with env var: VXIS_LLM_PROVIDER=claude-cli,gemini-cli,api
 def _get_provider_order() -> list[tuple[str, callable]]:
@@ -188,11 +199,13 @@ class LLMClient:
             try:
                 response = call_fn(system, user, max_tokens)
                 if response is not None:
-                    self._usage_log.append({
-                        "provider": response.provider,
-                        "model": response.model,
-                        "cost": response.cost,
-                    })
+                    self._usage_log.append(
+                        {
+                            "provider": response.provider,
+                            "model": response.model,
+                            "cost": response.cost,
+                        }
+                    )
                     logger.info("LLM 응답: %s (%s, $%.4f)", name, response.model, response.cost)
                     return response
             except Exception as exc:
@@ -217,6 +230,7 @@ class LLMClient:
         # Anthropic API 직접 호출 (tool use 지원)
         try:
             import anthropic
+
             api_key = os.environ.get("ANTHROPIC_API_KEY", "")
             if api_key:
                 client = anthropic.Anthropic(api_key=api_key)
@@ -231,7 +245,9 @@ class LLMClient:
             pass
 
         # Fallback: think without tools
-        response = await self.think(system, user + "\n\nAvailable tools: " + json.dumps(tools), max_tokens)
+        response = await self.think(
+            system, user + "\n\nAvailable tools: " + json.dumps(tools), max_tokens
+        )
         return response
 
     def get_usage_summary(self) -> str:

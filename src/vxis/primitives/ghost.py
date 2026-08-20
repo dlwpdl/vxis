@@ -113,7 +113,12 @@ async def ghost_verify() -> dict:
     try:
         result = await verifier.check()
     except Exception as exc:
-        return {"exit_ip": None, "verified": False, "ghost_active": ghost_layer.is_active(), "error": str(exc)}
+        return {
+            "exit_ip": None,
+            "verified": False,
+            "ghost_active": ghost_layer.is_active(),
+            "error": str(exc),
+        }
 
     return {
         "exit_ip": result.get("detected_ip"),

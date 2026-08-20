@@ -1,4 +1,5 @@
 """GhostLayer — 익명화 레이어 싱글턴."""
+
 from __future__ import annotations
 
 import logging
@@ -59,7 +60,7 @@ class GhostLayer:
 
     def activate(self, proxy_pool: list[str] | None = None) -> None:
         valid: list[str] = []
-        for p in (proxy_pool or []):
+        for p in proxy_pool or []:
             if _PROXY_URL_RE.match(p):
                 valid.append(p)
             else:
@@ -69,7 +70,8 @@ class GhostLayer:
         self._active = True
         logger.info(
             "[Ghost] 익명화 활성화 — 프록시: %d개, UA풀: %d종",
-            len(self._proxy_pool), len(UA_POOL),
+            len(self._proxy_pool),
+            len(UA_POOL),
         )
 
     def deactivate(self) -> None:

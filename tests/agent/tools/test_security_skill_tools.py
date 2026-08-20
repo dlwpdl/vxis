@@ -14,7 +14,9 @@ def _write_skill(base, slug: str, *, name: str, description: str, tags: list[str
     skill_dir = base / "skills" / slug
     skill_dir.mkdir(parents=True)
     (skill_dir / "references").mkdir()
-    (skill_dir / "references" / "standards.md").write_text("MITRE and OWASP notes", encoding="utf-8")
+    (skill_dir / "references" / "standards.md").write_text(
+        "MITRE and OWASP notes", encoding="utf-8"
+    )
     (skill_dir / "SKILL.md").write_text(
         "\n".join(
             [
@@ -64,7 +66,9 @@ async def test_search_security_skills_finds_local_agentskills_repo(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_load_security_skill_returns_content_and_supporting_files(tmp_path, monkeypatch) -> None:
+async def test_load_security_skill_returns_content_and_supporting_files(
+    tmp_path, monkeypatch
+) -> None:
     _write_skill(
         tmp_path,
         "performing-security-headers-audit",

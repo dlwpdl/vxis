@@ -34,12 +34,15 @@ class ShodanPlugin(BasePlugin):
         """Check if shodan CLI is available AND has API credits."""
         import shutil
         import subprocess
+
         if shutil.which("shodan") is None:
             return False
         try:
             r = subprocess.run(
                 ["shodan", "info"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             # "Query credits available: 0" means no credits
             if "Query credits available: 0" in r.stdout:
@@ -73,7 +76,9 @@ class ShodanPlugin(BasePlugin):
                 raw_output=raw_stdout,
                 parsed_data={"shodan_results": []},
                 findings=[],
-                errors=["SHODAN_API_KEY environment variable not configured; skipping Shodan scan."],
+                errors=[
+                    "SHODAN_API_KEY environment variable not configured; skipping Shodan scan."
+                ],
             )
 
         services: list[dict[str, Any]] = []

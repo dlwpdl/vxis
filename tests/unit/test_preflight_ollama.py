@@ -80,24 +80,24 @@ def test_check_brain_rejects_local_backend_when_completion_fails() -> None:
         label, ready = check_brain(interactive=False)
 
     assert ready is False
-    assert label == (
-        "local:llamacpp/local-35b "
-        "(Brain call failed — llamacpp/local-35b: HTTP 503)"
-    )
+    assert label == ("local:llamacpp/local-35b (Brain call failed — llamacpp/local-35b: HTTP 503)")
 
 
 def test_check_brain_normalizes_google_to_gemini() -> None:
     # mock the model-availability network check — this test is about provider
     # normalization (google → gemini), not whether the model is callable.
-    with patch.dict(
-        "os.environ",
-        {
-            "UPSTREAM_LLM_PROVIDER": "google",
-            "UPSTREAM_LLM_MODEL": "gemini-2.5-flash",
-            "GOOGLE_API_KEY": "test-key",
-        },
-        clear=True,
-    ), patch("vxis.cli.preflight._gemini_model_available", return_value=True):
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "UPSTREAM_LLM_PROVIDER": "google",
+                "UPSTREAM_LLM_MODEL": "gemini-2.5-flash",
+                "GOOGLE_API_KEY": "test-key",
+            },
+            clear=True,
+        ),
+        patch("vxis.cli.preflight._gemini_model_available", return_value=True),
+    ):
         label, ready = check_brain(interactive=False)
 
     assert ready is True
@@ -108,16 +108,19 @@ def test_check_brain_promotes_frontier_director_when_local_worker_has_key() -> N
     # This test isolates frontier *promotion* (director resolves to openai/gpt-5.4
     # when a frontier key exists). The orthogonal model-callable probe is mocked
     # so a fake key doesn't 401 the now-real healthcheck.
-    with patch.dict(
-        "os.environ",
-        {
-            "UPSTREAM_LLM_PROVIDER": "llamacpp",
-            "UPSTREAM_LLM_MODEL": "local-35b",
-            "VXIS_LLAMACPP_BASE_URL": "http://localhost:8080",
-            "OPENAI_API_KEY": "test-key",
-        },
-        clear=True,
-    ), patch("vxis.agent.brain.AgentBrain.healthcheck", return_value=(True, "")):
+    with (
+        patch.dict(
+            "os.environ",
+            {
+                "UPSTREAM_LLM_PROVIDER": "llamacpp",
+                "UPSTREAM_LLM_MODEL": "local-35b",
+                "VXIS_LLAMACPP_BASE_URL": "http://localhost:8080",
+                "OPENAI_API_KEY": "test-key",
+            },
+            clear=True,
+        ),
+        patch("vxis.agent.brain.AgentBrain.healthcheck", return_value=(True, "")),
+    ):
         label, ready = check_brain(interactive=False)
 
     assert ready is True

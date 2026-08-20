@@ -30,7 +30,9 @@ def test_python_egress_policy_blocks_raw_socket_and_subprocess_when_ghost_active
     ghost_layer.activate(["socks5://127.0.0.1:9050"])
     try:
         assert evaluate_python_egress("import socket\nsocket.socket()").allowed is False
-        assert evaluate_python_egress("import subprocess\nsubprocess.run(['nmap'])").allowed is False
+        assert (
+            evaluate_python_egress("import subprocess\nsubprocess.run(['nmap'])").allowed is False
+        )
         assert evaluate_python_egress("import httpx\nprint('proxy-aware client')").allowed is True
     finally:
         ghost_layer.deactivate()

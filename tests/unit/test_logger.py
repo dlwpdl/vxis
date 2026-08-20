@@ -199,9 +199,7 @@ class TestAppendMode:
         """Two separate AuditLogger instances pointing at the same file append correctly."""
         log_path = tmp_path / "shared.jsonl"
 
-        AuditLogger(log_path).log_scan_start(
-            "scan-X", "10.0.0.1", "quick", {"timeout": 30}
-        )
+        AuditLogger(log_path).log_scan_start("scan-X", "10.0.0.1", "quick", {"timeout": 30})
         AuditLogger(log_path).log_scan_end("scan-X", finding_count=5, status="completed")
 
         records = _read_lines(log_path)

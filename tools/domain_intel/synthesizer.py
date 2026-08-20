@@ -25,6 +25,7 @@ except ImportError:
     # 폴백: 직접 경로로 시도
     import importlib.util
     import os
+
     _llm_path = os.path.join(os.path.dirname(__file__), "..", "upstream_watch", "llm.py")
     _spec = importlib.util.spec_from_file_location("upstream_watch_llm", _llm_path)
     _mod = importlib.util.module_from_spec(_spec)
@@ -41,11 +42,11 @@ class TrendItem:
 
     title: str
     description: str
-    evidence: list[str]         # 근거 시그널 URL/제목
-    vxis_impact: str            # VXIS에 미치는 영향
-    options: list[dict]         # 적용 옵션 [{label, description, effort, risk}]
-    recommendation: str         # 추천 옵션
-    priority: str               # critical, high, medium, low
+    evidence: list[str]  # 근거 시그널 URL/제목
+    vxis_impact: str  # VXIS에 미치는 영향
+    options: list[dict]  # 적용 옵션 [{label, description, effort, risk}]
+    recommendation: str  # 추천 옵션
+    priority: str  # critical, high, medium, low
     related_tags: list[str] = field(default_factory=list)
 
 
@@ -57,7 +58,7 @@ class WeeklyReport:
     total_signals: int
     trends: list[TrendItem]
     cisa_kev_alerts: list[dict]  # 이번 주 CISA KEV 추가분
-    raw_signal_summary: dict     # 소스별 시그널 수
+    raw_signal_summary: dict  # 소스별 시그널 수
 
 
 SYNTHESIZER_SYSTEM_PROMPT = """\
@@ -145,7 +146,8 @@ def synthesize(signals: list[Signal]) -> WeeklyReport:
     # CISA KEV 별도 추출
     kev_alerts = [
         {"title": s.title, "url": s.url, "metadata": s.metadata}
-        for s in signals if s.source == "cisa_kev"
+        for s in signals
+        if s.source == "cisa_kev"
     ]
 
     # LLM 분석
@@ -250,19 +252,23 @@ def format_report_markdown(report: WeeklyReport) -> str:
             priority_icon = {"critical": "🚨", "high": "🔶", "medium": "💡", "low": "📌"}.get(
                 trend.priority, "📌"
             )
-            lines.extend([
-                f"### {priority_icon} Trend {i}: {trend.title}",
-                "",
-                trend.description,
-                "",
-                "**근거:**",
-            ])
+            lines.extend(
+                [
+                    f"### {priority_icon} Trend {i}: {trend.title}",
+                    "",
+                    trend.description,
+                    "",
+                    "**근거:**",
+                ]
+            )
             for ev in trend.evidence[:5]:
                 lines.append(f"- {ev}")
 
             lines.extend(["", f"**VXIS 영향:** {trend.vxis_impact}", "", "**옵션:**"])
             for opt in trend.options:
-                risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(opt.get("risk", ""), "⚪")
+                risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(
+                    opt.get("risk", ""), "⚪"
+                )
                 lines.append(
                     f"- {opt.get('label', '')} — {opt.get('description', '')} "
                     f"(소요: {opt.get('effort', '?')}, 위험: {risk_icon})"

@@ -78,10 +78,7 @@ class TestIsLocalBenchmark:
         assert _is_local_benchmark("https://localhost.evil.example:3000") is False
 
     def test_localhost_in_query_is_not_benchmark(self) -> None:
-        assert (
-            _is_local_benchmark("https://evil.example/?next=http://localhost:3000")
-            is False
-        )
+        assert _is_local_benchmark("https://evil.example/?next=http://localhost:3000") is False
 
     def test_localhost_userinfo_is_not_benchmark(self) -> None:
         assert _is_local_benchmark("http://localhost:3000@evil.example") is False

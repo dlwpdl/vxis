@@ -77,8 +77,7 @@ SCAN_TYPE_PLUGINS: dict[str, list[str] | None] = {
     "full": None,  # all plugins
 }
 SCAN_TYPE_TIERS = {
-    scan_type: 1 if scan_type == "zero_touch" else 2
-    for scan_type in SCAN_TYPE_PLUGINS
+    scan_type: 1 if scan_type == "zero_touch" else 2 for scan_type in SCAN_TYPE_PLUGINS
 }
 
 _HOST_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")

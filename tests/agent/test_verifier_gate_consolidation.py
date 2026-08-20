@@ -9,6 +9,7 @@ These pin the behaviour the two drifted gate copies must share once consolidated
 1.1 is behaviour-preserving: verification still fires only on high/critical here; the
 all-severity change is 1.2.
 """
+
 import pytest
 
 from vxis.agent.scan_loop import ScanAgentLoop

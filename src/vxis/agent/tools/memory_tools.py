@@ -8,6 +8,7 @@ let me verify those still exist and hunt for new ones").
 Phase B first step toward the full episodic memory that Phase C will build
 out into a proper vector DB.
 """
+
 from __future__ import annotations
 
 import json
@@ -49,6 +50,7 @@ def _evidence_fingerprint(item: dict[str, Any]) -> str:
 def _canonical_finding_type(value: str) -> str:
     try:
         from vxis.agent.tools.finding_tools import _canonical_finding_type as _canonical
+
         return _canonical(value)
     except Exception:
         return str(value or "").lower().strip()
@@ -111,7 +113,9 @@ def _severity_rank(severity: str) -> int:
     }.get(str(severity or "").lower().strip(), 0)
 
 
-def _snapshot_finding(finding: dict[str, Any], *, timestamp: str, scan_id: str = "") -> dict[str, Any]:
+def _snapshot_finding(
+    finding: dict[str, Any], *, timestamp: str, scan_id: str = ""
+) -> dict[str, Any]:
     canonical_type = _canonical_finding_type(str(finding.get("finding_type", "")))
     affected_component = str(finding.get("affected_component", ""))
     return {
@@ -128,7 +132,9 @@ def _snapshot_finding(finding: dict[str, Any], *, timestamp: str, scan_id: str =
         "occurrences": 1,
         "source_scan_ids": [scan_id] if scan_id else [],
         "variant_titles": [str(finding.get("title", ""))[:160]] if finding.get("title") else [],
-        "variant_types": [str(finding.get("finding_type", ""))[:80]] if finding.get("finding_type") else [],
+        "variant_types": [str(finding.get("finding_type", ""))[:80]]
+        if finding.get("finding_type")
+        else [],
     }
 
 
@@ -184,7 +190,10 @@ def _merge_aggregated_findings(
 
     return sorted(
         merged.values(),
-        key=lambda item: (-_severity_rank(str(item.get("severity", ""))), str(item.get("title", ""))),
+        key=lambda item: (
+            -_severity_rank(str(item.get("severity", ""))),
+            str(item.get("title", "")),
+        ),
     )[:100]
 
 
@@ -195,26 +204,32 @@ def _scan_findings_for_rebuild(scan: dict[str, Any]) -> list[dict[str, Any]]:
         for item in snapshots:
             if not isinstance(item, dict):
                 continue
-            rebuilt.append({
-                "finding_type": str(item.get("raw_finding_type") or item.get("finding_type") or ""),
-                "affected_component": str(item.get("affected_component", "")),
-                "severity": str(item.get("severity", "")),
-                "title": str(item.get("title", "")),
-                "description": str(item.get("description", "")),
-            })
+            rebuilt.append(
+                {
+                    "finding_type": str(
+                        item.get("raw_finding_type") or item.get("finding_type") or ""
+                    ),
+                    "affected_component": str(item.get("affected_component", "")),
+                    "severity": str(item.get("severity", "")),
+                    "title": str(item.get("title", "")),
+                    "description": str(item.get("description", "")),
+                }
+            )
         return rebuilt
     summaries = list(scan.get("finding_summaries") or [])
     rebuilt = []
     for item in summaries:
         if not isinstance(item, dict):
             continue
-        rebuilt.append({
-            "finding_type": str(item.get("finding_type", "")),
-            "affected_component": str(item.get("affected_component", "")),
-            "severity": str(item.get("severity", "")),
-            "title": str(item.get("title", "")),
-            "description": "",
-        })
+        rebuilt.append(
+            {
+                "finding_type": str(item.get("finding_type", "")),
+                "affected_component": str(item.get("affected_component", "")),
+                "severity": str(item.get("severity", "")),
+                "title": str(item.get("title", "")),
+                "description": "",
+            }
+        )
     return rebuilt
 
 
@@ -249,21 +264,25 @@ def _rebuild_target_memory_entry(entry: dict[str, Any]) -> dict[str, Any]:
     for item in list(entry.get("refuted_patterns") or []):
         if not isinstance(item, dict):
             continue
-        normalized_refuted.append({
-            **item,
-            "finding_type": _canonical_finding_type(str(item.get("finding_type", ""))),
-            "affected_component": str(item.get("affected_component", ""))[:240],
-        })
+        normalized_refuted.append(
+            {
+                **item,
+                "finding_type": _canonical_finding_type(str(item.get("finding_type", ""))),
+                "affected_component": str(item.get("affected_component", ""))[:240],
+            }
+        )
     entry["refuted_patterns"] = normalized_refuted[-50:]
     normalized_tactics: list[dict[str, Any]] = []
     for item in list(entry.get("successful_tactics") or []):
         if not isinstance(item, dict):
             continue
-        normalized_tactics.append({
-            **item,
-            "finding_type": _canonical_finding_type(str(item.get("finding_type", ""))),
-            "affected_component": str(item.get("affected_component", ""))[:240],
-        })
+        normalized_tactics.append(
+            {
+                **item,
+                "finding_type": _canonical_finding_type(str(item.get("finding_type", ""))),
+                "affected_component": str(item.get("affected_component", ""))[:240],
+            }
+        )
     entry["successful_tactics"] = normalized_tactics[-50:]
     return entry
 
@@ -488,14 +507,16 @@ def record_scan_result(
             if fingerprint:
                 known_refuted[pair]["evidence_fingerprint"] = fingerprint
             continue
-        refuted_patterns.append({
-            "finding_type": pair[0],
-            "affected_component": pair[1],
-            "title": str(item.get("title", ""))[:120],
-            "reasoning": str(item.get("reasoning", ""))[:240],
-            "last_seen": timestamp,
-            "evidence_fingerprint": fingerprint,
-        })
+        refuted_patterns.append(
+            {
+                "finding_type": pair[0],
+                "affected_component": pair[1],
+                "title": str(item.get("title", ""))[:120],
+                "reasoning": str(item.get("reasoning", ""))[:240],
+                "last_seen": timestamp,
+                "evidence_fingerprint": fingerprint,
+            }
+        )
         known_refuted[pair] = refuted_patterns[-1]
     entry["refuted_patterns"] = refuted_patterns[-50:]
 
@@ -512,40 +533,40 @@ def record_scan_result(
         )
         if not tactic[0] or tactic in seen_tactics:
             continue
-        successful_tactics.append({
-            "finding_type": _canonical_finding_type(tactic[0]),
-            "title": tactic[1],
-            "affected_component": str(item.get("affected_component", ""))[:200],
-            "confidence": str(item.get("confidence", ""))[:32],
-            "reasoning": str(item.get("reasoning", ""))[:240],
-            "last_seen": timestamp,
-        })
+        successful_tactics.append(
+            {
+                "finding_type": _canonical_finding_type(tactic[0]),
+                "title": tactic[1],
+                "affected_component": str(item.get("affected_component", ""))[:200],
+                "confidence": str(item.get("confidence", ""))[:32],
+                "reasoning": str(item.get("reasoning", ""))[:240],
+                "last_seen": timestamp,
+            }
+        )
         seen_tactics.add(tactic)
     entry["successful_tactics"] = successful_tactics[-50:]
 
     branch_leads = entry.setdefault("branch_leads", [])
-    seen_branches = {
-        str(item.get("id", ""))
-        for item in branch_leads
-        if isinstance(item, dict)
-    }
+    seen_branches = {str(item.get("id", "")) for item in branch_leads if isinstance(item, dict)}
     for branch in branches or []:
         if str(branch.get("status", "")).lower() in {"proven", "exhausted", "dead"}:
             continue
         branch_id = str(branch.get("id", ""))
         if not branch_id or branch_id in seen_branches:
             continue
-        branch_leads.append({
-            "id": branch_id,
-            "vector_id": str(branch.get("vector_id", ""))[:80],
-            "title": str(branch.get("title", ""))[:160],
-            "role": str(branch.get("role", ""))[:40],
-            "phase": str(branch.get("phase", ""))[:40],
-            "objective": str(branch.get("objective", ""))[:200],
-            "next_step": str(branch.get("next_step", ""))[:200],
-            "status": str(branch.get("status", ""))[:40],
-            "last_seen": timestamp,
-        })
+        branch_leads.append(
+            {
+                "id": branch_id,
+                "vector_id": str(branch.get("vector_id", ""))[:80],
+                "title": str(branch.get("title", ""))[:160],
+                "role": str(branch.get("role", ""))[:40],
+                "phase": str(branch.get("phase", ""))[:40],
+                "objective": str(branch.get("objective", ""))[:200],
+                "next_step": str(branch.get("next_step", ""))[:200],
+                "status": str(branch.get("status", ""))[:40],
+                "last_seen": timestamp,
+            }
+        )
         seen_branches.add(branch_id)
     entry["branch_leads"] = branch_leads[-50:]
 
@@ -564,7 +585,9 @@ def load_target_memory_profile(target: str) -> dict[str, Any]:
         "prior_scan_count": len(scans),
         "known_findings": list(entry.get("known_findings") or [])[:30],
         "aggregated_findings": list(entry.get("aggregated_findings") or [])[:50],
-        "refuted_patterns": _filtered_refuted_patterns(list(entry.get("refuted_patterns") or []))[:20],
+        "refuted_patterns": _filtered_refuted_patterns(list(entry.get("refuted_patterns") or []))[
+            :20
+        ],
         "successful_tactics": list(entry.get("successful_tactics") or [])[:20],
         "branch_leads": list(entry.get("branch_leads") or [])[:12],
         "last_scan": scans[-1] if scans else None,
@@ -673,12 +696,14 @@ class QueryScanMemoryTool:
                 recommended = last_fp.get("recommended_playbooks") or []
                 if stack_hint in [str(r).lower() for r in recommended]:
                     for kf in other_entry.get("known_findings", [])[:5]:
-                        cross_target.append({
-                            "source_target": other_key,
-                            "finding_type": kf.get("finding_type"),
-                            "affected_component": kf.get("affected_component"),
-                            "severity": kf.get("severity"),
-                        })
+                        cross_target.append(
+                            {
+                                "source_target": other_key,
+                                "finding_type": kf.get("finding_type"),
+                                "affected_component": kf.get("affected_component"),
+                                "severity": kf.get("severity"),
+                            }
+                        )
 
         if not entry and not cross_target:
             return ToolResult(
@@ -723,7 +748,8 @@ class QueryScanMemoryTool:
                 "cross_target_findings": cross_target[:20],
                 "stack_hint": stack_hint or None,
             },
-            summary="query_scan_memory: " + ". ".join(summary_parts)
+            summary="query_scan_memory: "
+            + ". ".join(summary_parts)
             + ". Verify these still exist and hunt for new ones."
             if summary_parts
             else f"query_scan_memory: no prior data for {key}.",

@@ -4,6 +4,7 @@ A 3rd fail-closed gate (after P1 + scope) refuses exploitation primitives
 (shell_exec/python_exec) when an active ScanPolicy's exploitation ceiling is
 below 'lateral'. Active-only: no ambient policy → legacy (no block).
 """
+
 import pytest
 
 from vxis.agent.policy.runtime_policy import (

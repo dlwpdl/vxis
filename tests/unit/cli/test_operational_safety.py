@@ -142,7 +142,9 @@ def test_dashboard_init_uses_configured_password_and_canonical_db(
     monkeypatch.setattr("vxis.core.db.create_engine", create_engine)
     monkeypatch.setattr("vxis.core.db.init_db", init_db)
     monkeypatch.setattr("vxis.dashboard.auth.ensure_default_admin", ensure_default_admin)
-    monkeypatch.setattr(cli.console, "print", lambda value, *args, **kwargs: output.append(str(value)))
+    monkeypatch.setattr(
+        cli.console, "print", lambda value, *args, **kwargs: output.append(str(value))
+    )
 
     cli.dashboard_init("super-secret")
 

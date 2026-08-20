@@ -129,9 +129,7 @@ class LeakedCredentialWatcher(BaseWatcher):
         logger.info("[leaked_credential] 수집 완료: %d건", len(items))
         return items
 
-    def _fetch_hibp_domain(
-        self, domain: str, api_key: str
-    ) -> list[dict[str, Any]]:
+    def _fetch_hibp_domain(self, domain: str, api_key: str) -> list[dict[str, Any]]:
         """HIBP 전체 침해 목록에서 타겟 도메인 관련 침해 사고 필터링.
 
         /breaches 엔드포인트는 모든 침해 사고의 메타데이터를 반환한다.
@@ -175,29 +173,27 @@ class LeakedCredentialWatcher(BaseWatcher):
             breach_id = f"hibp:breach:{breach.get('Name', '')}:{domain}"
             data_classes = breach.get("DataClasses", [])
 
-            items.append({
-                "id": breach_id,
-                "source": "hibp_breach",
-                "domain": domain,
-                "breach_name": breach.get("Name", ""),
-                "breach_title": breach.get("Title", ""),
-                "breach_date": breach.get("BreachDate", ""),
-                "added_date": breach.get("AddedDate", ""),
-                "pwn_count": breach.get("PwnCount", 0),
-                "data_classes": data_classes,
-                "is_verified": breach.get("IsVerified", False),
-                "is_sensitive": breach.get("IsSensitive", False),
-                "description": breach.get("Description", ""),
-            })
+            items.append(
+                {
+                    "id": breach_id,
+                    "source": "hibp_breach",
+                    "domain": domain,
+                    "breach_name": breach.get("Name", ""),
+                    "breach_title": breach.get("Title", ""),
+                    "breach_date": breach.get("BreachDate", ""),
+                    "added_date": breach.get("AddedDate", ""),
+                    "pwn_count": breach.get("PwnCount", 0),
+                    "data_classes": data_classes,
+                    "is_verified": breach.get("IsVerified", False),
+                    "is_sensitive": breach.get("IsSensitive", False),
+                    "description": breach.get("Description", ""),
+                }
+            )
 
-        logger.debug(
-            "[leaked_credential] HIBP 도메인 매칭: %d건 (도메인: %s)", len(items), domain
-        )
+        logger.debug("[leaked_credential] HIBP 도메인 매칭: %d건 (도메인: %s)", len(items), domain)
         return items
 
-    def _fetch_hibp_account(
-        self, email: str, domain: str, api_key: str
-    ) -> list[dict[str, Any]]:
+    def _fetch_hibp_account(self, email: str, domain: str, api_key: str) -> list[dict[str, Any]]:
         """특정 이메일 계정이 침해됐는지 HIBP로 확인."""
         items: list[dict[str, Any]] = []
 
@@ -222,26 +218,24 @@ class LeakedCredentialWatcher(BaseWatcher):
                 continue
 
             breach_id = f"hibp:account:{email}:{breach.get('Name', '')}"
-            items.append({
-                "id": breach_id,
-                "source": "hibp_account",
-                "domain": domain,
-                "email": email,
-                "breach_name": breach.get("Name", ""),
-                "breach_title": breach.get("Title", ""),
-                "breach_date": breach.get("BreachDate", ""),
-                "data_classes": breach.get("DataClasses", []),
-                "is_verified": breach.get("IsVerified", False),
-            })
+            items.append(
+                {
+                    "id": breach_id,
+                    "source": "hibp_account",
+                    "domain": domain,
+                    "email": email,
+                    "breach_name": breach.get("Name", ""),
+                    "breach_title": breach.get("Title", ""),
+                    "breach_date": breach.get("BreachDate", ""),
+                    "data_classes": breach.get("DataClasses", []),
+                    "is_verified": breach.get("IsVerified", False),
+                }
+            )
 
-        logger.debug(
-            "[leaked_credential] HIBP 계정 침해: %d건 (이메일: %s)", len(items), email
-        )
+        logger.debug("[leaked_credential] HIBP 계정 침해: %d건 (이메일: %s)", len(items), email)
         return items
 
-    def _fetch_github_credentials(
-        self, domain: str, token: str
-    ) -> list[dict[str, Any]]:
+    def _fetch_github_credentials(self, domain: str, token: str) -> list[dict[str, Any]]:
         """GitHub Code Search로 타겟 도메인의 노출된 자격증명 탐색."""
         items: list[dict[str, Any]] = []
 
@@ -283,16 +277,18 @@ class LeakedCredentialWatcher(BaseWatcher):
                 item_id = f"github:cred:{item_hash}:{domain}"
 
                 repo = item.get("repository", {})
-                items.append({
-                    "id": item_id,
-                    "source": "github_cred",
-                    "domain": domain,
-                    "query": query,
-                    "file_name": item.get("name", ""),
-                    "repo_full_name": repo.get("full_name", ""),
-                    "html_url": html_url,
-                    "sha": sha,
-                })
+                items.append(
+                    {
+                        "id": item_id,
+                        "source": "github_cred",
+                        "domain": domain,
+                        "query": query,
+                        "file_name": item.get("name", ""),
+                        "repo_full_name": repo.get("full_name", ""),
+                        "html_url": html_url,
+                        "sha": sha,
+                    }
+                )
 
         logger.debug(
             "[leaked_credential] GitHub 자격증명 탐색: %d건 (도메인: %s)", len(items), domain
@@ -301,9 +297,7 @@ class LeakedCredentialWatcher(BaseWatcher):
 
     # ── match ────────────────────────────────────────────────────
 
-    async def match(
-        self, items: list[dict[str, Any]]
-    ) -> list[WatcherAlert]:
+    async def match(self, items: list[dict[str, Any]]) -> list[WatcherAlert]:
         """항목별 심각도 판단 및 알림 생성."""
         alerts: list[WatcherAlert] = []
 
@@ -331,9 +325,7 @@ class LeakedCredentialWatcher(BaseWatcher):
         pwn_count = item.get("pwn_count", 0)
 
         # 심각도: 패스워드/이메일 포함 여부 + 피해 규모
-        has_passwords = any(
-            "password" in dc.lower() for dc in data_classes
-        )
+        has_passwords = any("password" in dc.lower() for dc in data_classes)
         is_sensitive = item.get("is_sensitive", False)
 
         if has_passwords or is_sensitive:
@@ -465,13 +457,15 @@ class LeakedCredentialWatcher(BaseWatcher):
                 continue
 
             target = alert.target
-            domain_accounts.setdefault(target, []).append({
-                "title": alert.title,
-                "severity": alert.severity,
-                "data": alert.data,
-                "timestamp": alert.timestamp,
-                "actionable": alert.actionable,
-            })
+            domain_accounts.setdefault(target, []).append(
+                {
+                    "title": alert.title,
+                    "severity": alert.severity,
+                    "data": alert.data,
+                    "timestamp": alert.timestamp,
+                    "actionable": alert.actionable,
+                }
+            )
 
         for domain, entries in domain_accounts.items():
             report_path = report_dir / f"leaked_cred_{domain}.json"
@@ -502,6 +496,7 @@ class LeakedCredentialWatcher(BaseWatcher):
 
 
 # ── 문법 자가 검증 ────────────────────────────────────────────────
+
 
 def _self_verify() -> None:
     """모듈 로드 시 ast.parse로 자신의 소스 문법 검증."""

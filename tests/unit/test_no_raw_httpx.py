@@ -19,6 +19,7 @@ and will be purged in a follow-up phase. Adding new files there is a
 regression too — the test fails if any file uses raw httpx without being in
 ALLOWED ∪ DEFERRED.
 """
+
 from __future__ import annotations
 
 import ast
@@ -26,12 +27,14 @@ import pathlib
 
 # Files that legitimately own the httpx abstraction. Adding to this list
 # requires architectural justification.
-ALLOWED: frozenset[str] = frozenset({
-    "src/vxis/interaction/hands.py",        # the SessionManager / TargetSession owner
-    "src/vxis/agent/tools/hands_tools.py",  # tool-call wrapper around Hands
-    "src/vxis/ghost/transport.py",          # httpx.AsyncBaseTransport impl — legitimately owns raw httpx
-    "src/vxis/cli/preflight.py",            # ghost proxy-readiness probe: must test a specific proxy directly, not via the ghost-routed SessionManager
-})
+ALLOWED: frozenset[str] = frozenset(
+    {
+        "src/vxis/interaction/hands.py",  # the SessionManager / TargetSession owner
+        "src/vxis/agent/tools/hands_tools.py",  # tool-call wrapper around Hands
+        "src/vxis/ghost/transport.py",  # httpx.AsyncBaseTransport impl — legitimately owns raw httpx
+        "src/vxis/cli/preflight.py",  # ghost proxy-readiness probe: must test a specific proxy directly, not via the ghost-routed SessionManager
+    }
+)
 
 # Pre-existing offenders carved out of phase-B.4 scope. These are tracked for
 # a follow-up phase. The list must only shrink — never grow.
@@ -73,8 +76,7 @@ def test_no_module_uses_raw_httpx_outside_allowed_or_deferred() -> None:
 
     assert not new_offenders, (
         "raw httpx introduced outside the abstraction owners — route through "
-        "vxis.interaction.hands.SessionManager instead. Offenders:\n  "
-        + "\n  ".join(new_offenders)
+        "vxis.interaction.hands.SessionManager instead. Offenders:\n  " + "\n  ".join(new_offenders)
     )
 
 
@@ -92,8 +94,8 @@ def test_phase_b4_documented_files_are_clean() -> None:
         line = _imports_httpx(repo_root / rel)
         if line is not None:
             still_dirty.append(f"{rel}:{line}")
-    assert not still_dirty, (
-        "phase-B.4 plan targets still import raw httpx:\n  " + "\n  ".join(still_dirty)
+    assert not still_dirty, "phase-B.4 plan targets still import raw httpx:\n  " + "\n  ".join(
+        still_dirty
     )
 
 
@@ -108,6 +110,4 @@ def test_deferred_set_only_shrinks() -> None:
             continue
         if _imports_httpx(path) is None:
             stale.append(f"{rel} (cleaned — remove from DEFERRED)")
-    assert not stale, (
-        "DEFERRED list is stale — prune cleaned-up entries:\n  " + "\n  ".join(stale)
-    )
+    assert not stale, "DEFERRED list is stale — prune cleaned-up entries:\n  " + "\n  ".join(stale)

@@ -67,7 +67,9 @@ def _redact_record(value: Any, *, key: str = "") -> Any:
     ):
         return "***"
     if isinstance(value, dict):
-        return {item_key: _redact_record(item, key=str(item_key)) for item_key, item in value.items()}
+        return {
+            item_key: _redact_record(item, key=str(item_key)) for item_key, item in value.items()
+        }
     if isinstance(value, list):
         return [_redact_record(item) for item in value]
     if isinstance(value, tuple):

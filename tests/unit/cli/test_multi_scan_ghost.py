@@ -27,6 +27,5 @@ def test_already_ghost_url_is_untouched():
 
 def test_non_web_kind_is_untouched():
     assert (
-        _ghost_run_target("/path/to/App.app", TargetKind.DESKTOP, ghost=True)
-        == "/path/to/App.app"
+        _ghost_run_target("/path/to/App.app", TargetKind.DESKTOP, ghost=True) == "/path/to/App.app"
     )

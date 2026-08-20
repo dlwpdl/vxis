@@ -57,17 +57,13 @@ class TestAlembicConfig:
         with sqlite3.connect(db_path) as connection:
             tables = {
                 row[0]
-                for row in connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table'"
-                )
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
             }
             comment_indexes = {
-                row[1]
-                for row in connection.execute("PRAGMA index_list('finding_comment_records')")
+                row[1] for row in connection.execute("PRAGMA index_list('finding_comment_records')")
             }
             review_indexes = {
-                row[1]
-                for row in connection.execute("PRAGMA index_list('finding_review_records')")
+                row[1] for row in connection.execute("PRAGMA index_list('finding_review_records')")
             }
 
         assert {

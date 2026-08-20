@@ -68,8 +68,7 @@ class ScanLoopDecisionPolicyMixin:
                 continue
             if branch.id not in blocker_ids and branch.source_candidate_id not in blocker_ids:
                 if (
-                    branch.owner == "memory"
-                    or branch.id.startswith(("carry:", "memory:"))
+                    branch.owner == "memory" or branch.id.startswith(("carry:", "memory:"))
                 ) and not self._branch_has_finish_blocking_yield(branch):
                     branch.status = "exhausted"
                     branch.last_report = (
@@ -395,15 +394,9 @@ class ScanLoopDecisionPolicyMixin:
             return True
         if branch.source_finding_id:
             return score >= 65
-        if (
-            family == "disclosure"
-            and self._has_stronger_foothold_than_disclosure()
-        ):
+        if family == "disclosure" and self._has_stronger_foothold_than_disclosure():
             return score >= 78
-        if (
-            family == "disclosure"
-            and self._disclosure_campaign_lacks_reusable_material()
-        ):
+        if family == "disclosure" and self._disclosure_campaign_lacks_reusable_material():
             return score >= 82
         return branch.attempts < 2 or score >= 78
 
@@ -773,9 +766,13 @@ class ScanLoopDecisionPolicyMixin:
                     continue
                 method = str(item.get("method") or "").upper()
                 path = str(item.get("path") or item.get("url") or "").lower()
-                has_body = any(item.get(key) for key in ("body", "request_body", "json", "json_data"))
-                if method in {"POST", "PUT", "PATCH"} and has_body and any(
-                    marker in path for marker in business_markers
+                has_body = any(
+                    item.get(key) for key in ("body", "request_body", "json", "json_data")
+                )
+                if (
+                    method in {"POST", "PUT", "PATCH"}
+                    and has_body
+                    and any(marker in path for marker in business_markers)
                 ):
                     flows.append(dict(item))
                     if len(flows) >= 12:
@@ -1411,8 +1408,7 @@ class ScanLoopDecisionPolicyMixin:
         if str(branch.vector_id or "") != "NET-SERVICE-PIVOT":
             return None
         if any(
-            child_id in self.state.branches
-            and self.state.branches[child_id].owner == "agent_graph"
+            child_id in self.state.branches and self.state.branches[child_id].owner == "agent_graph"
             for child_id in branch.child_ids
         ):
             return None
@@ -2297,7 +2293,11 @@ class ScanLoopDecisionPolicyMixin:
             if open_candidates:
                 forced = self._forced_candidate_action(open_candidates[0])
                 if forced is not None:
-                    return forced[0], forced[1], f"suggesting first attempt on {open_candidates[0].id}"
+                    return (
+                        forced[0],
+                        forced[1],
+                        f"suggesting first attempt on {open_candidates[0].id}",
+                    )
         return None
 
     @staticmethod
@@ -2743,9 +2743,7 @@ class ScanLoopDecisionPolicyMixin:
             mem_component = str(item.get("affected_component", "")).strip().lower()
             if not mem_type or not mem_component or mem_type not in action_types:
                 continue
-            if not self._refuted_memory_is_current(
-                item, args if isinstance(args, dict) else {}
-            ):
+            if not self._refuted_memory_is_current(item, args if isinstance(args, dict) else {}):
                 continue
             if any(
                 mem_component in component or component in mem_component

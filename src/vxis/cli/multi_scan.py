@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _build_base_scan_id() -> str:
     return f"VXIS-MULTI-{time.strftime('%Y%m%d-%H%M%S')}"
 
@@ -208,9 +209,7 @@ def _emit_report(
     report_data = ReportData(
         scan_id=base_scan_id,
         client_name=manifest.project,
-        target=", ".join(
-            t.entry for t in manifest.targets if not t.skip
-        ),
+        target=", ".join(t.entry for t in manifest.targets if not t.skip),
         scan_date=date.today().isoformat(),
         findings=all_findings,
         attack_chains=attack_chains or None,
@@ -224,6 +223,7 @@ def _emit_report(
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def multi_scan(manifest: ScanManifest, *, ghost: bool = False) -> int:
     """Orchestrate a multi-target scan and return a POSIX exit code.

@@ -123,32 +123,39 @@ def test_record_scan_result_skips_soft_refutation_reasons(tmp_path, monkeypatch)
 def test_load_target_memory_profile_filters_legacy_soft_refutations(tmp_path, monkeypatch) -> None:
     kb_path = tmp_path / "scan_kb.json"
     monkeypatch.setattr(memory_tools, "_KB_PATH", kb_path)
-    kb_path.write_text(json.dumps({
-        "targets": {
-            "http://localhost:3000": {
-                "refuted_patterns": [
-                    {
-                        "finding_type": "sql_injection",
-                        "affected_component": "/rest/user/login",
-                        "reasoning": "verify_finding: REFUTED (high) — incomplete high-severity report contract",
-                    },
-                    {
-                        "finding_type": "error_oracle",
-                        "affected_component": "/api/foo",
-                        "reasoning": "Generic 500 page only.",
-                    },
-                ],
-                "scans": [],
+    kb_path.write_text(
+        json.dumps(
+            {
+                "targets": {
+                    "http://localhost:3000": {
+                        "refuted_patterns": [
+                            {
+                                "finding_type": "sql_injection",
+                                "affected_component": "/rest/user/login",
+                                "reasoning": "verify_finding: REFUTED (high) — incomplete high-severity report contract",
+                            },
+                            {
+                                "finding_type": "error_oracle",
+                                "affected_component": "/api/foo",
+                                "reasoning": "Generic 500 page only.",
+                            },
+                        ],
+                        "scans": [],
+                    }
+                }
             }
-        }
-    }), encoding="utf-8")
+        ),
+        encoding="utf-8",
+    )
 
     profile = memory_tools.load_target_memory_profile("http://localhost:3000")
     assert len(profile["refuted_patterns"]) == 1
     assert profile["refuted_patterns"][0]["finding_type"] == "error_oracle"
 
 
-def test_record_scan_result_aggregates_same_target_findings_across_runs(tmp_path, monkeypatch) -> None:
+def test_record_scan_result_aggregates_same_target_findings_across_runs(
+    tmp_path, monkeypatch
+) -> None:
     kb_path = tmp_path / "scan_kb.json"
     monkeypatch.setattr(memory_tools, "_KB_PATH", kb_path)
 
@@ -185,7 +192,9 @@ def test_record_scan_result_aggregates_same_target_findings_across_runs(tmp_path
     assert set(merged["source_scan_ids"]) == {"VXIS-1", "VXIS-2"}
 
 
-def test_record_scan_result_collapses_git_variant_paths_into_single_aggregate(tmp_path, monkeypatch) -> None:
+def test_record_scan_result_collapses_git_variant_paths_into_single_aggregate(
+    tmp_path, monkeypatch
+) -> None:
     kb_path = tmp_path / "scan_kb.json"
     monkeypatch.setattr(memory_tools, "_KB_PATH", kb_path)
 
@@ -215,7 +224,11 @@ def test_record_scan_result_collapses_git_variant_paths_into_single_aggregate(tm
     )
 
     profile = memory_tools.load_target_memory_profile("http://localhost:3000")
-    git_items = [item for item in profile["aggregated_findings"] if item["canonical_key"] == "misconfiguration::/.git"]
+    git_items = [
+        item
+        for item in profile["aggregated_findings"]
+        if item["canonical_key"] == "misconfiguration::/.git"
+    ]
     assert len(git_items) == 1
     assert git_items[0]["occurrences"] == 2
 
@@ -223,40 +236,49 @@ def test_record_scan_result_collapses_git_variant_paths_into_single_aggregate(tm
 def test_migrate_scan_kb_rebuilds_legacy_aggregates(tmp_path, monkeypatch) -> None:
     kb_path = tmp_path / "scan_kb.json"
     monkeypatch.setattr(memory_tools, "_KB_PATH", kb_path)
-    kb_path.write_text(json.dumps({
-        "targets": {
-            "http://localhost:3000": {
-                "scans": [
-                    {
-                        "timestamp": "2026-05-09T00:00:00+00:00",
-                        "scan_id": "VXIS-1",
-                        "finding_summaries": [
+    kb_path.write_text(
+        json.dumps(
+            {
+                "targets": {
+                    "http://localhost:3000": {
+                        "scans": [
                             {
-                                "finding_type": "misconfiguration",
-                                "affected_component": "http://localhost:3000/.git/description",
-                                "severity": "critical",
-                                "title": "Infrastructure exposure: git_exposed",
-                            },
-                            {
-                                "finding_type": "misconfiguration",
-                                "affected_component": "http://localhost:3000/.git/COMMIT_EDITMSG",
-                                "severity": "critical",
-                                "title": "Infrastructure exposure: git_exposed",
-                            },
+                                "timestamp": "2026-05-09T00:00:00+00:00",
+                                "scan_id": "VXIS-1",
+                                "finding_summaries": [
+                                    {
+                                        "finding_type": "misconfiguration",
+                                        "affected_component": "http://localhost:3000/.git/description",
+                                        "severity": "critical",
+                                        "title": "Infrastructure exposure: git_exposed",
+                                    },
+                                    {
+                                        "finding_type": "misconfiguration",
+                                        "affected_component": "http://localhost:3000/.git/COMMIT_EDITMSG",
+                                        "severity": "critical",
+                                        "title": "Infrastructure exposure: git_exposed",
+                                    },
+                                ],
+                            }
                         ],
+                        "known_findings": [],
+                        "aggregated_findings": [],
                     }
-                ],
-                "known_findings": [],
-                "aggregated_findings": [],
+                }
             }
-        }
-    }), encoding="utf-8")
+        ),
+        encoding="utf-8",
+    )
 
     result = memory_tools.migrate_scan_kb()
     assert result["targets"] == 1
 
     profile = memory_tools.load_target_memory_profile("http://localhost:3000")
-    git_items = [item for item in profile["aggregated_findings"] if item["canonical_key"] == "misconfiguration::/.git"]
+    git_items = [
+        item
+        for item in profile["aggregated_findings"]
+        if item["canonical_key"] == "misconfiguration::/.git"
+    ]
     assert len(git_items) == 1
     assert git_items[0]["occurrences"] == 2
 
@@ -264,40 +286,45 @@ def test_migrate_scan_kb_rebuilds_legacy_aggregates(tmp_path, monkeypatch) -> No
 def test_migrate_scan_kb_prunes_stale_oneoff_noise(tmp_path, monkeypatch) -> None:
     kb_path = tmp_path / "scan_kb.json"
     monkeypatch.setattr(memory_tools, "_KB_PATH", kb_path)
-    kb_path.write_text(json.dumps({
-        "targets": {
-            "http://localhost:3000": {
-                "scans": [
-                    {
-                        "timestamp": "2026-05-08T00:00:00+00:00",
-                        "scan_id": "VXIS-1",
-                        "finding_summaries": [
+    kb_path.write_text(
+        json.dumps(
+            {
+                "targets": {
+                    "http://localhost:3000": {
+                        "scans": [
                             {
-                                "finding_type": "nosql",
-                                "affected_component": "http://localhost:3000/rest/products/search?q=test",
-                                "severity": "medium",
-                                "title": "NoSQL on q",
-                            },
-                            {
-                                "finding_type": "ssti",
-                                "affected_component": "http://localhost:3000/rest/products/search?q=test",
-                                "severity": "medium",
-                                "title": "SSTI on q",
-                            },
-                            {
-                                "finding_type": "sql_injection",
-                                "affected_component": "http://localhost:3000/rest/products/search?q=test",
-                                "severity": "critical",
-                                "title": "SQLI on q",
-                            },
+                                "timestamp": "2026-05-08T00:00:00+00:00",
+                                "scan_id": "VXIS-1",
+                                "finding_summaries": [
+                                    {
+                                        "finding_type": "nosql",
+                                        "affected_component": "http://localhost:3000/rest/products/search?q=test",
+                                        "severity": "medium",
+                                        "title": "NoSQL on q",
+                                    },
+                                    {
+                                        "finding_type": "ssti",
+                                        "affected_component": "http://localhost:3000/rest/products/search?q=test",
+                                        "severity": "medium",
+                                        "title": "SSTI on q",
+                                    },
+                                    {
+                                        "finding_type": "sql_injection",
+                                        "affected_component": "http://localhost:3000/rest/products/search?q=test",
+                                        "severity": "critical",
+                                        "title": "SQLI on q",
+                                    },
+                                ],
+                            }
                         ],
+                        "known_findings": [],
+                        "aggregated_findings": [],
                     }
-                ],
-                "known_findings": [],
-                "aggregated_findings": [],
+                }
             }
-        }
-    }), encoding="utf-8")
+        ),
+        encoding="utf-8",
+    )
 
     memory_tools.migrate_scan_kb()
     profile = memory_tools.load_target_memory_profile("http://localhost:3000")

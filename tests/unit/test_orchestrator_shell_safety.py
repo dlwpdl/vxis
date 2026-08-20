@@ -54,7 +54,7 @@ async def test_orchestrator_never_runs_plugin_commands_through_a_shell(
 
 
 def test_s3scanner_passes_bucket_names_as_bash_arguments() -> None:
-    malicious_bucket = 'safe\n$(touch /tmp/vxis-injected)\"; echo owned'
+    malicious_bucket = 'safe\n$(touch /tmp/vxis-injected)"; echo owned'
     context = DAGContext(target="https://example.com", scan_profile="standard")
 
     command = S3ScannerPlugin().build_command(

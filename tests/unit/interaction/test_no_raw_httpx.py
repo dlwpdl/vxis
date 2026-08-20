@@ -9,17 +9,20 @@ ALLOWED: abstraction owners that legitimately hold raw httpx (impl side).
 
 Every other file in src/vxis must route HTTP through SessionManager.
 """
+
 from __future__ import annotations
 
 import ast
 import pathlib
 
-ALLOWED: frozenset[str] = frozenset({
-    "src/vxis/interaction/hands.py",
-    "src/vxis/agent/tools/hands_tools.py",
-    "src/vxis/ghost/transport.py",
-    "src/vxis/cli/preflight.py",  # ghost proxy-readiness probe — tests a specific proxy directly
-})
+ALLOWED: frozenset[str] = frozenset(
+    {
+        "src/vxis/interaction/hands.py",
+        "src/vxis/agent/tools/hands_tools.py",
+        "src/vxis/ghost/transport.py",
+        "src/vxis/cli/preflight.py",  # ghost proxy-readiness probe — tests a specific proxy directly
+    }
+)
 
 
 def test_no_module_uses_raw_httpx() -> None:
@@ -46,6 +49,5 @@ def test_no_module_uses_raw_httpx() -> None:
 
     assert offenders == [], (
         "raw httpx found outside ALLOWED abstraction owners — route through "
-        "vxis.interaction.hands.SessionManager instead:\n  "
-        + "\n  ".join(offenders)
+        "vxis.interaction.hands.SessionManager instead:\n  " + "\n  ".join(offenders)
     )

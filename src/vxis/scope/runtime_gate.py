@@ -4,6 +4,7 @@ Mirrors p1.runtime_gate but injects an ambient ScopeEnforcer via ContextVar so
 EVERY target-facing tool call through ToolRegistry.dispatch is scope/approval
 checked even when no P1 engagement is active. Fail-closed.
 """
+
 from __future__ import annotations
 
 import os
@@ -111,10 +112,7 @@ def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateD
     """Return None when no scope is active or the tool is offline; otherwise allow/block."""
     enforcer = _ACTIVE.get()
     if enforcer is None:
-        if (
-            tool_name in _ARBITRARY_EXEC_TOOLS
-            and not arbitrary_exec_approved()
-        ):
+        if tool_name in _ARBITRARY_EXEC_TOOLS and not arbitrary_exec_approved():
             return _exec_approval_denial(tool_name)
         return None
     # Lazy import on purpose: importing vxis.agent.egress_contract at module top
@@ -134,10 +132,7 @@ def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateD
                 reason=f"{tool_name} contains network tooling but no parseable URL/host target",
                 policy="deny",
             )
-        if (
-            tool_name in _ARBITRARY_EXEC_TOOLS
-            and not arbitrary_exec_approved()
-        ):
+        if tool_name in _ARBITRARY_EXEC_TOOLS and not arbitrary_exec_approved():
             return _exec_approval_denial(tool_name)
         return None
     method = str(args.get("method") or "GET")
@@ -155,10 +150,7 @@ def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateD
             policy=result.policy.value,
             requires_approval=result.requires_approval,
         )
-    if (
-        tool_name in _ARBITRARY_EXEC_TOOLS
-        and not arbitrary_exec_approved()
-    ):
+    if tool_name in _ARBITRARY_EXEC_TOOLS and not arbitrary_exec_approved():
         return _exec_approval_denial(tool_name)
     return ScopeGateDecision(allowed=True)
 

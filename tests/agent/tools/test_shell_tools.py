@@ -138,7 +138,9 @@ async def test_ensure_sandbox_running_uses_per_scan_container_and_workspace(tmp_
     assert ("--cap-drop", "ALL") == run_call[
         run_call.index("--cap-drop") : run_call.index("--cap-drop") + 2
     ]
-    cap_adds = [run_call[index + 1] for index, arg in enumerate(run_call[:-1]) if arg == "--cap-add"]
+    cap_adds = [
+        run_call[index + 1] for index, arg in enumerate(run_call[:-1]) if arg == "--cap-add"
+    ]
     assert cap_adds == ["NET_RAW"]
     assert ("--security-opt", "no-new-privileges:true") == run_call[
         run_call.index("--security-opt") : run_call.index("--security-opt") + 2

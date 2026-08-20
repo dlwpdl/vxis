@@ -35,7 +35,9 @@ class ScanLoopActionMixin:
             return text
         return text[: limit - 3] + "..."
 
-    def _ui_action_details(self, name: str, args: dict[str, Any] | Any) -> tuple[str, str, str, str]:
+    def _ui_action_details(
+        self, name: str, args: dict[str, Any] | Any
+    ) -> tuple[str, str, str, str]:
         vector_id = name
         method = "TOOL"
         endpoint = self.state.target
@@ -187,7 +189,21 @@ class ScanLoopActionMixin:
         if len(lines) <= 6 and len(text) <= limit:
             return text[:limit]
         picked: list[str] = []
-        keywords = ("http/", "host:", "payload", "baseline", "control", "status", "response", "error", "token", "cookie", "admin", "select", "union")
+        keywords = (
+            "http/",
+            "host:",
+            "payload",
+            "baseline",
+            "control",
+            "status",
+            "response",
+            "error",
+            "token",
+            "cookie",
+            "admin",
+            "select",
+            "union",
+        )
         for line in lines:
             lower = line.lower()
             if any(token in lower for token in keywords):
@@ -226,29 +242,33 @@ class ScanLoopActionMixin:
             for item in list(compact.get("extra_evidence") or [])[:2]:
                 if not isinstance(item, dict):
                     continue
-                trimmed_extra.append({
-                    **item,
-                    "title": str(item.get("title", ""))[:60],
-                    "content": self._compact_local_reasoning_blob(item.get("content", ""), limit=700),
-                })
+                trimmed_extra.append(
+                    {
+                        **item,
+                        "title": str(item.get("title", ""))[:60],
+                        "content": self._compact_local_reasoning_blob(
+                            item.get("content", ""), limit=700
+                        ),
+                    }
+                )
             compact["extra_evidence"] = trimmed_extra
         return compact
 
     @staticmethod
-    def _callback_evidence_item(*, title: str, signal: str, payload: str, summary: str) -> dict[str, str]:
+    def _callback_evidence_item(
+        *, title: str, signal: str, payload: str, summary: str
+    ) -> dict[str, str]:
         return {
             "evidence_type": "callback",
             "title": title,
             "content_type": "text/plain",
-            "content": (
-                f"Signal: {signal}\n"
-                f"Payload: {payload}\n"
-                f"Summary: {summary}"
-            )[:4000],
+            "content": (f"Signal: {signal}\nPayload: {payload}\nSummary: {summary}")[:4000],
         }
 
     @staticmethod
-    def _retrieval_evidence_item(*, title: str, retrieval_kind: str, summary: str, sample: str) -> dict[str, str]:
+    def _retrieval_evidence_item(
+        *, title: str, retrieval_kind: str, summary: str, sample: str
+    ) -> dict[str, str]:
         return {
             "evidence_type": "retrieval",
             "title": title,
@@ -267,8 +287,7 @@ class ScanLoopActionMixin:
             "title": title,
             "content_type": "text/plain",
             "content": (
-                f"Summary: {summary}\n\n"
-                f"Sample:\n{_sanitize_evidence_text(sample, limit=3000)}"
+                f"Summary: {summary}\n\nSample:\n{_sanitize_evidence_text(sample, limit=3000)}"
             )[:4000],
         }
 
@@ -289,7 +308,9 @@ class ScanLoopActionMixin:
             original_value = original_params[param][0]
         payload_params = dict(original_params)
         payload_params[param] = [original_value + payload]
-        baseline_query = urlencode({k: v[0] for k, v in original_params.items()}) if original_params else ""
+        baseline_query = (
+            urlencode({k: v[0] for k, v in original_params.items()}) if original_params else ""
+        )
         payload_query = urlencode({k: v[0] for k, v in payload_params.items()})
         baseline_target = path + (f"?{baseline_query}" if baseline_query else "")
         payload_target = path + (f"?{payload_query}" if payload_query else "")
@@ -336,12 +357,7 @@ class ScanLoopActionMixin:
         if parsed.query:
             target += f"?{parsed.query}"
         preview = _sanitize_evidence_text(response_preview, limit=2500)
-        return (
-            f"{method.upper()} {target} HTTP/1.1\n"
-            f"Host: {host}\n\n"
-            f"HTTP/1.1 {status}\n\n"
-            f"{preview}"
-        )
+        return f"{method.upper()} {target} HTTP/1.1\nHost: {host}\n\nHTTP/1.1 {status}\n\n{preview}"
 
     def _settle_branches_after_chain(self, finding_ids: list[str]) -> None:
         chain_ids = {str(fid) for fid in finding_ids if fid}
@@ -351,6 +367,7 @@ class ScanLoopActionMixin:
         verified_chain_seen = False
         try:
             from vxis.agent.tools.finding_tools import _get_chains, _get_findings
+
             findings_by_id = {
                 str(item.get("id")): item
                 for item in (_get_findings() or [])
@@ -403,7 +420,9 @@ class ScanLoopActionMixin:
                 continue
             if branch.parent_branch_id and branch.parent_branch_id in branch_ids_to_settle:
                 branch.status = "exhausted"
-                branch.last_report = (branch.last_report or "superseded by linked attack chain")[:160]
+                branch.last_report = (branch.last_report or "superseded by linked attack chain")[
+                    :160
+                ]
 
     @staticmethod
     def _challenge_text(value: Any) -> str:
@@ -430,7 +449,13 @@ class ScanLoopActionMixin:
                 return int(match.group(1))
             except (TypeError, ValueError):
                 return 0
-        return 2 if any(token in text for token in ("twice", "second run", "reproduced 2", "replayed twice")) else 0
+        return (
+            2
+            if any(
+                token in text for token in ("twice", "second run", "reproduced 2", "replayed twice")
+            )
+            else 0
+        )
 
     @staticmethod
     def _challenge_has_negative(value: Any) -> bool:
@@ -510,9 +535,10 @@ class ScanLoopActionMixin:
             if isinstance(result_package.get("evidence_artifact"), dict)
             else {}
         )
-        if verdict not in {"candidate_positive", "proven"} and not self._agent_graph_result_needs_crown_chain(
-            str(agent.get("result") or "")
-        ):
+        if verdict not in {
+            "candidate_positive",
+            "proven",
+        } and not self._agent_graph_result_needs_crown_chain(str(agent.get("result") or "")):
             return []
         if not artifact or not artifact.get("valid"):
             return []
@@ -531,8 +557,7 @@ class ScanLoopActionMixin:
         ):
             missing.append("negative_or_refutation")
         if agent.get("parent_id") and not (
-            artifact.get("source_output")
-            and artifact.get("source_output_used_in_pivot")
+            artifact.get("source_output") and artifact.get("source_output_used_in_pivot")
         ):
             missing.append("source_output_reuse")
         if not self._challenge_has_crown_evidence(agent, artifact):
@@ -651,7 +676,9 @@ class ScanLoopActionMixin:
             agent_role = str(agent.get("role") or "exploit_worker").strip()
             title = f"Challenge positive worker result {agent_id or 'agent'}"
             vector_id = "CHALLENGE-WORKER"
-            role = "post_exploit_worker" if agent_role == "post_exploit_worker" else "exploit_worker"
+            role = (
+                "post_exploit_worker" if agent_role == "post_exploit_worker" else "exploit_worker"
+            )
             priority = 99 if "crown_jewel_evidence" in missing else 96
             source_finding_id = str(agent.get("source_finding_id") or "")
             crown_jewel = "validated crown impact" if "crown_jewel_evidence" in missing else ""
@@ -687,9 +714,7 @@ class ScanLoopActionMixin:
                 title,
             )
         )
-        suffix = hashlib.sha1(
-            fingerprint.encode("utf-8"), usedforsecurity=False
-        ).hexdigest()[:10]
+        suffix = hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:10]
         branch_id = f"gap:{vector_id.lower()}:{suffix}"
         evidence = _sanitize_evidence_text(
             {
@@ -827,9 +852,7 @@ class ScanLoopActionMixin:
         args["verifier_confidence"] = confidence
         args["verifier_reasoning"] = reasoning[:300]
         blocks_report = verdict == "REFUTED" or (
-            verdict != "CONFIRMED"
-            and require_confirmed
-            and severity in {"high", "critical"}
+            verdict != "CONFIRMED" and require_confirmed and severity in {"high", "critical"}
         )
         self.state.verdict_counts[verdict] = self.state.verdict_counts.get(verdict, 0) + 1
         _belief_entry = {
@@ -853,15 +876,18 @@ class ScanLoopActionMixin:
             confidence=confidence,
             blocked_action="report_finding" if blocks_report else "",
         )
-        self.state.add_message("tool", {
-            "name": "verify_finding",
-            "args": verify_args,
-            "result": {
-                "ok": True,
-                "summary": verdict_result.summary,
-                "data": verdict_data,
+        self.state.add_message(
+            "tool",
+            {
+                "name": "verify_finding",
+                "args": verify_args,
+                "result": {
+                    "ok": True,
+                    "summary": verdict_result.summary,
+                    "data": verdict_data,
+                },
             },
-        })
+        )
 
         if verdict == "UNCONFIRMED" and spawn_gap_on_unconfirmed:
             gap_branch_id = self._spawn_recursive_gap_branch_from_result(
@@ -885,8 +911,7 @@ class ScanLoopActionMixin:
             return ToolResult(
                 ok=False,
                 summary=(
-                    "report_finding BLOCKED by auto-verifier "
-                    f"(REFUTED). Reason: {reasoning[:220]}"
+                    f"report_finding BLOCKED by auto-verifier (REFUTED). Reason: {reasoning[:220]}"
                 ),
                 data={"verifier_blocked": True, "verdict": verdict, "reasoning": reasoning},
                 error="verifier_blocked",
@@ -931,7 +956,7 @@ class ScanLoopActionMixin:
         data: dict[str, Any],
     ) -> None:
         if real_skill == "test_injection":
-            for finding in (data.get("findings") or []):
+            for finding in data.get("findings") or []:
                 inj_sev = finding.get("severity", "medium")
                 if inj_sev not in ("high", "critical"):
                     continue
@@ -954,33 +979,37 @@ class ScanLoopActionMixin:
                     "description": f"Payload: {payload_text[:80]}",
                     "evidence": finding.get("response_preview", finding.get("evidence", ""))[:500],
                 }
-                args.update(self._build_report_finding_args(
-                    title=args["title"],
-                    severity=inj_sev,
-                    finding_type=finding["type"],
-                    affected_component=inj_url,
-                    description=f"Injection behavior was observed on parameter {inj_param}.",
-                    impact="Successful injection may expose backend data, execute attacker-controlled logic, or cross trust boundaries depending on the sink.",
-                    technical_analysis=(
-                        f"The injection skill recorded baseline/control data {control} alongside the payload response, "
-                        "which indicates the parameter reacts differently under attacker-controlled input."
-                    ),
-                    poc_description="Replay the payload against the same parameter and compare the baseline response to the injected response or delay/output delta.",
-                    poc_script_code=poc_blob,
-                    remediation_steps="Apply sink-specific input handling such as parameterized queries, output encoding, and strict server-side validation.",
-                    endpoint=inj_url,
-                    method="GET",
-                ))
+                args.update(
+                    self._build_report_finding_args(
+                        title=args["title"],
+                        severity=inj_sev,
+                        finding_type=finding["type"],
+                        affected_component=inj_url,
+                        description=f"Injection behavior was observed on parameter {inj_param}.",
+                        impact="Successful injection may expose backend data, execute attacker-controlled logic, or cross trust boundaries depending on the sink.",
+                        technical_analysis=(
+                            f"The injection skill recorded baseline/control data {control} alongside the payload response, "
+                            "which indicates the parameter reacts differently under attacker-controlled input."
+                        ),
+                        poc_description="Replay the payload against the same parameter and compare the baseline response to the injected response or delay/output delta.",
+                        poc_script_code=poc_blob,
+                        remediation_steps="Apply sink-specific input handling such as parameterized queries, output encoding, and strict server-side validation.",
+                        endpoint=inj_url,
+                        method="GET",
+                    )
+                )
                 await self._dispatch_report_finding_checked(args)
             return
 
         if real_skill == "test_xss":
-            for finding in (data.get("findings") or []):
+            for finding in data.get("findings") or []:
                 xss_sev = finding.get("severity", "high")
                 xss_url = data.get("url", self.state.target)
                 xss_param = finding.get("param", data.get("param", "?"))
                 payload = finding.get("payload", "")[:200]
-                response_preview = finding.get("response_preview", finding.get("evidence", ""))[:1200]
+                response_preview = finding.get("response_preview", finding.get("evidence", ""))[
+                    :1200
+                ]
                 control = finding.get("control", {}) or {}
                 xss_poc = self._build_reflected_get_poc(
                     url=xss_url,
@@ -998,36 +1027,42 @@ class ScanLoopActionMixin:
                     "evidence": response_preview,
                 }
                 if xss_sev in ("high", "critical"):
-                    args.update(self._build_report_finding_args(
-                        title=args["title"],
-                        severity=xss_sev,
-                        finding_type=args["finding_type"],
-                        affected_component=xss_url,
-                        description=args["description"],
-                        impact="An attacker may execute script in a victim browser, enabling session theft or authenticated action execution.",
-                        technical_analysis=(
-                            "The XSS skill returned a concrete payload and response evidence indicating that attacker-controlled script content was reflected or executed. "
-                            f"Baseline/control data: {control}."
-                        ),
-                        poc_description="Submit the supplied payload to the vulnerable parameter and confirm that it is reflected/executed in the response context.",
-                        poc_script_code=xss_poc,
-                        remediation_steps="Contextually encode untrusted input, apply output escaping, and deploy CSP as a secondary control.",
-                        endpoint=xss_url,
-                        method="GET",
-                        cwe="CWE-79",
-                    ))
+                    args.update(
+                        self._build_report_finding_args(
+                            title=args["title"],
+                            severity=xss_sev,
+                            finding_type=args["finding_type"],
+                            affected_component=xss_url,
+                            description=args["description"],
+                            impact="An attacker may execute script in a victim browser, enabling session theft or authenticated action execution.",
+                            technical_analysis=(
+                                "The XSS skill returned a concrete payload and response evidence indicating that attacker-controlled script content was reflected or executed. "
+                                f"Baseline/control data: {control}."
+                            ),
+                            poc_description="Submit the supplied payload to the vulnerable parameter and confirm that it is reflected/executed in the response context.",
+                            poc_script_code=xss_poc,
+                            remediation_steps="Contextually encode untrusted input, apply output escaping, and deploy CSP as a secondary control.",
+                            endpoint=xss_url,
+                            method="GET",
+                            cwe="CWE-79",
+                        )
+                    )
                 await self._dispatch_report_finding_checked(args)
             return
 
         if real_skill == "test_ssrf":
-            for finding in (data.get("findings") or []):
+            for finding in data.get("findings") or []:
                 ssrf_sev = finding.get("severity", "high")
                 ssrf_url = data.get("url", self.state.target)
                 ssrf_param = finding.get("param", data.get("param", "?"))
                 payload = finding.get("payload", "")[:200]
-                response_preview = finding.get("response_preview", finding.get("evidence", ""))[:1200]
+                response_preview = finding.get("response_preview", finding.get("evidence", ""))[
+                    :1200
+                ]
                 control = finding.get("control", {}) or {}
-                matched_signal = str(control.get("matched_signal") or finding.get("type", "internal_response"))
+                matched_signal = str(
+                    control.get("matched_signal") or finding.get("type", "internal_response")
+                )
                 callback_summary = response_preview[:500] or str(finding.get("evidence", ""))[:500]
                 self.state.record_callback_observation(
                     finding_type="ssrf",
@@ -1052,32 +1087,34 @@ class ScanLoopActionMixin:
                     "evidence": response_preview,
                 }
                 if ssrf_sev in ("high", "critical"):
-                    args.update(self._build_report_finding_args(
-                        title=args["title"],
-                        severity=ssrf_sev,
-                        finding_type="ssrf",
-                        affected_component=ssrf_url,
-                        description=args["description"],
-                        impact="Attackers may force the server to reach internal services, cloud metadata endpoints, or trust-bound internal resources.",
-                        technical_analysis=(
-                            "The SSRF skill produced a payload and corresponding response preview suggesting server-side fetching or internal reachability. "
-                            f"Baseline/control data: {control}."
-                        ),
-                        poc_description="Submit the SSRF payload to the target parameter and confirm that the server fetches or leaks data from the supplied internal URL.",
-                        poc_script_code=ssrf_poc,
-                        remediation_steps="Restrict outbound requests, enforce URL allowlists, and block internal address spaces from user-controlled fetches.",
-                        endpoint=ssrf_url,
-                        method="GET",
-                        cwe="CWE-918",
-                        extra_evidence=[
-                            self._callback_evidence_item(
-                                title="Callback / Internal Reachability",
-                                signal=matched_signal,
-                                payload=payload,
-                                summary=callback_summary,
-                            )
-                        ],
-                    ))
+                    args.update(
+                        self._build_report_finding_args(
+                            title=args["title"],
+                            severity=ssrf_sev,
+                            finding_type="ssrf",
+                            affected_component=ssrf_url,
+                            description=args["description"],
+                            impact="Attackers may force the server to reach internal services, cloud metadata endpoints, or trust-bound internal resources.",
+                            technical_analysis=(
+                                "The SSRF skill produced a payload and corresponding response preview suggesting server-side fetching or internal reachability. "
+                                f"Baseline/control data: {control}."
+                            ),
+                            poc_description="Submit the SSRF payload to the target parameter and confirm that the server fetches or leaks data from the supplied internal URL.",
+                            poc_script_code=ssrf_poc,
+                            remediation_steps="Restrict outbound requests, enforce URL allowlists, and block internal address spaces from user-controlled fetches.",
+                            endpoint=ssrf_url,
+                            method="GET",
+                            cwe="CWE-918",
+                            extra_evidence=[
+                                self._callback_evidence_item(
+                                    title="Callback / Internal Reachability",
+                                    signal=matched_signal,
+                                    payload=payload,
+                                    summary=callback_summary,
+                                )
+                            ],
+                        )
+                    )
                 await self._dispatch_report_finding_checked(args)
 
     def _emit_iteration_status(self, note: str) -> None:
@@ -1201,8 +1238,7 @@ class ScanLoopActionMixin:
         snapshot["campaign_groups"] = self._campaign_groups_for_ui(limit=4)
         snapshot["focus_campaign"] = self._focus_campaign_for_ui()
         snapshot["memory_directives"] = [
-            note for note in self.state.shared_notes
-            if str(note).startswith("memory")
+            note for note in self.state.shared_notes if str(note).startswith("memory")
         ][-4:]
         snapshot["chain_candidates"] = self._suggest_chain_candidates(limit=3)
         snapshot["agents"] = self._agent_graph_agents_from_messages()[:6]
@@ -1245,6 +1281,7 @@ class ScanLoopActionMixin:
 
     async def _maybe_autostart_proxy(self) -> None:
         import os
+
         try:
             from vxis.interaction.surface import TargetKind as _TK
             from vxis.agent.tools.proxy_runtime import get_proxy_runtime
@@ -1252,7 +1289,9 @@ class ScanLoopActionMixin:
             return
         if os.environ.get("VXIS_PROXY_AUTOSTART", "1").strip().lower() in {"0", "false", "no"}:
             return
-        if self._target_kind != _TK.WEB and not str(self.state.target).startswith(("http://", "https://")):
+        if self._target_kind != _TK.WEB and not str(self.state.target).startswith(
+            ("http://", "https://")
+        ):
             return
         try:
             status = await get_proxy_runtime().start(
@@ -1347,19 +1386,34 @@ class ScanLoopActionMixin:
     def _status_from_tool_result(result: ToolResult) -> str:
         if not result.ok:
             data = result.data if isinstance(result.data, dict) else {}
-            if any(data.get(k) for k in ("egress_blocked", "surface_guard_blocked", "dedup", "blocked")):
+            if any(
+                data.get(k) for k in ("egress_blocked", "surface_guard_blocked", "dedup", "blocked")
+            ):
                 return "blocked"
             if str(result.error or "").strip().lower() in {"stuck_loop", "non_text_response"}:
                 return "blocked"
             return "failed"
         text = f"{result.summary} {result.data}".lower()
-        if any(tok in text for tok in (
-            "confirmed", "vulnerable", "succeeded", "jwt payload",
-            "sql injection", "xss", "idor", "admin", "token",
-            "finding recorded", "finding grouped",
-        )):
+        if any(
+            tok in text
+            for tok in (
+                "confirmed",
+                "vulnerable",
+                "succeeded",
+                "jwt payload",
+                "sql injection",
+                "xss",
+                "idor",
+                "admin",
+                "token",
+                "finding recorded",
+                "finding grouped",
+            )
+        ):
             return "found"
-        if any(tok in text for tok in ("no finding", "not vulnerable", "nothing found", "no issue")):
+        if any(
+            tok in text for tok in ("no finding", "not vulnerable", "nothing found", "no issue")
+        ):
             return "clean"
         return "attempted"
 
@@ -1434,7 +1488,9 @@ class ScanLoopActionMixin:
             summary=retry_summary,
             evidence=f"{url} round={round_num} params={params}".strip(),
         )
-        self.state.add_shared_note(f"Retryable {candidate_id}: round {round_num} inconclusive on {url or self.state.target}")
+        self.state.add_shared_note(
+            f"Retryable {candidate_id}: round {round_num} inconclusive on {url or self.state.target}"
+        )
 
     def _parent_branch_ids_for_finding(self, args: dict[str, Any]) -> list[str]:
         ftype = str(args.get("finding_type") or "").lower()
@@ -1472,7 +1528,9 @@ class ScanLoopActionMixin:
         component = str(args.get("affected_component") or "").strip()
         severity = str(args.get("severity") or "").lower()
         parent_branch_ids = self._parent_branch_ids_for_finding(args) or ["root"]
-        severity_boost = {"critical": 10, "high": 8, "medium": 5, "low": 2, "informational": 1}.get(severity, 0)
+        severity_boost = {"critical": 10, "high": 8, "medium": 5, "low": 2, "informational": 1}.get(
+            severity, 0
+        )
 
         pivot_rules: list[tuple[tuple[str, ...], list[dict[str, Any]]]] = [
             (
@@ -1486,7 +1544,13 @@ class ScanLoopActionMixin:
                         "objective": "Use the obtained session to map authenticated APIs, admin pages, and role-protected flows.",
                         "next_step": "Reuse the live session with browser_get_cookies, browser_eval_js, post_auth_enum, then browse /admin and authenticated API paths.",
                         "crown_jewel": "admin takeover or broad data access",
-                        "watch_terms": ["token", "cookie", "/admin", "/api/users", "post_auth_enum"],
+                        "watch_terms": [
+                            "token",
+                            "cookie",
+                            "/admin",
+                            "/api/users",
+                            "post_auth_enum",
+                        ],
                     },
                     {
                         "suffix": "admin-access-control",
@@ -1496,7 +1560,13 @@ class ScanLoopActionMixin:
                         "objective": "Confirm whether the authenticated state crosses privilege boundaries into admin-only actions.",
                         "next_step": "Directly test /admin, /admin/users, role changes, and privileged exports with the current session.",
                         "crown_jewel": "admin takeover",
-                        "watch_terms": ["/admin", "role", "export", "browser_navigate", "http_request"],
+                        "watch_terms": [
+                            "/admin",
+                            "role",
+                            "export",
+                            "browser_navigate",
+                            "http_request",
+                        ],
                     },
                 ],
             ),
@@ -1511,7 +1581,15 @@ class ScanLoopActionMixin:
                         "objective": "Push the access-control bug past read-only confirmation into write, delete, or role-changing impact.",
                         "next_step": "Replay the vulnerable object reference against PATCH/PUT/DELETE or role/state-changing endpoints.",
                         "crown_jewel": "account takeover or broad data manipulation",
-                        "watch_terms": ["put", "patch", "delete", "role", "user", "account", "idor"],
+                        "watch_terms": [
+                            "put",
+                            "patch",
+                            "delete",
+                            "role",
+                            "user",
+                            "account",
+                            "idor",
+                        ],
                     },
                     {
                         "suffix": "data-exfil",
@@ -1586,7 +1664,13 @@ class ScanLoopActionMixin:
                         "objective": "Move from script execution proof into session theft or admin-only action execution.",
                         "next_step": "Read cookies/localStorage tokens and test whether the session reaches admin pages or sensitive actions.",
                         "crown_jewel": "session takeover",
-                        "watch_terms": ["document.cookie", "localStorage", "token", "/admin", "browser_eval_js"],
+                        "watch_terms": [
+                            "document.cookie",
+                            "localStorage",
+                            "token",
+                            "/admin",
+                            "browser_eval_js",
+                        ],
                     },
                 ],
             ),
@@ -1700,10 +1784,13 @@ class ScanLoopActionMixin:
         return matches
 
     @staticmethod
-    def _chain_candidate_for_pair(prior: dict[str, Any], current: dict[str, Any]) -> dict[str, Any] | None:
+    def _chain_candidate_for_pair(
+        prior: dict[str, Any], current: dict[str, Any]
+    ) -> dict[str, Any] | None:
         try:
             from vxis.agent.tools.finding_tools import _canonical_finding_type
         except Exception:
+
             def _canonical_finding_type(value: str) -> str:
                 return str(value or "").lower().strip()
 
@@ -1720,7 +1807,8 @@ class ScanLoopActionMixin:
 
         if current_type in {"broken_access_control", "idor"}:
             if prior_type in {"weak_auth", "sql_injection"} and any(
-                token in prior_blob for token in ("authentication bypass", "authenticated", "login", "token", "session")
+                token in prior_blob
+                for token in ("authentication bypass", "authenticated", "login", "token", "session")
             ):
                 return {
                     "score": 300,
@@ -1767,8 +1855,13 @@ class ScanLoopActionMixin:
                     "rationale": "The existing session or weak authorization context makes script execution materially useful for takeover or privileged action abuse.",
                     "crown_jewel": "session takeover",
                 }
-        if prior_type == "sql_injection" and current_type in {"broken_access_control", "idor"} and any(
-            token in current_blob for token in ("authenticated", "user data", "post-auth", "token", "session")
+        if (
+            prior_type == "sql_injection"
+            and current_type in {"broken_access_control", "idor"}
+            and any(
+                token in current_blob
+                for token in ("authenticated", "user data", "post-auth", "token", "session")
+            )
         ):
             return {
                 "score": 220,
@@ -1979,19 +2072,24 @@ class ScanLoopActionMixin:
                 best_candidate["source_id"],
             )
             return
-        result = await self.registry.dispatch("link_chain", {
-            "finding_ids": [best_candidate["source_id"], best_candidate["target_id"]],
-            "rationale": best_candidate["rationale"],
-            "crown_jewel": best_candidate["crown_jewel"],
-            "evidence_artifact": self._chain_evidence_artifact_for_pair(
-                source_finding,
-                current,
-                best_candidate,
-            ),
-        })
+        result = await self.registry.dispatch(
+            "link_chain",
+            {
+                "finding_ids": [best_candidate["source_id"], best_candidate["target_id"]],
+                "rationale": best_candidate["rationale"],
+                "crown_jewel": best_candidate["crown_jewel"],
+                "evidence_artifact": self._chain_evidence_artifact_for_pair(
+                    source_finding,
+                    current,
+                    best_candidate,
+                ),
+            },
+        )
         result_data = result.data if isinstance(result.data, dict) else {}
         if result.ok and result_data.get("verification_status") == "verified":
-            self._settle_branches_after_chain([best_candidate["source_id"], best_candidate["target_id"]])
+            self._settle_branches_after_chain(
+                [best_candidate["source_id"], best_candidate["target_id"]]
+            )
             logger.info("auto-linked chain %s -> %s", best_candidate["source_id"], finding_id)
 
     def _suggest_chain_candidates(self, *, limit: int = 3) -> list[dict[str, str]]:
@@ -2023,19 +2121,21 @@ class ScanLoopActionMixin:
                 candidate = self._chain_candidate_for_pair(prior, current)
                 if not candidate:
                     continue
-                suggestions.append({
-                    "source_id": pair[0],
-                    "target_id": pair[1],
-                    "source_type": str(prior.get("finding_type", "")),
-                    "target_type": str(current.get("finding_type", "")),
-                    "source_title": str(prior.get("title", "")),
-                    "target_title": str(current.get("title", "")),
-                    "source_component": str(prior.get("affected_component", "")),
-                    "target_component": str(current.get("affected_component", "")),
-                    "rationale": candidate["rationale"],
-                    "crown_jewel": candidate["crown_jewel"],
-                    "score": candidate["score"],
-                })
+                suggestions.append(
+                    {
+                        "source_id": pair[0],
+                        "target_id": pair[1],
+                        "source_type": str(prior.get("finding_type", "")),
+                        "target_type": str(current.get("finding_type", "")),
+                        "source_title": str(prior.get("title", "")),
+                        "target_title": str(current.get("title", "")),
+                        "source_component": str(prior.get("affected_component", "")),
+                        "target_component": str(current.get("affected_component", "")),
+                        "rationale": candidate["rationale"],
+                        "crown_jewel": candidate["crown_jewel"],
+                        "score": candidate["score"],
+                    }
+                )
         suggestions.sort(key=lambda item: int(item.get("score", 0)), reverse=True)
         deduped: list[dict[str, Any]] = []
         seen_pairs: set[tuple[str, str]] = set()
@@ -2094,16 +2194,19 @@ class ScanLoopActionMixin:
         if not candidates:
             return None
         candidate = candidates[0]
-        result = await self.registry.dispatch("link_chain", {
-            "finding_ids": [candidate["source_id"], candidate["target_id"]],
-            "rationale": candidate["rationale"],
-            "crown_jewel": candidate["crown_jewel"],
-            "evidence_artifact": self._chain_evidence_artifact_for_ids(
-                candidate["source_id"],
-                candidate["target_id"],
-                candidate,
-            ),
-        })
+        result = await self.registry.dispatch(
+            "link_chain",
+            {
+                "finding_ids": [candidate["source_id"], candidate["target_id"]],
+                "rationale": candidate["rationale"],
+                "crown_jewel": candidate["crown_jewel"],
+                "evidence_artifact": self._chain_evidence_artifact_for_ids(
+                    candidate["source_id"],
+                    candidate["target_id"],
+                    candidate,
+                ),
+            },
+        )
         if not result.ok:
             return None
         if isinstance(result.data, dict) and result.data.get("dedup"):
@@ -2117,12 +2220,15 @@ class ScanLoopActionMixin:
             candidate["source_id"],
             candidate["target_id"],
         )
-        self.state.add_message("system", {
-            "hint": (
-                f"SYSTEM HINT: auto-linked chain {candidate['source_id']} -> {candidate['target_id']} "
-                f"toward {candidate['crown_jewel']}. Re-evaluate whether finish_scan is now justified."
-            ),
-        })
+        self.state.add_message(
+            "system",
+            {
+                "hint": (
+                    f"SYSTEM HINT: auto-linked chain {candidate['source_id']} -> {candidate['target_id']} "
+                    f"toward {candidate['crown_jewel']}. Re-evaluate whether finish_scan is now justified."
+                ),
+            },
+        )
         return {
             "source_id": candidate["source_id"],
             "target_id": candidate["target_id"],
@@ -2138,7 +2244,9 @@ class ScanLoopActionMixin:
         # window — by iter 15, Brain has forgotten iters 1-10. The dashboard
         # gives it a complete picture in <40 lines.
         dashboard = self._build_scan_dashboard()
-        messages = state.messages + [{"role": "user", "content": dashboard, "iter": state.iteration}]
+        messages = state.messages + [
+            {"role": "user", "content": dashboard, "iter": state.iteration}
+        ]
         decision_class = v3_prepare_decision(self)
         return await self.brain.think_in_loop(
             messages,
@@ -2213,14 +2321,30 @@ class ScanLoopActionMixin:
             family = self._branch_family(focus)
             if family in {"auth", "injection"}:
                 allowed |= auth
-            if focus.role == "post_exploit_worker" or focus.phase in {"session_reuse", "privilege_probe", "data_access"}:
+            if focus.role == "post_exploit_worker" or focus.phase in {
+                "session_reuse",
+                "privilege_probe",
+                "data_access",
+            }:
                 allowed |= post_auth
             if family in {"xss", "ssrf"}:
                 allowed |= xss_ssrf
             if family == "disclosure":
-                allowed |= {"http_request", "browser_navigate", "shell_exec", "run_skill", "query_scan_memory"}
+                allowed |= {
+                    "http_request",
+                    "browser_navigate",
+                    "shell_exec",
+                    "run_skill",
+                    "query_scan_memory",
+                }
             if family == "idor":
-                allowed |= {"http_request", "browser_navigate", "browser_get_cookies", "run_skill", "shell_exec"}
+                allowed |= {
+                    "http_request",
+                    "browser_navigate",
+                    "browser_get_cookies",
+                    "run_skill",
+                    "shell_exec",
+                }
 
         filtered = [tool for tool in catalog if str(tool.get("name") or "") in allowed]
         return filtered or catalog

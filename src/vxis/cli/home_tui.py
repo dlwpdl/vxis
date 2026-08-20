@@ -71,11 +71,8 @@ def _home_row(label: str, desc: str) -> Text:
     return row
 
 
-# Emoji / variation-selector / ZWJ ranges — stripped from submenu labels so the
-# Textual menu reads clean (the InquirerPy choice strings bundle an icon).
-_EMOJI_RE = re.compile(
-    "[\U0001f000-\U0001faff\U00002600-\U000027bf\U00002b00-\U00002bff\U0001f1e6-\U0001f1ff️‍]+"
-)
+# Strip the leading icon/punctuation bundle from InquirerPy choice labels.
+_EMOJI_RE = re.compile(r"^[\W_]+", re.UNICODE)
 
 
 def _menu_row(raw: str, *, max_desc: int = 60) -> Text:

@@ -82,9 +82,7 @@ class BasePlugin(ABC):
             # plugins pay it, and validate_environment runs once per scan.
             for flag in ("-version", "--version", "version", "-V"):
                 try:
-                    result = subprocess.run(
-                        [path, flag], capture_output=True, text=True, timeout=5
-                    )
+                    result = subprocess.run([path, flag], capture_output=True, text=True, timeout=5)
                 except (subprocess.TimeoutExpired, OSError):
                     continue
                 if marker in (result.stdout + result.stderr).lower():

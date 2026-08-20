@@ -4,6 +4,7 @@ These tools expose the library as methodology/reference material for the Brain.
 They deliberately do not execute anything from the skills; execution must stay
 inside VXIS tools so scope, egress, evidence, and verifier gates remain active.
 """
+
 from __future__ import annotations
 
 import os
@@ -207,7 +208,9 @@ class SearchSecuritySkillsTool:
 
         query = str(kwargs.get("query", "")).strip()
         if not query:
-            return ToolResult(ok=False, summary="search_security_skills: query is required", error="missing_query")
+            return ToolResult(
+                ok=False, summary="search_security_skills: query is required", error="missing_query"
+            )
 
         limit = _bounded_int(kwargs.get("limit"), _DEFAULT_SEARCH_LIMIT, _MAX_SEARCH_LIMIT)
         query_terms = _terms(query)
@@ -287,7 +290,9 @@ class LoadSecuritySkillTool:
 
         name = str(kwargs.get("name", "")).strip()
         if not name:
-            return ToolResult(ok=False, summary="load_security_skill: name is required", error="missing_name")
+            return ToolResult(
+                ok=False, summary="load_security_skill: name is required", error="missing_name"
+            )
 
         entry = _find_entry(root, name)
         if entry is None:
@@ -302,7 +307,10 @@ class LoadSecuritySkillTool:
         truncated = len(raw) > max_chars
         content = raw[:max_chars]
         if truncated:
-            content = content.rstrip() + "\n\n[TRUNCATED: raise max_chars or inspect the file directly if more detail is required.]"
+            content = (
+                content.rstrip()
+                + "\n\n[TRUNCATED: raise max_chars or inspect the file directly if more detail is required.]"
+            )
 
         return ToolResult(
             ok=True,

@@ -378,9 +378,7 @@ def scan(
 
     profile = normalize_scan_profile_name(profile)
     if resume:
-        raise typer.BadParameter(
-            "--resume is not implemented yet; checkpoint resume is disabled."
-        )
+        raise typer.BadParameter("--resume is not implemented yet; checkpoint resume is disabled.")
     # Cost/token budget → env so resolve_cost_budget() picks it up at loop build.
     import os as _os_budget
 

@@ -18,6 +18,7 @@ _PROXY_PROBE_URL = "https://api64.ipify.org?format=json"
 @dataclass
 class PreflightResult:
     """스캔 시작 전 환경 검증 결과."""
+
     target_reachable: bool = False
     target_latency_ms: float = 0.0
     brain_backend: str = "unknown"  # "claude-code" | "api" | "none"
@@ -142,11 +143,11 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
 
     api_key_envs = {
         "anthropic": "ANTHROPIC_API_KEY",
-        "together":  "TOGETHER_API_KEY",
-        "openai":    "OPENAI_API_KEY",
-        "gemini":    "GOOGLE_API_KEY",
+        "together": "TOGETHER_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "gemini": "GOOGLE_API_KEY",
         "wavespeed": "WAVESPEED_API_KEY",
-        "deepseek":   "DEEPSEEK_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
     }
     key_env = api_key_envs.get(provider)
     has_key = bool(os.environ.get(key_env)) if key_env else False
@@ -219,7 +220,8 @@ def check_docker() -> bool:
     try:
         result = subprocess.run(
             ["docker", "info"],
-            capture_output=True, timeout=3,
+            capture_output=True,
+            timeout=3,
         )
         return result.returncode == 0
     except Exception:
@@ -284,9 +286,7 @@ def run_preflight(
             result.target_reachable = True
             result.warnings.append("Target reachability probe deferred to Ghost transport")
         else:
-            result.errors.append(
-                "Ghost proxy preflight failed; refusing direct fallback"
-            )
+            result.errors.append("Ghost proxy preflight failed; refusing direct fallback")
     else:
         result.target_reachable, result.target_latency_ms = check_target_reachable(
             target, kind=kind

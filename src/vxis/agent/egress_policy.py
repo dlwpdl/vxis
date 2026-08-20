@@ -59,7 +59,9 @@ class EgressPolicyDecision:
         return {key: value for key, value in asdict(self).items() if value not in ("", None)}
 
 
-def enforce_direct_tool_policy(tool_name: str, *, mode: str, alternative: str) -> EgressPolicyDecision:
+def enforce_direct_tool_policy(
+    tool_name: str, *, mode: str, alternative: str
+) -> EgressPolicyDecision:
     if not ghost_layer.is_active() or direct_egress_allowed():
         return EgressPolicyDecision(allowed=True, mode=mode)
     return EgressPolicyDecision(

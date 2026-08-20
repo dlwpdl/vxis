@@ -17,6 +17,7 @@ is infra fetching (model metadata), NOT target traffic, so urllib is used — th
 same pattern as cli.interactive._fetch_llamacpp_models. No data is sent: it is a
 read-only public GET.
 """
+
 from __future__ import annotations
 
 import json

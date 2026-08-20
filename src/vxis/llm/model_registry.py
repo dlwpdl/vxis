@@ -27,16 +27,16 @@ class ModelInfo:
     """Canonical metadata for a single LLM model."""
 
     model_id: str
-    provider: str                   # "openai" | "anthropic" | "gemini" | "together" | "ollama" | "llamacpp"
-    context_window: int             # max total tokens (input + output)
-    max_output_tokens: int          # max completion tokens
+    provider: str  # "openai" | "anthropic" | "gemini" | "together" | "ollama" | "llamacpp"
+    context_window: int  # max total tokens (input + output)
+    max_output_tokens: int  # max completion tokens
     supports_vision: bool = False
     supports_json_mode: bool = False
-    reasoning_model: bool = False   # consumes reasoning tokens (max_completion_tokens required)
-    family: str = ""                # e.g. "gpt-5.4", "claude-4.6", "gemini-3.1"
+    reasoning_model: bool = False  # consumes reasoning tokens (max_completion_tokens required)
+    family: str = ""  # e.g. "gpt-5.4", "claude-4.6", "gemini-3.1"
     aliases: tuple[str, ...] = field(default_factory=tuple)
     notes: str = ""
-    release_date: str = ""          # ISO date (from live catalog); "" for curated/unknown
+    release_date: str = ""  # ISO date (from live catalog); "" for curated/unknown
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ _MODELS: tuple[ModelInfo, ...] = (
     ModelInfo(
         model_id="gpt-5.4",
         provider="openai",
-        context_window=1_050_000,     # 1.05M (xhigh tier)
+        context_window=1_050_000,  # 1.05M (xhigh tier)
         max_output_tokens=64_000,
         supports_vision=True,
         supports_json_mode=True,
@@ -108,10 +108,10 @@ _MODELS: tuple[ModelInfo, ...] = (
     ModelInfo(
         model_id="claude-opus-4-8",
         provider="anthropic",
-        context_window=1_000_000,     # 1M max tier
+        context_window=1_000_000,  # 1M max tier
         max_output_tokens=64_000,
         supports_vision=True,
-        supports_json_mode=False,     # Anthropic uses tool_use for structured output
+        supports_json_mode=False,  # Anthropic uses tool_use for structured output
         reasoning_model=False,
         family="claude-4.8",
         aliases=("claude-opus-4-8[1m]",),
@@ -120,10 +120,10 @@ _MODELS: tuple[ModelInfo, ...] = (
     ModelInfo(
         model_id="claude-opus-4-6",
         provider="anthropic",
-        context_window=1_000_000,     # 1M max tier
+        context_window=1_000_000,  # 1M max tier
         max_output_tokens=64_000,
         supports_vision=True,
-        supports_json_mode=False,     # Anthropic uses tool_use for structured output
+        supports_json_mode=False,  # Anthropic uses tool_use for structured output
         reasoning_model=False,
         family="claude-4.6",
         aliases=("claude-opus-4-6[1m]",),
@@ -132,7 +132,7 @@ _MODELS: tuple[ModelInfo, ...] = (
     ModelInfo(
         model_id="claude-sonnet-4-6",
         provider="anthropic",
-        context_window=1_000_000,     # 1M max tier
+        context_window=1_000_000,  # 1M max tier
         max_output_tokens=64_000,
         supports_vision=True,
         supports_json_mode=False,
@@ -444,14 +444,13 @@ def _context_from_llamacpp_payload(payload: object, model_id: str) -> int | None
 
     wanted = (model_id or "").strip().casefold()
     matches = [
-        item for item in data
+        item
+        for item in data
         if isinstance(item, dict) and str(item.get("id", "")).strip().casefold() == wanted
     ]
     candidates = matches or (data if len(data) == 1 else [])
     contexts = {
-        value
-        for item in candidates
-        if (value := _context_from_llamacpp_model(item)) is not None
+        value for item in candidates if (value := _context_from_llamacpp_model(item)) is not None
     }
     return next(iter(contexts)) if len(contexts) == 1 else None
 
@@ -467,7 +466,8 @@ def detect_llamacpp_context(base_url: str, model_id: str) -> int | None:
     for path in ("/props", "/v1/models"):
         try:
             req = Request(base_url + path, method="GET")
-            with urlopen(req, timeout=0.75) as resp:
+            # The configurable llama.cpp endpoint is restricted to HTTP(S) above.
+            with urlopen(req, timeout=0.75) as resp:  # nosec B310
                 payload = json.loads(resp.read().decode("utf-8", errors="replace"))
         except Exception:
             continue

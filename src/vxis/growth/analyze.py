@@ -51,6 +51,7 @@ class _PublicArticleRedirectHandler(urllib.request.HTTPRedirectHandler):
         _validate_public_article_url(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
+
 EXTRACTION_PROMPT = """You are a threat intelligence analyst specializing in web application security.
 
 PHASE 1 — Extract what the article describes:
@@ -119,9 +120,7 @@ def _parse_llm_json(response: str) -> dict:
         return {}
 
 
-def analyze_signal(
-    signal: RawSignal, dry_run: bool = True
-) -> NewsIntelligence | None:
+def analyze_signal(signal: RawSignal, dry_run: bool = True) -> NewsIntelligence | None:
     """Extract structured intelligence|||구조화 인텔리전스 추출.
 
     Pipeline:
@@ -258,9 +257,7 @@ def analyze_signal(
         return None
 
 
-def analyze_batch(
-    signals: list[RawSignal], dry_run: bool = True
-) -> list[NewsIntelligence]:
+def analyze_batch(signals: list[RawSignal], dry_run: bool = True) -> list[NewsIntelligence]:
     """Analyze multiple signals respecting batch size|||배치 크기 기반 분석."""
     config = load_bootstrap_config()
     batch_size = int(config["filtering"]["batch_size"])
