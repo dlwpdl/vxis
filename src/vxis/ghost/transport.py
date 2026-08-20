@@ -2,18 +2,20 @@
 
 요청마다 GhostLayer에서 proxy/UA를 받아 적용.
 """
+
 from __future__ import annotations
 
 import logging
 
 import httpx
 
-from vxis.ghost.layer import GhostLayer
+from vxis.ghost.layer import GhostDirectEgressError, GhostLayer, direct_egress_allowed
 
 logger = logging.getLogger(__name__)
 
 try:
     import curl_cffi.requests as _curl  # noqa: F401
+
     _CURL_AVAILABLE = True
     logger.debug("[Ghost] curl_cffi 감지 — 향후 TLS fingerprint transport에 사용 가능")
 except ImportError:
@@ -60,10 +62,19 @@ class GhostTransport(httpx.AsyncBaseTransport):
             self._transports[key] = transport
         return transport
 
-    async def handle_async_request(
-        self, request: httpx.Request
-    ) -> httpx.Response:
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         proxy = self._layer.next_proxy()
+        # Central direct-fallback block: when Ghost is active but no proxy is
+        # available for this request (empty/exhausted pool), refuse rather than
+        # silently connecting direct. This is THE chokepoint every TargetSession
+        # routes through when Ghost is on, so it covers HTTP requests, chains,
+        # crawls, and the IP verifier. Fires regardless of an injected test
+        # transport — the guard is about proxy availability, not who serves it.
+        if proxy is None and self._layer.is_active() and not direct_egress_allowed():
+            raise GhostDirectEgressError(
+                "Ghost active but no usable proxy for this request; refusing direct "
+                "egress (set VXIS_ALLOW_DIRECT_EGRESS=1 to override)"
+            )
         transport = self._inner or self._transport_for_proxy(proxy)
 
         # UA 교체
@@ -86,7 +97,10 @@ class GhostTransport(httpx.AsyncBaseTransport):
 
         logger.debug(
             "[Ghost] %s %s  proxy=%s  ua=%.40s...",
-            new_request.method, new_request.url, proxy or "direct", ua,
+            new_request.method,
+            new_request.url,
+            proxy or "direct",
+            ua,
         )
 
         return await transport.handle_async_request(new_request)

@@ -29,13 +29,20 @@ class ModelRole(str, Enum):
 
 
 _LOCAL_PROVIDERS = {"ollama", "llamacpp"}
-_FRONTIER_PROVIDERS = {"anthropic", "openai", "gemini"}
-_CLOUD_PROVIDERS = {"anthropic", "openai", "gemini", "together", "deepseek"}
+_FRONTIER_PROVIDERS = {"anthropic", "openai", "gemini", "wavespeed"}
+_CLOUD_PROVIDERS = {
+    "anthropic",
+    "openai",
+    "gemini",
+    "together",
+    "deepseek",
+    "wavespeed",
+}
 _KNOWN_PROVIDERS = _LOCAL_PROVIDERS | _CLOUD_PROVIDERS | {"google", "vertex", "vertex_ai"}
 
 _DEFAULT_DIRECTOR = ("anthropic", "claude-sonnet-4-6")
 _DEFAULT_VERIFIER = ("anthropic", "claude-sonnet-4-6")
-_DEFAULT_LLAMACPP_MODEL = "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m"
+_DEFAULT_LLAMACPP_MODEL = "Qwen3.8-27B-Uncensored-Q6_K"
 _DEFAULT_OLLAMA_MODEL = "qwen2.5-coder:14b"
 
 
@@ -333,6 +340,7 @@ def _first_available_frontier(
         ("anthropic", ("ANTHROPIC_API_KEY",)),
         ("openai", ("OPENAI_API_KEY", "LLM_API_KEY")),
         ("gemini", ("GOOGLE_API_KEY", "GEMINI_API_KEY")),
+        ("wavespeed", ("WAVESPEED_API_KEY",)),
     ):
         if any(_env_get(env, key) for key in key_names):
             model = _default_model_for_provider(provider, env)
@@ -395,6 +403,7 @@ def _default_model_for_provider(provider: str, env: Mapping[str, str]) -> str:
         "anthropic": "claude-sonnet-4-6",
         "openai": "gpt-5.4",
         "gemini": "gemini-2.5-pro",
+        "wavespeed": "google/gemini-3.7-flash",
         "together": "deepseek-ai/DeepSeek-V3.1",
         "deepseek": "deepseek-chat",
     }.get(provider, "")

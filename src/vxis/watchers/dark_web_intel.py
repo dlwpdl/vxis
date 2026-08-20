@@ -180,7 +180,7 @@ class DarkWebIntelWatcher(BaseWatcher):
                 f"intelx:{domain}:{system_id}"
                 if system_id
                 else (
-                    f"intelx:{domain}:{hashlib.md5(json.dumps(record, sort_keys=True).encode()).hexdigest()[:12]}"
+                    f"intelx:{domain}:{hashlib.md5(json.dumps(record, sort_keys=True).encode(), usedforsecurity=False).hexdigest()[:12]}"
                 )
             )
 
@@ -241,7 +241,7 @@ class DarkWebIntelWatcher(BaseWatcher):
                 if not item.get("sha"):
                     item_id = (
                         f"github:code:"
-                        f"{hashlib.md5(item.get('html_url', '').encode()).hexdigest()[:12]}"
+                        f"{hashlib.md5(item.get('html_url', '').encode(), usedforsecurity=False).hexdigest()[:12]}"
                     )
 
                 items.append(

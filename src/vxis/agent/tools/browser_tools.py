@@ -9,6 +9,7 @@ Design: a module-level singleton BrowserEngine is lazily started on
 first `browser_navigate` call and reused across the entire scan.
 Cleanup is triggered via `shutdown_browser()` called at scan end.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,14 +20,14 @@ from typing import Any
 
 from vxis.agent.tool_registry import ToolResult
 from vxis.agent.tools.proxy_runtime import get_active_proxy_url
-from vxis.ghost.layer import ghost_layer
+from vxis.ghost.layer import GhostDirectEgressError, direct_egress_allowed, ghost_layer
 from vxis.ghost.routing import build_ghost_identity, public_ghost_identity
 
 logger = logging.getLogger(__name__)
 
 # Module-level singleton — shared across all tool calls in a scan.
-_engine: Any = None       # BrowserEngine
-_page: Any = None         # BrowserPage
+_engine: Any = None  # BrowserEngine
+_page: Any = None  # BrowserPage
 _screenshot_dir: str = ""
 _proxy_url: str | None = None
 _user_agent: str | None = None
@@ -66,6 +67,14 @@ async def _ensure_browser() -> tuple[Any, Any]:
     """Lazily start BrowserEngine and create a page."""
     global _engine, _page, _screenshot_dir, _proxy_url, _user_agent
     desired_proxy, desired_ua, _ghost_meta = _desired_browser_route()
+    # Fail closed: never launch a direct browser while Ghost is active but no
+    # exit/capture proxy resolved — that would leak the real IP on the first
+    # navigation. WebRTC UDP is separately pinned in eyes.py.
+    if ghost_layer.is_active() and not desired_proxy and not direct_egress_allowed():
+        raise GhostDirectEgressError(
+            "Ghost active but no proxy available for the browser; refusing direct "
+            "browser egress (set VXIS_ALLOW_DIRECT_EGRESS=1 to override)"
+        )
     current_proxy = getattr(_engine, "_proxy", None) if _engine is not None else None
     current_ua = getattr(_engine, "_user_agent", None) if _engine is not None else None
     if (
@@ -87,6 +96,7 @@ async def _ensure_browser() -> tuple[Any, Any]:
         _page = None
 
     from vxis.interaction.eyes import BrowserEngine, is_available
+
     if not is_available():
         raise RuntimeError(
             "Playwright not installed. Run: pip install playwright && playwright install chromium"
@@ -153,17 +163,23 @@ class BrowserNavigateTool:
     async def run(self, **kwargs: Any) -> ToolResult:
         url = str(kwargs.get("url", "")).strip()
         if not url:
-            return ToolResult(ok=False, summary="browser_navigate: url required", error="missing_url")
+            return ToolResult(
+                ok=False, summary="browser_navigate: url required", error="missing_url"
+            )
 
         try:
             _, page = await _ensure_browser()
         except Exception as e:
-            return ToolResult(ok=False, summary=f"browser_navigate: browser init failed: {e}", error=str(e))
+            return ToolResult(
+                ok=False, summary=f"browser_navigate: browser init failed: {e}", error=str(e)
+            )
 
         try:
             snap = await page.navigate(url)
         except Exception as e:
-            return ToolResult(ok=False, summary=f"browser_navigate: navigation failed: {e}", error=str(e))
+            return ToolResult(
+                ok=False, summary=f"browser_navigate: navigation failed: {e}", error=str(e)
+            )
         _proxy, _ua, ghost_meta = _desired_browser_route()
 
         # Build a compact summary for the Brain
@@ -171,22 +187,26 @@ class BrowserNavigateTool:
         for f in snap.forms[:10]:
             fields = f.get("fields", {})
             field_names = list(fields.keys())[:8]
-            forms_summary.append({
-                "action": f.get("action", ""),
-                "method": f.get("method", "GET"),
-                "id": f.get("id", ""),
-                "fields": field_names,
-            })
+            forms_summary.append(
+                {
+                    "action": f.get("action", ""),
+                    "method": f.get("method", "GET"),
+                    "id": f.get("id", ""),
+                    "fields": field_names,
+                }
+            )
 
         network_summary = []
         for entry in snap.network_log[-20:]:
             if entry.resource_type in ("document", "xhr", "fetch"):
-                network_summary.append({
-                    "method": entry.method,
-                    "url": entry.url[:200],
-                    "status": entry.status,
-                    "type": entry.resource_type,
-                })
+                network_summary.append(
+                    {
+                        "method": entry.method,
+                        "url": entry.url[:200],
+                        "status": entry.status,
+                        "type": entry.resource_type,
+                    }
+                )
 
         return ToolResult(
             ok=True,
@@ -199,7 +219,10 @@ class BrowserNavigateTool:
                 "links": snap.links[:30],
                 "link_count": len(snap.links),
                 "inputs": snap.inputs[:20],
-                "cookies": [{"name": c.get("name", ""), "domain": c.get("domain", "")} for c in snap.cookies[:15]],
+                "cookies": [
+                    {"name": c.get("name", ""), "domain": c.get("domain", "")}
+                    for c in snap.cookies[:15]
+                ],
                 "js_errors": snap.js_errors[:10],
                 "console_messages": snap.console_messages[-10:],
                 "network_requests": network_summary,
@@ -232,7 +255,11 @@ class BrowserAnalyzeDomTool:
 
     async def run(self, **kwargs: Any) -> ToolResult:
         if _page is None:
-            return ToolResult(ok=False, summary="browser_analyze_dom: no page loaded — call browser_navigate first", error="no_page")
+            return ToolResult(
+                ok=False,
+                summary="browser_analyze_dom: no page loaded — call browser_navigate first",
+                error="no_page",
+            )
 
         try:
             dom = await _page.analyze_dom()
@@ -275,7 +302,10 @@ class BrowserClickTool:
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
-            "selector": {"type": "string", "description": "CSS selector (e.g. 'button#login', 'a.nav-link')"},
+            "selector": {
+                "type": "string",
+                "description": "CSS selector (e.g. 'button#login', 'a.nav-link')",
+            },
         },
         "required": ["selector"],
     }
@@ -283,7 +313,9 @@ class BrowserClickTool:
     async def run(self, **kwargs: Any) -> ToolResult:
         selector = str(kwargs.get("selector", "")).strip()
         if not selector:
-            return ToolResult(ok=False, summary="browser_click: selector required", error="missing_selector")
+            return ToolResult(
+                ok=False, summary="browser_click: selector required", error="missing_selector"
+            )
         if _page is None:
             return ToolResult(ok=False, summary="browser_click: no page loaded", error="no_page")
 
@@ -326,7 +358,7 @@ class BrowserFillFormTool:
             },
             "fields": {
                 "type": "object",
-                "description": "Dict of field_name → value (e.g. {\"username\": \"admin\", \"password\": \"admin123\"})",
+                "description": 'Dict of field_name → value (e.g. {"username": "admin", "password": "admin123"})',
             },
             "submit_selector": {
                 "type": "string",
@@ -342,9 +374,15 @@ class BrowserFillFormTool:
         submit_sel = str(kwargs.get("submit_selector", "") or "").strip()
 
         if not form_sel or not fields:
-            return ToolResult(ok=False, summary="browser_fill_form: form_selector and fields required", error="missing_args")
+            return ToolResult(
+                ok=False,
+                summary="browser_fill_form: form_selector and fields required",
+                error="missing_args",
+            )
         if _page is None:
-            return ToolResult(ok=False, summary="browser_fill_form: no page loaded", error="no_page")
+            return ToolResult(
+                ok=False, summary="browser_fill_form: no page loaded", error="no_page"
+            )
 
         try:
             fill_result = await _page.fill_form(form_sel, fields)
@@ -391,7 +429,10 @@ class BrowserFillFormTool:
                 "url": snap.url,
                 "title": snap.title,
                 "text_preview": _truncate(snap.text_content, 2000),
-                "cookies": [{"name": c.get("name", ""), "value": c.get("value", "")[:50]} for c in snap.cookies[:10]],
+                "cookies": [
+                    {"name": c.get("name", ""), "value": c.get("value", "")[:50]}
+                    for c in snap.cookies[:10]
+                ],
                 "form_count": len(snap.forms),
                 "js_errors": snap.js_errors[:5],
                 "filled": filled,
@@ -417,20 +458,29 @@ class BrowserScreenshotTool:
     input_schema: dict[str, Any] = {
         "type": "object",
         "properties": {
-            "filename": {"type": "string", "description": "Filename for screenshot (default: auto-generated)"},
-            "full_page": {"type": "boolean", "description": "Capture full page vs viewport only (default: true)"},
+            "filename": {
+                "type": "string",
+                "description": "Filename for screenshot (default: auto-generated)",
+            },
+            "full_page": {
+                "type": "boolean",
+                "description": "Capture full page vs viewport only (default: true)",
+            },
         },
     }
 
     async def run(self, **kwargs: Any) -> ToolResult:
         if _page is None:
-            return ToolResult(ok=False, summary="browser_screenshot: no page loaded", error="no_page")
+            return ToolResult(
+                ok=False, summary="browser_screenshot: no page loaded", error="no_page"
+            )
 
         filename = str(kwargs.get("filename", "")).strip()
         full_page = bool(kwargs.get("full_page", True))
 
         if not filename:
             import time
+
             filename = f"screenshot_{int(time.time())}.png"
 
         path = os.path.join(_screenshot_dir, filename)
@@ -472,7 +522,17 @@ class BrowserEvalJsTool:
     async def run(self, **kwargs: Any) -> ToolResult:
         expr = str(kwargs.get("expression", "")).strip()
         if not expr:
-            return ToolResult(ok=False, summary="browser_eval_js: expression required", error="missing_expression")
+            return ToolResult(
+                ok=False, summary="browser_eval_js: expression required", error="missing_expression"
+            )
+        from vxis.agent.egress import is_strict_mode
+
+        if is_strict_mode():
+            return ToolResult(
+                ok=False,
+                summary="browser_eval_js: disabled while strict egress is enabled",
+                error="egress_blocked",
+            )
         if _page is None:
             return ToolResult(ok=False, summary="browser_eval_js: no page loaded", error="no_page")
 
@@ -510,7 +570,9 @@ class BrowserGetCookiesTool:
 
     async def run(self, **kwargs: Any) -> ToolResult:
         if _page is None:
-            return ToolResult(ok=False, summary="browser_get_cookies: no page loaded", error="no_page")
+            return ToolResult(
+                ok=False, summary="browser_get_cookies: no page loaded", error="no_page"
+            )
 
         try:
             cookies = await _page.get_cookies()
@@ -530,5 +592,5 @@ class BrowserGetCookiesTool:
         return ToolResult(
             ok=True,
             data={"cookies": cookies, "bridged_to_http_session": bridged},
-            summary=f"{len(cookies)} cookie(s): {', '.join(c.get('name','') for c in cookies[:10])}",
+            summary=f"{len(cookies)} cookie(s): {', '.join(c.get('name', '') for c in cookies[:10])}",
         )

@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-_LOCAL_PROVIDERS = {"llamacpp", "ollama"}
 _ROLE_ALIASES = {
     "director": "director",
     "root": "director",
@@ -113,7 +112,9 @@ def resolve_context_budget(
     window_fraction = _ROLE_CONTEXT_FRACTIONS[role_name]
     max_prompt = min(role_ceiling, max(512, int(resolved_window * window_fraction)))
     if resolved_window > 0:
-        output_reserve = max(384, min(8_000, int(resolved_window * (0.20 if local_profile else 0.12))))
+        output_reserve = max(
+            384, min(8_000, int(resolved_window * (0.20 if local_profile else 0.12)))
+        )
         max_prompt = min(max_prompt, max(512, resolved_window - output_reserve))
     history_tokens = max(128, int(max_prompt * _ROLE_HISTORY_FRACTIONS[role_name]))
     return RoleContextBudget(
@@ -132,7 +133,9 @@ def resolve_context_budget(
     )
 
 
-def trim_text_to_token_budget(text: Any, max_tokens: int, *, marker: str = "...truncated...") -> str:
+def trim_text_to_token_budget(
+    text: Any, max_tokens: int, *, marker: str = "...truncated..."
+) -> str:
     clean = str(text or "")
     max_tokens = int(max_tokens or 0)
     if max_tokens <= 0 or estimate_context_tokens(clean) <= max_tokens:
@@ -227,7 +230,7 @@ def _resolve_context_window(*, provider: str, model: str, context_window: int | 
             return int(policy.context_window)
     except Exception:
         pass
-    return 8_192 if provider in _LOCAL_PROVIDERS else 300_000
+    return 8_192 if provider in {"llamacpp", "ollama"} else 300_000
 
 
 def _skill_char_budget(role: str, *, local_profile: bool) -> int:

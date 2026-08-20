@@ -39,7 +39,10 @@ The legacy `browser_render` tool (in `hands_tools.py`) still uses the one-shot l
 
 **Eyes isolated contexts** (`eyes.py`): `new_page(isolated=True)` creates a fresh browser context. Prevents cookie leakage across tool calls.
 
-**X-Ray MitmProxy lifecycle**: requires `mitmproxy` runtime. `MitmProxy.is_available()` lets InterceptProxyTool fail gracefully on hosts without it.
+**X-Ray MitmProxy lifecycle**: the passive `FlowAnalyzer` works without `mitmproxy`.
+The live proxy dependency is temporarily not bundled because mitmproxy 12.2.3
+caps msgpack below its patched 1.2.1 release. `MitmProxy.is_available()` makes
+`InterceptProxyTool` fail gracefully until that upstream constraint is fixed.
 
 ## Sandbox traffic bypass
 

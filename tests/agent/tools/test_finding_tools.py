@@ -69,6 +69,12 @@ async def test_report_finding_conforms_to_brain_tool():
     assert tool.name == "report_finding"
 
 
+def test_report_finding_requires_observed_impact_for_severity() -> None:
+    description = ReportFindingTool.description.lower()
+    assert "demonstrated impact" in description
+    assert "stolen credentials" in description
+
+
 @pytest.mark.asyncio
 async def test_report_finding_stores_and_returns_id():
     tool = ReportFindingTool()
@@ -321,6 +327,94 @@ async def test_report_finding_allows_medium_with_descriptive_evidence():
         _get_findings()[0]["poc_script_code"]
         == "Stack trace included SQL exception details in browser response."
     )
+
+
+@pytest.mark.asyncio
+async def test_dedup_keeps_same_path_on_different_origins_distinct():
+    tool = ReportFindingTool()
+
+    first = await tool.run(
+        title="IDOR on first host",
+        severity="medium",
+        finding_type="idor",
+        affected_component="https://one.example/api/users/1",
+        description="Other user data is returned.",
+    )
+    second = await tool.run(
+        title="IDOR on second host",
+        severity="medium",
+        finding_type="idor",
+        affected_component="https://two.example/api/users/2",
+        description="Other user data is returned.",
+    )
+
+    assert first.data["id"] != second.data["id"]
+    assert len(_get_findings()) == 2
+
+
+@pytest.mark.asyncio
+async def test_dedup_monotonically_promotes_stronger_finding():
+    tool = ReportFindingTool()
+    await tool.run(
+        title="Tentative injection signal",
+        severity="medium",
+        finding_type="sqli",
+        affected_component="https://app.example/api/search?q=test",
+        description="An error changed with input.",
+        verifier_verdict="UNCONFIRMED",
+    )
+
+    stronger = {
+        "title": "Confirmed SQL injection",
+        "severity": "critical",
+        "finding_type": "sql_injection",
+        "affected_component": "https://app.example/api/search?q=quote",
+        "description": "The query is injectable.",
+        "impact": "Unauthenticated database access is possible.",
+        "technical_analysis": (
+            "Negative control returned 200 without an SQL error; the quote payload "
+            "returned a database error twice. repeat_count=2"
+        ),
+        "poc_description": "Replay the control, then the quote payload twice.",
+        "poc_script_code": (
+            "GET /api/search?q=test HTTP/1.1\nHost: app.example\n\n"
+            "HTTP/1.1 200 OK\n\nnegative control: no sql error\n\n"
+            "GET /api/search?q=' HTTP/1.1\nHost: app.example\n\n"
+            "HTTP/1.1 500 Internal Server Error\n\nSQL syntax error\n\n"
+            "repeat_count=2\n"
+            "GET /api/search?q=' HTTP/1.1\nHost: app.example\n\n"
+            "HTTP/1.1 500 Internal Server Error\n\nSQL syntax error"
+        ),
+        "remediation_steps": "Use parameterized queries.",
+        "verifier_verdict": "CONFIRMED",
+        "verifier_confidence": "high",
+        "verifier_reasoning": "Control and repeated exploit differ.",
+        "replay_gate": {"status": "passed", "method": "raw_http"},
+        "_replay_gate_machine": True,
+    }
+    result = await tool.run(**stronger)
+
+    assert result.data["deduped"] is True
+    finding = _get_findings()[0]
+    assert finding["severity"] == "critical"
+    assert finding["title"] == "Confirmed SQL injection"
+    assert finding["proof"]["ok"] is True
+    assert finding["verifier_verdict"] == "CONFIRMED"
+    assert finding["acceptance_status"] == "accepted"
+
+    await tool.run(
+        title="Weaker duplicate",
+        severity="medium",
+        finding_type="sqli",
+        affected_component="https://app.example/api/search?q=other",
+        description="A weaker duplicate.",
+        verifier_verdict="UNCONFIRMED",
+    )
+    finding = _get_findings()[0]
+    assert finding["severity"] == "critical"
+    assert finding["title"] == "Confirmed SQL injection"
+    assert finding["verifier_verdict"] == "CONFIRMED"
+    assert finding["acceptance_status"] == "accepted"
 
 
 # ── QueryFindingsTool ────────────────────────────────────────
@@ -630,6 +724,26 @@ async def test_link_chain_requires_at_least_two_findings():
     result = await link.run(finding_ids=["VXIS-0001"], rationale="alone")
     assert result.ok is False
     assert "at least 2" in result.summary.lower()
+
+
+@pytest.mark.asyncio
+async def test_link_chain_rejects_self_link():
+    reported = await ReportFindingTool().run(
+        title="Debug disclosure",
+        severity="low",
+        finding_type="information_disclosure",
+        affected_component="/debug",
+        description="Debug data is public.",
+    )
+
+    result = await LinkChainTool().run(
+        finding_ids=[reported.data["id"], reported.data["id"]],
+        rationale="A finding cannot pivot into itself.",
+    )
+
+    assert result.ok is False
+    assert result.error == "duplicate_finding_ids"
+    assert _get_chains() == []
 
 
 @pytest.mark.asyncio

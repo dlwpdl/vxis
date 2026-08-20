@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
@@ -78,15 +79,16 @@ class S3ScannerPlugin(BasePlugin):
         #   s3scanner scan --bucket NAME --json          (single bucket)
         #   s3scanner scan --bucket-file FILE --json     (multi-bucket file)
         #
-        # For multiple buckets we write a bucket-file via process substitution
-        # so a single invocation handles all names.  The bucket list is joined
-        # with newlines and fed through bash process substitution.
-        bucket_list = "\n".join(buckets)
-        # Shell command: create a temp file, write bucket names, scan, clean up
-        return (
-            f"bash -c 'TMP=$(mktemp); printf \"{bucket_list}\" > \"$TMP\"; "
-            f"s3scanner scan --bucket-file \"$TMP\" --json; rm -f \"$TMP\"'"
+        # The common runner does not invoke a shell.  This plugin explicitly
+        # starts bash only for the temporary bucket file, with bucket names as
+        # positional arguments so target data is never parsed as shell code.
+        script = (
+            "tmp=$(mktemp) || exit 1; "
+            "trap 'rm -f \"$tmp\"' EXIT; "
+            'printf \'%s\\n\' "$@" > "$tmp"; '
+            's3scanner scan --bucket-file "$tmp" --json'
         )
+        return shlex.join(["bash", "-c", script, "--", *map(str, buckets)])
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []
@@ -121,12 +123,10 @@ class S3ScannerPlugin(BasePlugin):
 
             # Support both v1 and v2 field naming
             public_read: bool = bool(
-                record.get("public_read", False)
-                or record.get("AllUsers_read", False)
+                record.get("public_read", False) or record.get("AllUsers_read", False)
             )
             public_write: bool = bool(
-                record.get("public_write", False)
-                or record.get("AllUsers_write", False)
+                record.get("public_write", False) or record.get("AllUsers_write", False)
             )
             # AuthUsers = any AWS-authenticated user — also a finding
             auth_read: bool = bool(record.get("AuthUsers_read", False))
@@ -147,21 +147,23 @@ class S3ScannerPlugin(BasePlugin):
                     "severity": severity,
                 }
                 public_buckets.append(bucket_info)
-                findings.append({
-                    "type": "public_s3_bucket",
-                    "severity": severity,
-                    "title": f"Publicly Accessible S3 Bucket: {bucket_name}",
-                    "description": (
-                        f"S3 bucket '{bucket_name}' is publicly accessible. "
-                        f"Public read: {public_read}, Public write: {public_write}, "
-                        f"Auth read: {auth_read}, Auth write: {auth_write}."
-                    ),
-                    "bucket": bucket_name,
-                    "public_read": public_read,
-                    "public_write": public_write,
-                    "auth_read": auth_read,
-                    "auth_write": auth_write,
-                })
+                findings.append(
+                    {
+                        "type": "public_s3_bucket",
+                        "severity": severity,
+                        "title": f"Publicly Accessible S3 Bucket: {bucket_name}",
+                        "description": (
+                            f"S3 bucket '{bucket_name}' is publicly accessible. "
+                            f"Public read: {public_read}, Public write: {public_write}, "
+                            f"Auth read: {auth_read}, Auth write: {auth_write}."
+                        ),
+                        "bucket": bucket_name,
+                        "public_read": public_read,
+                        "public_write": public_write,
+                        "auth_read": auth_read,
+                        "auth_write": auth_write,
+                    }
+                )
 
         parsed_data["public_buckets"] = public_buckets
 

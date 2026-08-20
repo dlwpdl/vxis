@@ -531,9 +531,18 @@ class ProxyRuntime:
         for old, new in dict(body_replacements).items():
             body = str(body).replace(str(old), str(new))
         json_payload = overrides.get("json")
-        proxy_url = self.active_proxy_url()
         base_url, path = _split_absolute_url(url)
-        session = TargetSession(base_url, timeout=20.0, proxy=proxy_url)
+        # When Ghost is active the replay must exit through the Ghost proxy pool
+        # (fail-closed via GhostTransport), not just the local capture proxy —
+        # otherwise intercept_proxy replay would egress from the real IP.
+        from vxis.ghost.layer import ghost_layer
+
+        if ghost_layer.is_active():
+            from vxis.ghost.transport import GhostTransport
+
+            session = TargetSession(base_url, timeout=20.0, transport=GhostTransport(ghost_layer))
+        else:
+            session = TargetSession(base_url, timeout=20.0, proxy=self.active_proxy_url())
         try:
             resp = await session.request(
                 method,

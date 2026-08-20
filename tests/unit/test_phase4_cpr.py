@@ -153,7 +153,7 @@ class TestXRayImport:
             timestamp=0,
             method="POST",
             url="https://example.com/config",
-            request_body='{"password": "supersecret123", "api_key": "sk-1234567890abcdef1234567890abcdef"}',
+            request_body='{"password": "supersecret123", "api_key": "sk-1234567890abcdef1234567890abcdef"}',  # gitleaks:allow -- detector fixture
             request_headers={"content-type": "application/json"},
         )
         analyzer.add_flow(flow)

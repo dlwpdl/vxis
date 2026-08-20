@@ -21,7 +21,7 @@ X-Ray  = 투시 (트래픽 가로채기)
 
 1. **Plan mode first.** 비자명한 작업은 계획부터. 스코프와 성공 기준을 명시한 프롬프트로 `/plan` 돌리고 ExitPlanMode 전에 **`/plan-review`** (8개 서브에이전트: architecture, coding-standards, UX, performance, security, testing, ops, docs — 각자 전용 레퍼런스 문서 `postgres_performance.md`, `python_threading.md`, `software_architecture.md` 등 참조).
 2. **Phased commits.** 계획의 각 phase = 1 commit. 커밋마다 **`/code-review`** (같은 8개 에이전트 재사용) → 피드백을 내가 steer.
-3. **TDD.** Brain·scoring·skills·pipeline 변경은 실패하는 테스트부터. `pytest tests/ -x --timeout=30` 로컬 확인.
+3. **TDD.** Brain·scoring·skills·pipeline 변경은 실패하는 테스트부터. `uv run python -m pytest tests/ -x --timeout=30` 로컬 확인.
 
 ## Git Workflow
 
@@ -49,20 +49,20 @@ docker compose -f infra/benchmarks/juice-shop.yml up -d   # :3000
 docker compose -f infra/benchmarks/webgoat.yml up -d      # :8888/WebGoat
 
 # 풀 스캔
-python -m vxis.cli scan --target http://localhost:3000 --mode enterprise
+uv run python -m vxis.cli scan --target http://localhost:3000 --mode enterprise
 
 # 테스트
-pytest tests/ -x --timeout=30
-pytest tests/agent/test_scan_loop.py -k "not runs_to_finish"  # 스킵 flaky
+uv run python -m pytest tests/ -x --timeout=30
+uv run python -m pytest tests/agent/test_scan_loop.py -k "not runs_to_finish"  # 스킵 flaky
 
 # Growth loop (self-improving benchmark)
-python scripts/growth_loop.py --weekly
+uv run python scripts/growth_loop.py --weekly
 
 # Smoke: Brain-First 경로
 python scripts/smoke_brain_first.py --target http://localhost:3000
 
 # 리포트 생성 (WebGoat/Juice Shop 벤치마크 템플릿)
-python scripts/generate_benchmark_reports.py
+uv run python generate_benchmark_reports.py
 ```
 
 ## 런타임 구조 (single-loop · Brain-First)
@@ -92,7 +92,7 @@ GH Actions (외부): `cve-watch.yml`, `domain-intel.yml`, `upstream-watch.yml`, 
 
 ## Report Format (MANDATORY — 변경 금지)
 
-템플릿: `scripts/generate_benchmark_reports.py` 의 `WEBGOAT_FINDINGS`.
+템플릿: `generate_benchmark_reports.py` 의 `WEBGOAT_FINDINGS`.
 
 - `Finding.id`: `타겟약어-NNN`
 - `Finding.title` · `description` · `remediation`: `"English|||한국어"`

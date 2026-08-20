@@ -3,19 +3,37 @@
 Headless via App.run_test() (no real scan). Assertions lean on the model (which
 drives the tree) plus the Textual Tree node structure.
 """
+
 from textual.widgets import RichLog, Static, Tree
 
 from vxis.cli.scan_tui import ScanTUI
 
 
+async def test_scan_chrome_follows_selected_language(monkeypatch):
+    monkeypatch.setenv("VXIS_UI_LANGUAGE", "ko")
+    app = ScanTUI(target="t")
+    async with app.run_test():
+        assert str(app.query_one("#tree", Tree).border_title) == "스캔 트리"
+        assert str(app.query_one("#detail", RichLog).border_title) == "디렉터"
+        assert "실행 중" in str(app.query_one("#status", Static).render())
+        assert app.active_bindings["q"][1].description == "종료"
+        assert app.use_command_palette is False
+
+
 async def test_feed_builds_director_iteration_tree():
     app = ScanTUI(target="http://localhost:3000", brain="together/GLM-5")
     async with app.run_test() as pilot:
-        app.feed_event("brain_thinking", {
-            "iteration": 1, "max_iters": 120,
-            "vectors": [{"id": "web:recon", "reasoning": "map the surface"}],
-        })
-        app.feed_event("attack", {"vector_id": "skill:test_injection", "method": "SKILL", "endpoint": "/login"})
+        app.feed_event(
+            "brain_thinking",
+            {
+                "iteration": 1,
+                "max_iters": 120,
+                "vectors": [{"id": "web:recon", "reasoning": "map the surface"}],
+            },
+        )
+        app.feed_event(
+            "attack", {"vector_id": "skill:test_injection", "method": "SKILL", "endpoint": "/login"}
+        )
         app.feed_event("hit", {"vector_id": "sqli", "confidence": "critical"})
         await pilot.pause()
 
@@ -39,20 +57,38 @@ async def test_feed_builds_director_iteration_tree():
 async def test_control_plane_shows_nested_agent_subtree():
     app = ScanTUI(target="t")
     async with app.run_test() as pilot:
-        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]})
+        app.feed_event(
+            "brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]}
+        )
         app.feed_event("injection_approval_result", {"decision": "readonly"})
-        app.feed_event("control_plane", {"agents": [
-            {"id": "director", "status": "running", "role": "director"},
-            {"id": "w1", "parent_id": "director", "status": "running", "task": "skill:test_ssrf"},
-            {"id": "w2", "parent_id": "director", "status": "waiting", "task": "skill:test_xss"},
-        ], "telemetry": {
-            "brain_decisions": 3,
-            "memory_compression": {
-                "last_tokens_before": 12_000,
-                "last_threshold": 200_000,
-                "total_tokens_saved": 1000,
+        app.feed_event(
+            "control_plane",
+            {
+                "agents": [
+                    {"id": "director", "status": "running", "role": "director"},
+                    {
+                        "id": "w1",
+                        "parent_id": "director",
+                        "status": "running",
+                        "task": "skill:test_ssrf",
+                    },
+                    {
+                        "id": "w2",
+                        "parent_id": "director",
+                        "status": "waiting",
+                        "task": "skill:test_xss",
+                    },
+                ],
+                "telemetry": {
+                    "brain_decisions": 3,
+                    "memory_compression": {
+                        "last_tokens_before": 12_000,
+                        "last_threshold": 200_000,
+                        "total_tokens_saved": 1000,
+                    },
+                },
             },
-        }})
+        )
         await pilot.pause()
 
         assert {n["agent"]["id"] for n in app.model.agent_tree()} == {"director"}
@@ -74,7 +110,10 @@ async def test_scan_runner_worker_drives_feed_and_marks_done():
 
     async def runner():
         app = holder["app"]
-        app.thread_safe_feed("brain_thinking", {"iteration": 1, "vectors": [{"id": "skill:test_ssrf", "reasoning": "x"}]})
+        app.thread_safe_feed(
+            "brain_thinking",
+            {"iteration": 1, "vectors": [{"id": "skill:test_ssrf", "reasoning": "x"}]},
+        )
         app.thread_safe_feed("hit", {"vector_id": "ssrf", "confidence": "high"})
 
     app = ScanTUI(target="t", scan_runner=runner)
@@ -99,7 +138,9 @@ async def test_live_updates_preserve_iteration_node_identity():
     """
     app = ScanTUI(target="t")
     async with app.run_test() as pilot:
-        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]})
+        app.feed_event(
+            "brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]}
+        )
         await pilot.pause()
         tree = app.query_one("#tree", Tree)
         director_before = tree.root.children[0]
@@ -107,32 +148,40 @@ async def test_live_updates_preserve_iteration_node_identity():
 
         # a finding on the same iteration + a brand new iteration arrive
         app.feed_event("hit", {"vector_id": "sqli", "confidence": "high"})
-        app.feed_event("brain_thinking", {"iteration": 2, "vectors": [{"id": "skill:test_ssrf", "reasoning": "b"}]})
+        app.feed_event(
+            "brain_thinking",
+            {"iteration": 2, "vectors": [{"id": "skill:test_ssrf", "reasoning": "b"}]},
+        )
         await pilot.pause()
 
         director_after = tree.root.children[0]
-        assert director_after is director_before          # not rebuilt
-        assert director_after.children[0] is iter_before   # same leaf object
-        assert "1 found" in str(iter_before.label)         # label updated in place
-        assert len(director_after.children) == 2           # new iteration appended
+        assert director_after is director_before  # not rebuilt
+        assert director_after.children[0] is iter_before  # same leaf object
+        assert "1 found" in str(iter_before.label)  # label updated in place
+        assert len(director_after.children) == 2  # new iteration appended
 
 
 async def test_agent_node_updates_status_in_place():
     """An agent's status flip (running → done) reuses the same node, relabelled."""
     app = ScanTUI(target="t")
     async with app.run_test() as pilot:
-        app.feed_event("control_plane", {"agents": [{"id": "w1", "status": "running", "task": "skill:test_ssrf"}]})
+        app.feed_event(
+            "control_plane",
+            {"agents": [{"id": "w1", "status": "running", "task": "skill:test_ssrf"}]},
+        )
         await pilot.pause()
         tree = app.query_one("#tree", Tree)
         agents_branch = [c for c in tree.root.children if "Agents" in str(c.label)][0]
         w1_before = agents_branch.children[0]
         assert "running" in str(w1_before.label)
 
-        app.feed_event("control_plane", {"agents": [{"id": "w1", "status": "done", "task": "skill:test_ssrf"}]})
+        app.feed_event(
+            "control_plane", {"agents": [{"id": "w1", "status": "done", "task": "skill:test_ssrf"}]}
+        )
         await pilot.pause()
         agents_after = [c for c in tree.root.children if "Agents" in str(c.label)][0]
         w1_after = agents_after.children[0]
-        assert w1_after is w1_before        # same node, not recreated
+        assert w1_after is w1_before  # same node, not recreated
         assert "done" in str(w1_after.label)
         # the detail pane reads node.data live — it must hold the fresh agent dict
         assert w1_after.data["agent"]["status"] == "done"
@@ -142,8 +191,13 @@ async def test_cursor_selection_survives_live_updates():
     """Moving the cursor onto a node must survive a burst of later events."""
     app = ScanTUI(target="t")
     async with app.run_test() as pilot:
-        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]})
-        app.feed_event("brain_thinking", {"iteration": 2, "vectors": [{"id": "skill:test_ssrf", "reasoning": "b"}]})
+        app.feed_event(
+            "brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]}
+        )
+        app.feed_event(
+            "brain_thinking",
+            {"iteration": 2, "vectors": [{"id": "skill:test_ssrf", "reasoning": "b"}]},
+        )
         await pilot.pause()
         tree = app.query_one("#tree", Tree)
         second_iter = tree.root.children[0].children[1]
@@ -152,9 +206,11 @@ async def test_cursor_selection_survives_live_updates():
         assert tree.cursor_node is second_iter
 
         app.feed_event("hit", {"vector_id": "x", "confidence": "low"})
-        app.feed_event("control_plane", {"agents": [{"id": "w1", "status": "running", "task": "t"}]})
+        app.feed_event(
+            "control_plane", {"agents": [{"id": "w1", "status": "running", "task": "t"}]}
+        )
         await pilot.pause()
-        assert tree.cursor_node is second_iter   # not yanked back to the root
+        assert tree.cursor_node is second_iter  # not yanked back to the root
 
 
 async def test_markup_for_iteration_is_scoped_director_is_everything():
@@ -162,15 +218,23 @@ async def test_markup_for_iteration_is_scoped_director_is_everything():
     (root) node shows the whole narrative across all iterations."""
     app = ScanTUI(target="t")
     async with app.run_test() as pilot:
-        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "map surface"}]})
-        app.feed_event("attack", {"vector_id": "skill:test_injection", "method": "SKILL", "endpoint": "/login"})
-        app.feed_event("brain_thinking", {"iteration": 2, "vectors": [{"id": "skill:test_ssrf", "reasoning": "probe ssrf"}]})
+        app.feed_event(
+            "brain_thinking",
+            {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "map surface"}]},
+        )
+        app.feed_event(
+            "attack", {"vector_id": "skill:test_injection", "method": "SKILL", "endpoint": "/login"}
+        )
+        app.feed_event(
+            "brain_thinking",
+            {"iteration": 2, "vectors": [{"id": "skill:test_ssrf", "reasoning": "probe ssrf"}]},
+        )
         await pilot.pause()
 
         iter0 = app._markup_for({"kind": "iter", "pos": 0})
         assert any("map surface" in m for m in iter0)
         assert any("SQL Injection" in m for m in iter0)
-        assert not any("probe ssrf" in m for m in iter0)   # scoped to iteration 0
+        assert not any("probe ssrf" in m for m in iter0)  # scoped to iteration 0
 
         everything = app._markup_for({"kind": "root"})
         assert any("map surface" in m for m in everything)
@@ -183,19 +247,21 @@ async def test_detail_follows_live_then_freezes_on_drill_in():
     app = ScanTUI(target="t")
     async with app.run_test() as pilot:
         detail = app.query_one("#detail", RichLog)
-        app.feed_event("attack", {"vector_id": "skill:test_injection", "method": "SKILL", "endpoint": "/login"})
+        app.feed_event(
+            "attack", {"vector_id": "skill:test_injection", "method": "SKILL", "endpoint": "/login"}
+        )
         await pilot.pause()
         n1 = len(detail.lines)
         app.feed_event("hit", {"vector_id": "sqli", "confidence": "high"})
         await pilot.pause()
-        assert len(detail.lines) > n1            # streamed live, without any click
+        assert len(detail.lines) > n1  # streamed live, without any click
 
         app._on_node_focus({"kind": "iter", "pos": 0})  # drill in
         await pilot.pause()
         frozen = len(detail.lines)
         app.feed_event("attack", {"vector_id": "skill:test_xss", "method": "GET", "endpoint": "/s"})
         await pilot.pause()
-        assert len(detail.lines) == frozen       # frozen on the drilled node
+        assert len(detail.lines) == frozen  # frozen on the drilled node
 
 
 async def test_dossier_theme_and_chrome_applied():
@@ -217,7 +283,9 @@ async def test_dossier_theme_and_chrome_applied():
 async def test_detail_border_title_follows_drilled_node():
     app = ScanTUI(target="t")
     async with app.run_test() as pilot:
-        app.feed_event("brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]})
+        app.feed_event(
+            "brain_thinking", {"iteration": 1, "vectors": [{"id": "web:recon", "reasoning": "a"}]}
+        )
         await pilot.pause()
         app._render_detail({"kind": "iter", "pos": 0})
         assert str(app.query_one("#detail", RichLog).border_title) == "ITER 01"

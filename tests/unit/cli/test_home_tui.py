@@ -13,6 +13,18 @@ async def test_home_mounts_with_theme_and_menu():
         assert menu.option_count == 6
 
 
+async def test_home_labels_follow_selected_language(monkeypatch):
+    monkeypatch.setenv("VXIS_UI_LANGUAGE", "ko")
+    app = VxisHome()
+    async with app.run_test():
+        menu = app.query_one("#menu", OptionList)
+        labels = [str(menu.get_option_at_index(i).prompt) for i in range(menu.option_count)]
+        assert any("스캔" in label for label in labels)
+        assert any("설정" in label for label in labels)
+        assert app.active_bindings["q"][1].description == "종료"
+        assert app.use_command_palette is False
+
+
 async def test_enter_selects_highlighted_action():
     app = VxisHome()
     async with app.run_test() as pilot:

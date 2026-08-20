@@ -7,8 +7,11 @@ with fixture data so that no real scan artifacts are required.
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Generator
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -19,13 +22,20 @@ from sqlalchemy.ext.asyncio import AsyncEngine  # noqa: E402
 
 from vxis.core.db import create_engine, get_session, init_db  # noqa: E402
 from vxis.dashboard.app import app  # noqa: E402
-from vxis.dashboard.auth import SESSION_COOKIE, ensure_default_admin  # noqa: E402
+from vxis.dashboard.auth import (  # noqa: E402
+    SESSION_COOKIE,
+    SESSION_MAX_AGE_SECONDS,
+    ensure_default_admin,
+    make_session_token,
+    parse_session_token,
+)
 from vxis.models.db_models import FindingRecord, ScanRecord  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_engine() -> AsyncEngine:
     return create_engine("sqlite+aiosqlite:///:memory:")
@@ -92,6 +102,7 @@ async def _seed(engine: AsyncEngine) -> tuple[int, int]:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def seeded_engine() -> Generator[tuple[AsyncEngine, int, int], None, None]:
     """Provide a seeded in-memory engine; shared across all tests in this module."""
@@ -145,6 +156,7 @@ def finding_id(seeded_engine) -> int:  # type: ignore[no-untyped-def]
 # Health endpoint
 # ---------------------------------------------------------------------------
 
+
 def test_health_endpoint(client: TestClient) -> None:
     response = client.get("/health")
     assert response.status_code == 200
@@ -159,6 +171,26 @@ def test_health_version(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Authentication
 # ---------------------------------------------------------------------------
+
+
+def test_session_token_expires_server_side(monkeypatch) -> None:
+    monkeypatch.setattr("vxis.dashboard.auth.time.time", lambda: 1_000.0)
+    token = make_session_token(42)
+    assert parse_session_token(token) == 42
+
+    monkeypatch.setattr(
+        "vxis.dashboard.auth.time.time",
+        lambda: 1_000.0 + SESSION_MAX_AGE_SECONDS + 1,
+    )
+    assert parse_session_token(token) is None
+
+
+def test_session_token_rejects_legacy_payload() -> None:
+    from vxis.dashboard import auth
+
+    payload = "42"
+    assert parse_session_token(f"{payload}.{auth._sign(payload)}") is None
+
 
 def test_dashboard_redirects_browser_without_auth(auth_client: TestClient) -> None:
     response = auth_client.get("/", headers={"accept": "text/html"}, follow_redirects=False)
@@ -185,9 +217,49 @@ def test_dashboard_login_creates_session(auth_client: TestClient) -> None:
     assert response.status_code == 200
 
 
+def test_bearer_token_cannot_start_scan(auth_client: TestClient, monkeypatch) -> None:
+    from vxis.dashboard.scan_manager import scan_manager
+
+    monkeypatch.setenv("VXIS_DASHBOARD_TOKEN", "dashboard-token")
+    monkeypatch.setenv("VXIS_DASHBOARD_SCAN_ENABLED", "1")
+    start_scan = AsyncMock()
+    monkeypatch.setattr(scan_manager, "start_scan", start_scan)
+
+    response = auth_client.post(
+        "/api/scan/start",
+        headers={"authorization": "Bearer dashboard-token"},
+        data={"target": "example.com", "scan_type": "external"},
+    )
+
+    assert response.status_code == 403
+    start_scan.assert_not_awaited()
+
+
+def test_scan_start_is_disabled_by_default(auth_client: TestClient, monkeypatch) -> None:
+    from vxis.dashboard.scan_manager import scan_manager
+
+    start_scan = AsyncMock()
+    monkeypatch.setattr(scan_manager, "start_scan", start_scan)
+    login = auth_client.post(
+        "/login",
+        data={"username": "admin", "password": "secret-password"},
+        follow_redirects=False,
+    )
+    assert login.status_code == 303
+
+    response = auth_client.post(
+        "/api/scan/start",
+        data={"target": "example.com", "scan_type": "external"},
+    )
+
+    assert response.status_code == 503
+    start_scan.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # Index page
 # ---------------------------------------------------------------------------
+
 
 def test_index_returns_html(client: TestClient) -> None:
     response = client.get("/")
@@ -235,6 +307,7 @@ def test_scan_new_includes_scan_type_select(client: TestClient) -> None:
 # Scan detail page
 # ---------------------------------------------------------------------------
 
+
 def test_scan_detail_returns_html(client: TestClient, scan_id: int) -> None:
     response = client.get(f"/scan/{scan_id}")
     assert response.status_code == 200
@@ -272,6 +345,7 @@ def test_scan_detail_404_on_unknown_scan(client: TestClient) -> None:
 # ---------------------------------------------------------------------------
 # Findings partial (HTMX)
 # ---------------------------------------------------------------------------
+
 
 def test_findings_partial_returns_html(client: TestClient, scan_id: int) -> None:
     response = client.get(f"/scan/{scan_id}/findings")
@@ -316,17 +390,14 @@ def test_findings_partial_empty_result(client: TestClient, scan_id: int) -> None
 # Finding detail page
 # ---------------------------------------------------------------------------
 
-def test_finding_detail_returns_html(
-    client: TestClient, scan_id: int, finding_id: int
-) -> None:
+
+def test_finding_detail_returns_html(client: TestClient, scan_id: int, finding_id: int) -> None:
     response = client.get(f"/scan/{scan_id}/finding/{finding_id}")
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
 
 
-def test_finding_detail_shows_title(
-    client: TestClient, scan_id: int, finding_id: int
-) -> None:
+def test_finding_detail_shows_title(client: TestClient, scan_id: int, finding_id: int) -> None:
     response = client.get(f"/scan/{scan_id}/finding/{finding_id}")
     assert "SQL Injection" in response.text
 
@@ -345,9 +416,7 @@ def test_finding_detail_shows_description(
     assert "vulnerable to SQL injection" in response.text
 
 
-def test_finding_detail_shows_target(
-    client: TestClient, scan_id: int, finding_id: int
-) -> None:
+def test_finding_detail_shows_target(client: TestClient, scan_id: int, finding_id: int) -> None:
     response = client.get(f"/scan/{scan_id}/finding/{finding_id}")
     assert "192.168.1.1" in response.text
 
@@ -368,6 +437,7 @@ def test_finding_detail_breadcrumb_links_back(
 # Export endpoint
 # ---------------------------------------------------------------------------
 
+
 def test_export_returns_file(client: TestClient, scan_id: int) -> None:
     response = client.get(f"/scan/{scan_id}/export")
     assert response.status_code == 200
@@ -381,9 +451,21 @@ def test_export_contains_html_report(client: TestClient, scan_id: int) -> None:
     assert "192.168.1.1" in response.text
 
 
+def test_export_removes_temporary_file(client: TestClient, scan_id: int) -> None:
+    temp_dir = Path(tempfile.gettempdir())
+    pattern = f"vxis_report_{scan_id}_*.html"
+    before = set(temp_dir.glob(pattern))
+
+    response = client.get(f"/scan/{scan_id}/export")
+
+    assert response.status_code == 200
+    assert set(temp_dir.glob(pattern)) == before
+
+
 # ---------------------------------------------------------------------------
 # Knowledge base
 # ---------------------------------------------------------------------------
+
 
 def test_kb_page_is_linked_route(client: TestClient) -> None:
     response = client.get("/kb")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -320,6 +320,65 @@ class TestScanOrchestratorScopeValidation:
             result = await orch.run_scan(target="example.com", profile="stealth")
 
         assert result.profile == "stealth"
+
+    @pytest.mark.asyncio
+    async def test_explicit_plugin_scan_fails_when_none_are_available(self, tmp_path):
+        from vxis.config.schema import VXISConfig
+
+        orch = ScanOrchestrator(VXISConfig(data_dir=tmp_path))
+        with patch("vxis.core.orchestrator.discover_plugins", return_value={}):
+            with pytest.raises(RuntimeError, match="requested plugins"):
+                await orch.run_scan(
+                    target="example.com",
+                    profile="standard",
+                    selected_plugins=["nuclei"],
+                    tier=2,
+                )
+
+    @pytest.mark.asyncio
+    async def test_required_plugin_scan_fails_for_empty_full_registry(self, tmp_path):
+        from vxis.config.schema import VXISConfig
+
+        orch = ScanOrchestrator(VXISConfig(data_dir=tmp_path))
+        with patch("vxis.core.orchestrator.discover_plugins", return_value={}):
+            with pytest.raises(RuntimeError, match="runnable plugins"):
+                await orch.run_scan(
+                    target="example.com",
+                    profile="standard",
+                    selected_plugins=None,
+                    tier=2,
+                    require_runnable_plugins=True,
+                )
+
+    @pytest.mark.asyncio
+    async def test_scan_fails_when_every_runnable_plugin_fails(self, tmp_path):
+        from vxis.config.schema import VXISConfig
+        from vxis.core.engine import TaskNode, TaskState
+
+        plugin = MagicMock()
+        plugin.meta.tier = 1
+        plugin.validate_environment.return_value = True
+        failed_node = TaskNode(
+            plugin_name="nuclei",
+            state=TaskState.FAILED,
+            error="tool crashed",
+        )
+        orch = ScanOrchestrator(VXISConfig(data_dir=tmp_path))
+        with (
+            patch("vxis.core.orchestrator.discover_plugins", return_value={"nuclei": plugin}),
+            patch("vxis.core.orchestrator.build_dag_from_plugins", return_value={}),
+            patch(
+                "vxis.core.orchestrator.DAGExecutor.execute",
+                new_callable=AsyncMock,
+                return_value={"nuclei": failed_node},
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="No plugin completed successfully"):
+                await orch.run_scan(
+                    target="example.com",
+                    profile="standard",
+                    selected_plugins=["nuclei"],
+                )
 
 
 @pytest.mark.asyncio

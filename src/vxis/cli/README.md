@@ -16,7 +16,7 @@ vxis scan <target> [OPTIONS]
 | `--ghost`, `-g` | Ghost mode — proxy rotation, UA spoof, timing jitter |
 | `--output`, `-o` | HTML report output path |
 | `--resume` | Resume from checkpoint (compatibility option; no-op in the current single-loop runtime) |
-| `--interactive`, `-i` | Claude Code as Brain (InteractiveBrain path, stdin/stdout NDJSON) |
+| `--interactive`, `-i` | Disabled legacy InteractiveBrain bridge; exits with migration guidance |
 | `--tui/--no-tui` | Clickable Textual tree TUI by default on a real terminal; Rich fallback when disabled/headless |
 | `--verbose`, `-v` | DEBUG logging |
 | `--allow-inject` | Auto-approve injection gate (benchmarks only) |

@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import ipaddress
 import json
 import logging
 import re
+import socket
+import urllib.request
+from urllib.parse import urlsplit
 
 from vxis.growth.cache import ExtractionCache
 from vxis.growth.config import load_bootstrap_config
@@ -13,6 +17,40 @@ from vxis.growth.regex_filter import is_relevant
 from vxis.growth.schemas import NewsIntelligence, RawSignal
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_public_article_url(url: str) -> str:
+    """Allow only HTTP(S) URLs whose every resolved address is globally routable."""
+    try:
+        parsed = urlsplit(str(url).strip())
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("article URL must use http or https")
+        if parsed.username or parsed.password:
+            raise ValueError("article URL must not contain credentials")
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            addresses = [ipaddress.ip_address(parsed.hostname)]
+        except ValueError:
+            addresses = [
+                ipaddress.ip_address(info[4][0])
+                for info in socket.getaddrinfo(
+                    parsed.hostname,
+                    port,
+                    type=socket.SOCK_STREAM,
+                )
+            ]
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("article URL could not be resolved safely") from exc
+    if not addresses or any(not address.is_global for address in addresses):
+        raise ValueError("article URL must resolve only to public addresses")
+    return parsed.geturl()
+
+
+class _PublicArticleRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[no-untyped-def]
+        _validate_public_article_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
 
 EXTRACTION_PROMPT = """You are a threat intelligence analyst specializing in web application security.
 
@@ -82,9 +120,7 @@ def _parse_llm_json(response: str) -> dict:
         return {}
 
 
-def analyze_signal(
-    signal: RawSignal, dry_run: bool = True
-) -> NewsIntelligence | None:
+def analyze_signal(signal: RawSignal, dry_run: bool = True) -> NewsIntelligence | None:
     """Extract structured intelligence|||구조화 인텔리전스 추출.
 
     Pipeline:
@@ -134,16 +170,17 @@ def analyze_signal(
         body_text = signal.metadata.get("description", "") if signal.metadata else ""
     if len(body_text) < 500 and signal.url and signal.url.startswith("http"):
         try:
-            import re
-            import urllib.request
+            article_url = _validate_public_article_url(signal.url)
             req = urllib.request.Request(
-                signal.url,
+                article_url,
                 headers={"User-Agent": "VXIS-Growth/1.0"},
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            opener = urllib.request.build_opener(_PublicArticleRedirectHandler())
+            with opener.open(req, timeout=10) as resp:  # nosec B310 - URL and redirects validated
                 raw_bytes: bytes = resp.read(1_000_000)  # cap at 1MB
+                status = resp.status
             raw_html = raw_bytes.decode("utf-8", errors="replace")
-            if resp.status == 200 and len(raw_html) > 500:
+            if status == 200 and len(raw_html) > 500:
                 # Extract text from HTML — simple approach
                 html = raw_html
                 # Remove script/style tags
@@ -220,9 +257,7 @@ def analyze_signal(
         return None
 
 
-def analyze_batch(
-    signals: list[RawSignal], dry_run: bool = True
-) -> list[NewsIntelligence]:
+def analyze_batch(signals: list[RawSignal], dry_run: bool = True) -> list[NewsIntelligence]:
     """Analyze multiple signals respecting batch size|||배치 크기 기반 분석."""
     config = load_bootstrap_config()
     batch_size = int(config["filtering"]["batch_size"])

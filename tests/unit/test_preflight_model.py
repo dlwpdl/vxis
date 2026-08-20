@@ -1,17 +1,23 @@
 """preflight.check_brain must validate the resolved director model for ALL cloud
 providers (not just gemini): reject unknown/uncallable models BEFORE the scan,
 with the real reason + valid options — so a bad model never silently dies 9x."""
+
 from vxis.cli import preflight
 
 
 def _openai_env(monkeypatch, model):
     monkeypatch.setenv("UPSTREAM_LLM_PROVIDER", "openai")
     monkeypatch.setenv("UPSTREAM_LLM_MODEL", model)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0123456789abcdef")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0123456789abcdef")  # gitleaks:allow
     for k in (
-        "VXIS_DIRECTOR_LLM_PROVIDER", "VXIS_DIRECTOR_LLM_MODEL",
-        "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",
-        "TOGETHER_API_KEY", "LLM_API_KEY",
+        "VXIS_DIRECTOR_LLM",
+        "VXIS_DIRECTOR_LLM_PROVIDER",
+        "VXIS_DIRECTOR_LLM_MODEL",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+        "TOGETHER_API_KEY",
+        "LLM_API_KEY",
     ):
         monkeypatch.delenv(k, raising=False)
 
@@ -38,9 +44,7 @@ def test_registry_valid_but_uncallable_blocked(monkeypatch):
 
 def test_valid_callable_model_ready(monkeypatch):
     _openai_env(monkeypatch, "gpt-5.4")
-    monkeypatch.setattr(
-        "vxis.agent.brain.AgentBrain.healthcheck", lambda self: (True, "")
-    )
+    monkeypatch.setattr("vxis.agent.brain.AgentBrain.healthcheck", lambda self: (True, ""))
     label, ready = preflight.check_brain(interactive=False)
     assert ready is True
     assert "gpt-5.4" in label

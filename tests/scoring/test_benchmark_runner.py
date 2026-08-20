@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from vxis.scoring.benchmark import BenchmarkRunner
+from vxis.scoring.benchmark import BaselineNotFoundError, BenchmarkRunner
 from vxis.scoring.engine import DimensionScore, ScoringEngine, VXISScore
 from vxis.scoring.reporter import ScoreComparison
 from vxis.scoring.tracker import ScoreTracker
@@ -96,6 +96,38 @@ async def test_run_benchmark_falls_back_when_ctx_has_no_score_tracker(
     assert actual.target_type == "web"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("context_attrs", "message"),
+    [
+        ({"brain_health_warning": "all LLM calls failed"}, "all LLM calls failed"),
+        ({"scan_loop_completed": False, "scan_loop_error": "loop crashed"}, "loop crashed"),
+    ],
+)
+async def test_run_benchmark_rejects_invalid_scan_results(
+    tmp_path: Path,
+    monkeypatch,
+    context_attrs: dict[str, object],
+    message: str,
+) -> None:
+    ctx = SimpleNamespace(findings=[], **context_attrs)
+
+    async def fake_execute_pipeline(
+        self,
+        target_type: str,
+        target_url: str,
+        scan_id: str,
+        profile: str = "crown",
+    ):
+        return ctx
+
+    monkeypatch.setattr(BenchmarkRunner, "_execute_pipeline", fake_execute_pipeline)
+
+    runner = BenchmarkRunner(str(tmp_path / "baseline.json"))
+    with pytest.raises(RuntimeError, match=message):
+        await runner.run_benchmark("web", "http://localhost:3000")
+
+
 def test_benchmark_runner_save_and_load_baseline_roundtrip(tmp_path: Path) -> None:
     runner = BenchmarkRunner(str(tmp_path / "baseline.json"))
     score = _score(total=432.0)
@@ -105,6 +137,13 @@ def test_benchmark_runner_save_and_load_baseline_roundtrip(tmp_path: Path) -> No
 
     assert isinstance(loaded, VXISScore)
     assert loaded.total == 432.0
+
+
+def test_compare_requires_a_real_baseline(tmp_path: Path) -> None:
+    runner = BenchmarkRunner(str(tmp_path / "baseline.json"))
+
+    with pytest.raises(BaselineNotFoundError, match="baseline"):
+        runner.compare_with_baseline(_score())
 
 
 def test_vector_coverage_details_preserve_vector_ids() -> None:

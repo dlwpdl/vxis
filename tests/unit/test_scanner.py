@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from vxis.core.scanner import ToolResult, run_tool
@@ -51,3 +53,11 @@ class TestRunTool:
 
         assert "echo" in result.command
         assert "cmd-label" in result.command
+
+    async def test_string_command_preserves_quoted_arguments_without_a_shell(self) -> None:
+        command = f'{sys.executable} -c "import sys; print(sys.argv[1])" "hello world"'
+
+        result = await run_tool(command)
+
+        assert result.return_code == 0
+        assert result.stdout.strip() == "hello world"

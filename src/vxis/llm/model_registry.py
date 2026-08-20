@@ -27,16 +27,16 @@ class ModelInfo:
     """Canonical metadata for a single LLM model."""
 
     model_id: str
-    provider: str                   # "openai" | "anthropic" | "gemini" | "together" | "ollama" | "llamacpp"
-    context_window: int             # max total tokens (input + output)
-    max_output_tokens: int          # max completion tokens
+    provider: str  # "openai" | "anthropic" | "gemini" | "together" | "ollama" | "llamacpp"
+    context_window: int  # max total tokens (input + output)
+    max_output_tokens: int  # max completion tokens
     supports_vision: bool = False
     supports_json_mode: bool = False
-    reasoning_model: bool = False   # consumes reasoning tokens (max_completion_tokens required)
-    family: str = ""                # e.g. "gpt-5.4", "claude-4.6", "gemini-3.1"
+    reasoning_model: bool = False  # consumes reasoning tokens (max_completion_tokens required)
+    family: str = ""  # e.g. "gpt-5.4", "claude-4.6", "gemini-3.1"
     aliases: tuple[str, ...] = field(default_factory=tuple)
     notes: str = ""
-    release_date: str = ""          # ISO date (from live catalog); "" for curated/unknown
+    release_date: str = ""  # ISO date (from live catalog); "" for curated/unknown
 
 
 @dataclass(frozen=True)
@@ -63,7 +63,7 @@ _MODELS: tuple[ModelInfo, ...] = (
     ModelInfo(
         model_id="gpt-5.4",
         provider="openai",
-        context_window=1_050_000,     # 1.05M (xhigh tier)
+        context_window=1_050_000,  # 1.05M (xhigh tier)
         max_output_tokens=64_000,
         supports_vision=True,
         supports_json_mode=True,
@@ -108,10 +108,10 @@ _MODELS: tuple[ModelInfo, ...] = (
     ModelInfo(
         model_id="claude-opus-4-8",
         provider="anthropic",
-        context_window=1_000_000,     # 1M max tier
+        context_window=1_000_000,  # 1M max tier
         max_output_tokens=64_000,
         supports_vision=True,
-        supports_json_mode=False,     # Anthropic uses tool_use for structured output
+        supports_json_mode=False,  # Anthropic uses tool_use for structured output
         reasoning_model=False,
         family="claude-4.8",
         aliases=("claude-opus-4-8[1m]",),
@@ -120,10 +120,10 @@ _MODELS: tuple[ModelInfo, ...] = (
     ModelInfo(
         model_id="claude-opus-4-6",
         provider="anthropic",
-        context_window=1_000_000,     # 1M max tier
+        context_window=1_000_000,  # 1M max tier
         max_output_tokens=64_000,
         supports_vision=True,
-        supports_json_mode=False,     # Anthropic uses tool_use for structured output
+        supports_json_mode=False,  # Anthropic uses tool_use for structured output
         reasoning_model=False,
         family="claude-4.6",
         aliases=("claude-opus-4-6[1m]",),
@@ -132,7 +132,7 @@ _MODELS: tuple[ModelInfo, ...] = (
     ModelInfo(
         model_id="claude-sonnet-4-6",
         provider="anthropic",
-        context_window=1_000_000,     # 1M max tier
+        context_window=1_000_000,  # 1M max tier
         max_output_tokens=64_000,
         supports_vision=True,
         supports_json_mode=False,
@@ -150,6 +150,28 @@ _MODELS: tuple[ModelInfo, ...] = (
         family="claude-4.5",
     ),
     # ── Google Gemini ─────────────────────────────────────────
+    ModelInfo(
+        model_id="google/gemini-3.7-flash",
+        provider="wavespeed",
+        context_window=1_048_576,
+        max_output_tokens=65_536,
+        supports_vision=True,
+        supports_json_mode=True,
+        reasoning_model=True,
+        family="gemini-3.7",
+        notes="Gemini 3.7 Flash through WaveSpeedAI",
+    ),
+    ModelInfo(
+        model_id="gemini-3.7-flash",
+        provider="gemini",
+        context_window=1_048_576,
+        max_output_tokens=65_536,
+        supports_vision=True,
+        supports_json_mode=True,
+        reasoning_model=True,
+        family="gemini-3.7",
+        notes="Stable Flash model; thinking levels: low, medium, high",
+    ),
     ModelInfo(
         model_id="gemini-3.1-pro-preview",
         provider="gemini",
@@ -261,17 +283,39 @@ _MODELS: tuple[ModelInfo, ...] = (
         notes="Uncensored general-purpose",
     ),
     # ── llama.cpp (local OpenAI-compatible server) ────────────
+    # Director: dense 27B, Heretic-decensored (structure-preserving, unlike crude
+    # abliteration), MTP head for per-turn latency. Supports 256K context + a
+    # tunable thinking mode; started conservatively so the memory compressor
+    # matches a Mac-sized llama-server launch. No neutral tool-calling benchmark
+    # exists yet — pilot against VXIS agent tests before trusting 1-tool/turn.
     ModelInfo(
-        model_id="huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+        model_id="Qwen3.8-27B-Uncensored-Q6_K",
+        provider="llamacpp",
+        context_window=32_768,
+        max_output_tokens=4_096,
+        supports_vision=False,  # text-only seat; mmproj-*.gguf omitted (latent VLM)
+        supports_json_mode=False,  # tools via llama-server --jinja, not json_mode
+        reasoning_model=False,  # has a thinking mode; leave off until piloted
+        family="qwen3.8",
+        aliases=("qwen3.8-27b-uncensored", "qwen3.8-27b"),
+        notes="orcarouter/Qwen3.8-27B-Uncensored-GGUF Q6_K (22.4GB). Run via local llama-server with --jinja for tools; start context small on <=32GB Macs.",
+    ),
+    # Fallback offensive-security WORKER (executor under a constrained harness) —
+    # NOT a director: base Qwen3.6-35B-A3B is MoE ~3B active and the CyberStrike
+    # LoRA teaches only tool-call FORMATTING (self-eval ~42% correct tool routing,
+    # but 100% clean termination, 0 fabricated observations). Use the clean GGUF
+    # (Q6/Q8) — not the huihui-abliterated build, not MLX 4-bit.
+    ModelInfo(
+        model_id="CyberStrike-OffSec-35B-Q6_K",
         provider="llamacpp",
         context_window=8_192,
         max_output_tokens=4_096,
         supports_vision=False,
         supports_json_mode=False,
         reasoning_model=False,
-        family="huihui-qwen3.6",
-        aliases=("huihui-qwen3.6-35b-a3b",),
-        notes="Run via local llama-server; on 64GB Macs start at 2048 context even though the model can be configured higher.",
+        family="cyberstrike-offsec",
+        aliases=("cyberstrike-offsec-35b",),
+        notes="oyildirim/CyberStrike-OffSec-35B-GGUF. Offensive-native executor for the worker slot only; harness must constrain tool choice.",
     ),
 )
 
@@ -400,14 +444,13 @@ def _context_from_llamacpp_payload(payload: object, model_id: str) -> int | None
 
     wanted = (model_id or "").strip().casefold()
     matches = [
-        item for item in data
+        item
+        for item in data
         if isinstance(item, dict) and str(item.get("id", "")).strip().casefold() == wanted
     ]
     candidates = matches or (data if len(data) == 1 else [])
     contexts = {
-        value
-        for item in candidates
-        if (value := _context_from_llamacpp_model(item)) is not None
+        value for item in candidates if (value := _context_from_llamacpp_model(item)) is not None
     }
     return next(iter(contexts)) if len(contexts) == 1 else None
 
@@ -423,7 +466,8 @@ def detect_llamacpp_context(base_url: str, model_id: str) -> int | None:
     for path in ("/props", "/v1/models"):
         try:
             req = Request(base_url + path, method="GET")
-            with urlopen(req, timeout=0.75) as resp:
+            # The configurable llama.cpp endpoint is restricted to HTTP(S) above.
+            with urlopen(req, timeout=0.75) as resp:  # nosec B310
                 payload = json.loads(resp.read().decode("utf-8", errors="replace"))
         except Exception:
             continue
@@ -494,7 +538,7 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
             profile="local-medium",
         )
 
-    if provider in {"openai", "anthropic", "gemini", "together", "deepseek"}:
+    if provider in {"openai", "anthropic", "gemini", "together", "deepseek", "wavespeed"}:
         segment_cap = _context_segment_cap()
         threshold = max(12_000, min(segment_cap, int(context_window * 0.85)))
         return CompressionPolicy(

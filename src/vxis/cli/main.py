@@ -76,28 +76,49 @@ app.command("emulate")(p1_emulate)
 # Injection auto-approve gate helper (module-level so it can be unit-tested)
 # ---------------------------------------------------------------------------
 
-_BENCHMARK_PORTS: frozenset[str] = frozenset({"8081", "3000", "8888", "8082", "8083", "5013", "4000"})
-_BENCHMARK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1"})
+_BENCHMARK_PORTS = frozenset({8081, 3000, 8888, 8082, 8083, 5013, 4000})
 
 
 def _is_local_benchmark(target: str) -> bool:
-    """Return True iff *target* is safe to auto-approve for injection.
+    """Return True only for an exactly parsed loopback benchmark endpoint."""
+    from ipaddress import ip_address
+    from urllib.parse import urlsplit
 
-    Safe means either:
-    1. The ``ghost://`` VXIS-internal scheme (never reaches a real network host), or
-    2. BOTH a known benchmark port AND a loopback host are present.
+    try:
+        parsed = urlsplit(target if "://" in target else f"//{target}")
+        host = parsed.hostname
+        if parsed.scheme not in {"", "http", "https"}:
+            return False
+        if host is None or parsed.port not in _BENCHMARK_PORTS:
+            return False
+        return host.casefold() == "localhost" or ip_address(host).is_loopback
+    except ValueError:
+        return False
 
-    The original inline predicate was accidentally correct because Python's
-    ``and`` binds tighter than ``or``, but the implicit precedence made it
-    one ``or`` clause away from silently approving injection against prod.
-    This helper makes the intent explicit and testable.
-    """
-    t_lower = target.lower()
-    if t_lower.startswith("ghost://"):
-        return True
-    has_benchmark_port = any(f":{port}" in t_lower for port in _BENCHMARK_PORTS)
-    has_loopback_host = any(h in t_lower for h in _BENCHMARK_HOSTS)
-    return has_benchmark_port and has_loopback_host
+
+def _expanded_db_url(db_url: str) -> str:
+    if ":///" not in db_url:
+        return db_url
+    prefix, path = db_url.split(":///", 1)
+    return f"{prefix}:///{Path(path).expanduser()}"
+
+
+def _create_secure_scan_log(log_dir: Path) -> Path:
+    """Atomically create a private scan log and return its path."""
+    import tempfile
+    from datetime import datetime
+
+    log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    log_dir.chmod(0o700)
+    with tempfile.NamedTemporaryFile(
+        prefix=f"scan_{datetime.now().strftime('%Y%m%d_%H%M%S')}_",
+        suffix=".log",
+        dir=log_dir,
+        delete=False,
+    ) as handle:
+        path = Path(handle.name)
+    path.chmod(0o600)
+    return path
 
 
 def _box_flag_to_mode(box: str) -> str | None:
@@ -271,7 +292,7 @@ def scan(
         False,
         "--interactive",
         "-i",
-        help="Claude Code가 Brain으로 작동 (stdin/stdout JSON)",
+        help="Disabled legacy Claude Code stdin/stdout bridge; use AgentBrain or VXIS MCP.",
     ),
     verbose: bool = typer.Option(
         False,
@@ -292,11 +313,6 @@ def scan(
         "--allow-inject",
         help="Skip the interactive approval gate and auto-approve injection. "
         "ONLY use on targets you own / are explicitly authorized to test.",
-    ),
-    plugins: Optional[str] = typer.Option(
-        None,
-        "--plugins",
-        help="Comma-separated plugin allowlist for compatibility with legacy scan workflows.",
     ),
     kind: str = typer.Option(
         "web",
@@ -348,15 +364,21 @@ def scan(
 
     \b
     기본: LLM API Brain이 단일 scan loop를 자율 실행
-    --interactive: Claude Code가 Brain (stdin/stdout JSON 프로토콜)
+    --interactive: 지원 중단된 legacy stdin/stdout 브리지 (사용 시 명시적 종료)
     --resume: 아직 지원하지 않음 (전달 시 명시 에러)
     --manifest: 여러 타겟을 한 번에 스캔 (scan.yml)
     """
+    if interactive:
+        err_console.print(
+            "[bold red]--interactive is disabled:[/bold red] the legacy InteractiveBrain "
+            "does not implement the live scan-loop contract. Configure AgentBrain or use "
+            "the VXIS MCP server instead."
+        )
+        raise typer.Exit(code=2)
+
     profile = normalize_scan_profile_name(profile)
     if resume:
-        raise typer.BadParameter(
-            "--resume is not implemented yet; checkpoint resume is disabled."
-        )
+        raise typer.BadParameter("--resume is not implemented yet; checkpoint resume is disabled.")
     # Cost/token budget → env so resolve_cost_budget() picks it up at loop build.
     import os as _os_budget
 
@@ -404,7 +426,9 @@ def scan(
             f"targets: {len(scan_manifest.targets)}"
         )
 
-        exit_code = multi_scan(scan_manifest)
+        # Propagate --ghost: without this the manifest path scanned every target
+        # with a direct connection even when the operator asked for anonymization.
+        exit_code = multi_scan(scan_manifest, ghost=ghost)
         raise typer.Exit(code=exit_code)
 
     # ── Single-target path (original behaviour) ────────────────────
@@ -425,7 +449,6 @@ def scan(
     else:
         os.environ.pop("VXIS_SCAN_INSTRUCTIONS", None)
 
-    selected_plugins = [p.strip() for p in plugins.split(",") if p.strip()] if plugins else None
     if client:
         os.environ["VXIS_CLIENT_ID"] = client
     else:
@@ -444,11 +467,8 @@ def scan(
         )
     else:
         # Route ALL logs to file so Rich Live TUI is never interrupted
-        from datetime import datetime as _dt
-
         log_dir = Path("logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f"scan_{_dt.now().strftime('%Y%m%d_%H%M%S')}.log"
+        log_path = _create_secure_scan_log(log_dir)
 
         # Reset any previous handlers (re-runs in same session)
         root_logger = logging.getLogger()
@@ -516,8 +536,6 @@ def scan(
             else "[yellow]⚠ empty pool (UA only)[/yellow]"
         )
         pf_table.add_row("Proxy Pool:", _p_status)
-    if selected_plugins:
-        pf_table.add_row("Plugins:", ", ".join(selected_plugins))
     if client:
         pf_table.add_row("Client:", client)
     if log_path is not None:
@@ -859,6 +877,9 @@ def scan(
         err_console.print("[bold red]Scan produced no context[/bold red]")
         raise typer.Exit(code=1)
 
+    scan_loop_completed = getattr(ctx, "scan_loop_completed", True) is not False
+    scan_status = str(getattr(ctx, "scan_status", "completed") or "completed").lower()
+
     # --- Final Results (Live display 종료 후) ---
     console.print()  # spacing after live display
 
@@ -893,7 +914,7 @@ def scan(
             )
 
         console.print(finding_table)
-    else:
+    elif scan_loop_completed:
         console.print(
             Panel(
                 "[yellow]No findings discovered.[/yellow]\n"
@@ -901,6 +922,14 @@ def scan(
                 "or pre-flight issues prevented full execution.[/dim]",
                 title="No Findings",
                 border_style="yellow",
+            )
+        )
+    else:
+        console.print(
+            Panel(
+                "[red]The scan did not complete; an empty result is not a clean result.[/red]",
+                title=f"Scan {scan_status}",
+                border_style="red",
             )
         )
 
@@ -960,7 +989,11 @@ def scan(
     runtime_failed = sum(1 for p in display.phases if p["status"] == "failed")
     iteration_count = int(getattr(ctx, "scan_loop_iterations", 0) or 0)
     summary_parts = [
-        "[bold green]Scan completed[/bold green]",
+        (
+            "[bold green]Scan completed[/bold green]"
+            if scan_loop_completed
+            else f"[bold red]Scan {scan_status}[/bold red]"
+        ),
         f"[cyan]{ctx.duration_seconds:.1f}s[/cyan]",
         f"[bold]{len(ctx.findings)}[/bold] finding(s)",
     ]
@@ -1023,6 +1056,8 @@ def scan(
     # Exit code:
     # 0 = success with findings OR clean target
     # 3 = scan completed but the fallback display saw a failed runtime stage
+    if not scan_loop_completed:
+        raise typer.Exit(code=1)
     if runtime_failed:
         raise typer.Exit(code=3)
 
@@ -1525,8 +1560,18 @@ def dashboard(
 
 
 @app.command(name="dashboard-init")
-def dashboard_init() -> None:
-    """Initialise dashboard DB tables and seed default admin/admin user."""
+def dashboard_init(
+    password: str = typer.Option(
+        ...,
+        "--password",
+        envvar="VXIS_DASHBOARD_ADMIN_PASSWORD",
+        prompt="Dashboard admin password",
+        hide_input=True,
+        confirmation_prompt=True,
+        help="Initial admin password (prefer VXIS_DASHBOARD_ADMIN_PASSWORD over argv)",
+    ),
+) -> None:
+    """Initialise the configured VXIS database and seed its first admin."""
     _require_optional_dependency("fastapi", "dashboard", "vxis dashboard-init")
     import asyncio
 
@@ -1534,17 +1579,16 @@ def dashboard_init() -> None:
     from vxis.dashboard.auth import ensure_default_admin
 
     async def _run() -> None:
-        engine = create_engine("sqlite+aiosqlite:///vxis.db")
-        await init_db(engine)
-        created = await ensure_default_admin(engine)
-        if created is not None:
-            console.print(
-                "[green]Default admin user created:[/green] "
-                "username=[bold]admin[/bold] password=[bold]admin[/bold]"
-            )
-            console.print("[yellow]Change the password immediately.[/yellow]")
-        else:
-            console.print("[dim]Users already exist — no seeding performed.[/dim]")
+        engine = create_engine(_expanded_db_url(_get_config().db_url))
+        try:
+            await init_db(engine)
+            created = await ensure_default_admin(engine, password)
+            if created is not None:
+                console.print("[green]Admin user created:[/green] username=[bold]admin[/bold]")
+            else:
+                console.print("[dim]Users already exist — no seeding performed.[/dim]")
+        finally:
+            await engine.dispose()
 
     asyncio.run(_run())
 
@@ -1575,6 +1619,7 @@ def diff_cmd(
 
         summary_table.add_row("[green]New[/green]", str(len(result.new_findings)))
         summary_table.add_row("[red]Resolved[/red]", str(len(result.resolved_findings)))
+        summary_table.add_row("[magenta]Unknown[/magenta]", str(len(result.unknown_findings)))
         summary_table.add_row("[yellow]Changed[/yellow]", str(len(result.changed_findings)))
         summary_table.add_row("[dim]Unchanged[/dim]", str(len(result.unchanged_findings)))
         console.print(summary_table)
@@ -1610,6 +1655,21 @@ def diff_cmd(
             for f in result.resolved_findings:
                 res_table.add_row(f.title, f.effective_severity.value, f.target)
             console.print(res_table)
+
+        if result.unknown_findings:
+            unknown_table = Table(
+                title="Unknown Resolution (Coverage Incomplete or Different)",
+                show_header=True,
+                header_style="bold magenta",
+                border_style="magenta",
+                expand=False,
+            )
+            unknown_table.add_column("Title", no_wrap=True)
+            unknown_table.add_column("Severity", no_wrap=True)
+            unknown_table.add_column("Target")
+            for f in result.unknown_findings:
+                unknown_table.add_row(f.title, f.effective_severity.value, f.target)
+            console.print(unknown_table)
 
         # Changed findings detail
         if result.changed_findings:
@@ -1707,10 +1767,10 @@ def trend_cmd(
 def agent_scan(
     target: str = typer.Argument(help="Target URL or domain"),
 ) -> None:
-    """[DEPRECATED] Use 'vxis scan' instead. 'vxis scan --interactive' for Claude Code mode."""
+    """[DEPRECATED] Use `vxis scan`; register `vxis-mcp` for Claude Code."""
     console.print("[yellow]agent-scan is deprecated. Use:[/yellow]")
     console.print("  [bold]vxis scan[/bold] <target>               # LLM API Brain")
-    console.print("  [bold]vxis scan[/bold] <target> --interactive  # Claude Code Brain")
+    console.print("  [bold]claude mcp add vxis -- vxis-mcp[/bold]    # Claude Code MCP")
     raise typer.Exit(code=0)
 
 
@@ -2124,16 +2184,23 @@ def kb_list() -> None:
 
 
 def _alembic_cfg():
-    """Return an Alembic Config pointing at the project's alembic.ini."""
+    """Return an Alembic config for both source checkouts and installed wheels."""
     from alembic.config import Config
 
-    # Resolve alembic.ini relative to the installed package so it works
-    # regardless of the current working directory.
-    ini_path = Path(__file__).resolve().parents[3] / "alembic.ini"
+    package_root = Path(__file__).resolve().parents[1]
+    ini_path = package_root / "alembic.ini"
+    script_path = package_root / "alembic"
     if not ini_path.exists():
-        # Fallback: try CWD (editable install / dev checkout).
-        ini_path = Path("alembic.ini")
-    return Config(str(ini_path))
+        source_root = Path(__file__).resolve().parents[3]
+        ini_path = source_root / "alembic.ini"
+        script_path = source_root / "alembic"
+    if not ini_path.is_file() or not script_path.is_dir():
+        raise RuntimeError("Alembic migration assets are missing from this installation")
+    cfg = Config(str(ini_path))
+    cfg.set_main_option("script_location", str(script_path))
+    db_url = _expanded_db_url(_get_config().db_url)
+    cfg.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
+    return cfg
 
 
 @db_app.command("upgrade")
@@ -2178,8 +2245,8 @@ schedule_app = typer.Typer(
 app.add_typer(schedule_app, name="schedule")
 
 
-def _run_scheduled_scan(target: str, profile: str) -> Optional[str]:
-    """Invoke `vxis scan` as subprocess; returns generated scan_id or None.
+def _run_scheduled_scan(target: str, profile: str) -> bool:
+    """Invoke ``vxis scan`` and return whether it completed successfully.
 
     |||하위 프로세스로 vxis scan 실행. scan_id 반환.
     """
@@ -2194,17 +2261,16 @@ def _run_scheduled_scan(target: str, profile: str) -> Optional[str]:
             timeout=60 * 60 * 4,
         )
         if proc.returncode != 0:
-            err_console.print(f"[red]Scheduled scan failed for {target}[/red]")
-            err_console.print(proc.stderr[-2000:])
-            return None
+            err_console.print(f"[red]Scheduled scan failed (exit {proc.returncode})[/red]")
+            return False
         # Try to parse a scan id from stdout (best-effort)
         for line in proc.stdout.splitlines():
             if "scan_id" in line.lower() or "scan id" in line.lower():
                 console.print(f"[dim]{line}[/dim]")
-        return None
+        return True
     except Exception as exc:  # noqa: BLE001
-        err_console.print(f"[red]Scheduled scan exception:[/red] {exc}")
-        return None
+        err_console.print(f"[red]Scheduled scan exception:[/red] {type(exc).__name__}")
+        return False
 
 
 @schedule_app.command("add")
@@ -2315,7 +2381,8 @@ def schedule_run(schedule_id: str = typer.Argument(help="Schedule ID to run now"
         raise typer.Exit(code=1)
 
     console.print(f"[cyan]Running schedule {sched.id} → {sched.target}[/cyan]")
-    _run_scheduled_scan(sched.target, sched.profile)
+    if not _run_scheduled_scan(sched.target, sched.profile):
+        raise typer.Exit(code=1)
     store.mark_ran(sched.id)
     console.print(f"[green]Done. Next run: {store.get(sched.id).next_run}[/green]")
 
@@ -2331,9 +2398,12 @@ def schedule_tick() -> None:
         console.print("[dim]No due schedules.[/dim]")
         return
 
+    failed = False
     for sched in due:
         console.print(f"[cyan]Running due schedule {sched.id} → {sched.target}[/cyan]")
-        _run_scheduled_scan(sched.target, sched.profile)
+        if not _run_scheduled_scan(sched.target, sched.profile):
+            failed = True
+            continue
         store.mark_ran(sched.id)
 
         # Diff against previous scan + regression notification
@@ -2341,6 +2411,8 @@ def schedule_tick() -> None:
             asyncio.run(_diff_latest_two_for_target(sched.target))
         except Exception as exc:  # noqa: BLE001
             err_console.print(f"[yellow]Diff/notify skipped:[/yellow] {exc}")
+    if failed:
+        raise typer.Exit(code=1)
 
 
 async def _diff_latest_two_for_target(target: str) -> None:
@@ -2355,7 +2427,8 @@ async def _diff_latest_two_for_target(target: str) -> None:
     from vxis.models.db_models import ScanRecord
 
     config = _get_config()
-    engine = create_engine(config.db_url)
+    db_url = _expanded_db_url(config.db_url)
+    engine = create_engine(db_url)
     async with get_session(engine) as session:
         result = await session.execute(
             select(ScanRecord)
@@ -2369,10 +2442,11 @@ async def _diff_latest_two_for_target(target: str) -> None:
         return
 
     new_scan, old_scan = scans[0], scans[1]
-    diff = await compare_scans(old_scan.id, new_scan.id, config.db_url)
+    diff = await compare_scans(old_scan.id, new_scan.id, db_url)
     console.print(
         f"[bold]Diff {old_scan.id} → {new_scan.id}:[/bold] "
         f"new={len(diff.new_findings)} resolved={len(diff.resolved_findings)} "
+        f"unknown={len(diff.unknown_findings)} "
         f"changed={len(diff.changed_findings)} unchanged={len(diff.unchanged_findings)}"
     )
 
@@ -2428,7 +2502,8 @@ def retest_cmd(
         from vxis.models.db_models import ScanRecord
 
         config = _get_config()
-        engine = create_engine(config.db_url)
+        db_url = _expanded_db_url(config.db_url)
+        engine = create_engine(db_url)
         async with get_session(engine) as session:
             result = await session.execute(select(ScanRecord).where(ScanRecord.id == scan_id))
             original = result.scalar_one_or_none()
@@ -2438,7 +2513,8 @@ def retest_cmd(
 
         target = original.target
         console.print(f"[cyan]Re-testing scan {scan_id} → {target}[/cyan]")
-        _run_scheduled_scan(target, profile)
+        if not _run_scheduled_scan(target, profile):
+            raise typer.Exit(code=1)
 
         # Find newest scan for that target (the one we just created)
         async with get_session(engine) as session:
@@ -2453,12 +2529,13 @@ def retest_cmd(
             err_console.print("[yellow]No new scan record found after retest[/yellow]")
             return
 
-        diff = await compare_scans(scan_id, new_scan.id, config.db_url)
+        diff = await compare_scans(scan_id, new_scan.id, db_url)
         console.print(
             Panel(
                 f"Original: {scan_id}\nNew: {new_scan.id}\n"
                 f"New findings:     {len(diff.new_findings)}\n"
                 f"Resolved:         {len(diff.resolved_findings)}\n"
+                f"Unknown:          {len(diff.unknown_findings)}\n"
                 f"Severity changed: {len(diff.changed_findings)}\n"
                 f"Unchanged:        {len(diff.unchanged_findings)}",
                 title="Retest Result|||재테스트 결과",

@@ -19,6 +19,19 @@ class _ShellTool:
         )
 
 
+class _ConfirmingVerifier:
+    name = "verify_finding"
+    description = "confirm test finding"
+    input_schema = {"type": "object"}
+
+    async def run(self, **kwargs) -> ToolResult:
+        return ToolResult(
+            ok=True,
+            summary="confirmed",
+            data={"verdict": "CONFIRMED", "confidence": "high", "reasoning": "test proof"},
+        )
+
+
 def test_scan_loop_emits_ui_events_for_regular_dispatch() -> None:
     async def _run() -> list[tuple[str, dict]]:
         reg = ToolRegistry()
@@ -81,9 +94,7 @@ def test_control_plane_exposes_ghost_coverage() -> None:
     assert control_events[-1]["ghost"]["coverage"]["shell_exec"] == "env_proxy"
     assert control_events[-1]["ghost"]["coverage"]["nmap_scan"] == "direct_raw_socket"
     assert control_events[-1]["egress_contract"]["errors"] == []
-    egress_tools = {
-        item["name"]: item for item in control_events[-1]["egress_contract"]["tools"]
-    }
+    egress_tools = {item["name"]: item for item in control_events[-1]["egress_contract"]["tools"]}
     assert egress_tools["agent_graph"]["mode"] == "delegated"
 
 
@@ -92,6 +103,7 @@ def test_scan_loop_spawns_followup_branches_from_finding() -> None:
         _reset_for_tests()
         reg = ToolRegistry()
         reg.register(ReportFindingTool())
+        reg.register(_ConfirmingVerifier())
 
         loop = ScanAgentLoop(
             target="http://example.test",

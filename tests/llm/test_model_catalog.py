@@ -5,6 +5,7 @@ merged onto the curated registry (curated wins on conflicts so the models we
 control are always correct), with graceful fallback to disk cache then the
 bundled defaults when offline / no network.
 """
+
 from vxis.llm.model_catalog import (
     CatalogResult,
     _normalize_models_dev,
@@ -77,10 +78,24 @@ def test_normalize_unknown_provider_is_empty():
 
 
 def test_merge_curated_wins_on_conflict():
-    curated = [ModelInfo(model_id="claude-opus-4-8", provider="anthropic",
-                         context_window=1_000_000, max_output_tokens=64_000, notes="CURATED")]
-    live = [ModelInfo(model_id="claude-opus-4-8", provider="anthropic",
-                      context_window=200_000, max_output_tokens=8_000, notes="LIVE")]
+    curated = [
+        ModelInfo(
+            model_id="claude-opus-4-8",
+            provider="anthropic",
+            context_window=1_000_000,
+            max_output_tokens=64_000,
+            notes="CURATED",
+        )
+    ]
+    live = [
+        ModelInfo(
+            model_id="claude-opus-4-8",
+            provider="anthropic",
+            context_window=200_000,
+            max_output_tokens=8_000,
+            notes="LIVE",
+        )
+    ]
     merged = merge_catalog(curated, live)
     same = [m for m in merged if m.model_id == "claude-opus-4-8"]
     assert len(same) == 1
@@ -88,8 +103,14 @@ def test_merge_curated_wins_on_conflict():
 
 
 def test_merge_adds_live_only_models():
-    curated = [ModelInfo(model_id="claude-opus-4-8", provider="anthropic",
-                         context_window=1_000_000, max_output_tokens=64_000)]
+    curated = [
+        ModelInfo(
+            model_id="claude-opus-4-8",
+            provider="anthropic",
+            context_window=1_000_000,
+            max_output_tokens=64_000,
+        )
+    ]
     live = _normalize_models_dev(RAW, "anthropic")
     merged = merge_catalog(curated, live)
     ids = {m.model_id for m in merged}
@@ -117,20 +138,41 @@ def test_available_live_merges_and_labels_source(monkeypatch):
 
 
 def test_normalize_captures_release_date():
-    raw = {"anthropic": {"models": {"x": {
-        "id": "x", "release_date": "2026-01-02",
-        "modalities": {"input": ["text"]}, "limit": {"context": 1, "output": 1}}}}}
+    raw = {
+        "anthropic": {
+            "models": {
+                "x": {
+                    "id": "x",
+                    "release_date": "2026-01-02",
+                    "modalities": {"input": ["text"]},
+                    "limit": {"context": 1, "output": 1},
+                }
+            }
+        }
+    }
     m = _normalize_models_dev(raw, "anthropic")[0]
     assert m.release_date == "2026-01-02"
 
 
 def test_available_sorts_live_models_newest_first(monkeypatch):
-    raw = {"openai": {"models": {
-        "zzz-old": {"id": "zzz-old", "release_date": "2024-01-01",
-                    "modalities": {"input": ["text"]}, "limit": {"context": 1, "output": 1}},
-        "aaa-new": {"id": "aaa-new", "release_date": "2026-05-01",
-                    "modalities": {"input": ["text"]}, "limit": {"context": 1, "output": 1}},
-    }}}
+    raw = {
+        "openai": {
+            "models": {
+                "zzz-old": {
+                    "id": "zzz-old",
+                    "release_date": "2024-01-01",
+                    "modalities": {"input": ["text"]},
+                    "limit": {"context": 1, "output": 1},
+                },
+                "aaa-new": {
+                    "id": "aaa-new",
+                    "release_date": "2026-05-01",
+                    "modalities": {"input": ["text"]},
+                    "limit": {"context": 1, "output": 1},
+                },
+            }
+        }
+    }
     monkeypatch.setattr("vxis.llm.model_catalog._save_cache", lambda data: None)
     res = available_models("openai", fetcher=lambda: raw)
     live_ids = [m.model_id for m in res.models if m.model_id in ("zzz-old", "aaa-new")]
@@ -140,6 +182,7 @@ def test_available_sorts_live_models_newest_first(monkeypatch):
 # ── single-source flagship + cache refresh ──
 def test_flagship_returns_current_anthropic():
     from vxis.llm.model_registry import flagship
+
     assert flagship("anthropic") == "claude-opus-4-8"
     assert flagship("ANTHROPIC") == "claude-opus-4-8"  # case-insensitive
     assert flagship("nonexistent") is None
@@ -147,6 +190,7 @@ def test_flagship_returns_current_anthropic():
 
 def test_flagship_is_a_registered_model():
     from vxis.llm.model_registry import flagship, get_model_info
+
     for prov in ("anthropic", "openai", "gemini", "together"):
         fid = flagship(prov)
         assert fid and get_model_info(fid) is not None, prov
@@ -154,6 +198,7 @@ def test_flagship_is_a_registered_model():
 
 def test_clear_cache_removes_file(tmp_path, monkeypatch):
     from vxis.llm import model_catalog
+
     cache = tmp_path / "models_dev.json"
     cache.write_text("{}", encoding="utf-8")
     monkeypatch.setenv("VXIS_MODELS_CACHE", str(cache))
@@ -166,4 +211,22 @@ def test_clear_cache_removes_file(tmp_path, monkeypatch):
 
 def test_gemini_flagship_is_ga_not_preview():
     from vxis.llm.model_registry import flagship
+
     assert "preview" not in flagship("gemini").lower()  # don't default to a preview model
+
+
+def test_gemini_3_7_flash_metadata():
+    from vxis.llm.model_registry import get_compression_policy, get_model_info
+
+    model = get_model_info("google/gemini-3.7-flash")
+    assert model is not None
+    assert model.provider == "wavespeed"
+    assert (model.context_window, model.max_output_tokens) == (1_048_576, 65_536)
+    assert model.supports_vision and model.supports_json_mode and model.reasoning_model
+    direct = get_model_info("gemini-3.7-flash")
+    assert direct is not None and direct.provider == "gemini"
+    assert (direct.context_window, direct.max_output_tokens) == (
+        model.context_window,
+        model.max_output_tokens,
+    )
+    assert get_compression_policy("wavespeed", model.model_id).profile == "cloud-segmented"

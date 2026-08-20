@@ -41,7 +41,7 @@ User → CLI (src/vxis/cli/main.py)
      → ScanPipeline (src/vxis/pipeline/scan_pipeline_v2.py)  ← Phase A thin shim
        → ScanAgentLoop (src/vxis/agent/scan_loop.py)         ← persistent messages
          → AgentBrain.think_in_loop (src/vxis/agent/brain.py) ← ReAct decision
-           → ToolRegistry.dispatch                            ← 11 BrainTools
+           → ToolRegistry.dispatch                            ← 27 BrainTools
              ├── Control: finish_scan / think / wait
              ├── Hands/Eyes/X-Ray: http_request / browser_render / intercept_proxy
              ├── Sandbox:       shell_exec / python_exec      ← Docker scanner sandbox

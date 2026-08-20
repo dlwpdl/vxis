@@ -15,6 +15,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import time
 from functools import wraps
 from typing import Awaitable, Callable
 
@@ -30,6 +31,7 @@ from vxis.models.db_models import UserRecord
 # ---------------------------------------------------------------------------
 
 SESSION_COOKIE = "vxis_session"
+SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7
 ROLE_LEVELS: dict[str, int] = {"viewer": 1, "reviewer": 2, "admin": 3}
 
 # Runtime fallback secret — regenerated each process start unless
@@ -54,9 +56,7 @@ def hash_password(password: str, *, salt: str | None = None) -> str:
     Returned format: ``"<salt_hex>$<hash_hex>"``.
     """
     salt_bytes = bytes.fromhex(salt) if salt else secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt_bytes, 100_000
-    )
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt_bytes, 100_000)
     return f"{salt_bytes.hex()}${digest.hex()}"
 
 
@@ -69,18 +69,17 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Session cookies — signed user_id payload
+# Session cookies — signed user_id and absolute expiry payload
 # ---------------------------------------------------------------------------
 
 
 def _sign(payload: str) -> str:
-    return hmac.new(
-        _secret().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
+    return hmac.new(_secret().encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def make_session_token(user_id: int) -> str:
-    payload = str(user_id)
+    expires_at = int(time.time()) + SESSION_MAX_AGE_SECONDS
+    payload = f"{user_id}.{expires_at}"
     return f"{payload}.{_sign(payload)}"
 
 
@@ -91,9 +90,14 @@ def parse_session_token(token: str) -> int | None:
     if not hmac.compare_digest(sig, _sign(payload)):
         return None
     try:
-        return int(payload)
+        user_id_text, expires_at_text = payload.split(".", 1)
+        user_id = int(user_id_text)
+        expires_at = int(expires_at_text)
     except ValueError:
         return None
+    if expires_at <= int(time.time()):
+        return None
+    return user_id
 
 
 def set_session_cookie(response: Response, user_id: int) -> None:
@@ -102,7 +106,7 @@ def set_session_cookie(response: Response, user_id: int) -> None:
         make_session_token(user_id),
         httponly=True,
         samesite="lax",
-        max_age=60 * 60 * 24 * 7,
+        max_age=SESSION_MAX_AGE_SECONDS,
         path="/",
     )
 
@@ -132,9 +136,7 @@ async def current_user(request: Request) -> UserRecord | None:
         engine = _engine
 
     async with get_session(engine) as session:
-        result = await session.execute(
-            select(UserRecord).where(UserRecord.id == user_id)
-        )
+        result = await session.execute(select(UserRecord).where(UserRecord.id == user_id))
         return result.scalar_one_or_none()
 
 

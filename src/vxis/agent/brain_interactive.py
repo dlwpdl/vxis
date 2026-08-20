@@ -1,4 +1,4 @@
-"""VXIS InteractiveBrain — Claude Code가 Brain이 되는 모드.
+"""VXIS InteractiveBrain — legacy external-process protocol adapter.
 
 stdin/stdout NDJSON 프로토콜로 외부 프로세스(Claude Code)와 통신.
 
@@ -8,8 +8,9 @@ Protocol:
     VXIS → stdout: {"type": "result", ...}         — 실행 결과 알림
     VXIS → stdout: {"type": "complete", ...}       — 스캔 완료
 
-Usage:
-    vxis scan https://target.com --interactive
+This class does not implement the live loop's ``think_in_loop`` contract and
+is therefore not exposed by the scan CLI. It remains importable for legacy
+library users of the synchronous ``think`` protocol.
 """
 
 from __future__ import annotations

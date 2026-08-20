@@ -13,6 +13,7 @@ HTTP requests. For Phase A (local Docker targets) this is intentional — see
 the pivot note in the plan doc. For Phase C enterprise scans, a second-layer
 sandbox egress filter will be added.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -80,7 +81,9 @@ def _sanitize_sandbox_key(raw: str | None) -> str:
 
 
 def _sandbox_suffix(raw: str | None) -> str:
-    return hashlib.sha1(str(raw or "default").encode("utf-8")).hexdigest()[:10]
+    return hashlib.sha1(str(raw or "default").encode("utf-8"), usedforsecurity=False).hexdigest()[
+        :10
+    ]
 
 
 def resolve_sandbox_runtime(
@@ -102,6 +105,45 @@ def resolve_sandbox_runtime(
     )
 
 
+def _sandbox_network_and_caps() -> tuple[list[str], list[str]]:
+    """Docker --network and --cap-add flags, hardened when Ghost is active.
+
+    Default (Ghost off): host network + NET_RAW so localhost benchmark targets
+    are reachable and raw-socket tools work.
+
+    Ghost on (no explicit direct-egress opt-in): drop host network and NET_RAW.
+    Host networking gives the container the host's IP stack, so any tool that
+    ignores HTTP_PROXY (curl --noproxy, a static binary, a raw socket) egresses
+    from the real IP — the exact leak Ghost exists to prevent. Raw sockets are
+    never anonymized by an HTTP/SOCKS proxy either, so NET_RAW comes off too.
+
+    ponytail: bridge isolation only anonymizes egress when the configured proxy
+    is reachable from the bridge (a remote proxy, or host.docker.internal — not
+    a bare 127.0.0.1). Full transparent-proxy jailing is a sidecar/infra job;
+    this closes the host-network leak without pretending to be that.
+    """
+    from vxis.ghost.layer import direct_egress_allowed, ghost_layer
+
+    if ghost_layer.is_active() and not direct_egress_allowed():
+        return ["--network", "bridge"], []
+    return ["--network", "host"], ["--cap-add", "NET_RAW"]
+
+
+def _sandbox_docker_args() -> list[str]:
+    """Return bounded Docker runtime flags without imposing resource defaults."""
+    args: list[str] = ["--log-opt", "max-size=50m", "--log-opt", "max-file=3"]
+    for env_name, flag in (
+        ("VXIS_SANDBOX_MEM_LIMIT", "--memory"),
+        ("VXIS_SANDBOX_SHM_SIZE", "--shm-size"),
+        ("VXIS_SANDBOX_CPUS", "--cpus"),
+        ("VXIS_SANDBOX_PIDS_LIMIT", "--pids-limit"),
+    ):
+        value = os.environ.get(env_name, "").strip()
+        if value:
+            args.extend((flag, value))
+    return args
+
+
 def sanitize_session_name(prefix: str, raw: str | None) -> str:
     """Build a tmux-safe session name from local-model input."""
     text = str(raw or "default").strip()
@@ -117,7 +159,8 @@ def _docker_available() -> bool:
 async def _run_docker(*args: str, timeout: float = 30.0) -> tuple[int, str, str]:
     """Run `docker <args>` and capture (exit_code, stdout, stderr)."""
     proc = await asyncio.create_subprocess_exec(
-        "docker", *args,
+        "docker",
+        *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -183,13 +226,17 @@ async def _ensure_tool_server(runtime: SandboxRuntime) -> ToolServerState | None
 
     state = ToolServerState(port=_pick_local_port(), token=secrets.token_urlsafe(24))
     rc, _out, err = await _run_docker(
-        "exec", "-d",
+        "exec",
+        "-d",
         runtime.container,
         "python3",
         "/usr/local/bin/vxis-tool-server",
-        "--host", "127.0.0.1",
-        "--port", str(state.port),
-        "--token", state.token,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(state.port),
+        "--token",
+        state.token,
     )
     if rc != 0:
         logger.info("sandbox tool server unavailable: %s", err[:300])
@@ -237,7 +284,12 @@ async def _execute_via_docker_exec(
     timeout: float,
 ) -> dict[str, Any]:
     proc = await asyncio.create_subprocess_exec(
-        "docker", "exec", runtime.container, "sh", "-c", command,
+        "docker",
+        "exec",
+        runtime.container,
+        "sh",
+        "-c",
+        command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -295,26 +347,39 @@ async def _ensure_tmux_session(
     command: str | None = None,
 ) -> tuple[bool, str]:
     rc, _out, err = await _run_docker(
-        "exec", runtime.container, "sh", "-lc", "command -v tmux >/dev/null 2>&1",
+        "exec",
+        runtime.container,
+        "sh",
+        "-lc",
+        "command -v tmux >/dev/null 2>&1",
     )
     if rc != 0:
         return False, (
             "tmux not installed in sandbox image. Rebuild with: "
-            f"docker build -t {SANDBOX_IMAGE} docker/sandbox/"
-            + (f" ({err[:200]})" if err else "")
+            f"docker build -t {SANDBOX_IMAGE} docker/sandbox/" + (f" ({err[:200]})" if err else "")
         )
 
     rc, _out, _err = await _run_docker(
-        "exec", runtime.container, "tmux", "has-session", "-t", session_name,
+        "exec",
+        runtime.container,
+        "tmux",
+        "has-session",
+        "-t",
+        session_name,
     )
     if rc == 0:
         return True, "session already running"
 
     args = [
-        "exec", runtime.container,
-        "tmux", "new-session", "-d",
-        "-s", session_name,
-        "-c", runtime.workspace_mount,
+        "exec",
+        runtime.container,
+        "tmux",
+        "new-session",
+        "-d",
+        "-s",
+        session_name,
+        "-c",
+        runtime.workspace_mount,
     ]
     if command:
         args.append(command)
@@ -326,10 +391,15 @@ async def _ensure_tmux_session(
 
 async def _capture_tmux_pane(runtime: SandboxRuntime, session_name: str) -> str:
     rc, out, err = await _run_docker(
-        "exec", runtime.container,
-        "tmux", "capture-pane", "-p",
-        "-t", session_name,
-        "-S", f"-{TMUX_CAPTURE_LINES}",
+        "exec",
+        runtime.container,
+        "tmux",
+        "capture-pane",
+        "-p",
+        "-t",
+        session_name,
+        "-S",
+        f"-{TMUX_CAPTURE_LINES}",
     )
     if rc != 0:
         raise RuntimeError(f"tmux capture-pane failed: {err[:300]}")
@@ -344,7 +414,9 @@ async def send_tmux_payload_and_wait(
     end_marker: str,
     timeout: float,
 ) -> tuple[int, str, bool]:
-    await _run_docker("exec", runtime.container, "tmux", "send-keys", "-l", "-t", session_name, payload)
+    await _run_docker(
+        "exec", runtime.container, "tmux", "send-keys", "-l", "-t", session_name, payload
+    )
     await _run_docker("exec", runtime.container, "tmux", "send-keys", "-t", session_name, "C-m")
 
     deadline = time.monotonic() + timeout
@@ -425,7 +497,9 @@ async def _container_running(name: str) -> bool:
 
 
 async def _container_exists(name: str) -> bool:
-    rc, out, _ = await _run_docker("ps", "-a", "--filter", f"name=^{name}$", "--format", "{{.Names}}")
+    rc, out, _ = await _run_docker(
+        "ps", "-a", "--filter", f"name=^{name}$", "--format", "{{.Names}}"
+    )
     return rc == 0 and name in out
 
 
@@ -438,6 +512,10 @@ async def _ensure_sandbox_running(
     Returns (ok, message). When ok=False, the message describes the problem in
     a way that's safe to surface back to the Brain as a tool error.
     """
+    from vxis.scope.runtime_gate import arbitrary_exec_approved
+
+    if not arbitrary_exec_approved():
+        return False, "arbitrary execution requires explicit operator approval"
     if not _docker_available():
         return False, "docker CLI not found on host PATH"
 
@@ -468,13 +546,25 @@ async def _ensure_sandbox_running(
     # Ensure workspace dir exists on host
     os.makedirs(runtime.workspace_host, exist_ok=True)
 
+    network_args, cap_add_args = _sandbox_network_and_caps()
     rc, _out, err = await _run_docker(
-        "run", "-d",
-        "--name", runtime.container,
-        "--network", "host",
-        "--label", "vxis.managed=true",
-        "--label", f"vxis.sandbox_key={runtime.key}",
-        "-v", f"{runtime.workspace_host}:{runtime.workspace_mount}",
+        "run",
+        "-d",
+        "--name",
+        runtime.container,
+        *network_args,
+        "--cap-drop",
+        "ALL",
+        *cap_add_args,
+        "--security-opt",
+        "no-new-privileges:true",
+        *_sandbox_docker_args(),
+        "--label",
+        "vxis.managed=true",
+        "--label",
+        f"vxis.sandbox_key={runtime.key}",
+        "-v",
+        f"{runtime.workspace_host}:{runtime.workspace_mount}",
         SANDBOX_IMAGE,
     )
     if rc != 0:
@@ -517,7 +607,12 @@ class ShellExecTool:
                     "and background jobs within this scan."
                 ),
             },
-            "timeout": {"type": "number", "minimum": 1, "maximum": 600, "description": "Timeout in seconds (default 120, max 600)"},
+            "timeout": {
+                "type": "number",
+                "minimum": 1,
+                "maximum": 600,
+                "description": "Timeout in seconds (default 120, max 600)",
+            },
         },
         "required": ["command"],
     }
@@ -533,7 +628,9 @@ class ShellExecTool:
     async def run(self, **kwargs: Any) -> ToolResult:
         command = kwargs.get("command", "")
         if not command:
-            return ToolResult(ok=False, summary="shell_exec: command is required", error="missing_command")
+            return ToolResult(
+                ok=False, summary="shell_exec: command is required", error="missing_command"
+            )
 
         policy_decision = evaluate_shell_egress(str(command))
         if not policy_decision.allowed:

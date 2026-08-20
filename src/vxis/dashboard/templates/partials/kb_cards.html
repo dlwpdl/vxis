@@ -1,0 +1,39 @@
+{% if entries %}
+<div class="space-y-4">
+  {% for entry in entries %}
+  <article class="bg-surface rounded-lg border border-surface-border p-5">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h2 class="text-base font-semibold text-white">{{ entry.title }}</h2>
+        <p class="text-xs text-gray-500 font-mono mt-1">{{ entry.vuln_type }}</p>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <span class="px-2 py-1 rounded bg-gray-800 text-cyan-300">{{ entry.cwe_id }}</span>
+        <span class="px-2 py-1 rounded bg-gray-800 text-gray-300">{{ entry.owasp_category }}</span>
+      </div>
+    </div>
+
+    <p class="text-sm text-gray-400 mt-4">{{ entry.description }}</p>
+
+    <h3 class="text-xs font-semibold uppercase tracking-wide text-gray-300 mt-4 mb-2">Remediation</h3>
+    <ol class="list-decimal list-inside space-y-1 text-sm text-gray-400">
+      {% for step in entry.remediation_steps %}
+      <li>{{ step }}</li>
+      {% endfor %}
+    </ol>
+
+    {% if entry.references %}
+    <div class="flex flex-wrap gap-3 mt-4">
+      {% for url in entry.references %}
+      <a href="{{ url }}" target="_blank" rel="noopener noreferrer" class="text-xs text-cyan-400 hover:text-cyan-300">Reference {{ loop.index }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="bg-surface rounded-lg border border-surface-border p-8 text-center text-sm text-gray-500">
+  No results found
+</div>
+{% endif %}

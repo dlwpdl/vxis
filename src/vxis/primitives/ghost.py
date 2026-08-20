@@ -41,8 +41,15 @@ def ghost_activate(profile: str = "standard") -> dict:
     Reads proxy pool from the configured environment variable (comma-separated URLs).
 
     Returns:
-        dict with keys: active, profile, proxy_count, timing.
+        dict with keys: active, profile, proxy_count, timing. When a
+        proxy-expecting profile has no usable proxy, active is False and an
+        ``error`` key explains the refusal (never a false "anonymized" state).
     """
+    profile = (profile or "standard").strip().lower()
+    if profile == "off":
+        ghost_deactivate()
+        return {"active": False, "profile": "off", "proxy_count": 0, "timing": {}}
+
     config = GHOST_CONFIG.get(profile) or GHOST_CONFIG["standard"]
 
     proxies: list[str] = []
@@ -54,6 +61,23 @@ def ghost_activate(profile: str = "standard") -> dict:
         proxies.extend(p.strip() for p in raw.split(",") if p.strip())
 
     ghost_layer.activate(proxy_pool=proxies)
+
+    # activate() drops malformed URLs, so trust the validated pool, not the raw
+    # env count. A proxy-expecting profile with 0 usable proxies must refuse —
+    # same fail-closed contract as the scan pipeline — so egress can't silently
+    # fall back to a direct connection.
+    usable = len(getattr(ghost_layer, "_proxy_pool", []) or [])
+    if usable == 0:
+        ghost_layer.deactivate()
+        return {
+            "active": False,
+            "profile": profile,
+            "proxy_count": 0,
+            "error": (
+                "Ghost requested but no usable proxy is configured; refusing direct "
+                "fallback. Set VXIS_PROXY_POOL or VXIS_GHOST_PROXIES."
+            ),
+        }
 
     # Apply timing config if supported.
     timing = config.get("timing") or {}
@@ -72,7 +96,7 @@ def ghost_activate(profile: str = "standard") -> dict:
     return {
         "active": ghost_layer.is_active(),
         "profile": profile,
-        "proxy_count": len(proxies),
+        "proxy_count": usable,
         "timing": timing,
     }
 
@@ -89,7 +113,12 @@ async def ghost_verify() -> dict:
     try:
         result = await verifier.check()
     except Exception as exc:
-        return {"exit_ip": None, "verified": False, "ghost_active": ghost_layer.is_active(), "error": str(exc)}
+        return {
+            "exit_ip": None,
+            "verified": False,
+            "ghost_active": ghost_layer.is_active(),
+            "error": str(exc),
+        }
 
     return {
         "exit_ip": result.get("detected_ip"),

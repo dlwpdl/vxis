@@ -1,7 +1,9 @@
 """GhostLayer — 익명화 레이어 싱글턴."""
+
 from __future__ import annotations
 
 import logging
+import os
 import random
 import re
 from dataclasses import dataclass
@@ -11,6 +13,26 @@ from vxis.ghost.ua_pool import UA_POOL
 logger = logging.getLogger(__name__)
 
 _PROXY_URL_RE = re.compile(r"^(https?|socks5?)://(?:[^/@]+(?::[^/@]*)?@)?[^/]+:\d+$")
+
+# Operator opt-in that turns every fail-closed egress guard below into a warning
+# and lets Ghost-active traffic fall back to a direct (non-proxied) connection.
+_DIRECT_EGRESS_ENVS = ("VXIS_ALLOW_DIRECT_EGRESS", "VXIS_ALLOW_GHOST_DIRECT_EGRESS")
+
+
+class GhostDirectEgressError(RuntimeError):
+    """Ghost is active but a request would leave without a proxy.
+
+    Raised at the central chokepoints (HTTP transport, browser launch, request
+    replay) so anonymization never silently degrades to a direct connection.
+    """
+
+
+def direct_egress_allowed() -> bool:
+    """True when the operator has explicitly opted into direct (non-proxied) egress."""
+    return any(
+        os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+        for name in _DIRECT_EGRESS_ENVS
+    )
 
 
 @dataclass
@@ -38,7 +60,7 @@ class GhostLayer:
 
     def activate(self, proxy_pool: list[str] | None = None) -> None:
         valid: list[str] = []
-        for p in (proxy_pool or []):
+        for p in proxy_pool or []:
             if _PROXY_URL_RE.match(p):
                 valid.append(p)
             else:
@@ -48,7 +70,8 @@ class GhostLayer:
         self._active = True
         logger.info(
             "[Ghost] 익명화 활성화 — 프록시: %d개, UA풀: %d종",
-            len(self._proxy_pool), len(UA_POOL),
+            len(self._proxy_pool),
+            len(UA_POOL),
         )
 
     def deactivate(self) -> None:

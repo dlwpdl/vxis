@@ -11,14 +11,53 @@ target needs bespoke technique, chain pivot, or post-exploitation beyond
 any pre-built skill. Do NOT default to run_skill because it's shorter —
 default to evidence.
 """
+
 from __future__ import annotations
 import json
 import logging
+import re
 from typing import Any
 
 from vxis.agent.tool_registry import ToolResult
 
 logger = logging.getLogger(__name__)
+
+_SENSITIVE_OUTPUT_KEYS = frozenset(
+    {
+        "authorization",
+        "api_key",
+        "bearer",
+        "cookie",
+        "cookies",
+        "credentials",
+        "credentials_used",
+        "creds",
+        "identities",
+        "owner_map",
+        "password",
+        "password_hash",
+        "poc_http_exchange",
+        "private_key",
+        "primary_identity",
+        "secret",
+        "token",
+        "user_info",
+    }
+)
+_INLINE_SECRET_RE = re.compile(
+    r"(?i)([\"']?(?:authorization|cookie|password|secret|token|api[_-]?key)"
+    r"[\"']?\s*[:=]\s*)"
+    r"(?:bearer\s+)?(?:[\"'][^\"']*[\"']|[^\s,}]+)"
+)
+_BEARER_SECRET_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
+
+
+def _is_sensitive_output_key(key: Any) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(key).lower()).strip("_")
+    return normalized in _SENSITIVE_OUTPUT_KEYS or normalized.endswith(
+        ("_token", "_secret", "_password", "_cookie", "_api_key", "_private_key")
+    )
+
 
 _SKILL_ALIASES: dict[str, str] = {
     "auth_bypass": "attempt_auth",
@@ -53,6 +92,25 @@ def _with_egress_metadata(result: Any, egress: dict[str, Any]) -> dict[str, Any]
     data = dict(result) if isinstance(result, dict) else {"result": result}
     data["_egress"] = egress
     return data
+
+
+def redact_sensitive_output(value: Any) -> Any:
+    """Remove credentials and identity blobs from logs, PoCs, and message history."""
+    if isinstance(value, dict):
+        return {
+            key: ("[redacted]" if _is_sensitive_output_key(key) else redact_sensitive_output(item))
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_sensitive_output(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_sensitive_output(item) for item in value)
+    if isinstance(value, str):
+        return _BEARER_SECRET_RE.sub(
+            "Bearer [redacted]",
+            _INLINE_SECRET_RE.sub(r"\1[redacted]", value),
+        )
+    return value
 
 
 class RunSkillTool:
@@ -183,7 +241,8 @@ class RunSkillTool:
         try:
             _cache_key = json.dumps(
                 {"s": skill_name, "t": target_url, "p": params},
-                sort_keys=True, default=str,
+                sort_keys=True,
+                default=str,
             )
         except Exception:
             _cache_key = f"{skill_name}:{target_url}:{params!r}"
@@ -213,7 +272,8 @@ class RunSkillTool:
                 )
                 logger.warning(
                     "run_skill BLOCKED: skill=%s hits=%d — forcing pivot",
-                    skill_name, _hits,
+                    skill_name,
+                    _hits,
                 )
                 return ToolResult(
                     ok=False,
@@ -240,7 +300,8 @@ class RunSkillTool:
                 )
             logger.info(
                 "run_skill cache hit: skill=%s hits=%d — returning cached + nudge",
-                skill_name, _hits,
+                skill_name,
+                _hits,
             )
             return ToolResult(
                 ok=True,
@@ -268,7 +329,11 @@ class RunSkillTool:
                     **{k: v for k, v in params.items() if k not in ("url_pattern", "token")},
                 )
             elif skill_name in ("post_auth_enum",):
-                result = await fn(target_url=target_url, token=params.get("token", ""), **{k: v for k, v in params.items() if k != "token"})
+                result = await fn(
+                    target_url=target_url,
+                    token=params.get("token", ""),
+                    **{k: v for k, v in params.items() if k != "token"},
+                )
             elif skill_name in ("test_injection", "test_xss", "test_ssrf"):
                 # These use url= as first positional arg. Do not mutate the
                 # caller's params dict — it is reused to compute the stuck-loop
@@ -277,14 +342,28 @@ class RunSkillTool:
                 result = await fn(
                     url=effective_url, **{k: v for k, v in params.items() if k != "url"}
                 )
-            elif skill_name in ("test_auth_deep", "test_csrf", "test_api_security", "test_business_logic"):
+            elif skill_name in (
+                "test_auth_deep",
+                "test_csrf",
+                "test_api_security",
+                "test_business_logic",
+            ):
                 # These accept optional token
-                result = await fn(target_url=target_url, token=params.get("token"), **{k: v for k, v in params.items() if k != "token"})
+                result = await fn(
+                    target_url=target_url,
+                    token=params.get("token"),
+                    **{k: v for k, v in params.items() if k != "token"},
+                )
             else:
                 result = await fn(target_url=target_url, **params)
         except Exception as e:
-            logger.exception("run_skill %s failed", skill_name)
-            return ToolResult(ok=False, summary=f"run_skill {skill_name}: {type(e).__name__}: {e}", error=str(e))
+            error = type(e).__name__
+            logger.error("run_skill %s failed (%s)", skill_name, error)
+            return ToolResult(
+                ok=False,
+                summary=f"run_skill {skill_name} failed ({error})",
+                error=error,
+            )
 
         # Build a compact summary
         summary_parts = [f"skill:{skill_name}"]
@@ -293,34 +372,48 @@ class RunSkillTool:
             accessible = result.get("accessible", [])
             auth_req = result.get("auth_required", [])
             errors = result.get("errors", [])
-            summary_parts.append(f"{len(accessible)} accessible, {len(auth_req)} auth-required, {len(errors)} errors")
+            summary_parts.append(
+                f"{len(accessible)} accessible, {len(auth_req)} auth-required, {len(errors)} errors"
+            )
             if accessible:
-                summary_parts.append("Top: " + ", ".join(f"{e['path']}({e['size']}B)" for e in accessible[:5]))
+                summary_parts.append(
+                    "Top: " + ", ".join(f"{e['path']}({e['size']}B)" for e in accessible[:5])
+                )
 
         elif skill_name == "test_injection":
             findings = result.get("findings", [])
-            summary_parts.append(f"{'VULNERABLE' if result.get('vulnerable') else 'clean'} — {len(findings)} finding(s)")
+            summary_parts.append(
+                f"{'VULNERABLE' if result.get('vulnerable') else 'clean'} — {len(findings)} finding(s)"
+            )
             baseline = result.get("baseline", {})
             if baseline:
-                summary_parts.append(f"baseline={baseline.get('status', '?')}/{baseline.get('size', '?')}B")
+                summary_parts.append(
+                    f"baseline={baseline.get('status', '?')}/{baseline.get('size', '?')}B"
+                )
             for f in findings[:3]:
                 summary_parts.append(f"  {f['type']}: {f['payload'][:30]} ({f['severity']})")
 
         elif skill_name == "attempt_auth":
             if result.get("authenticated"):
-                summary_parts.append(f"AUTHENTICATED via {result['method']}! token={result['token'][:30]}...")
-                summary_parts.append(f"user: {result.get('user_info', {})}")
+                summary_parts.append(f"AUTHENTICATED via {result['method']} (token acquired)")
+                summary_parts.append(f"identities={len(result.get('identities') or [])}")
                 controls = result.get("control_checks", {})
                 if controls:
-                    summary_parts.append(f"controls: neg={controls.get('negative_control', {}).get('status', '?')} pos={controls.get('positive_control', {}).get('status', '?')}")
+                    summary_parts.append(
+                        f"controls: neg={controls.get('negative_control', {}).get('status', '?')} pos={controls.get('positive_control', {}).get('status', '?')}"
+                    )
             else:
-                summary_parts.append(f"auth failed ({len(result.get('all_attempts', []))} attempts)")
+                summary_parts.append(
+                    f"auth failed ({len(result.get('all_attempts', []))} attempts)"
+                )
 
         elif skill_name == "post_auth_enum":
             acc = result.get("accessible", [])
             new = result.get("new_endpoints", [])
             exposed = result.get("user_data_exposed", [])
-            summary_parts.append(f"{len(acc)} accessible, {len(new)} new (auth-only), {len(exposed)} with user data")
+            summary_parts.append(
+                f"{len(acc)} accessible, {len(new)} new (auth-only), {len(exposed)} with user data"
+            )
             controls = result.get("control_evidence", {})
             if controls:
                 summary_parts.append(
@@ -354,19 +447,29 @@ class RunSkillTool:
                 f"{len(steps)} step(s), {len(findings)} finding(s), {len(failed)} failed"
             )
             for step in steps[:4]:
-                summary_parts.append(
-                    f"  {step.get('skill')}: {step.get('summary', '')[:60]}"
-                )
+                summary_parts.append(f"  {step.get('skill')}: {step.get('summary', '')[:60]}")
 
-        elif skill_name in ("test_xss", "test_ssrf", "test_auth_deep", "test_csrf",
-                             "test_api_security", "test_misconfig", "test_business_logic",
-                             "test_crypto", "test_infra"):
+        elif skill_name in (
+            "test_xss",
+            "test_ssrf",
+            "test_auth_deep",
+            "test_csrf",
+            "test_api_security",
+            "test_misconfig",
+            "test_business_logic",
+            "test_crypto",
+            "test_infra",
+        ):
             findings = result.get("findings", result.get("exposed", []))
             vuln = result.get("vulnerable", len(findings) > 0)
-            summary_parts.append(f"{'VULNERABLE' if vuln else 'clean'} — {len(findings)} finding(s), {result.get('tested', 0)} tested")
+            summary_parts.append(
+                f"{'VULNERABLE' if vuln else 'clean'} — {len(findings)} finding(s), {result.get('tested', 0)} tested"
+            )
             baseline = result.get("baseline", {})
             if baseline:
-                summary_parts.append(f"baseline={baseline.get('status', '?')}/{baseline.get('size', '?')}B")
+                summary_parts.append(
+                    f"baseline={baseline.get('status', '?')}/{baseline.get('size', '?')}B"
+                )
             controls = result.get("control_evidence", {})
             if controls:
                 control_count = sum(len(v) for v in controls.values() if isinstance(v, list))

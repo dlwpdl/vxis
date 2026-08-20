@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
 from vxis.agent.scan_loop import ScanAgentLoop, VectorCandidate
@@ -10,10 +11,12 @@ from vxis.agent.tools.finding_tools import (
     _reset_for_tests as _reset_findings,
 )
 
+
 class FinishTool:
     name = "finish_scan"
     description = "end scan"
     input_schema = {"type": "object"}
+
     async def run(self, **kwargs) -> ToolResult:
         return ToolResult(ok=True, summary="finished", data={"final": True})
 
@@ -68,7 +71,11 @@ class RunSkillTool:
 class ReplayHttpTool:
     name = "http_request"
     description = "machine replay http"
-    input_schema = {"type": "object", "properties": {"method": {"type": "string"}}, "required": ["method"]}
+    input_schema = {
+        "type": "object",
+        "properties": {"method": {"type": "string"}},
+        "required": ["method"],
+    }
 
     async def run(self, **kwargs) -> ToolResult:
         path = str(kwargs.get("path") or kwargs.get("url") or "")
@@ -103,7 +110,7 @@ def test_focus_branch_role_blocks_exploit_action_for_recon_worker():
             "shell_exec",
             {"command": "sqlmap -u http://localhost:3000/rest/products/search?q=test"},
             [],
-    )
+        )
         is False
     )
 
@@ -127,14 +134,19 @@ def test_recent_blocked_skill_count_uses_explicit_skill_counter():
 
 def test_platform_allowed_skills_for_desktop_excludes_web_skills():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
-    loop = ScanAgentLoop(target="/Applications/Calculator.app", registry=reg, max_iters=3, target_kind="desktop")
+    loop = ScanAgentLoop(
+        target="/Applications/Calculator.app", registry=reg, max_iters=3, target_kind="desktop"
+    )
     allowed = loop._platform_allowed_skills()
     assert "test_xss" not in allowed
     assert "test_signature_audit" in allowed
@@ -142,12 +154,15 @@ def test_platform_allowed_skills_for_desktop_excludes_web_skills():
 
 def test_pivoted_skill_name_moves_within_web_graph_after_blocked_retries():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     loop.state.record_blocked_skill("attempt_auth")
@@ -158,12 +173,15 @@ def test_pivoted_skill_name_moves_within_web_graph_after_blocked_retries():
 
 def test_reroute_blocked_skill_advances_to_next_web_pivot():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     for _ in range(3):
@@ -177,12 +195,15 @@ def test_reroute_blocked_skill_advances_to_next_web_pivot():
 
 def test_mobile_forced_candidate_action_does_not_select_web_skill():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="/tmp/app.apk", registry=reg, max_iters=3, target_kind="mobile")
     candidate = VectorCandidate(
@@ -237,11 +258,13 @@ def test_cloud_profiles_allow_uncovered_family_probe_more_readily_than_local():
         priority=88,
         evidence="unexplored route family discovered",
     )
-    loop.state.findings.append({
-        "finding_type": "sql_injection",
-        "title": "SQLi on q",
-        "severity": "critical",
-    })
+    loop.state.findings.append(
+        {
+            "finding_type": "sql_injection",
+            "title": "SQLi on q",
+            "severity": "critical",
+        }
+    )
     loop.brain = SimpleNamespace(_provider="llamacpp")
     local_allowed = loop._should_allow_off_branch_action(
         branch,
@@ -273,20 +296,42 @@ def test_cloud_profiles_allow_uncovered_family_probe_more_readily_than_local():
 
 def test_local_strict_brain_tool_catalog_is_narrower_than_full_registry():
     reg = ToolRegistry()
+
     class _Tool:
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
         def __init__(self, name: str, description: str = "") -> None:
             self.name = name
             self.description = description or name
 
     for name in (
-        "finish_scan", "think", "wait", "report_finding", "query_findings", "link_chain",
-        "verify_finding", "run_skill", "fingerprint_target", "list_playbooks", "load_playbook",
-        "http_request", "browser_render", "browser_navigate", "browser_analyze_dom",
-        "browser_fill_form", "browser_get_cookies", "browser_eval_js", "shell_exec",
-        "python_exec", "browser_click", "browser_screenshot", "intercept_proxy", "query_scan_memory",
+        "finish_scan",
+        "think",
+        "wait",
+        "report_finding",
+        "query_findings",
+        "link_chain",
+        "verify_finding",
+        "run_skill",
+        "fingerprint_target",
+        "list_playbooks",
+        "load_playbook",
+        "http_request",
+        "browser_render",
+        "browser_navigate",
+        "browser_analyze_dom",
+        "browser_fill_form",
+        "browser_get_cookies",
+        "browser_eval_js",
+        "shell_exec",
+        "python_exec",
+        "browser_click",
+        "browser_screenshot",
+        "intercept_proxy",
+        "query_scan_memory",
         "agent_graph",
     ):
         reg.register(_Tool(name))
@@ -304,10 +349,13 @@ def test_local_strict_brain_tool_catalog_is_narrower_than_full_registry():
 
 def test_cloud_balanced_brain_tool_catalog_keeps_full_registry():
     reg = ToolRegistry()
+
     class _Tool:
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
         def __init__(self, name: str) -> None:
             self.name = name
             self.description = name
@@ -324,12 +372,14 @@ def test_local_strict_scan_dashboard_is_compact():
     loop.brain = SimpleNamespace(_provider="llamacpp", _model="local-qwen")
     loop.state.iteration = 7
     for i in range(5):
-        loop.state.findings.append({
-            "id": f"VXIS-{i:04d}",
-            "finding_type": "sql_injection",
-            "severity": "high",
-            "title": f"Finding {i}",
-        })
+        loop.state.findings.append(
+            {
+                "id": f"VXIS-{i:04d}",
+                "finding_type": "sql_injection",
+                "severity": "high",
+                "title": f"Finding {i}",
+            }
+        )
     for i in range(6):
         loop.state.ensure_branch(
             f"branch-{i}",
@@ -401,14 +451,16 @@ async def test_scan_dashboard_keeps_crown_distance_under_chain_pressure():
 
 def test_scan_dashboard_surfaces_auth_state_without_tokens():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
-    loop.state.record_auth_identities([
-        {
-            "name": "alice",
-            "role": "admin",
-            "token": "SECRET_TOKEN_123",
-            "headers": {"Cookie": "session=SECRET_TOKEN_123"},
-        }
-    ])
+    loop.state.record_auth_identities(
+        [
+            {
+                "name": "alice",
+                "role": "admin",
+                "token": "SECRET_TOKEN_123",
+                "headers": {"Cookie": "session=SECRET_TOKEN_123"},
+            }
+        ]
+    )
 
     dashboard = loop._build_scan_dashboard()
 
@@ -464,19 +516,21 @@ def test_dag_finish_readds_active_crown_branch_outside_untested_nodes():
 def test_local_strict_compacts_finding_payload_before_verifier():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=24)
     loop.brain = SimpleNamespace(_provider="llamacpp", _model="local-qwen")
-    args = loop._compact_local_finding_payload({
-        "description": "D" * 600,
-        "impact": "I" * 600,
-        "technical_analysis": "HTTP/1.1 500\n" + ("A" * 3000),
-        "poc_description": "baseline/control\n" + ("B" * 2000),
-        "poc_script_code": "GET /x HTTP/1.1\nHost: test\n\nHTTP/1.1 200\n" + ("C" * 3000),
-        "evidence": "GET /x HTTP/1.1\nHost: test\n\nHTTP/1.1 200\n" + ("E" * 3000),
-        "extra_evidence": [
-            {"title": "artifact", "content": "payload\n" + ("X" * 2000)},
-            {"title": "artifact2", "content": "payload\n" + ("Y" * 2000)},
-            {"title": "artifact3", "content": "payload\n" + ("Z" * 2000)},
-        ],
-    })
+    args = loop._compact_local_finding_payload(
+        {
+            "description": "D" * 600,
+            "impact": "I" * 600,
+            "technical_analysis": "HTTP/1.1 500\n" + ("A" * 3000),
+            "poc_description": "baseline/control\n" + ("B" * 2000),
+            "poc_script_code": "GET /x HTTP/1.1\nHost: test\n\nHTTP/1.1 200\n" + ("C" * 3000),
+            "evidence": "GET /x HTTP/1.1\nHost: test\n\nHTTP/1.1 200\n" + ("E" * 3000),
+            "extra_evidence": [
+                {"title": "artifact", "content": "payload\n" + ("X" * 2000)},
+                {"title": "artifact2", "content": "payload\n" + ("Y" * 2000)},
+                {"title": "artifact3", "content": "payload\n" + ("Z" * 2000)},
+            ],
+        }
+    )
     assert len(args["description"]) <= 220
     assert len(args["impact"]) <= 240
     assert len(args["technical_analysis"]) <= 520
@@ -500,12 +554,15 @@ def test_cloud_profile_keeps_finding_payload_uncompacted():
 
 def test_dag_finish_branches_exhausts_post_exploit_branch_when_pivot_graph_is_spent():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     loop.state.ensure_vector_candidate(
@@ -514,7 +571,14 @@ def test_dag_finish_branches_exhausts_post_exploit_branch_when_pivot_graph_is_sp
         "Expand authenticated route coverage",
         priority=95,
     )
-    for skill in ("attempt_auth", "post_auth_enum", "test_idor", "test_api_security", "test_business_logic", "test_sensitive_files"):
+    for skill in (
+        "attempt_auth",
+        "post_auth_enum",
+        "test_idor",
+        "test_api_security",
+        "test_business_logic",
+        "test_sensitive_files",
+    ):
         for _ in range(3):
             loop.state.record_blocked_skill(skill)
     branch = loop.state.ensure_branch(
@@ -534,12 +598,15 @@ def test_dag_finish_branches_exhausts_post_exploit_branch_when_pivot_graph_is_sp
 
 def test_dag_finish_branches_keeps_high_yield_post_exploit_branch():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     loop.state.ensure_vector_candidate(
@@ -570,50 +637,59 @@ async def test_budget_exhaustion_completion_accepts_when_no_meaningful_blockers_
     reg.register(LinkChainTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
 
-    first = await reg.dispatch("report_finding", {
-        "title": "debug leak",
-        "severity": "medium",
-        "finding_type": "information_disclosure",
-        "affected_component": "/debug",
-        "description": "debug endpoint exposed",
-    })
-    second = await reg.dispatch("report_finding", {
-        "title": "weak auth",
-        "severity": "medium",
-        "finding_type": "weak_auth",
-        "affected_component": "/login",
-        "description": "weak authentication evidence",
-    })
-    await reg.dispatch("link_chain", {
-        "finding_ids": [first.data["id"], second.data["id"]],
-        "rationale": "debug leak leads to auth foothold",
-        "crown_jewel": "authenticated foothold",
-        "evidence_artifact": {
-            "source_finding_id": first.data["id"],
-            "target_finding_id": second.data["id"],
-            "source_output": "debug leak disclosed the /login path and default credential hint",
-            "pivot_action": "Reused the default credential hint against /login.",
-            "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
-            "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
-            "crown_jewel_evidence": "Authenticated session cookie issued after credential reuse.",
-            "repeat_count": 2,
-            "negative_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
-            "source_output_used_in_pivot": True,
-            "hops": [
-                {
-                    "source_finding_id": first.data["id"],
-                    "target_finding_id": second.data["id"],
-                    "source_output": "debug leak disclosed the /login path and default credential hint",
-                    "pivot_action": "Reused the default credential hint against /login.",
-                    "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
-                    "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
-                    "repeat_count": 2,
-                    "negative_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
-                    "source_output_used_in_pivot": True,
-                }
-            ],
+    first = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "debug leak",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "debug endpoint exposed",
         },
-    })
+    )
+    second = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "weak auth",
+            "severity": "medium",
+            "finding_type": "weak_auth",
+            "affected_component": "/login",
+            "description": "weak authentication evidence",
+        },
+    )
+    await reg.dispatch(
+        "link_chain",
+        {
+            "finding_ids": [first.data["id"], second.data["id"]],
+            "rationale": "debug leak leads to auth foothold",
+            "crown_jewel": "authenticated foothold",
+            "evidence_artifact": {
+                "source_finding_id": first.data["id"],
+                "target_finding_id": second.data["id"],
+                "source_output": "debug leak disclosed the /login path and default credential hint",
+                "pivot_action": "Reused the default credential hint against /login.",
+                "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
+                "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+                "crown_jewel_evidence": "Authenticated session cookie issued after credential reuse.",
+                "repeat_count": 2,
+                "negative_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+                "source_output_used_in_pivot": True,
+                "hops": [
+                    {
+                        "source_finding_id": first.data["id"],
+                        "target_finding_id": second.data["id"],
+                        "source_output": "debug leak disclosed the /login path and default credential hint",
+                        "pivot_action": "Reused the default credential hint against /login.",
+                        "observed_result": "HTTP/1.1 200 OK\nSet-Cookie: session=admin",
+                        "control_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+                        "repeat_count": 2,
+                        "negative_result": "HTTP/1.1 401 Unauthorized\nbaseline invalid credentials denied",
+                        "source_output_used_in_pivot": True,
+                    }
+                ],
+            },
+        },
+    )
     loop.state.record_review_item(
         "judge:unfinished_branches:http://localhost:3000",
         stage="judge",
@@ -627,7 +703,10 @@ async def test_budget_exhaustion_completion_accepts_when_no_meaningful_blockers_
     loop.state.open_vector_candidates = lambda: []  # type: ignore[method-assign]
     assert loop._maybe_finalize_budget_exhausted_scan() is True
     assert loop.state.completed is True
-    assert loop.state.review_queue["judge:unfinished_branches:http://localhost:3000"].status == "closed"
+    assert (
+        loop.state.review_queue["judge:unfinished_branches:http://localhost:3000"].status
+        == "closed"
+    )
     assert any(item.verdict == "ACCEPTED" for item in loop.state.review_history)
 
 
@@ -640,11 +719,13 @@ def test_candidate_finish_blocking_yield_drops_when_vector_family_already_covere
         priority=95,
         evidence="login form exposed",
     )
-    findings = [{
-        "finding_type": "sql_injection",
-        "title": "Authentication bypass via sqli_bypass",
-        "affected_component": "/rest/user/login",
-    }]
+    findings = [
+        {
+            "finding_type": "sql_injection",
+            "title": "Authentication bypass via sqli_bypass",
+            "affected_component": "/rest/user/login",
+        }
+    ]
     for _ in range(3):
         loop.state.record_blocked_skill("attempt_auth")
     assert loop._candidate_has_finish_blocking_yield(candidate, findings) is False
@@ -659,11 +740,13 @@ def test_memory_candidate_finish_blocking_yield_drops_when_family_is_already_cov
         priority=95,
         evidence="Previously observed IDOR on /api/users/{id}.",
     )
-    findings = [{
-        "finding_type": "idor",
-        "title": "Unauthorized object retrieval",
-        "affected_component": "/api/Users/1",
-    }]
+    findings = [
+        {
+            "finding_type": "idor",
+            "title": "Unauthorized object retrieval",
+            "affected_component": "/api/Users/1",
+        }
+    ]
     for _ in range(3):
         loop.state.record_blocked_skill("test_idor")
     assert loop._candidate_has_finish_blocking_yield(candidate, findings) is False
@@ -691,19 +774,24 @@ def test_candidate_family_detects_disclosure_seed_variants():
 
 def test_memory_carry_branch_drops_finish_blocking_yield_when_family_is_already_covered():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
-    loop.state.findings.append({
-        "finding_type": "broken_access_control",
-        "title": "Authenticated data access via IDOR",
-        "affected_component": "/api/Users/1",
-    })
+    loop.state.findings.append(
+        {
+            "finding_type": "broken_access_control",
+            "title": "Authenticated data access via IDOR",
+            "affected_component": "/api/Users/1",
+        }
+    )
     for _ in range(3):
         loop.state.record_blocked_skill("test_idor")
     branch = loop.state.ensure_branch(
@@ -725,19 +813,24 @@ def test_memory_carry_branch_drops_finish_blocking_yield_when_family_is_already_
 
 def test_blocked_root_branch_drops_finish_blocking_yield_when_family_is_already_covered():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
-    loop.state.findings.append({
-        "finding_type": "sql_injection",
-        "title": "Authentication bypass via sqli_bypass",
-        "affected_component": "/rest/user/login",
-    })
+    loop.state.findings.append(
+        {
+            "finding_type": "sql_injection",
+            "title": "Authentication bypass via sqli_bypass",
+            "affected_component": "/rest/user/login",
+        }
+    )
     for _ in range(3):
         loop.state.record_blocked_skill("attempt_auth")
     for _ in range(3):
@@ -752,7 +845,9 @@ def test_blocked_root_branch_drops_finish_blocking_yield_when_family_is_already_
     )
     branch.status = "blocked"
     branch.last_tool = "run_skill"
-    branch.last_summary = "run_skill BLOCKED — you've called 'attempt_auth' with IDENTICAL args 3 times."
+    branch.last_summary = (
+        "run_skill BLOCKED — you've called 'attempt_auth' with IDENTICAL args 3 times."
+    )
     blockers = loop._dag_finish_blocking_branches()
     assert all(item.id != branch.id for item in blockers)
     assert loop.state.branches[branch.id].status == "blocked"
@@ -760,60 +855,71 @@ def test_blocked_root_branch_drops_finish_blocking_yield_when_family_is_already_
 
 def test_best_skill_params_reuses_known_search_surface_for_xss_and_injection():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
-        "result": {
-            "ok": True,
-            "summary": "enumerated",
-            "data": {
-                "accessible": [
-                    {"path": "/rest/products/search?q=test", "status": 200, "size": 1234},
-                ],
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "run_skill",
+            "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+            "result": {
+                "ok": True,
+                "summary": "enumerated",
+                "data": {
+                    "accessible": [
+                        {"path": "/rest/products/search?q=test", "status": 200, "size": 1234},
+                    ],
+                },
             },
         },
-    })
+    )
     assert loop._best_skill_params("test_xss")["url"].endswith("/rest/products/search?q=test")
     assert loop._best_skill_params("test_injection")["url"].endswith("/rest/products/search?q=test")
 
 
 def test_best_skill_params_passes_seed_paths_to_infra():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
-        "result": {
-            "ok": True,
-            "summary": "enumerated",
-            "data": {
-                "accessible": [
-                    {"path": "/ftp/acme.md", "status": 200, "size": 128},
-                    {"path": "/support/logs", "status": 200, "size": 256},
-                ],
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "run_skill",
+            "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+            "result": {
+                "ok": True,
+                "summary": "enumerated",
+                "data": {
+                    "accessible": [
+                        {"path": "/ftp/acme.md", "status": 200, "size": 128},
+                        {"path": "/support/logs", "status": 200, "size": 256},
+                    ],
+                },
             },
         },
-    })
+    )
     params = loop._best_skill_params("test_infra")
     assert params["seed_paths"] == ["/ftp/acme.md", "/support/logs"]
 
 
 def test_finish_scan_does_not_attach_family_candidates_from_report_text():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    ids = loop._candidate_ids_for_action("finish_scan", {
-        "executive_summary": "xss and ssrf checked",
-        "methodology": "exercise xss ssrf family",
-        "technical_analysis": "search xss and redirect ssrf",
-    })
+    ids = loop._candidate_ids_for_action(
+        "finish_scan",
+        {
+            "executive_summary": "xss and ssrf checked",
+            "methodology": "exercise xss ssrf family",
+            "technical_analysis": "search xss and redirect ssrf",
+        },
+    )
     assert ids == []
 
 
 def test_finish_scan_unattempted_candidate_gate_uses_high_yield_family_filter():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    findings = [{
-        "finding_type": "idor",
-        "title": "Unauthorized object retrieval",
-        "affected_component": "/api/Users/1",
-    }]
+    findings = [
+        {
+            "finding_type": "idor",
+            "title": "Unauthorized object retrieval",
+            "affected_component": "/api/Users/1",
+        }
+    ]
     candidate = loop.state.ensure_vector_candidate(
         "memory:idor:http://localhost:3000/api/users/{id}",
         "web:idor",
@@ -844,7 +950,9 @@ def test_fallback_branch_ids_for_candidates_maps_root_branch_without_watch_terms
         role="recon_worker",
     )
     assert loop._branch_ids_for_action("run_skill", {"skill": "enumerate_endpoints"}) == []
-    assert loop._fallback_branch_ids_for_candidates(["web:dir-bruteforce"]) == ["web:dir-bruteforce"]
+    assert loop._fallback_branch_ids_for_candidates(["web:dir-bruteforce"]) == [
+        "web:dir-bruteforce"
+    ]
 
 
 def test_dag_finish_blocking_branches_exhausts_stale_root_recon_branch_after_candidate_failure():
@@ -872,12 +980,15 @@ def test_dag_finish_blocking_branches_exhausts_stale_root_recon_branch_after_can
 
 def test_dag_finish_blocking_branches_drops_redundant_root_family_branch_when_child_post_exploit_exists():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     root = loop.state.ensure_branch(
@@ -907,12 +1018,15 @@ def test_dag_finish_blocking_branches_drops_redundant_root_family_branch_when_ch
 
 def test_dag_finish_blocking_branches_drops_redundant_memory_branch_when_live_family_branch_exists():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     live = loop.state.ensure_branch(
@@ -941,11 +1055,13 @@ def test_dag_finish_blocking_branches_drops_redundant_memory_branch_when_live_fa
 def test_dag_finish_blocking_branches_drops_memory_revalidation_when_family_already_found_this_run():
     reg = ToolRegistry()
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
-    loop.state.findings.append({
-        "finding_type": "sql_injection",
-        "title": "SQLI on q",
-        "affected_component": "http://localhost:3000/rest/products/search?q=",
-    })
+    loop.state.findings.append(
+        {
+            "finding_type": "sql_injection",
+            "title": "SQLI on q",
+            "affected_component": "http://localhost:3000/rest/products/search?q=",
+        }
+    )
     memory = loop.state.ensure_branch(
         "memory:sql_injection:/rest/user/login",
         "WEB-SQLI-001",
@@ -959,28 +1075,33 @@ def test_dag_finish_blocking_branches_drops_memory_revalidation_when_family_alre
 
 def test_hydrate_verify_finding_args_backfills_from_latest_report():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.add_message("tool", {
-        "name": "report_finding",
-        "args": {
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "report_finding",
+            "args": {
+                "title": "SQLI on q",
+                "severity": "critical",
+                "finding_type": "sql_injection",
+                "affected_component": "http://localhost:3000/rest/products/search?q=",
+                "description": "Injection behavior was observed on parameter q.",
+                "impact": "DB impact possible.",
+                "technical_analysis": "Observed response-length delta.",
+                "poc_description": "Send quote payload and compare responses.",
+                "poc_script_code": "curl 'http://localhost:3000/rest/products/search?q='",
+                "evidence": "GET /rest/products/search?q= ... HTTP/1.1 200 ...",
+            },
+            "result": {"ok": True, "summary": "reported"},
+        },
+    )
+    hydrated = loop._hydrate_verify_finding_args(
+        {
             "title": "SQLI on q",
             "severity": "critical",
             "finding_type": "sql_injection",
-            "affected_component": "http://localhost:3000/rest/products/search?q=",
-            "description": "Injection behavior was observed on parameter q.",
-            "impact": "DB impact possible.",
-            "technical_analysis": "Observed response-length delta.",
-            "poc_description": "Send quote payload and compare responses.",
-            "poc_script_code": "curl 'http://localhost:3000/rest/products/search?q='",
-            "evidence": "GET /rest/products/search?q= ... HTTP/1.1 200 ...",
-        },
-        "result": {"ok": True, "summary": "reported"},
-    })
-    hydrated = loop._hydrate_verify_finding_args({
-        "title": "SQLI on q",
-        "severity": "critical",
-        "finding_type": "sql_injection",
-        "affected_component": "/rest/user/login",
-    })
+            "affected_component": "/rest/user/login",
+        }
+    )
     assert hydrated["evidence"].startswith("GET /rest/products/search?q=")
     assert hydrated["technical_analysis"] == "Observed response-length delta."
 
@@ -993,11 +1114,13 @@ def test_normalize_tool_args_maps_shell_exec_cmd_to_command():
 def test_dag_finish_blocking_branches_exhausts_found_root_branch_when_family_is_already_confirmed():
     reg = ToolRegistry()
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
-    loop.state.findings.append({
-        "finding_type": "sql_injection",
-        "title": "SQLI on q",
-        "affected_component": "http://localhost:3000/rest/products/search?q=",
-    })
+    loop.state.findings.append(
+        {
+            "finding_type": "sql_injection",
+            "title": "SQLI on q",
+            "affected_component": "http://localhost:3000/rest/products/search?q=",
+        }
+    )
     candidate = loop.state.ensure_vector_candidate(
         "web:sqli",
         "WEB-SQLI-001",
@@ -1020,12 +1143,14 @@ def test_dag_finish_blocking_branches_exhausts_found_root_branch_when_family_is_
 
 def test_branch_expected_yield_downgrades_disclosure_when_stronger_foothold_exists():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.findings.append({
-        "finding_type": "weak_auth",
-        "title": "Authentication bypass via sqli_bypass",
-        "impact": "An authenticated foothold was obtained.",
-        "technical_analysis": "Token acquired and session reused.",
-    })
+    loop.state.findings.append(
+        {
+            "finding_type": "weak_auth",
+            "title": "Authentication bypass via sqli_bypass",
+            "impact": "An authenticated foothold was obtained.",
+            "technical_analysis": "Token acquired and session reused.",
+        }
+    )
     branch = loop.state.ensure_branch(
         "web:sensitive-files:admin-surface",
         "WEB-ADMIN-PIVOT",
@@ -1101,12 +1226,15 @@ def test_branch_expected_yield_downgrades_db_impact_without_meaningful_db_eviden
 
 def test_forced_branch_action_prefers_test_idor_for_idor_branch():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     branch = loop.state.ensure_branch(
@@ -1123,19 +1251,18 @@ def test_forced_branch_action_prefers_test_idor_for_idor_branch():
 
 def test_best_skill_params_for_idor_carries_latest_auth_token():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {"skill": "attempt_auth"},
-        "result": {"ok": True, "data": {"authenticated": True, "token": "abc123token"}},
-    })
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {"skill": "enumerate_endpoints"},
-        "result": {
-            "ok": True,
-            "data": {"accessible": [{"path": "/api/users/2", "status": 200, "size": 120}]},
+    loop.state.record_auth_identities([{"name": "alice", "token": "abc123token"}])
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "run_skill",
+            "args": {"skill": "enumerate_endpoints"},
+            "result": {
+                "ok": True,
+                "data": {"accessible": [{"path": "/api/users/2", "status": 200, "size": 120}]},
+            },
         },
-    })
+    )
     params = loop._best_skill_params("test_idor")
     assert params["url_pattern"].endswith("/api/users/{id}")
     assert params["token"] == "abc123token"
@@ -1150,14 +1277,17 @@ def test_best_skill_params_carries_multi_identity_authz_context():
             {"name": "bob", "token": "tok-bob", "owned_ids": [2], "role": "user"},
         ]
     )
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {"skill": "enumerate_endpoints"},
-        "result": {
-            "ok": True,
-            "data": {"accessible": [{"path": "/api/users/2", "status": 200, "size": 120}]},
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "run_skill",
+            "args": {"skill": "enumerate_endpoints"},
+            "result": {
+                "ok": True,
+                "data": {"accessible": [{"path": "/api/users/2", "status": 200, "size": 120}]},
+            },
         },
-    })
+    )
 
     idor_params = loop._best_skill_params("test_idor")
     chain_params = loop._best_skill_params("execute_chain")
@@ -1171,19 +1301,22 @@ def test_best_skill_params_carries_multi_identity_authz_context():
 
 def test_best_skill_params_for_business_logic_carries_captured_flows():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.add_message("tool", {
-        "name": "intercept_proxy",
-        "args": {"action": "view_request", "request_id": "req-1"},
-        "result": {
-            "ok": True,
-            "data": {
-                "id": "req-1",
-                "method": "POST",
-                "path": "/api/orders",
-                "body": '{"sku":"A1","quantity":1,"price":19.99}',
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "intercept_proxy",
+            "args": {"action": "view_request", "request_id": "req-1"},
+            "result": {
+                "ok": True,
+                "data": {
+                    "id": "req-1",
+                    "method": "POST",
+                    "path": "/api/orders",
+                    "body": '{"sku":"A1","quantity":1,"price":19.99}',
+                },
             },
         },
-    })
+    )
 
     params = loop._best_skill_params("test_business_logic")
 
@@ -1202,12 +1335,16 @@ def test_spawn_followup_branches_reuses_same_vector_for_same_finding():
         "severity": "critical",
     }
     loop._spawn_followup_branches_from_finding("VXIS-0002", args)
-    loop._spawn_followup_branches_from_finding("VXIS-0002", {
-        **args,
-        "finding_type": "weak_auth",
-    })
+    loop._spawn_followup_branches_from_finding(
+        "VXIS-0002",
+        {
+            **args,
+            "finding_type": "weak_auth",
+        },
+    )
     pivots = [
-        b for b in loop.state.branches.values()
+        b
+        for b in loop.state.branches.values()
         if b.source_finding_id == "VXIS-0002" and b.vector_id == "WEB-SQLI-PIVOT"
     ]
     assert len(pivots) == 1
@@ -1215,12 +1352,15 @@ def test_spawn_followup_branches_reuses_same_vector_for_same_finding():
 
 def test_forced_branch_action_uses_http_fallback_after_shell_exec_exit_on_post_exploit():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     branch = loop.state.ensure_branch(
@@ -1276,12 +1416,14 @@ def test_off_branch_action_allowed_for_same_campaign_branch():
 
 def test_off_branch_action_allowed_for_high_value_cross_campaign_after_sqli_foothold():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.findings.append({
-        "finding_type": "sql_injection",
-        "title": "Authentication bypass via sqli_bypass",
-        "affected_component": "/rest/user/login",
-        "impact": "Authenticated foothold obtained.",
-    })
+    loop.state.findings.append(
+        {
+            "finding_type": "sql_injection",
+            "title": "Authentication bypass via sqli_bypass",
+            "affected_component": "/rest/user/login",
+            "impact": "Authenticated foothold obtained.",
+        }
+    )
     focus = loop.state.ensure_branch(
         "web:sqli:credential-pivot",
         "WEB-SQLI-PIVOT",
@@ -1310,11 +1452,13 @@ def test_off_branch_action_allowed_for_high_value_cross_campaign_after_sqli_foot
 
 def test_high_value_cross_campaign_exception_ignores_low_value_unrelated_campaign():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.findings.append({
-        "finding_type": "sql_injection",
-        "title": "Authentication bypass via sqli_bypass",
-        "affected_component": "/rest/user/login",
-    })
+    loop.state.findings.append(
+        {
+            "finding_type": "sql_injection",
+            "title": "Authentication bypass via sqli_bypass",
+            "affected_component": "/rest/user/login",
+        }
+    )
     focus = loop.state.ensure_branch(
         "web:sqli:credential-pivot",
         "WEB-SQLI-PIVOT",
@@ -1419,14 +1563,16 @@ def test_focus_campaign_for_ui_includes_related_findings_and_reviews():
         next_step="Dump users/auth tables.",
         crown_jewel="DB dump",
     )
-    loop.state.findings.append({
-        "id": "VXIS-0002",
-        "finding_type": "sql_injection",
-        "severity": "critical",
-        "title": "SQLI on q",
-        "affected_component": "/rest/products/search?q=",
-        "impact": "DB impact possible.",
-    })
+    loop.state.findings.append(
+        {
+            "id": "VXIS-0002",
+            "finding_type": "sql_injection",
+            "severity": "critical",
+            "title": "SQLI on q",
+            "affected_component": "/rest/products/search?q=",
+            "impact": "DB impact possible.",
+        }
+    )
     loop.state.record_review_item(
         "verify:sqli:/rest/products/search?q=",
         stage="verifier",
@@ -1471,57 +1617,69 @@ def test_branch_is_redundant_family_root_when_same_family_post_exploit_branch_ex
 
 def test_best_skill_params_rotates_xss_surface_after_recent_attempt():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
-        "result": {
-            "ok": True,
-            "summary": "enumerated",
-            "data": {
-                "accessible": [
-                    {"path": "/search?q=test", "status": 200, "size": 123},
-                    {"path": "/redirect?next=/profile", "status": 200, "size": 123},
-                ],
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "run_skill",
+            "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+            "result": {
+                "ok": True,
+                "summary": "enumerated",
+                "data": {
+                    "accessible": [
+                        {"path": "/search?q=test", "status": 200, "size": 123},
+                        {"path": "/redirect?next=/profile", "status": 200, "size": 123},
+                    ],
+                },
             },
         },
-    })
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {
-            "skill": "test_xss",
-            "target_url": "http://localhost:3000",
-            "params": {"url": "http://localhost:3000/search?q=test"},
+    )
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "run_skill",
+            "args": {
+                "skill": "test_xss",
+                "target_url": "http://localhost:3000",
+                "params": {"url": "http://localhost:3000/search?q=test"},
+            },
+            "result": {"ok": True, "summary": "clean", "data": {"vulnerable": False}},
         },
-        "result": {"ok": True, "summary": "clean", "data": {"vulnerable": False}},
-    })
+    )
     params = loop._best_skill_params("test_xss")
     assert params["url"].endswith("/redirect?next=/profile")
 
 
 def test_reroute_blocked_skill_retries_same_xss_skill_on_fresh_surface_before_pivot():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
-        "result": {
-            "ok": True,
-            "summary": "enumerated",
-            "data": {
-                "accessible": [
-                    {"path": "/search?q=test", "status": 200, "size": 123},
-                    {"path": "/redirect?next=/profile", "status": 200, "size": 123},
-                ],
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "run_skill",
+            "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+            "result": {
+                "ok": True,
+                "summary": "enumerated",
+                "data": {
+                    "accessible": [
+                        {"path": "/search?q=test", "status": 200, "size": 123},
+                        {"path": "/redirect?next=/profile", "status": 200, "size": 123},
+                    ],
+                },
             },
         },
-    })
+    )
     for _ in range(3):
         loop.state.record_blocked_skill("test_xss")
     skill, params = loop._reroute_blocked_skill(
@@ -1557,12 +1715,15 @@ def test_mark_family_probe_retryable_revives_xss_candidate():
 @pytest.mark.asyncio
 async def test_suggested_replan_uses_remaining_family_candidate_when_branch_cannot_advance():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     reg.register(ReportFindingTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
@@ -1576,31 +1737,50 @@ async def test_suggested_replan_uses_remaining_family_candidate_when_branch_cann
         source_finding_id="VXIS-0001",
     )
     branch.attempts = 4
-    for skill in ("attempt_auth", "post_auth_enum", "test_idor", "test_api_security", "test_business_logic", "test_sensitive_files"):
+    for skill in (
+        "attempt_auth",
+        "post_auth_enum",
+        "test_idor",
+        "test_api_security",
+        "test_business_logic",
+        "test_sensitive_files",
+    ):
         for _ in range(3):
             loop.state.record_blocked_skill(skill)
-    await reg.dispatch("report_finding", {
-        "title": "Authentication bypass via sqli_bypass",
-        "severity": "medium",
-        "finding_type": "sql_injection",
-        "affected_component": "/rest/user/login",
-        "description": "auth foothold",
-    })
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Authentication bypass via sqli_bypass",
+            "severity": "medium",
+            "finding_type": "sql_injection",
+            "affected_component": "/rest/user/login",
+            "description": "auth foothold",
+        },
+    )
     forced = loop._suggested_replan_action("unfinished_branches")
     assert forced is not None
     assert forced[0] == "run_skill"
-    assert forced[1]["skill"] in {"test_injection", "test_xss", "test_ssrf", "enumerate_endpoints", "test_infra"}
+    assert forced[1]["skill"] in {
+        "test_injection",
+        "test_xss",
+        "test_ssrf",
+        "enumerate_endpoints",
+        "test_infra",
+    }
 
 
 @pytest.mark.asyncio
 async def test_suggested_replan_prioritizes_retryable_family_candidate():
     reg = ToolRegistry()
+
     class _RunSkill:
         name = "run_skill"
         description = "run skill"
         input_schema = {"type": "object"}
+
         async def run(self, **kwargs):  # pragma: no cover - not executed
             return ToolResult(ok=True, summary="ok")
+
     reg.register(_RunSkill())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
     retryable = loop.state.ensure_vector_candidate(
@@ -1612,16 +1792,21 @@ async def test_suggested_replan_prioritizes_retryable_family_candidate():
     )
     retryable.status = "retryable"
     retryable.attempts = 1
-    retryable.last_summary = "test_xss remained inconclusive at round 1; retry with stronger payload variant"
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
-        "result": {
-            "ok": True,
-            "summary": "enumerated",
-            "data": {"accessible": [{"path": "/search?q=test", "status": 200, "size": 123}]},
+    retryable.last_summary = (
+        "test_xss remained inconclusive at round 1; retry with stronger payload variant"
+    )
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "run_skill",
+            "args": {"skill": "enumerate_endpoints", "target_url": "http://localhost:3000"},
+            "result": {
+                "ok": True,
+                "summary": "enumerated",
+                "data": {"accessible": [{"path": "/search?q=test", "status": 200, "size": 123}]},
+            },
         },
-    })
+    )
     forced = loop._suggested_replan_action("unattempted_candidates")
     assert forced is not None
     assert forced[0] == "run_skill"
@@ -1704,9 +1889,13 @@ def test_scan_dashboard_surfaces_memory_directives():
     for branch in loop.state.branches.values():
         branch.status = "blocked"
     loop.state.add_shared_note("memory: 2 prior scan(s) for this target.")
-    loop.state.add_shared_note("memory strategy: first revalidate the strongest prior lead, then spend at least one branch on unexplored surface.")
+    loop.state.add_shared_note(
+        "memory strategy: first revalidate the strongest prior lead, then spend at least one branch on unexplored surface."
+    )
     loop.state.add_shared_note("memory refuted: suppress weak error_oracle on /api/foo")
-    loop.state.add_shared_note("memory branch: reopen Dump product table as p90 post_exploit_worker/data_access")
+    loop.state.add_shared_note(
+        "memory branch: reopen Dump product table as p90 post_exploit_worker/data_access"
+    )
     loop.state.ensure_branch(
         "carry:branch-1",
         "WEB-SQLI-001",
@@ -1737,16 +1926,22 @@ async def test_memory_refuted_pattern_blocks_repeated_run_skill_probe():
                 "affected_component": "http://localhost:3000/#/search?q=test",
                 "title": "Reflected XSS on search",
                 "reasoning": "Prior replay only reflected inert text without executable context.",
+                "last_seen": datetime.now(timezone.utc).isoformat(),
             }
         ],
     }
 
     async def fake_decide(state):
-        return [("run_skill", {
-            "skill": "test_xss",
-            "target_url": "http://localhost:3000",
-            "params": {"url": "http://localhost:3000/#/search?q=test"},
-        })]
+        return [
+            (
+                "run_skill",
+                {
+                    "skill": "test_xss",
+                    "target_url": "http://localhost:3000",
+                    "params": {"url": "http://localhost:3000/#/search?q=test"},
+                },
+            )
+        ]
 
     loop._decide = fake_decide  # type: ignore
     result = await loop.run()
@@ -1777,11 +1972,19 @@ async def test_memory_success_tactic_hint_injected_for_matching_action():
     }
 
     async def fake_decide(state):
-        return [("run_skill", {
-            "skill": "test_injection",
-            "target_url": "http://localhost:3000",
-            "params": {"url": "http://localhost:3000/rest/products/search?q=test", "param_name": "q"},
-        })]
+        return [
+            (
+                "run_skill",
+                {
+                    "skill": "test_injection",
+                    "target_url": "http://localhost:3000",
+                    "params": {
+                        "url": "http://localhost:3000/rest/products/search?q=test",
+                        "param_name": "q",
+                    },
+                },
+            )
+        ]
 
     loop._decide = fake_decide  # type: ignore
     await loop.run()
@@ -1798,6 +2001,7 @@ async def test_memory_success_tactic_hint_injected_for_matching_action():
 async def test_direct_injection_promotion_skips_medium_noise():
     reg = ToolRegistry()
     reg.register(ReportFindingTool())
+    reg.register(ConfirmingVerifyTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
 
     original_dispatch = reg.dispatch
@@ -1896,13 +2100,18 @@ async def test_scan_loop_runs_to_finish(monkeypatch):
         call_count["n"] += 1
         # First decision drops a finding so Q11's 0-finding gate clears.
         if call_count["n"] == 1:
-            return [("report_finding", {
-                "title": "stub finding",
-                "severity": "low",
-                "finding_type": "test_stub",
-                "affected_component": "/x",
-                "description": "evidence of nothing — fixture only",
-            })]
+            return [
+                (
+                    "report_finding",
+                    {
+                        "title": "stub finding",
+                        "severity": "low",
+                        "finding_type": "test_stub",
+                        "affected_component": "/x",
+                        "description": "evidence of nothing — fixture only",
+                    },
+                )
+            ]
         return [("finish_scan", {})]
 
     loop = ScanAgentLoop(target="http://localhost", registry=reg, max_iters=10)
@@ -1911,6 +2120,78 @@ async def test_scan_loop_runs_to_finish(monkeypatch):
     assert result["completed"] is True
     assert call_count["n"] >= 5
     assert len(loop.state.messages) >= 2  # system + user + tool result
+
+
+@pytest.mark.asyncio
+async def test_scan_loop_redacts_sensitive_tool_history_without_mutating_dispatch():
+    class SecretTool:
+        name = "secret_tool"
+        description = "test-only secret echo"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            assert kwargs["token"] == "dispatch-secret"
+            return ToolResult(
+                ok=True,
+                summary="completed",
+                data={"authorization": "Bearer result-secret", "value": "safe"},
+            )
+
+    reg = ToolRegistry()
+    reg.register(SecretTool())
+    loop = ScanAgentLoop(target="http://localhost", registry=reg, max_iters=1)
+
+    async def decide_once(_state):
+        return [("secret_tool", {"token": "dispatch-secret"})]
+
+    loop._decide = decide_once  # type: ignore[method-assign]
+    await loop.run()
+
+    message = next(
+        item
+        for item in reversed(loop.state.messages)
+        if item.get("role") == "tool" and item.get("content", {}).get("name") == "secret_tool"
+    )
+    assert message["content"]["args"]["token"] == "[redacted]"
+    assert message["content"]["result"]["data"]["authorization"] == "[redacted]"
+    assert message["content"]["result"]["data"]["value"] == "safe"
+
+
+@pytest.mark.asyncio
+async def test_direct_auth_skill_keeps_token_only_in_runtime_auth_state():
+    class AuthSkillTool:
+        name = "run_skill"
+        description = "test-only auth skill"
+        input_schema = {"type": "object"}
+
+        async def run(self, **_kwargs) -> ToolResult:
+            return ToolResult(
+                ok=True,
+                summary="authenticated",
+                data={
+                    "authenticated": True,
+                    "token": "runtime-secret",
+                    "identities": [{"name": "alice", "token": "runtime-secret"}],
+                },
+            )
+
+    reg = ToolRegistry()
+    reg.register(AuthSkillTool())
+    loop = ScanAgentLoop(target="http://localhost", registry=reg, max_iters=1)
+
+    async def decide_once(_state):
+        return [("run_skill", {"skill": "attempt_auth"})]
+
+    loop._decide = decide_once  # type: ignore[method-assign]
+    await loop.run()
+
+    assert loop._latest_auth_token() == "runtime-secret"
+    history = next(
+        item
+        for item in reversed(loop.state.messages)
+        if item.get("role") == "tool" and item.get("content", {}).get("name") == "run_skill"
+    )
+    assert history["content"]["result"]["data"]["token"] == "[redacted]"
 
 
 def test_retrieval_observation_sanitizes_binary_samples():
@@ -1927,12 +2208,15 @@ def test_retrieval_observation_sanitizes_binary_samples():
     assert "\x00" not in sample
     assert "\\x00ABC\\x01\\x02" in sample
 
+
 @pytest.mark.asyncio
 async def test_scan_loop_respects_max_iters():
     reg = ToolRegistry()
     loop = ScanAgentLoop(target="http://localhost", registry=reg, max_iters=3)
+
     async def never_finish(state):
         return [("nonexistent_tool", {})]
+
     loop._decide = never_finish  # type: ignore
     result = await loop.run()
     assert result["completed"] is False
@@ -1946,22 +2230,34 @@ async def test_finish_scan_rejected_when_two_findings_have_no_chain():
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "first finding",
-            "severity": "medium",
-            "finding_type": "information_disclosure",
-            "affected_component": "/debug",
-            "description": "debug endpoint exposed",
-        })],
-        [("report_finding", {
-            "title": "second finding",
-            "severity": "medium",
-            "finding_type": "weak_auth",
-            "affected_component": "/login",
-            "description": "weak authentication evidence",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "first finding",
+                        "severity": "medium",
+                        "finding_type": "information_disclosure",
+                        "affected_component": "/debug",
+                        "description": "debug endpoint exposed",
+                    },
+                )
+            ],
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "second finding",
+                        "severity": "medium",
+                        "finding_type": "weak_auth",
+                        "affected_component": "/login",
+                        "description": "weak authentication evidence",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -1976,7 +2272,8 @@ async def test_finish_scan_rejected_when_two_findings_have_no_chain():
     result = await loop.run()
 
     chain_rejections = [
-        m for m in loop.state.messages
+        m
+        for m in loop.state.messages
         if m.get("role") == "tool"
         and isinstance(m.get("content"), dict)
         and (m["content"].get("result") or {}).get("data", {}).get("needs_chains")
@@ -1995,22 +2292,29 @@ async def test_unconfirmed_verifier_result_is_kept_in_review_queue():
     reg.register(ReportFindingTool())
     reg.register(VerifyTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "Auth bypass on login",
-            "severity": "high",
-            "finding_type": "auth_bypass",
-            "affected_component": "/login",
-            "description": "Forged token accepted by login flow.",
-            "impact": "Attacker gains authenticated access.",
-            "technical_analysis": "The forged token was accepted and returned a session cookie, but the control pair is still missing.",
-            "poc_description": "Send the forged token and observe the session response.",
-            "poc_script_code": "POST /login HTTP/1.1\\nHost: example\\nAuthorization: Bearer forged\\n\\nHTTP/1.1 200 OK\\nSet-Cookie: session=abc",
-            "remediation_steps": "Reject forged tokens and validate signatures.",
-            "evidence": "HTTP/1.1 200 OK\\nSet-Cookie: session=abc",
-        })],
-        [("finish_scan", {})],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "Auth bypass on login",
+                        "severity": "high",
+                        "finding_type": "auth_bypass",
+                        "affected_component": "/login",
+                        "description": "Forged token accepted by login flow.",
+                        "impact": "Attacker gains authenticated access.",
+                        "technical_analysis": "The forged token was accepted and returned a session cookie, but the control pair is still missing.",
+                        "poc_description": "Send the forged token and observe the session response.",
+                        "poc_script_code": "POST /login HTTP/1.1\\nHost: example\\nAuthorization: Bearer forged\\n\\nHTTP/1.1 200 OK\\nSet-Cookie: session=abc",
+                        "remediation_steps": "Reject forged tokens and validate signatures.",
+                        "evidence": "HTTP/1.1 200 OK\\nSet-Cookie: session=abc",
+                    },
+                )
+            ],
+            [("finish_scan", {})],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2031,7 +2335,7 @@ async def test_unconfirmed_verifier_result_is_kept_in_review_queue():
     assert any(
         item["stage"] == "verifier"
         and item["verdict"] == "UNCONFIRMED"
-        and item["blocked_action"] == ""
+        and item["blocked_action"] == "report_finding"
         for item in result["review_history"]
     )
 
@@ -2042,25 +2346,33 @@ async def test_short_smoke_can_finish_after_single_high_finding_once_branch_guar
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
     reg.register(ReplayHttpTool())
+    reg.register(ConfirmingVerifyTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "reflected xss",
-            "severity": "high",
-            "finding_type": "xss_reflected",
-            "affected_component": "/search?q=test",
-            "description": "script payload reflected",
-            "impact": "Attacker can execute script in the victim browser and act in their session context.",
-            "technical_analysis": "Negative control baseline was not reflected as markup; payload reflection reproduced twice. repeat_count=2",
-            "poc_description": "Replay a benign search, then inject an HTML payload twice and observe reflected execution content.",
-            "poc_script_code": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nnegative control: search:test not reflected\\n\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>\\n\\nrepeat_count=2\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>",
-            "response_or_effect": "search:<img src=x onerror=alert(1)>",
-            "control_comparison": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nsearch:test",
-            "request_or_payload": "GET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example",
-            "remediation_steps": "Apply output encoding and context-aware templating.",
-            "verifier_verdict": "CONFIRMED",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "reflected xss",
+                        "severity": "high",
+                        "finding_type": "xss_reflected",
+                        "affected_component": "/search?q=test",
+                        "description": "script payload reflected",
+                        "impact": "Attacker can execute script in the victim browser and act in their session context.",
+                        "technical_analysis": "Negative control baseline was not reflected as markup; payload reflection reproduced twice. repeat_count=2",
+                        "poc_description": "Replay a benign search, then inject an HTML payload twice and observe reflected execution content.",
+                        "poc_script_code": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nnegative control: search:test not reflected\\n\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>\\n\\nrepeat_count=2\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>",
+                        "response_or_effect": "search:<img src=x onerror=alert(1)>",
+                        "control_comparison": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nsearch:test",
+                        "request_or_payload": "GET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example",
+                        "remediation_steps": "Apply output encoding and context-aware templating.",
+                        "verifier_verdict": "CONFIRMED",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2080,23 +2392,31 @@ async def test_finish_scan_rejected_when_high_finding_lacks_machine_replay_gate(
     reg = ToolRegistry()
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
+    reg.register(ConfirmingVerifyTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "reflected xss",
-            "severity": "high",
-            "finding_type": "xss_reflected",
-            "affected_component": "/search?q=test",
-            "description": "script payload reflected",
-            "impact": "Attacker can execute script in the victim browser and act in their session context.",
-            "technical_analysis": "Negative control baseline was not reflected as markup; payload reflection reproduced twice. repeat_count=2",
-            "poc_description": "Replay a benign search, then inject an HTML payload twice and observe reflected execution content.",
-            "poc_script_code": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nnegative control: search:test not reflected\\n\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>\\n\\nrepeat_count=2\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>",
-            "remediation_steps": "Apply output encoding and context-aware templating.",
-            "verifier_verdict": "CONFIRMED",
-            "replay_gate": {"status": "passed", "method": "brain_attested"},
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "reflected xss",
+                        "severity": "high",
+                        "finding_type": "xss_reflected",
+                        "affected_component": "/search?q=test",
+                        "description": "script payload reflected",
+                        "impact": "Attacker can execute script in the victim browser and act in their session context.",
+                        "technical_analysis": "Negative control baseline was not reflected as markup; payload reflection reproduced twice. repeat_count=2",
+                        "poc_description": "Replay a benign search, then inject an HTML payload twice and observe reflected execution content.",
+                        "poc_script_code": "GET /search?q=test HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nnegative control: search:test not reflected\\n\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>\\n\\nrepeat_count=2\\nGET /search?q=%3Cimg%20src=x%20onerror=alert(1)%3E HTTP/1.1\\nHost: example\\n\\nHTTP/1.1 200\\n\\nsearch:<img src=x onerror=alert(1)>",
+                        "remediation_steps": "Apply output encoding and context-aware templating.",
+                        "verifier_verdict": "CONFIRMED",
+                        "replay_gate": {"status": "passed", "method": "brain_attested"},
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2124,29 +2444,36 @@ async def test_non_web_high_finding_uses_verifier_replay_gate_not_http_replay():
     reg.register(ReportFindingTool())
     reg.register(ConfirmingVerifyTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "Local secret exposed",
-            "severity": "high",
-            "finding_type": "information_disclosure",
-            "affected_component": "/tmp/App.app/Contents/Resources/config.json",
-            "description": "Bundled app config exposes a credential.",
-            "impact": "Credential material can be extracted from the local app bundle.",
-            "technical_analysis": "Control file has no secret; target config contains api_key=abc. repeat_count=2. Negative result: clean control has no api_key.",
-            "poc_description": "Read the bundled config and compare it to a clean control file twice.",
-            "poc_script_code": (
-                "PAYLOAD: cat /tmp/App.app/Contents/Resources/config.json -> api_key=abc\n"
-                "CONTROL: cat /tmp/clean-config.json -> no api_key\n"
-                "repeat_count=2\n"
-                "NEGATIVE_RESULT: clean control did not expose api_key"
-            ),
-            "request_or_payload": "cat /tmp/App.app/Contents/Resources/config.json",
-            "response_or_effect": "response_excerpt: api_key=abc",
-            "control_comparison": "control_result: /tmp/clean-config.json contains no api_key",
-            "replay_command": "cat /tmp/App.app/Contents/Resources/config.json",
-            "remediation_steps": "Remove secrets from bundled resources.",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "Local secret exposed",
+                        "severity": "high",
+                        "finding_type": "information_disclosure",
+                        "affected_component": "/tmp/App.app/Contents/Resources/config.json",
+                        "description": "Bundled app config exposes a credential.",
+                        "impact": "Credential material can be extracted from the local app bundle.",
+                        "technical_analysis": "Control file has no secret; target config contains api_key=abc. repeat_count=2. Negative result: clean control has no api_key.",
+                        "poc_description": "Read the bundled config and compare it to a clean control file twice.",
+                        "poc_script_code": (
+                            "PAYLOAD: cat /tmp/App.app/Contents/Resources/config.json -> api_key=abc\n"
+                            "CONTROL: cat /tmp/clean-config.json -> no api_key\n"
+                            "repeat_count=2\n"
+                            "NEGATIVE_RESULT: clean control did not expose api_key"
+                        ),
+                        "request_or_payload": "cat /tmp/App.app/Contents/Resources/config.json",
+                        "response_or_effect": "response_excerpt: api_key=abc",
+                        "control_comparison": "control_result: /tmp/clean-config.json contains no api_key",
+                        "replay_command": "cat /tmp/App.app/Contents/Resources/config.json",
+                        "remediation_steps": "Remove secrets from bundled resources.",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2176,29 +2503,42 @@ async def test_auto_chain_links_information_disclosure_to_weak_auth():
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
     reg.register(LinkChainTool())
+    reg.register(ConfirmingVerifyTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "debug config leak",
-            "severity": "low",
-            "finding_type": "information_disclosure",
-            "affected_component": "/debug",
-            "description": "debug endpoint exposed stack details and default credential hint admin@juice-sh.op/admin123",
-            "evidence": "GET /debug -> default credential path /rest/user/login admin@juice-sh.op/admin123",
-        })],
-        [("report_finding", {
-            "title": "default admin credentials",
-            "severity": "high",
-            "finding_type": "default_credentials",
-            "affected_component": "/login",
-            "description": "admin:admin works",
-            "impact": "Attacker gains an authenticated foothold as a privileged user.",
-            "technical_analysis": "Negative control invalid credentials returned 401; debug-disclosed admin@juice-sh.op/admin123 succeeded twice. repeat_count=2",
-            "poc_description": "Attempt invalid credentials, then the documented default credentials twice and compare authentication responses.",
-            "poc_script_code": "POST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{\"email\":\"bad@example\",\"password\":\"bad\"}\\n\\nHTTP/1.1 401 Unauthorized\\n\\nnegative control\\n\\nPOST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{\"email\":\"admin@juice-sh.op\",\"password\":\"admin123\"}\\n\\nHTTP/1.1 200\\n\\n{\"authentication\":{\"token\":\"...\"}}\\n\\nrepeat_count=2\\nPOST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{\"email\":\"admin@juice-sh.op\",\"password\":\"admin123\"}\\n\\nHTTP/1.1 200\\n\\n{\"authentication\":{\"token\":\"...\"}}",
-            "remediation_steps": "Disable default accounts and enforce unique bootstrap secrets.",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "debug config leak",
+                        "severity": "low",
+                        "finding_type": "information_disclosure",
+                        "affected_component": "/debug",
+                        "description": "debug endpoint exposed stack details and default credential hint admin@juice-sh.op/admin123",
+                        "evidence": "GET /debug -> default credential path /rest/user/login admin@juice-sh.op/admin123",
+                    },
+                )
+            ],
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "default admin credentials",
+                        "severity": "high",
+                        "finding_type": "default_credentials",
+                        "affected_component": "/login",
+                        "description": "admin:admin works",
+                        "impact": "Attacker gains an authenticated foothold as a privileged user.",
+                        "technical_analysis": "Negative control invalid credentials returned 401; debug-disclosed admin@juice-sh.op/admin123 succeeded twice. repeat_count=2",
+                        "poc_description": "Attempt invalid credentials, then the documented default credentials twice and compare authentication responses.",
+                        "poc_script_code": 'POST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{"email":"bad@example","password":"bad"}\\n\\nHTTP/1.1 401 Unauthorized\\n\\nnegative control\\n\\nPOST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{"email":"admin@juice-sh.op","password":"admin123"}\\n\\nHTTP/1.1 200\\n\\n{"authentication":{"token":"..."}}\\n\\nrepeat_count=2\\nPOST /rest/user/login HTTP/1.1\\nHost: example\\nContent-Type: application/json\\n\\n{"email":"admin@juice-sh.op","password":"admin123"}\\n\\nHTTP/1.1 200\\n\\n{"authentication":{"token":"..."}}',
+                        "remediation_steps": "Disable default accounts and enforce unique bootstrap secrets.",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2215,7 +2555,8 @@ async def test_auto_chain_links_information_disclosure_to_weak_auth():
 
 
 @pytest.mark.asyncio
-async def test_vector_candidates_record_attempt_outcomes_for_brain_tools():
+async def test_vector_candidates_record_attempt_outcomes_for_brain_tools(monkeypatch):
+    monkeypatch.setenv("VXIS_ALLOW_ARBITRARY_EXEC", "1")
     reg = ToolRegistry()
     reg.register(FinishTool())
 
@@ -2233,10 +2574,19 @@ async def test_vector_candidates_record_attempt_outcomes_for_brain_tools():
 
     reg.register(ShellTool())
 
-    decisions = iter([
-        [("shell_exec", {"command": "sqlmap -u http://localhost:3000/rest/products/search?q=test --batch"})],
-        [("finish_scan", {})],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "shell_exec",
+                    {
+                        "command": "sqlmap -u http://localhost:3000/rest/products/search?q=test --batch"
+                    },
+                )
+            ],
+            [("finish_scan", {})],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2270,11 +2620,13 @@ async def test_execution_monitor_escalates_repeated_no_progress_action():
 
     reg.register(HttpRequestTool())
 
-    decisions = iter([
-        [("http_request", {"url": "http://localhost:3000/health"})],
-        [("http_request", {"url": "http://localhost:3000/health"})],
-        [("finish_scan", {})],
-    ])
+    decisions = iter(
+        [
+            [("http_request", {"url": "http://localhost:3000/health"})],
+            [("http_request", {"url": "http://localhost:3000/health"})],
+            [("finish_scan", {})],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2322,18 +2674,25 @@ async def test_execution_monitor_resets_after_progress():
 
     reg.register(HttpRequestTool())
 
-    decisions = iter([
-        [("http_request", {"url": "http://localhost:3000/health"})],
-        [("report_finding", {
-            "title": "Debug endpoint exposes version",
-            "severity": "medium",
-            "finding_type": "information_disclosure",
-            "affected_component": "/debug",
-            "description": "Debug endpoint leaks build metadata.",
-            "evidence": "GET /debug -> 200 OK build=dev",
-        })],
-        [("http_request", {"url": "http://localhost:3000/health"})],
-    ])
+    decisions = iter(
+        [
+            [("http_request", {"url": "http://localhost:3000/health"})],
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "Debug endpoint exposes version",
+                        "severity": "medium",
+                        "finding_type": "information_disclosure",
+                        "affected_component": "/debug",
+                        "description": "Debug endpoint leaks build metadata.",
+                        "evidence": "GET /debug -> 200 OK build=dev",
+                    },
+                )
+            ],
+            [("http_request", {"url": "http://localhost:3000/health"})],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2421,9 +2780,11 @@ async def test_authenticated_401_requeues_attempt_auth_once():
 
     reg.register(HttpRequestTool())
 
-    decisions = iter([
-        [("http_request", {"url": "http://localhost:3000/api/me"})],
-    ])
+    decisions = iter(
+        [
+            [("http_request", {"url": "http://localhost:3000/api/me"})],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2453,15 +2814,22 @@ async def test_finish_scan_rejected_when_high_priority_candidates_unattempted():
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "one finding",
-            "severity": "low",
-            "finding_type": "information_disclosure",
-            "affected_component": "/debug",
-            "description": "debug endpoint exposed",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "one finding",
+                        "severity": "low",
+                        "finding_type": "information_disclosure",
+                        "affected_component": "/debug",
+                        "description": "debug endpoint exposed",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2476,7 +2844,8 @@ async def test_finish_scan_rejected_when_high_priority_candidates_unattempted():
 
     assert result["completed"] is False
     candidate_rejections = [
-        m for m in loop.state.messages
+        m
+        for m in loop.state.messages
         if m.get("role") == "tool"
         and isinstance(m.get("content"), dict)
         and (m["content"].get("result") or {}).get("data", {}).get("unresolved_vector_candidates")
@@ -2497,15 +2866,22 @@ async def test_memory_refuted_pattern_suppresses_repeat_report_finding():
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "HTTP 500 on /api/foo",
-            "severity": "medium",
-            "finding_type": "error_oracle",
-            "affected_component": "/api/foo",
-            "description": "generic 500 page",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "HTTP 500 on /api/foo",
+                        "severity": "medium",
+                        "finding_type": "error_oracle",
+                        "affected_component": "/api/foo",
+                        "description": "generic 500 page",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2520,6 +2896,7 @@ async def test_memory_refuted_pattern_suppresses_repeat_report_finding():
             {
                 "finding_type": "error_oracle",
                 "affected_component": "/api/foo",
+                "last_seen": datetime.now(timezone.utc).isoformat(),
             }
         ],
     }
@@ -2551,15 +2928,22 @@ async def test_repeated_finish_unattempted_candidates_suggests_brain_replan():
         evidence="login form exposed",
     )
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "seed finding",
-            "severity": "low",
-            "finding_type": "information_disclosure",
-            "affected_component": "/debug",
-            "description": "seed finding",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "seed finding",
+                        "severity": "low",
+                        "finding_type": "information_disclosure",
+                        "affected_component": "/debug",
+                        "description": "seed finding",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2579,7 +2963,9 @@ async def test_repeated_finish_unattempted_candidates_suggests_brain_replan():
         isinstance(m.get("content"), dict)
         and ((m["content"].get("result") or {}).get("data") or {}).get("suggested_action")
         for m in loop.state.messages
-        if m.get("role") == "tool" and isinstance(m.get("content"), dict) and m["content"].get("name") == "finish_scan"
+        if m.get("role") == "tool"
+        and isinstance(m.get("content"), dict)
+        and m["content"].get("name") == "finish_scan"
     )
     assert any(
         item["stage"] == "judge"
@@ -2591,7 +2977,9 @@ async def test_repeated_finish_unattempted_candidates_suggests_brain_replan():
         isinstance(m.get("content"), dict)
         and ((m["content"].get("result") or {}).get("data") or {}).get("judge_replan_halt")
         for m in loop.state.messages
-        if m.get("role") == "tool" and isinstance(m.get("content"), dict) and m["content"].get("name") == "finish_scan"
+        if m.get("role") == "tool"
+        and isinstance(m.get("content"), dict)
+        and m["content"].get("name") == "finish_scan"
     )
 
 
@@ -2616,15 +3004,22 @@ async def test_repeated_finish_unfinished_branches_suggests_post_auth_replan():
         crown_jewel="authenticated data exfiltration",
     )
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "seed finding",
-            "severity": "low",
-            "finding_type": "information_disclosure",
-            "affected_component": "/debug",
-            "description": "seed finding",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "seed finding",
+                        "severity": "low",
+                        "finding_type": "information_disclosure",
+                        "affected_component": "/debug",
+                        "description": "seed finding",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2649,7 +3044,9 @@ async def test_repeated_finish_unfinished_branches_suggests_post_auth_replan():
         isinstance(m.get("content"), dict)
         and ((m["content"].get("result") or {}).get("data") or {}).get("suggested_action")
         for m in loop.state.messages
-        if m.get("role") == "tool" and isinstance(m.get("content"), dict) and m["content"].get("name") == "finish_scan"
+        if m.get("role") == "tool"
+        and isinstance(m.get("content"), dict)
+        and m["content"].get("name") == "finish_scan"
     )
     assert any(
         item["stage"] == "judge"
@@ -2673,15 +3070,22 @@ async def test_repeated_finish_alternating_rejections_halts_title_agnostic():
     reg.register(FailingFinishTool())
     reg.register(ReportFindingTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "seed finding",
-            "severity": "low",
-            "finding_type": "information_disclosure",
-            "affected_component": "/debug",
-            "description": "seed finding",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "seed finding",
+                        "severity": "low",
+                        "finding_type": "information_disclosure",
+                        "affected_component": "/debug",
+                        "description": "seed finding",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2720,9 +3124,7 @@ async def test_repeated_finish_alternating_rejections_halts_title_agnostic():
     )
     assert any(
         isinstance(m.get("content"), dict)
-        and ((m["content"].get("result") or {}).get("data") or {}).get(
-            "finish_rejection_streak"
-        )
+        and ((m["content"].get("result") or {}).get("data") or {}).get("finish_rejection_streak")
         for m in loop.state.messages
         if m.get("role") == "tool"
         and isinstance(m.get("content"), dict)
@@ -2736,15 +3138,22 @@ async def test_finish_gate_exception_fails_closed():
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
 
-    decisions = iter([
-        [("report_finding", {
-            "title": "seed finding",
-            "severity": "low",
-            "finding_type": "information_disclosure",
-            "affected_component": "/debug",
-            "description": "seed finding",
-        })],
-    ])
+    decisions = iter(
+        [
+            [
+                (
+                    "report_finding",
+                    {
+                        "title": "seed finding",
+                        "severity": "low",
+                        "finding_type": "information_disclosure",
+                        "affected_component": "/debug",
+                        "description": "seed finding",
+                    },
+                )
+            ],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2783,10 +3192,12 @@ async def test_memory_priority_hint_injected_when_early_action_ignores_prior_lea
 
     reg.register(QueryTool())
 
-    decisions = iter([
-        [("query_findings", {"text_contains": "random"})],
-        [("finish_scan", {})],
-    ])
+    decisions = iter(
+        [
+            [("query_findings", {"text_contains": "random"})],
+            [("finish_scan", {})],
+        ]
+    )
 
     async def fake_decide(state):
         try:
@@ -2797,7 +3208,9 @@ async def test_memory_priority_hint_injected_when_early_action_ignores_prior_lea
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
     loop._target_memory_profile = {
         "target_known": True,
-        "known_findings": [{"finding_type": "sql_injection", "affected_component": "/rest/products/search?q="}],
+        "known_findings": [
+            {"finding_type": "sql_injection", "affected_component": "/rest/products/search?q="}
+        ],
         "branch_leads": [{"id": "branch-1"}],
     }
     loop._decide = fake_decide  # type: ignore

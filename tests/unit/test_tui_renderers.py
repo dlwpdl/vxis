@@ -6,6 +6,7 @@ event type yields markup that carries its key fields and at least one Rich tag,
 unknown/telemetry events yield ``""``, and every produced string is valid Rich
 markup (``Text.from_markup`` must not raise on it).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -29,6 +30,12 @@ def test_brain_thinking_includes_reasoning_and_tag() -> None:
     _assert_valid_markup(out)
 
 
+def test_detail_labels_follow_selected_language(monkeypatch) -> None:
+    monkeypatch.setenv("VXIS_UI_LANGUAGE", "ko")
+    out = render_detail("hit", {"vector_id": "SQLI-01"})
+    assert "발견" in out
+
+
 def test_brain_thinking_no_reasoning_returns_empty() -> None:
     assert render_detail("brain_thinking", {"vectors": [{"id": "v1"}]}) == ""
     assert render_detail("brain_thinking", {"vectors": []}) == ""
@@ -36,9 +43,7 @@ def test_brain_thinking_no_reasoning_returns_empty() -> None:
 
 
 def test_brain_thinking_blank_reasoning_returns_empty() -> None:
-    out = render_detail(
-        "brain_thinking", {"vectors": [{"id": "v1", "reasoning": "   "}]}
-    )
+    out = render_detail("brain_thinking", {"vectors": [{"id": "v1", "reasoning": "   "}]})
     assert out == ""
 
 
@@ -93,7 +98,7 @@ def test_chain_step_includes_category_endpoint() -> None:
 def test_error_is_red_and_carries_message() -> None:
     out = render_detail("error", {"stage": "scan_loop", "error": "boom failed"})
     assert "boom failed" in out
-    assert "red" in out          # errors stand out, not lost in the gray stream
+    assert "red" in out  # errors stand out, not lost in the gray stream
     assert "scan_loop" in out
     _assert_valid_markup(out)
 

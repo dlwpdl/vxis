@@ -61,7 +61,7 @@ async def test_finds_planted_github_token(tmp_path):
 @pytest.mark.asyncio
 async def test_finds_jwt(tmp_path):
     """Plant a well-formed three-segment JWT — expect jwt pattern match."""
-    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.signaturehere1234567"
+    jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4ifQ.signaturehere1234567"  # gitleaks:allow -- detector fixture
     (tmp_path / "config.js").write_text(f'const TOKEN = "{jwt}";')
 
     result = await execute(target_url=str(tmp_path))

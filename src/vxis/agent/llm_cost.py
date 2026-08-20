@@ -16,10 +16,13 @@ model. Unknown models (and local/cli providers) estimate to ``$0.0`` with
 Pure: no I/O, no global mutable state, no network. ``from __future__`` is on so
 the dict/tuple annotations stay strings under 3.9-style evaluation.
 """
+
 from __future__ import annotations
 
 # model_id -> (input_usd_per_1M, output_usd_per_1M). Public list prices.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
+    "gemini-3.7-flash": (0.75, 3.75),
+    "google/gemini-3.7-flash": (0.75, 3.75),
     "gemini-2.5-pro": (1.25, 10.0),
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-flash-lite": (0.10, 0.40),
@@ -51,9 +54,7 @@ def _resolve_price(model: str) -> tuple[float, float] | None:
     return MODEL_PRICES.get(base)
 
 
-def estimate_cost(
-    model: str, input_tokens: int, output_tokens: int
-) -> tuple[float, bool]:
+def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> tuple[float, bool]:
     """Estimate USD cost for one call.
 
     Returns ``(usd_rounded_to_6dp, is_known_price)``. An unknown model (or a
@@ -128,9 +129,7 @@ def summarize_usage(rows: list[dict]) -> dict:
     }
 
 
-def format_cost_line(
-    model: str, role: str, input_tokens: int, output_tokens: int
-) -> str:
+def format_cost_line(model: str, role: str, input_tokens: int, output_tokens: int) -> str:
     """One-line cost summary for the TUI, e.g.::
 
         gemini-2.5-flash (director)  12,345 tok  ~$0.0031

@@ -28,6 +28,10 @@ from vxis.agent.tools.playbook_tools import (
     ListPlaybooksTool,
     LoadPlaybookTool,
 )
+from vxis.agent.tools.security_skill_tools import (
+    LoadSecuritySkillTool,
+    SearchSecuritySkillsTool,
+)
 from vxis.agent.tools.fingerprint_tools import FingerprintTargetTool
 from vxis.agent.tools.memory_tools import QueryScanMemoryTool
 from vxis.agent.tools.verifier_tools import VerifyFindingTool
@@ -59,6 +63,8 @@ __all__ = [
     "LinkChainTool",
     "ListPlaybooksTool",
     "LoadPlaybookTool",
+    "SearchSecuritySkillsTool",
+    "LoadSecuritySkillTool",
     "FingerprintTargetTool",
     "QueryScanMemoryTool",
     "VerifyFindingTool",
@@ -104,6 +110,8 @@ def build_default_registry(
     reg.register(LinkChainTool())
     reg.register(ListPlaybooksTool())
     reg.register(LoadPlaybookTool())
+    reg.register(SearchSecuritySkillsTool())
+    reg.register(LoadSecuritySkillTool())
     reg.register(FingerprintTargetTool())
     reg.register(QueryScanMemoryTool())
     verifier = VerifyFindingTool(brain=brain)

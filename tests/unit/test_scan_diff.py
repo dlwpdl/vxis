@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
 
-from vxis.core.scan_diff import ScanDiffResult, compare_finding_lists
+from vxis.core.db import create_engine, get_session, init_db
+from vxis.core.scan_diff import ScanDiffResult, compare_finding_lists, compare_scans
 from vxis.models.finding import Finding, Severity
+from vxis.models.db_models import FindingRecord, ScanRecord
 
 
 def _make_finding(
@@ -175,6 +178,17 @@ class TestCompareFindingLists:
         assert result.total_a == 1
         assert result.total_b == 0
 
+    def test_missing_findings_are_unknown_when_coverage_is_not_comparable(self) -> None:
+        """An incomplete or different-scope scan cannot prove resolution."""
+        f1 = _make_finding(title="A", finding_type="sqli", target="10.0.0.1")
+
+        result = compare_finding_lists([f1], [], missing_is_resolved=False)
+
+        assert result.resolved_findings == []
+        assert result.unknown_findings == [f1]
+        assert result.total_a == 1
+        assert result.total_b == 0
+
     def test_summary_counts(self) -> None:
         """The summary property returns correct counts."""
         f_a = _make_finding(title="A", finding_type="sqli", target="10.0.0.1")
@@ -185,6 +199,7 @@ class TestCompareFindingLists:
         summary = result.summary
         assert summary["new"] == 1
         assert summary["resolved"] == 0
+        assert summary["unknown"] == 0
         assert summary["unchanged"] == 1
         assert summary["changed"] == 0
         assert summary["total_a"] == 1
@@ -202,8 +217,69 @@ class TestScanDiffResult:
         assert result.summary == {
             "new": 0,
             "resolved": 0,
+            "unknown": 0,
             "unchanged": 0,
             "changed": 0,
             "total_a": 0,
             "total_b": 0,
         }
+
+
+@pytest.mark.parametrize(
+    (
+        "comparison_status",
+        "comparison_target",
+        "comparison_profile",
+        "resolved_count",
+        "unknown_count",
+    ),
+    [
+        ("completed", "example.test", "full", 1, 0),
+        ("partial", "example.test", "full", 0, 1),
+        ("completed", "example.test", "quick", 0, 1),
+        ("completed", "other.test", "full", 0, 1),
+    ],
+)
+async def test_db_comparison_only_resolves_after_complete_same_scope_scan(
+    tmp_path,
+    comparison_status: str,
+    comparison_target: str,
+    comparison_profile: str,
+    resolved_count: int,
+    unknown_count: int,
+) -> None:
+    db_url = f"sqlite+aiosqlite:///{tmp_path / 'scan-diff.db'}"
+    engine = create_engine(db_url)
+    await init_db(engine)
+    async with get_session(engine) as session:
+        baseline = ScanRecord(target="example.test", profile="full", status="completed")
+        session.add(baseline)
+        await session.flush()
+        session.add(
+            FindingRecord(
+                scan_id=baseline.id,
+                dedup_hash="baseline-finding",
+                title="Baseline finding",
+                description="Present in the baseline scan.",
+                severity="high",
+                effective_severity="high",
+                status="open",
+                finding_type="sqli",
+                target="example.test",
+                affected_component="/search?q=",
+                source_plugin="test",
+            )
+        )
+        session.add(
+            ScanRecord(
+                target=comparison_target,
+                profile=comparison_profile,
+                status=comparison_status,
+            )
+        )
+    await engine.dispose()
+
+    result = await compare_scans(1, 2, db_url)
+
+    assert len(result.resolved_findings) == resolved_count
+    assert len(result.unknown_findings) == unknown_count

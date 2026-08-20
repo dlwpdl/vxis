@@ -39,6 +39,16 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# WebRTC opsec: STUN/TURN use raw UDP that ignores the HTTP/SOCKS proxy and
+# would leak the host's real IP even while page HTTP is proxied.
+# disable_non_proxied_udp forces WebRTC to never emit UDP that bypasses the
+# proxy, closing the STUN leak. Applied to every launch (a pentest browser has
+# no legitimate need to leak local candidates).
+_WEBRTC_OPSEC_ARGS = [
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+]
+
 # Playwright는 선택적 의존성 — 없으면 graceful degradation
 try:
     from playwright.async_api import (
@@ -168,6 +178,7 @@ class BrowserEngine:
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
+                *_WEBRTC_OPSEC_ARGS,
             ],
         }
         if self._proxy:

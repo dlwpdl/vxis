@@ -9,11 +9,16 @@ Manages scan lifecycle from the dashboard:
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
+import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlsplit
 
-from vxis.config.schema import VXISConfig
+from vxis.config.schema import VXISConfig, resolve_scan_profile
 from vxis.core.events import ScanEventBus, ScanSnapshotCollector, ScanEvent
 from vxis.core.orchestrator import ScanOrchestrator, ScanResult
 
@@ -34,6 +39,7 @@ class ManagedScan:
     event_bus: ScanEventBus = field(default_factory=ScanEventBus)
     result: ScanResult | None = None
     error: str = ""
+    scope_path: str = ""
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     # SSE subscribers: list of asyncio.Queue that receive event dicts
     subscribers: list[asyncio.Queue] = field(default_factory=list)
@@ -67,9 +73,70 @@ SCAN_TYPE_PLUGINS: dict[str, list[str] | None] = {
         "confused",
         "trivy",
     ],
-    "cloud": ["prowler", "s3scanner", "trivy_k8s", "kube_bench"],
+    "cloud": ["prowler", "s3scanner", "trivy-k8s", "kube-bench"],
     "full": None,  # all plugins
 }
+SCAN_TYPE_TIERS = {
+    scan_type: 1 if scan_type == "zero_touch" else 2 for scan_type in SCAN_TYPE_PLUGINS
+}
+
+_HOST_LABEL = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+_SAFE_PATH = re.compile(r"^/[A-Za-z0-9._~/-]*$")
+
+
+def _validate_target(target: str) -> str:
+    value = target.strip()
+    if not value or any(char.isspace() or ord(char) < 32 for char in value):
+        raise ValueError("invalid dashboard scan target")
+
+    if "://" not in value and "/" in value:
+        try:
+            ipaddress.ip_network(value, strict=False)
+        except ValueError:
+            pass
+        else:
+            raise ValueError("CIDR targets require a dedicated configured engagement")
+
+    try:
+        parsed = urlsplit(value if "://" in value else f"//{value}")
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("invalid dashboard scan target") from exc
+
+    if parsed.scheme and parsed.scheme not in {"http", "https"}:
+        raise ValueError("dashboard scan target must use http or https")
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("invalid dashboard scan target")
+
+    host = parsed.hostname or ""
+    if not host or port == 0:
+        raise ValueError("invalid dashboard scan target")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        if len(host) > 253 or any(not _HOST_LABEL.fullmatch(label) for label in host.split(".")):
+            raise ValueError("invalid dashboard scan target") from None
+
+    if parsed.path and not _SAFE_PATH.fullmatch(parsed.path):
+        raise ValueError("invalid dashboard scan target")
+    return value
+
+
+def _dashboard_scope_path(target: str) -> str:
+    from vxis.scope.enforcer import ScopeEnforcer
+    from vxis.scope.loader import _read_json
+
+    configured = os.environ.get("VXIS_DASHBOARD_SCAN_SCOPE", "").strip()
+    if not configured:
+        raise ValueError("dashboard scan scope is not configured")
+    path = Path(configured).expanduser()
+    scope = _read_json(path)
+    if scope is None or not scope.in_scope_domains:
+        raise ValueError("dashboard scan scope is invalid")
+    if not ScopeEnforcer(scope).check_url(target).allowed:
+        raise ValueError("dashboard scan target is outside configured scope")
+    return str(path)
+
 
 SCAN_TYPE_PROFILES: dict[str, str] = {
     "zero_touch": "passive",
@@ -122,15 +189,26 @@ class ScanManager:
         """Start a scan in the background and return the ManagedScan handle."""
         import uuid
 
+        if scan_type not in SCAN_TYPE_PLUGINS:
+            raise ValueError(f"unknown dashboard scan type: {scan_type}")
+        target = _validate_target(target)
+        scope_path = _dashboard_scope_path(target)
+
+        config = self._get_config()
         scan_id = str(uuid.uuid4())[:8]
-        resolved_profile = profile or SCAN_TYPE_PROFILES.get(scan_type, "standard")
-        plugins = SCAN_TYPE_PLUGINS.get(scan_type)
+        requested_profile = profile or SCAN_TYPE_PROFILES[scan_type]
+        try:
+            resolved_profile = resolve_scan_profile(requested_profile, config.profiles).name
+        except KeyError as exc:
+            raise ValueError(f"unknown dashboard scan profile: {requested_profile}") from exc
+        plugins = SCAN_TYPE_PLUGINS[scan_type]
 
         managed = ManagedScan(
             scan_id=scan_id,
             target=target,
             profile=resolved_profile,
             scan_type=scan_type,
+            scope_path=scope_path,
         )
 
         # Wire up event bus → collector + SSE broadcast
@@ -163,23 +241,37 @@ class ScanManager:
         )
 
         managed.status = "running"
-        set_active_scope(build_target_scope_enforcer(managed.target))
+        set_active_scope(
+            build_target_scope_enforcer(
+                managed.target,
+                scope_arg=managed.scope_path or None,
+            )
+        )
         try:
             result = await orchestrator.run_scan(
                 target=managed.target,
                 profile=managed.profile,
                 selected_plugins=plugins,
+                tier=SCAN_TYPE_TIERS[managed.scan_type],
+                require_runnable_plugins=True,
             )
             managed.result = result
-            managed.status = "completed"
+            result_errors = list(getattr(result, "errors", []) or [])
+            managed.status = "partial" if result_errors else "completed"
+            managed.error = (
+                f"{len(result_errors)} plugin(s) did not complete successfully"
+                if result_errors
+                else ""
+            )
 
             # Notify SSE subscribers of completion
             await self._broadcast(
                 managed,
                 {
-                    "event": "scan_completed",
+                    "event": "scan_partial" if result_errors else "scan_completed",
                     "findings": len(result.findings),
                     "duration": f"{result.duration_seconds:.1f}s",
+                    "failed_plugins": len(result_errors),
                 },
             )
 

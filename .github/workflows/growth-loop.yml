@@ -1,32 +1,26 @@
-name: VXIS Growth Loop
+name: VXIS Growth Loop (Review Only)
 
 on:
-  # Cost guard: this job can run for hours. Trigger only when explicitly requested.
-  repository_dispatch:
-    types: [growth-loop-validate]
-
+  # Offensive evaluations remain manual until generation, validation, and
+  # promotion run on separate isolated workers.
   workflow_dispatch:
     inputs:
+      confirm_isolated_eval:
+        description: "격리된 평가 환경에서만 실행한다는 확인"
+        required: true
+        default: false
+        type: boolean
       score_target:
         description: "목표 점수 (기본 1000)"
         required: false
         default: "1000"
         type: string
-      target_type:
-        description: "벤치마크 대상"
-        required: false
-        default: "web"
-        type: choice
-        options:
-          - web
-          - game
-          - mobile
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
-  contents: write
+  contents: read
   issues: write
 
 concurrency:
@@ -35,64 +29,64 @@ concurrency:
 
 jobs:
   growth-loop:
-    name: Autonomous Growth Loop
+    name: Manual Growth Evaluation
+    if: ${{ inputs.confirm_isolated_eval == true }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
 
     services:
       dvwa:
-        image: vulnerables/web-dvwa
+        image: vulnerables/web-dvwa@sha256:dae203fe11646a86937bf04db0079adef295f426da68a92b40e3b181f337daa7
         ports:
           - 8081:80
       juice-shop:
-        image: bkimminich/juice-shop
+        image: bkimminich/juice-shop@sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a
         ports:
           - 3000:3000
       vampi:
-        image: erev0s/vampi:latest
+        image: erev0s/vampi@sha256:0a5a224b6e14ae7da6a6ea265178ff71286ff903aec74adee98f660bb0e4ca12
         ports:
           - 5001:5000
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
+
       - name: Install VXIS
-        run: pip install -e ".[dev]" 2>/dev/null || { echo "PYTHONPATH=src" >> "$GITHUB_ENV"; pip install -e . 2>/dev/null || true; }
+        run: uv sync --frozen --extra dev
 
-      - name: Restore score history
-        uses: actions/cache@v4
-        with:
-          path: tools/benchmark/
-          key: growth-loop-${{ github.run_id }}
-          restore-keys: growth-loop-
-
-      - name: Growth Loop — 점수 목표까지 자율 성장
+      - name: Growth Loop — 측정 및 검토 제안 생성
         id: growth
         env:
           PYTHONPATH: src
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           TOGETHER_API_KEY: ${{ secrets.TOGETHER_API_KEY }}
           VXIS_BRAIN_MODE: api
+          VXIS_ALLOW_ARBITRARY_EXEC: "0"
+          VXIS_EGRESS_STRICT: "1"
           SCORE_TARGET: ${{ github.event.inputs.score_target || '1000' }}
         timeout-minutes: 340
         run: |
-          python - <<'PYEOF'
-          import asyncio, json, os, subprocess, sys, time, urllib.request, urllib.error
+          uv run --frozen python - <<'PYEOF'
+          import json, os, subprocess, sys, tempfile, time, urllib.request, urllib.error
           from datetime import datetime, timezone
           from pathlib import Path
 
           sys.path.insert(0, "src")
 
           SCORE_TARGET = int(os.environ.get("SCORE_TARGET", "1000"))
+          MAX_ITERATIONS = 3
           STAGNATION_LIMIT = 2        # 연속 N회 개선 없으면 종료
           MIN_IMPROVEMENT = 5.0       # 개선으로 인정하는 최소 점수 차
           HISTORY_FILE = Path("tools/benchmark/score_history.json")
@@ -103,6 +97,27 @@ jobs:
 
           together_key = os.environ.get("TOGETHER_API_KEY", "")
           anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+
+          _SECRET_ENV_MARKERS = (
+              "TOKEN", "SECRET", "PASSWORD", "API_KEY", "PRIVATE_KEY", "CREDENTIAL",
+          )
+
+          def secret_free_env() -> dict[str, str]:
+              """Remove unrelated runner credentials from benchmark subprocesses."""
+              return {
+                  name: value
+                  for name, value in os.environ.items()
+                  if not any(marker in name.upper() for marker in _SECRET_ENV_MARKERS)
+              }
+
+          def benchmark_env() -> dict[str, str]:
+              """Expose only the single provider credential required by the live scan."""
+              env = secret_free_env()
+              if together_key:
+                  env["TOGETHER_API_KEY"] = together_key
+              elif anthropic_key:
+                  env["ANTHROPIC_API_KEY"] = anthropic_key
+              return env
 
           history = json.loads(HISTORY_FILE.read_text()) if HISTORY_FILE.exists() else []
           iterations: list[dict] = []
@@ -117,11 +132,15 @@ jobs:
               except Exception as exc:
                   print(f"[CVE] 로드 실패: {exc}")
 
-          targets = [
+          training_targets = [
               ("dvwa",       "http://localhost:8081",           "web"),
               ("juice-shop", "http://localhost:3000",           "web"),
+          ]
+          # Never include these targets, scores, or findings in the patch-generation prompt.
+          holdout_targets = [
               ("vampi",      "http://localhost:5001",           "web"),
           ]
+          targets = [*training_targets, *holdout_targets]
 
           # ── Docker 준비 대기 ──────────────────────────────────────────
           for name, url, _ in targets:
@@ -136,33 +155,57 @@ jobs:
                   print(f"[SKIP] {name} not ready after 60s")
 
           # ── 벤치마크 실행 ─────────────────────────────────────────────
+          # Each target uses a fresh interpreter to avoid cross-target state leakage.
+          _BENCHMARK_CHILD = r"""
+          import asyncio, json, sys
+          from pathlib import Path
+          from vxis.scoring.benchmark import BenchmarkRunner
+
+          async def main():
+              target_type, target_url, baseline_path, output_path = sys.argv[1:]
+              runner = BenchmarkRunner(baseline_path=baseline_path)
+              score = await runner.run_benchmark(target_type, target_url)
+              Path(output_path).write_text(json.dumps({
+                  "total": score.total,
+                  "grade": score.grade,
+                  "dimensions": {
+                      "vector_coverage": score.vector_coverage.score,
+                      "exploitation_reach": score.exploitation_reach.score,
+                      "chain_intelligence": score.chain_intelligence.score,
+                      "finding_precision": score.finding_precision.score,
+                      "completeness": score.completeness.score,
+                  },
+              }), encoding="utf-8")
+
+          asyncio.run(main())
+          """
+
           def run_benchmark(target_name: str, target_url: str, target_type: str = "web") -> dict:
               try:
-                  from vxis.scoring.benchmark import BenchmarkRunner
-                  runner = BenchmarkRunner(baseline_path=str(BASELINE_FILE))
-
-                  async def _run():
-                      score = await runner.run_benchmark(target_type, target_url)
-                      comparison = runner.compare_with_baseline(score)
-                      return score, comparison, runner
-
-                  score, comparison, runner = asyncio.run(_run())
-                  return {
-                      "target": target_name,
-                      "total": score.total,
-                      "grade": score.grade,
-                      "dimensions": {
-                          "vector_coverage":    score.vector_coverage.score,
-                          "exploitation_reach": score.exploitation_reach.score,
-                          "chain_intelligence": score.chain_intelligence.score,
-                          "finding_precision":  score.finding_precision.score,
-                          "completeness":       score.completeness.score,
-                      },
-                      "delta":      comparison.total_delta if comparison else 0,
-                      "score_obj":  score,
-                      "comparison": comparison,
-                      "runner":     runner,
-                  }
+                  with tempfile.TemporaryDirectory(prefix="vxis-growth-") as temp_dir:
+                      output_path = Path(temp_dir) / "result.json"
+                      completed = subprocess.run(
+                          [
+                              sys.executable,
+                              "-c",
+                              _BENCHMARK_CHILD,
+                              target_type,
+                              target_url,
+                              str(BASELINE_FILE),
+                              str(output_path),
+                          ],
+                          capture_output=True,
+                          text=True,
+                          timeout=1200,
+                          env=benchmark_env(),
+                      )
+                      if completed.returncode != 0 or not output_path.exists():
+                          detail = (completed.stderr or completed.stdout).strip()
+                          raise RuntimeError(detail[-300:] or "benchmark child failed")
+                      return {
+                          "target": target_name,
+                          **json.loads(output_path.read_text(encoding="utf-8")),
+                      }
               except Exception as exc:
                   return {"target": target_name, "total": 0.0, "grade": "D", "error": str(exc)[:300]}
 
@@ -240,7 +283,7 @@ jobs:
           Relevant source code:
           {chr(10).join(file_ctx_parts) if file_ctx_parts else '(no context)'}
 
-          Generate targeted patches to improve the {weakest_dim} score on real vulnerable web apps (DVWA, Juice Shop, WebGoat, VAmPI)."""
+          Generate a targeted, general improvement for the {weakest_dim} score. Do not special-case benchmark applications or fixtures."""
 
               # Together AI 우선 (저렴), Anthropic 폴백
               if together_key:
@@ -299,63 +342,40 @@ jobs:
                   print(f"  [LLM] 패치 생성 실패: {exc}")
                   return []
 
-          def apply_patches(patches: list[dict]) -> dict[str, str]:
-              """패치 적용. 적용 전 백업 반환 {filepath: original_content}."""
-              backups: dict[str, str] = {}
-              for patch in patches:
-                  fpath = Path(patch.get("file", ""))
-                  search = patch.get("search", "")
-                  replace = patch.get("replace", "")
-                  if not fpath.exists() or not search or search == replace:
+          def sanitize_proposals(
+              patches: object, allowed_files: list[str]
+          ) -> list[dict[str, str]]:
+              """Bound untrusted LLM output for review-only artifact storage."""
+              if not isinstance(patches, list):
+                  return []
+              proposals: list[dict[str, str]] = []
+              allowed = {str(Path(path)) for path in allowed_files}
+              for patch in patches[:3]:
+                  if not isinstance(patch, dict):
                       continue
-                  content = fpath.read_text(encoding="utf-8")
-                  if search in content:
-                      backups[str(fpath)] = content
-                      fpath.write_text(content.replace(search, replace, 1), encoding="utf-8")
-                      print(f"  [PATCH] {fpath} 패치 적용")
-                  else:
-                      print(f"  [PATCH] 검색 문자열 없음: {fpath}")
-              return backups
-
-          def restore_backups(backups: dict[str, str]) -> None:
-              for fpath_str, content in backups.items():
-                  Path(fpath_str).write_text(content, encoding="utf-8")
-              if backups:
-                  subprocess.run(["pip", "install", "-e", ".", "-q"], check=False,
-                                 capture_output=True)
-                  print(f"  [REVERT] {len(backups)}개 파일 롤백 완료")
-
-          def reinstall_vxis() -> bool:
-              result = subprocess.run(
-                  ["pip", "install", "-e", ".", "-q"],
-                  capture_output=True, text=True,
-              )
-              return result.returncode == 0
-
-          def commit_improvement(weakest_dim: str, iteration: int, score_delta: float) -> None:
-              try:
-                  subprocess.run(["git", "config", "user.name", "vxis-growth[bot]"], check=False)
-                  subprocess.run(["git", "config", "user.email", "vxis-growth@users.noreply.github.com"], check=False)
-                  subprocess.run(["git", "add", "src/"], check=False)
-                  msg = (
-                      f"feat(growth): auto-merge {weakest_dim} +{score_delta:.1f}pt "
-                      f"[iter {iteration}]\n\n"
-                      f"Autonomous growth loop — verified ≥{MIN_IMPROVEMENT}pt improvement\n"
-                      f"Dimension: {_DIM_KO.get(weakest_dim, weakest_dim)}"
+                  file_value = patch.get("file")
+                  search = patch.get("search")
+                  replace = patch.get("replace")
+                  if not all(isinstance(value, str) for value in (file_value, search, replace)):
+                      continue
+                  fpath = str(Path(file_value))
+                  if (
+                      fpath not in allowed
+                      or not search
+                      or search == replace
+                  ):
+                      continue
+                  proposals.append(
+                      {
+                          "file": fpath,
+                          "search": search[:20_000],
+                          "replace": replace[:20_000],
+                      }
                   )
-                  result = subprocess.run(
-                      ["git", "commit", "-m", msg],
-                      capture_output=True, text=True,
-                  )
-                  if result.returncode == 0:
-                      subprocess.run(["git", "pull", "--rebase", "origin", "main"], check=False)
-                      subprocess.run(["git", "push"], check=False)
-                      print(f"  [GIT] 개선 코드 커밋 완료")
-              except Exception as exc:
-                  print(f"  [GIT] 커밋 실패: {exc}")
+              return proposals
 
           # ═══════════════════════════════════════════════════════════════
-          #  메인 루프: 점수 목표 달성까지 자율 성장
+          #  메인 루프: 점수 측정 및 실행하지 않는 개선 제안 생성
           # ═══════════════════════════════════════════════════════════════
           now = datetime.now(timezone.utc)
           print(f"\n{'#'*60}")
@@ -375,9 +395,9 @@ jobs:
               print(f"  ITERATION {iteration}")
               print(f"{'='*60}")
 
-              # 전체 타겟 벤치마크
+              # 공개 training target만 최적화 피드백으로 사용한다.
               iter_results = []
-              for target_name, target_url, target_type in targets:
+              for target_name, target_url, target_type in training_targets:
                   print(f"\n  --- {target_name} ---")
                   result = run_benchmark(target_name, target_url, target_type)
                   iter_results.append(result)
@@ -398,20 +418,23 @@ jobs:
               valid_results = [r for r in iter_results if "error" not in r]
               if not valid_results:
                   stop_reason = "all_targets_failed"
-                  print("\n[STOP] 모든 타겟 실패")
+                  print("\n[STOP] 모든 training target 실패")
                   break
+
+              # Holdout 점수와 결과는 제안 프롬프트에 노출하지 않는다.
+              holdout_results = [run_benchmark(*target) for target in holdout_targets]
+              if any("error" in result for result in holdout_results):
+                  stop_reason = "holdout_failed"
+                  print("\n[STOP] holdout target 실패")
+                  break
+              holdout_score = sum(
+                  result["total"] for result in holdout_results
+              ) / len(holdout_results)
 
               current_best = max(r["total"] for r in valid_results)
               best_result = max(valid_results, key=lambda r: r["total"])
-              best_target = next(t for t in targets if t[0] == best_result["target"])
 
               print(f"\n  현재 최고: {current_best:.1f}점 [{best_result['grade']}]")
-
-              # ── 목표 달성 체크 ────────────────────────────────────────
-              if current_best >= SCORE_TARGET:
-                  stop_reason = "target_reached"
-                  print(f"\n[SUCCESS] 목표 {SCORE_TARGET}점 달성! ({current_best:.1f}점)")
-                  break
 
               # ── 정체 체크 ─────────────────────────────────────────────
               improvement = current_best - prev_best
@@ -432,7 +455,7 @@ jobs:
               dim_score = best_result["dimensions"].get(weakest_dim, 0)
               print(f"  약점: {_DIM_KO.get(weakest_dim, weakest_dim)} ({weakest_pct:.0%})")
 
-              # ── LLM 코드 개선 ─────────────────────────────────────────
+              # ── LLM 개선 제안(실행 금지) ──────────────────────────────
               iter_log = {
                   "iteration": iteration,
                   "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -441,43 +464,38 @@ jobs:
                   "weakest_pct": round(weakest_pct, 2),
                   "improvement": round(improvement, 1),
                   "consecutive_no_improve": consecutive_no_improve,
+                  "holdout_score": round(holdout_score, 1),
                   "action": "none",
-                  "code_improved": False,
               }
 
-              patches = llm_generate_patches(weakest_dim, dim_score, iteration)
-              if patches:
-                  backups = apply_patches(patches)
-                  if backups:
-                      ok = reinstall_vxis()
-                      if ok:
-                          # 최고 타겟에서 재테스트
-                          print(f"  [TEST] {best_target[0]}에서 개선 효과 검증...")
-                          verify_result = run_benchmark(*best_target)
-                          verify_score = verify_result.get("total", 0.0)
-                          verify_delta = verify_score - current_best
-
-                          if verify_delta >= MIN_IMPROVEMENT:
-                              print(f"  [KEEP] +{verify_delta:.1f}점 개선 확인 (≥{MIN_IMPROVEMENT}) → main 자동 머지")
-                              commit_improvement(weakest_dim, iteration, verify_delta)
-                              iter_log["action"] = f"improved_{weakest_dim}"
-                              iter_log["code_improved"] = True
-                              iter_log["verify_delta"] = round(verify_delta, 1)
-                          else:
-                              print(f"  [REVERT] 개선 효과 없음 ({verify_delta:+.1f}) → 롤백")
-                              restore_backups(backups)
-                              iter_log["action"] = f"reverted_{weakest_dim}"
-                      else:
-                          print("  [REVERT] 재설치 실패 → 롤백")
-                          restore_backups(backups)
-                          iter_log["action"] = "reinstall_failed"
-                  else:
-                      iter_log["action"] = "no_patches_applied"
+              if current_best >= SCORE_TARGET:
+                  stop_reason = "target_reached"
+                  iter_log["action"] = "target_reached"
+                  print(f"\n[SUCCESS] 목표 {SCORE_TARGET}점 달성! ({current_best:.1f}점)")
               else:
-                  iter_log["action"] = "no_patches_generated"
+                  patches = llm_generate_patches(weakest_dim, dim_score, iteration)
+                  safe_proposals = sanitize_proposals(
+                      patches, _DIM_FILES.get(weakest_dim, [])
+                  )
+                  if safe_proposals:
+                      iter_log["action"] = "proposal_generated"
+                      iter_log["proposal_count"] = len(safe_proposals)
+                      iter_log["proposals"] = safe_proposals
+                      print(
+                          f"  [REVIEW] 실행하지 않은 개선 제안 {len(safe_proposals)}개 저장"
+                      )
+                  else:
+                      iter_log["action"] = "no_proposals_generated"
 
               iterations.append(iter_log)
               prev_best = current_best
+
+              if stop_reason == "target_reached":
+                  break
+              if iteration >= MAX_ITERATIONS:
+                  stop_reason = "proposal_budget_exhausted"
+                  print(f"\n[STOP] 제안 반복 한도 {MAX_ITERATIONS}회 도달")
+                  break
 
               print(f"\n  [WAIT] 20초 후 다음 iteration...")
               time.sleep(20)
@@ -498,7 +516,7 @@ jobs:
                   (iterations[-1]["best_score"] - iterations[0]["best_score"])
                   if len(iterations) >= 2 else 0, 1
               ),
-              "code_improvements": sum(1 for it in iterations if it.get("code_improved")),
+              "proposal_count": sum(int(it.get("proposal_count", 0)) for it in iterations),
               "iterations": iterations,
           }
           ITERATION_LOG.write_text(json.dumps(final_log, indent=2, ensure_ascii=False))
@@ -508,7 +526,7 @@ jobs:
           print(f"  Growth Loop 완료 — {stop_reason}")
           print(f"  반복: {len(iterations)}회")
           print(f"  점수: {final_log['start_score']:.1f} → {final_log['final_score']:.1f} (+{final_log['total_growth']:.1f})")
-          print(f"  코드 개선: {final_log['code_improvements']}회")
+          print(f"  검토 제안: {final_log['proposal_count']}개")
           print(f"{'#'*60}")
 
           # 환경변수로 결과 전달
@@ -516,15 +534,17 @@ jobs:
               f.write(f"final_score={final_log['final_score']:.1f}\n")
               f.write(f"stop_reason={stop_reason}\n")
               f.write(f"iterations={len(iterations)}\n")
-              f.write(f"code_improvements={final_log['code_improvements']}\n")
+              f.write(f"proposal_count={final_log['proposal_count']}\n")
           PYEOF
 
       - name: Archive benchmark data
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: growth-loop-benchmark-data
-          path: tools/benchmark/
+          path: |
+            tools/benchmark/score_history.json
+            tools/benchmark/iteration_log.json
           if-no-files-found: ignore
 
       - name: Create growth summary issue
@@ -535,7 +555,7 @@ jobs:
           FINAL_SCORE="${{ steps.growth.outputs.final_score }}"
           STOP_REASON="${{ steps.growth.outputs.stop_reason }}"
           ITERATIONS="${{ steps.growth.outputs.iterations }}"
-          CODE_IMPROVEMENTS="${{ steps.growth.outputs.code_improvements }}"
+          PROPOSAL_COUNT="${{ steps.growth.outputs.proposal_count }}"
 
           if [ -n "$FINAL_SCORE" ]; then
             BODY="## Growth Loop Summary — $(date -u +%Y-%m-%d)
@@ -545,72 +565,11 @@ jobs:
           | 최종 점수 | ${FINAL_SCORE} / 1000 |
           | 종료 이유 | ${STOP_REASON} |
           | 총 반복 | ${ITERATIONS}회 |
-          | 코드 개선 | ${CODE_IMPROVEMENTS}회 |
+          | 검토 제안 | ${PROPOSAL_COUNT}개 |
 
-          자세한 내용: \`tools/benchmark/iteration_log.json\`"
+          제안 원문은 이 실행의 \`growth-loop-benchmark-data\` artifact에서 검토하세요. 자동 적용·실행되지 않았습니다."
 
             gh issue create \
               --title "Growth Loop: $(date -u +%Y-%m-%d) — ${FINAL_SCORE}/1000 [${STOP_REASON}]" \
-              --body "$BODY" \
-              --label "growth-loop,benchmark" 2>/dev/null || true
-          fi
-
-      # Rollback signal-driven changes if regression detected
-      - name: Rollback on regression (signal-driven changes)
-        if: always() && github.event_name == 'repository_dispatch'
-        env:
-          PYTHONPATH: src
-        run: |
-          STOP_REASON="${{ steps.growth.outputs.stop_reason }}"
-          if [ "$STOP_REASON" = "regression" ] || [ "$STOP_REASON" = "stagnation" ]; then
-            echo "Regression detected — rolling back recent signal-driven proposals"
-            python - <<'PYEOF'
-          from vxis.growth.rollback import rollback_since
-          from datetime import datetime, timezone, timedelta
-          # Rollback last 24h worth of auto-applied proposals
-          cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-          count = rollback_since(cutoff)
-          print(f"Rolled back {count} proposals (cutoff: {cutoff})")
-          PYEOF
-            git config user.name "vxis-growth[bot]"
-            git config user.email "vxis-growth@users.noreply.github.com"
-            git add src/vxis/agent/skills/ 2>/dev/null || true
-            if ! git diff --staged --quiet 2>/dev/null; then
-              git commit -m "chore(growth): rollback signal-driven changes + skill payloads (regression detected)" || true
-              git pull --rebase origin main || true
-              git push || true
-            fi
-            # Smart rollback: isolate problematic payloads instead of removing all
-            python - <<'SMART_ROLLBACK'
-          import asyncio, os, urllib.request, urllib.parse
-          from vxis.growth.payload_validator import isolate_regression
-          from vxis.growth.rollback import rollback_proposal
-
-          bad = asyncio.run(isolate_regression())
-          if bad:
-              for pid in bad:
-                  rollback_proposal(pid, reason="regression_isolated")
-              msg = f"REGRESSION — {len(bad)} payload(s) isolated and rolled back:\n"
-              msg += "\n".join(f"  - {pid}" for pid in bad[:5])
-          else:
-              # Can't isolate — fall back to full rollback
-              from vxis.growth.rollback import rollback_since
-              from datetime import datetime, timezone, timedelta
-              cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
-              count = rollback_since(cutoff)
-              msg = f"REGRESSION — couldn't isolate. Rolled back {count} proposal(s) from last 24h."
-
-          print(msg)
-          token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-          chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
-          if token and chat_id:
-              url = f"https://api.telegram.org/bot{token}/sendMessage"
-              data = urllib.parse.urlencode({"chat_id": chat_id, "text": "🔴 " + msg}).encode()
-              try:
-                  urllib.request.urlopen(url, data=data, timeout=10)
-              except Exception:
-                  pass
-          SMART_ROLLBACK
-          else
-            echo "No regression — signal-driven changes retained"
+              --body "$BODY"
           fi

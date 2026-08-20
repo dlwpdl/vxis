@@ -31,7 +31,7 @@ python tools/growth_loop_runner.py --targets dvwa --until 06:00
 
 # CLI 직접 스캔 (Brain-First 파이프라인)
 vxis scan http://localhost:8081                    # LLM API Brain 자율 실행
-vxis scan http://localhost:8081 --interactive      # Claude Code가 Brain (MCP)
+claude mcp add vxis -- vxis-mcp                    # Claude Code에 VXIS MCP 등록
 vxis scan http://localhost:8081 -g                 # Ghost 익명화 켜기
 vxis scan http://app.acme.com --approve-destructive # 파괴적 액션 사전 승인(기본 차단)
 ```
@@ -130,7 +130,9 @@ vxis version          # 버전 정보
     runtime_table.add_column("Purpose", width=34)
     runtime_table.add_row("Entry", "vxis scan / dashboard / MCP", "Target, scope, profile")
     runtime_table.add_row("Pipeline", "ScanPipelineV2", "Context + per-scan finding store")
-    runtime_table.add_row("Brain", "ScanAgentLoop + AgentBrain.think_in_loop", "One tool per message")
+    runtime_table.add_row(
+        "Brain", "ScanAgentLoop + AgentBrain.think_in_loop", "One tool per message"
+    )
     runtime_table.add_row("Tools", "ToolRegistry BrainTools", "Recon, skills, evidence, verifier")
     runtime_table.add_row("Output", "TUI / dashboard / report", "Real scan state only")
     console.print(runtime_table)
@@ -145,7 +147,9 @@ vxis version          # 버전 정보
 
     for t in BENCHMARK_TARGETS:
         port = t.port.split(":")[0]
-        docker_cmd = f"docker run -d -p {t.port} {t.image}" if t.image else f"docker compose ({t.compose})"
+        docker_cmd = (
+            f"docker run -d -p {t.port} {t.image}" if t.image else f"docker compose ({t.compose})"
+        )
         target_table.add_row(t.name, port, t.category, t.description, docker_cmd)
 
     console.print(target_table)

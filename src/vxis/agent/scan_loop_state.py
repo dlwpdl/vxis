@@ -530,6 +530,10 @@ class ScanLoopState:
     blocked_skill_counts: dict[str, int] = field(default_factory=dict)
 
     def add_message(self, role: str, content: Any) -> None:
+        if role == "tool":
+            from vxis.agent.tools.skill_runner import redact_sensitive_output
+
+            content = redact_sensitive_output(content)
         self.messages.append({"role": role, "content": content, "iter": self.iteration})
 
     def ensure_vector_candidate(

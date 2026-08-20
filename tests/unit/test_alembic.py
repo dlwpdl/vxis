@@ -41,6 +41,42 @@ class TestAlembicConfig:
         revisions = list(scripts.walk_revisions())
         assert len(revisions) >= 1, "Expected at least one migration revision"
 
+    def test_upgrade_head_creates_all_dashboard_tables(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        import sqlite3
+
+        from alembic import command
+        from alembic.config import Config
+
+        db_path = tmp_path / "migration.db"
+        cfg = Config(str(ALEMBIC_INI))
+        cfg.set_main_option("script_location", str(REPO_ROOT / "alembic"))
+        cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_path}")
+
+        command.upgrade(cfg, "head")
+
+        with sqlite3.connect(db_path) as connection:
+            tables = {
+                row[0]
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+            }
+            comment_indexes = {
+                row[1] for row in connection.execute("PRAGMA index_list('finding_comment_records')")
+            }
+            review_indexes = {
+                row[1] for row in connection.execute("PRAGMA index_list('finding_review_records')")
+            }
+
+        assert {
+            "scan_records",
+            "finding_records",
+            "tool_run_records",
+            "user_records",
+            "finding_comment_records",
+            "finding_review_records",
+        } <= tables
+        assert "ix_finding_comment_records_finding_id" in comment_indexes
+        assert "ix_finding_review_records_finding_id" in review_indexes
+
 
 class TestMigrationScripts:
     """Verify that individual migration scripts are importable and valid."""

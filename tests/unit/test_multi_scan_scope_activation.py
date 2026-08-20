@@ -152,6 +152,25 @@ class TestScanTargetScopeActivation:
         assert post is None, f"Scope was not cleared after exception: {post}"
 
     @pytest.mark.asyncio
+    async def test_incomplete_scan_is_not_reported_as_success(self):
+        target = _make_target(entry="http://example.com")
+        incomplete = _FakeCtx(findings=[object()])
+        incomplete.scan_loop_completed = False  # type: ignore[attr-defined]
+        incomplete.scan_loop_error = "loop crashed"  # type: ignore[attr-defined]
+
+        pipeline = MagicMock()
+        pipeline.run = AsyncMock(return_value=incomplete)
+
+        with (
+            patch(_PIPELINE_PATH, return_value=pipeline),
+            patch(_BRAIN_PATH, return_value=MagicMock()),
+        ):
+            with pytest.raises(RuntimeError, match="loop crashed"):
+                await _scan_target(target=target, scan_id="VXIS-TEST-001", max_iters=5)
+
+        assert enforce_scope_invocation("nmap", {"target": "http://evil.com"}) is None
+
+    @pytest.mark.asyncio
     async def test_skip_target_does_not_activate_scope(self):
         """skip=True targets return early — scope must never be activated."""
         target = _make_target(entry="http://example.com", skip=True)

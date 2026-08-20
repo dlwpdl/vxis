@@ -23,6 +23,7 @@ class _FakeShellTool:
 async def test_dispatch_and_record_updates_v3_and_attempt_outcome(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("VXIS_V3", "1")
     monkeypatch.setenv("VXIS_PTI_DIR", str(tmp_path / "pti"))
+    monkeypatch.setenv("VXIS_ALLOW_ARBITRARY_EXEC", "1")
 
     registry = ToolRegistry()
     tool = _FakeShellTool()

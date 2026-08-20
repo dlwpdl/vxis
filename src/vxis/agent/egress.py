@@ -15,6 +15,7 @@ The filter is intentionally simple text extraction — not a packet-level
 firewall. It's a "don't pipe credentials to attacker-controlled domain"
 check, not a malware sandbox.
 """
+
 from __future__ import annotations
 
 import os
@@ -25,30 +26,12 @@ from urllib.parse import urlparse
 _URL_RE = re.compile(r"https?://([A-Za-z0-9._\-]+)(?::\d+)?", re.IGNORECASE)
 # Bare hostname patterns in curl/wget/nc/ssh style invocations.
 _HOST_FLAG_RE = re.compile(
-    r"(?:curl|wget|nc|ncat|ssh|sshpass|ffuf|gobuster|nuclei|sqlmap|nmap)[^\n;]*?\s(?:-u\s+)?([a-zA-Z0-9._\-]+\.[a-zA-Z]{2,})",
+    r"\b(?:curl|wget|nc|ncat|ssh|sshpass|ffuf|gobuster|nuclei|sqlmap|nmap)\b"
+    r"[^\n;]*?(?:https?://)?"
+    r"((?:\d{1,3}\.){3}\d{1,3}|[a-zA-Z0-9._\-]+\.[a-zA-Z]{2,})"
+    r"(?::\d+)?",
+    re.IGNORECASE,
 )
-
-# Loopback + RFC1918 + lab shortcuts that are always allowed.
-_ALWAYS_ALLOWED = frozenset({
-    "localhost", "127.0.0.1", "0.0.0.0", "::1",
-})
-
-
-def _is_private(host: str) -> bool:
-    """RFC1918 / link-local / lab nets — always allowed in strict mode."""
-    if host in _ALWAYS_ALLOWED:
-        return True
-    # 10.0.0.0/8, 172.16-31, 192.168/16, 169.254/16
-    if host.startswith(("10.", "192.168.", "169.254.")):
-        return True
-    if host.startswith("172."):
-        try:
-            second = int(host.split(".", 2)[1])
-            if 16 <= second <= 31:
-                return True
-        except (ValueError, IndexError):
-            pass
-    return False
 
 
 def build_allowlist(target_url: str) -> set[str]:
@@ -87,10 +70,10 @@ def extract_hosts(blob: str) -> list[str]:
 def check_violations(blob: str, allowlist: set[str]) -> list[str]:
     """Return list of hosts that appear in blob but not in allowlist.
 
-    Private/loopback hosts pass. Only returns violations in strict mode —
-    returns [] otherwise so the check is a no-op outside enterprise runs.
+    Private, link-local, metadata, and loopback hosts require explicit inclusion
+    just like public hosts. Outside strict mode the check remains a no-op.
     """
     if not is_strict_mode():
         return []
     hosts = extract_hosts(blob)
-    return [h for h in hosts if h not in allowlist and not _is_private(h)]
+    return [host for host in hosts if host not in allowlist]

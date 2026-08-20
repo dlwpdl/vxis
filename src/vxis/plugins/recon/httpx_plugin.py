@@ -16,6 +16,11 @@ class HttpxPlugin(BasePlugin):
         name="httpx",
         version="1.0.0",
         tool_binary="httpx",
+        # The Python `httpx` HTTP library ships a `httpx` CLI that shadows the
+        # ProjectDiscovery tool on most dev machines — verify identity and allow
+        # the common collision-avoiding aliases.
+        binary_aliases=("httpx-pd", "httpx-toolkit"),
+        identity_marker="projectdiscovery",
         category="recon",
         depends_on=("subfinder",),
         produces=("live_hosts", "live_urls"),
@@ -40,6 +45,10 @@ class HttpxPlugin(BasePlugin):
         }
         rate = rate_map.get(scan_profile, 150)
 
+        # Use the identity-verified binary path so we invoke ProjectDiscovery
+        # httpx even when a Python `httpx` shadows it earlier in PATH.
+        binary = self.resolve_binary() or "httpx"
+
         from urllib.parse import urlparse
 
         # Collect subdomains from subfinder output; fall back to target itself.
@@ -52,7 +61,7 @@ class HttpxPlugin(BasePlugin):
         if len(subdomains) == 1:
             # 단일 호스트는 파일 없이 직접 전달 (Windows temp 경로 → Docker 불일치 방지)
             return (
-                f"httpx -u {subdomains[0]} -json -title -tech-detect -status-code"
+                f"{binary} -u {subdomains[0]} -json -title -tech-detect -status-code"
                 f" -follow-redirects -rate-limit {rate} -tls-grab -cdn -cname -asn"
                 f" -response-header -favicon -method -websocket -ip -silent"
             )
@@ -68,7 +77,7 @@ class HttpxPlugin(BasePlugin):
             f.write("\n".join(subdomains))
 
         return (
-            f"httpx -l {input_file_container} -json -title -tech-detect -status-code"
+            f"{binary} -l {input_file_container} -json -title -tech-detect -status-code"
             f" -follow-redirects -rate-limit {rate} -tls-grab -cdn -cname -asn"
             f" -response-header -favicon -method -websocket -ip -silent"
         )

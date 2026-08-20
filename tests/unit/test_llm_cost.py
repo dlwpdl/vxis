@@ -4,6 +4,7 @@ TDD: written before ``vxis.agent.llm_cost`` exists. These pin the public API
 (``estimate_cost``, ``summarize_usage``, ``format_cost_line``) and the contract
 that costs are ESTIMATES (``~$`` marker, ``cost_known`` / ``cost_estimated`` flags).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -18,6 +19,8 @@ from vxis.agent.llm_cost import (
 
 def test_model_prices_has_realistic_known_models() -> None:
     # flash is exercised numerically below; just assert the table is populated.
+    assert MODEL_PRICES["gemini-3.7-flash"] == (0.75, 3.75)
+    assert estimate_cost("google/gemini-3.7-flash", 1_000_000, 1_000_000) == (4.5, True)
     assert MODEL_PRICES["gemini-2.5-flash"] == (0.30, 2.50)
     assert "claude-opus-4-8" in MODEL_PRICES
 
@@ -57,8 +60,18 @@ def test_estimate_cost_zero_tokens() -> None:
 
 def test_summarize_usage_aggregates_same_model_role() -> None:
     rows = [
-        {"model": "gemini-2.5-flash", "role": "director", "input_tokens": 1_000_000, "output_tokens": 0},
-        {"model": "gemini-2.5-flash", "role": "director", "input_tokens": 0, "output_tokens": 1_000_000},
+        {
+            "model": "gemini-2.5-flash",
+            "role": "director",
+            "input_tokens": 1_000_000,
+            "output_tokens": 0,
+        },
+        {
+            "model": "gemini-2.5-flash",
+            "role": "director",
+            "input_tokens": 0,
+            "output_tokens": 1_000_000,
+        },
     ]
     out = summarize_usage(rows)
 
@@ -80,8 +93,18 @@ def test_summarize_usage_aggregates_same_model_role() -> None:
 
 def test_summarize_usage_sorted_by_cost_desc() -> None:
     rows = [
-        {"model": "gemini-2.5-flash-lite", "role": "scout", "input_tokens": 1_000_000, "output_tokens": 0},
-        {"model": "claude-opus-4-8", "role": "brain", "input_tokens": 1_000_000, "output_tokens": 0},
+        {
+            "model": "gemini-2.5-flash-lite",
+            "role": "scout",
+            "input_tokens": 1_000_000,
+            "output_tokens": 0,
+        },
+        {
+            "model": "claude-opus-4-8",
+            "role": "brain",
+            "input_tokens": 1_000_000,
+            "output_tokens": 0,
+        },
     ]
     out = summarize_usage(rows)
     costs = [b["cost_usd"] for b in out["by_model_role"]]

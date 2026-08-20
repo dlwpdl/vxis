@@ -67,6 +67,12 @@ _PROVIDERS: dict[str, dict[str, str]] = {
         "env_key": "OPENAI_API_KEY",
         "format": "openai",
     },
+    "wavespeed": {
+        "base_url": "https://llm.wavespeed.ai/v1",
+        "default_model": "google/gemini-3.7-flash",
+        "env_key": "WAVESPEED_API_KEY",
+        "format": "openai",
+    },
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
         "default_model": "deepseek-chat",
@@ -93,8 +99,8 @@ _PROVIDERS: dict[str, dict[str, str]] = {
 # Full list: https://docs.together.ai/docs/serverless-models
 TOGETHER_MODELS = {
     # ── Flagship models (via Together) ──
-    "kimi-k2.5": "moonshotai/Kimi-K2.5",       # 1T params, 32B active, MoE
-    "glm-5": "zai-org/GLM-5",                   # 744B params, 40B active, MoE
+    "kimi-k2.5": "moonshotai/Kimi-K2.5",  # 1T params, 32B active, MoE
+    "glm-5": "zai-org/GLM-5",  # 744B params, 40B active, MoE
     # ── Other strong models ──
     "qwen-72b": "Qwen/Qwen2.5-72B-Instruct-Turbo",
     "qwen-7b": "Qwen/Qwen2.5-7B-Instruct-Turbo",
@@ -109,6 +115,7 @@ TOGETHER_MODELS = {
 @dataclass
 class LLMResponse:
     """Unified response from any LLM provider."""
+
     text: str
     model: str
     provider: str
@@ -147,8 +154,15 @@ def _get_api_key() -> str:
 
 def _get_any_available_key() -> str:
     """어떤 provider든 키가 있으면 반환 (is_available() 전용)."""
-    for env_var in ("TOGETHER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
-                    "GOOGLE_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"):
+    for env_var in (
+        "TOGETHER_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "WAVESPEED_API_KEY",
+    ):
         key = os.environ.get(env_var, "")
         if key:
             return key
@@ -163,9 +177,7 @@ def _get_model() -> str:
             return TOGETHER_MODELS[override]
         return override
     provider = _get_provider()
-    return _PROVIDERS.get(provider, {}).get(
-        "default_model", "Qwen/Qwen2.5-72B-Instruct-Turbo"
-    )
+    return _PROVIDERS.get(provider, {}).get("default_model", "Qwen/Qwen2.5-72B-Instruct-Turbo")
 
 
 def is_available() -> bool:
@@ -191,8 +203,13 @@ def _try_provider(
         return _call_gemini(api_key, model, system_prompt, user_prompt, max_tokens)
     else:
         return _call_openai_compat(
-            api_key, model, provider,
-            cfg["base_url"], system_prompt, user_prompt, max_tokens,
+            api_key,
+            model,
+            provider,
+            cfg["base_url"],
+            system_prompt,
+            user_prompt,
+            max_tokens,
         )
 
 
@@ -217,20 +234,36 @@ def chat(
 
     # Try primary provider first (키가 있을 때만)
     if not skip_primary:
-        logger.info("LLM request: %s/%s (prompt ~%d chars)", primary_provider, model, len(user_prompt))
+        logger.info(
+            "LLM request: %s/%s (prompt ~%d chars)", primary_provider, model, len(user_prompt)
+        )
         try:
-            result = _try_provider(primary_provider, primary_key, model, system_prompt, user_prompt, max_tokens)
+            result = _try_provider(
+                primary_provider, primary_key, model, system_prompt, user_prompt, max_tokens
+            )
             if result is not None:
-                logger.info("LLM success: %s/%s (%d chars response)", result.provider, result.model, len(result.text))
+                logger.info(
+                    "LLM success: %s/%s (%d chars response)",
+                    result.provider,
+                    result.model,
+                    len(result.text),
+                )
                 return result
             logger.warning("Primary LLM returned None (%s/%s)", primary_provider, model)
         except Exception as exc:
-            logger.warning("Primary LLM failed (%s/%s): %s: %s", primary_provider, model, type(exc).__name__, exc)
+            logger.warning(
+                "Primary LLM failed (%s/%s): %s: %s",
+                primary_provider,
+                model,
+                type(exc).__name__,
+                exc,
+            )
     else:
         logger.info("Primary provider %s has no key — going directly to fallback", primary_provider)
 
     # Fallback chain: try other providers that have keys
     _FALLBACK_ORDER = [
+        ("wavespeed", "WAVESPEED_API_KEY"),
         ("google", "GOOGLE_API_KEY"),
         ("anthropic", "ANTHROPIC_API_KEY"),
         ("openai", "OPENAI_API_KEY"),
@@ -250,13 +283,21 @@ def chat(
         logger.info("Falling back to %s/%s", fb_provider, fb_model)
 
         try:
-            result = _try_provider(fb_provider, fb_key, fb_model, system_prompt, user_prompt, max_tokens)
+            result = _try_provider(
+                fb_provider, fb_key, fb_model, system_prompt, user_prompt, max_tokens
+            )
             if result is not None:
                 logger.info("Fallback success: %s/%s", fb_provider, fb_model)
                 return result
             logger.warning("Fallback returned None (%s/%s)", fb_provider, fb_model)
         except Exception as exc:
-            logger.warning("Fallback LLM failed (%s/%s): %s: %s", fb_provider, fb_model, type(exc).__name__, exc)
+            logger.warning(
+                "Fallback LLM failed (%s/%s): %s: %s",
+                fb_provider,
+                fb_model,
+                type(exc).__name__,
+                exc,
+            )
             continue
 
     logger.error("All LLM providers exhausted — no response generated")
@@ -264,6 +305,7 @@ def chat(
 
 
 # ── OpenAI-compatible (Together, OpenAI, DeepSeek, Kimi, GLM) ──
+
 
 def _call_openai_compat(
     api_key: str,
@@ -275,14 +317,16 @@ def _call_openai_compat(
     max_tokens: int,
 ) -> LLMResponse | None:
     url = f"{base_url}/chat/completions"
-    payload = json.dumps({
-        "model": model,
-        "max_tokens": max_tokens,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }).encode("utf-8")
+    payload = json.dumps(
+        {
+            "model": model,
+            "max_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+    ).encode("utf-8")
 
     req = urllib.request.Request(
         url,
@@ -313,8 +357,9 @@ def _call_openai_compat(
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        logger.warning("LLM invalid JSON from %s/%s: %s (first 200 chars: %s)",
-                        provider, model, e, raw[:200])
+        logger.warning(
+            "LLM invalid JSON from %s/%s: %s (first 200 chars: %s)", provider, model, e, raw[:200]
+        )
         return None
 
     # Some providers return errors inside the JSON body
@@ -340,6 +385,7 @@ def _call_openai_compat(
 
 # ── Anthropic Claude ────────────────────────────────────────────
 
+
 def _call_anthropic(
     api_key: str,
     model: str,
@@ -348,12 +394,14 @@ def _call_anthropic(
     max_tokens: int,
 ) -> LLMResponse | None:
     url = "https://api.anthropic.com/v1/messages"
-    payload = json.dumps({
-        "model": model,
-        "max_tokens": max_tokens,
-        "system": system_prompt,
-        "messages": [{"role": "user", "content": user_prompt}],
-    }).encode("utf-8")
+    payload = json.dumps(
+        {
+            "model": model,
+            "max_tokens": max_tokens,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}],
+        }
+    ).encode("utf-8")
 
     req = urllib.request.Request(
         url,
@@ -408,6 +456,7 @@ def _call_anthropic(
 
 # ── Google Gemini ───────────────────────────────────────────────
 
+
 def _call_gemini(
     api_key: str,
     model: str,
@@ -419,11 +468,13 @@ def _call_gemini(
         f"https://generativelanguage.googleapis.com/v1beta/"
         f"models/{model}:generateContent?key={api_key}"
     )
-    payload = json.dumps({
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": [{"parts": [{"text": user_prompt}]}],
-        "generationConfig": {"maxOutputTokens": max_tokens},
-    }).encode("utf-8")
+    payload = json.dumps(
+        {
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": [{"parts": [{"text": user_prompt}]}],
+            "generationConfig": {"maxOutputTokens": max_tokens},
+        }
+    ).encode("utf-8")
 
     req = urllib.request.Request(
         url,

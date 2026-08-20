@@ -80,7 +80,7 @@ class TestDispatchOrder:
         _fake_pipeline()
         call_order: list[str] = []
 
-        async def fake_scan_target(target, scan_id, max_iters):  # type: ignore[no-untyped-def]
+        async def fake_scan_target(target, scan_id, max_iters, ghost=False):  # type: ignore[no-untyped-def]
             call_order.append(target.name)
             return []
 
@@ -97,7 +97,7 @@ class TestDispatchOrder:
     def test_three_targets_dispatched_in_order(self) -> None:
         call_order: list[str] = []
 
-        async def fake_scan_target(target, scan_id, max_iters):  # type: ignore[no-untyped-def]
+        async def fake_scan_target(target, scan_id, max_iters, ghost=False):  # type: ignore[no-untyped-def]
             call_order.append(target.name)
             return []
 
@@ -125,7 +125,7 @@ class TestDispatchOrder:
     def test_skipped_targets_not_dispatched(self) -> None:
         call_order: list[str] = []
 
-        async def fake_scan_target(target, scan_id, max_iters):  # type: ignore[no-untyped-def]
+        async def fake_scan_target(target, scan_id, max_iters, ghost=False):  # type: ignore[no-untyped-def]
             call_order.append(target.name)
             return []
 

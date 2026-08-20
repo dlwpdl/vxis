@@ -8,14 +8,18 @@ let me verify those still exist and hunt for new ones").
 Phase B first step toward the full episodic memory that Phase C will build
 out into a proper vector DB.
 """
+
 from __future__ import annotations
 
 import json
 import logging
 import os
+import hashlib
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator, TypeVar
 from urllib.parse import urlparse
 
 from vxis.agent.tool_registry import ToolResult
@@ -24,11 +28,29 @@ logger = logging.getLogger(__name__)
 
 # KB location — data dir at repo root (gitignored for privacy)
 _KB_PATH = Path(__file__).parent.parent.parent.parent.parent / "data" / "scan_kb.json"
+_T = TypeVar("_T")
+
+
+def _evidence_fingerprint(item: dict[str, Any]) -> str:
+    material = "\n".join(
+        str(item.get(key, ""))
+        for key in (
+            "evidence",
+            "poc_script_code",
+            "technical_analysis",
+            "request_or_payload",
+            "response_or_effect",
+            "control_comparison",
+        )
+    )
+    normalized = " ".join(material.lower().split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16] if normalized else ""
 
 
 def _canonical_finding_type(value: str) -> str:
     try:
         from vxis.agent.tools.finding_tools import _canonical_finding_type as _canonical
+
         return _canonical(value)
     except Exception:
         return str(value or "").lower().strip()
@@ -91,7 +113,9 @@ def _severity_rank(severity: str) -> int:
     }.get(str(severity or "").lower().strip(), 0)
 
 
-def _snapshot_finding(finding: dict[str, Any], *, timestamp: str, scan_id: str = "") -> dict[str, Any]:
+def _snapshot_finding(
+    finding: dict[str, Any], *, timestamp: str, scan_id: str = ""
+) -> dict[str, Any]:
     canonical_type = _canonical_finding_type(str(finding.get("finding_type", "")))
     affected_component = str(finding.get("affected_component", ""))
     return {
@@ -108,7 +132,9 @@ def _snapshot_finding(finding: dict[str, Any], *, timestamp: str, scan_id: str =
         "occurrences": 1,
         "source_scan_ids": [scan_id] if scan_id else [],
         "variant_titles": [str(finding.get("title", ""))[:160]] if finding.get("title") else [],
-        "variant_types": [str(finding.get("finding_type", ""))[:80]] if finding.get("finding_type") else [],
+        "variant_types": [str(finding.get("finding_type", ""))[:80]]
+        if finding.get("finding_type")
+        else [],
     }
 
 
@@ -164,7 +190,10 @@ def _merge_aggregated_findings(
 
     return sorted(
         merged.values(),
-        key=lambda item: (-_severity_rank(str(item.get("severity", ""))), str(item.get("title", ""))),
+        key=lambda item: (
+            -_severity_rank(str(item.get("severity", ""))),
+            str(item.get("title", "")),
+        ),
     )[:100]
 
 
@@ -175,26 +204,32 @@ def _scan_findings_for_rebuild(scan: dict[str, Any]) -> list[dict[str, Any]]:
         for item in snapshots:
             if not isinstance(item, dict):
                 continue
-            rebuilt.append({
-                "finding_type": str(item.get("raw_finding_type") or item.get("finding_type") or ""),
-                "affected_component": str(item.get("affected_component", "")),
-                "severity": str(item.get("severity", "")),
-                "title": str(item.get("title", "")),
-                "description": str(item.get("description", "")),
-            })
+            rebuilt.append(
+                {
+                    "finding_type": str(
+                        item.get("raw_finding_type") or item.get("finding_type") or ""
+                    ),
+                    "affected_component": str(item.get("affected_component", "")),
+                    "severity": str(item.get("severity", "")),
+                    "title": str(item.get("title", "")),
+                    "description": str(item.get("description", "")),
+                }
+            )
         return rebuilt
     summaries = list(scan.get("finding_summaries") or [])
     rebuilt = []
     for item in summaries:
         if not isinstance(item, dict):
             continue
-        rebuilt.append({
-            "finding_type": str(item.get("finding_type", "")),
-            "affected_component": str(item.get("affected_component", "")),
-            "severity": str(item.get("severity", "")),
-            "title": str(item.get("title", "")),
-            "description": "",
-        })
+        rebuilt.append(
+            {
+                "finding_type": str(item.get("finding_type", "")),
+                "affected_component": str(item.get("affected_component", "")),
+                "severity": str(item.get("severity", "")),
+                "title": str(item.get("title", "")),
+                "description": "",
+            }
+        )
     return rebuilt
 
 
@@ -229,21 +264,25 @@ def _rebuild_target_memory_entry(entry: dict[str, Any]) -> dict[str, Any]:
     for item in list(entry.get("refuted_patterns") or []):
         if not isinstance(item, dict):
             continue
-        normalized_refuted.append({
-            **item,
-            "finding_type": _canonical_finding_type(str(item.get("finding_type", ""))),
-            "affected_component": str(item.get("affected_component", ""))[:240],
-        })
+        normalized_refuted.append(
+            {
+                **item,
+                "finding_type": _canonical_finding_type(str(item.get("finding_type", ""))),
+                "affected_component": str(item.get("affected_component", ""))[:240],
+            }
+        )
     entry["refuted_patterns"] = normalized_refuted[-50:]
     normalized_tactics: list[dict[str, Any]] = []
     for item in list(entry.get("successful_tactics") or []):
         if not isinstance(item, dict):
             continue
-        normalized_tactics.append({
-            **item,
-            "finding_type": _canonical_finding_type(str(item.get("finding_type", ""))),
-            "affected_component": str(item.get("affected_component", ""))[:240],
-        })
+        normalized_tactics.append(
+            {
+                **item,
+                "finding_type": _canonical_finding_type(str(item.get("finding_type", ""))),
+                "affected_component": str(item.get("affected_component", ""))[:240],
+            }
+        )
     entry["successful_tactics"] = normalized_tactics[-50:]
     return entry
 
@@ -288,7 +327,43 @@ def _ensure_kb_dir() -> None:
     _KB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _load_kb() -> dict[str, Any]:
+@contextmanager
+def _kb_write_lock() -> Iterator[None]:
+    _ensure_kb_dir()
+    lock_path = _KB_PATH.with_name(f"{_KB_PATH.name}.lock")
+    with lock_path.open("a+b") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+
+            if lock_file.seek(0, os.SEEK_END) == 0:
+                lock_file.write(b"\0")
+                lock_file.flush()
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _serialized_kb_write(func: Callable[..., _T]) -> Callable[..., _T]:
+    @wraps(func)
+    def locked(*args: Any, **kwargs: Any) -> _T:
+        with _kb_write_lock():
+            return func(*args, **kwargs)
+
+    return locked
+
+
+def _load_kb(*, strict: bool = False) -> dict[str, Any]:
     if not _KB_PATH.exists():
         return {"targets": {}}
     try:
@@ -301,15 +376,22 @@ def _load_kb() -> dict[str, Any]:
         return kb
     except Exception as e:
         logger.warning("Failed to load scan KB: %s", e)
+        if strict:
+            raise
         return {"targets": {}}
 
 
 def _save_kb(kb: dict[str, Any]) -> None:
     _ensure_kb_dir()
+    temp_path = _KB_PATH.with_name(f".{_KB_PATH.name}.{os.getpid()}.tmp")
     try:
-        _KB_PATH.write_text(json.dumps(kb, indent=2, default=str), encoding="utf-8")
+        temp_path.write_text(json.dumps(kb, indent=2, default=str), encoding="utf-8")
+        os.replace(temp_path, _KB_PATH)
     except Exception as e:
         logger.warning("Failed to save scan KB: %s", e)
+        raise
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def _target_key(url: str) -> str:
@@ -321,6 +403,7 @@ def _target_key(url: str) -> str:
         return url
 
 
+@_serialized_kb_write
 def record_scan_result(
     target: str,
     findings: list[dict[str, Any]],
@@ -335,7 +418,7 @@ def record_scan_result(
     """Append a scan result to the KB. Called by ScanPipelineV2 at scan end."""
     if not findings and not fingerprint:
         return
-    kb = _load_kb()
+    kb = _load_kb(strict=True)
     key = _target_key(target)
     targets = kb.setdefault("targets", {})
     entry = targets.setdefault(key, {"scans": [], "known_findings": []})
@@ -402,7 +485,10 @@ def record_scan_result(
 
     refuted_patterns = entry.setdefault("refuted_patterns", [])
     known_refuted = {
-        (str(item.get("finding_type", "")), str(item.get("affected_component", "")))
+        (
+            _canonical_finding_type(str(item.get("finding_type", ""))),
+            str(item.get("affected_component", "")),
+        ): item
         for item in refuted_patterns
         if isinstance(item, dict)
     }
@@ -410,19 +496,28 @@ def record_scan_result(
         if _is_soft_refutation_reason(str(item.get("reasoning", ""))):
             continue
         pair = (
-            str(item.get("finding_type", "")),
+            _canonical_finding_type(str(item.get("finding_type", ""))),
             str(item.get("affected_component", "")),
         )
-        if not pair[0] or pair in known_refuted:
+        if not pair[0]:
             continue
-        refuted_patterns.append({
-            "finding_type": _canonical_finding_type(pair[0]),
-            "affected_component": pair[1],
-            "title": str(item.get("title", ""))[:120],
-            "reasoning": str(item.get("reasoning", ""))[:240],
-            "last_seen": timestamp,
-        })
-        known_refuted.add(pair)
+        fingerprint = str(item.get("evidence_fingerprint", "")) or _evidence_fingerprint(item)
+        if pair in known_refuted:
+            known_refuted[pair]["last_seen"] = timestamp
+            if fingerprint:
+                known_refuted[pair]["evidence_fingerprint"] = fingerprint
+            continue
+        refuted_patterns.append(
+            {
+                "finding_type": pair[0],
+                "affected_component": pair[1],
+                "title": str(item.get("title", ""))[:120],
+                "reasoning": str(item.get("reasoning", ""))[:240],
+                "last_seen": timestamp,
+                "evidence_fingerprint": fingerprint,
+            }
+        )
+        known_refuted[pair] = refuted_patterns[-1]
     entry["refuted_patterns"] = refuted_patterns[-50:]
 
     successful_tactics = entry.setdefault("successful_tactics", [])
@@ -438,40 +533,40 @@ def record_scan_result(
         )
         if not tactic[0] or tactic in seen_tactics:
             continue
-        successful_tactics.append({
-            "finding_type": _canonical_finding_type(tactic[0]),
-            "title": tactic[1],
-            "affected_component": str(item.get("affected_component", ""))[:200],
-            "confidence": str(item.get("confidence", ""))[:32],
-            "reasoning": str(item.get("reasoning", ""))[:240],
-            "last_seen": timestamp,
-        })
+        successful_tactics.append(
+            {
+                "finding_type": _canonical_finding_type(tactic[0]),
+                "title": tactic[1],
+                "affected_component": str(item.get("affected_component", ""))[:200],
+                "confidence": str(item.get("confidence", ""))[:32],
+                "reasoning": str(item.get("reasoning", ""))[:240],
+                "last_seen": timestamp,
+            }
+        )
         seen_tactics.add(tactic)
     entry["successful_tactics"] = successful_tactics[-50:]
 
     branch_leads = entry.setdefault("branch_leads", [])
-    seen_branches = {
-        str(item.get("id", ""))
-        for item in branch_leads
-        if isinstance(item, dict)
-    }
+    seen_branches = {str(item.get("id", "")) for item in branch_leads if isinstance(item, dict)}
     for branch in branches or []:
         if str(branch.get("status", "")).lower() in {"proven", "exhausted", "dead"}:
             continue
         branch_id = str(branch.get("id", ""))
         if not branch_id or branch_id in seen_branches:
             continue
-        branch_leads.append({
-            "id": branch_id,
-            "vector_id": str(branch.get("vector_id", ""))[:80],
-            "title": str(branch.get("title", ""))[:160],
-            "role": str(branch.get("role", ""))[:40],
-            "phase": str(branch.get("phase", ""))[:40],
-            "objective": str(branch.get("objective", ""))[:200],
-            "next_step": str(branch.get("next_step", ""))[:200],
-            "status": str(branch.get("status", ""))[:40],
-            "last_seen": timestamp,
-        })
+        branch_leads.append(
+            {
+                "id": branch_id,
+                "vector_id": str(branch.get("vector_id", ""))[:80],
+                "title": str(branch.get("title", ""))[:160],
+                "role": str(branch.get("role", ""))[:40],
+                "phase": str(branch.get("phase", ""))[:40],
+                "objective": str(branch.get("objective", ""))[:200],
+                "next_step": str(branch.get("next_step", ""))[:200],
+                "status": str(branch.get("status", ""))[:40],
+                "last_seen": timestamp,
+            }
+        )
         seen_branches.add(branch_id)
     entry["branch_leads"] = branch_leads[-50:]
 
@@ -490,16 +585,19 @@ def load_target_memory_profile(target: str) -> dict[str, Any]:
         "prior_scan_count": len(scans),
         "known_findings": list(entry.get("known_findings") or [])[:30],
         "aggregated_findings": list(entry.get("aggregated_findings") or [])[:50],
-        "refuted_patterns": _filtered_refuted_patterns(list(entry.get("refuted_patterns") or []))[:20],
+        "refuted_patterns": _filtered_refuted_patterns(list(entry.get("refuted_patterns") or []))[
+            :20
+        ],
         "successful_tactics": list(entry.get("successful_tactics") or [])[:20],
         "branch_leads": list(entry.get("branch_leads") or [])[:12],
         "last_scan": scans[-1] if scans else None,
     }
 
 
+@_serialized_kb_write
 def migrate_scan_kb() -> dict[str, int]:
     """Rebuild aggregate memory for all targets using current canonicalization rules."""
-    kb = _load_kb()
+    kb = _load_kb(strict=True)
     targets = kb.get("targets") or {}
     migrated_targets = 0
     for key, entry in list(targets.items()):
@@ -598,12 +696,14 @@ class QueryScanMemoryTool:
                 recommended = last_fp.get("recommended_playbooks") or []
                 if stack_hint in [str(r).lower() for r in recommended]:
                     for kf in other_entry.get("known_findings", [])[:5]:
-                        cross_target.append({
-                            "source_target": other_key,
-                            "finding_type": kf.get("finding_type"),
-                            "affected_component": kf.get("affected_component"),
-                            "severity": kf.get("severity"),
-                        })
+                        cross_target.append(
+                            {
+                                "source_target": other_key,
+                                "finding_type": kf.get("finding_type"),
+                                "affected_component": kf.get("affected_component"),
+                                "severity": kf.get("severity"),
+                            }
+                        )
 
         if not entry and not cross_target:
             return ToolResult(
@@ -648,7 +748,8 @@ class QueryScanMemoryTool:
                 "cross_target_findings": cross_target[:20],
                 "stack_hint": stack_hint or None,
             },
-            summary="query_scan_memory: " + ". ".join(summary_parts)
+            summary="query_scan_memory: "
+            + ". ".join(summary_parts)
             + ". Verify these still exist and hunt for new ones."
             if summary_parts
             else f"query_scan_memory: no prior data for {key}.",

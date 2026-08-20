@@ -35,8 +35,8 @@ RESET_PATHS = _load_ds(
 )  # ADR-007 Phase 3-9 — data in data/payloads/attempt_auth.json
 
 
-def _preview_text(text: str, limit: int = 240) -> str:
-    return " ".join(str(text or "").split())[:limit]
+def _preview_text(text: str) -> str:
+    return "[response body redacted]" if text else ""
 
 
 def _extract_token_and_user_info(data: dict[str, Any]) -> tuple[str, dict[str, str]]:
@@ -168,7 +168,8 @@ def _format_login_transcript(
     *,
     label: str,
 ) -> str:
-    body = f'{{"email":"{creds.get("email", "")}","password":"{creds.get("password", "")}"}}'
+    del creds
+    body = '{"email":"[redacted]","password":"[redacted]"}'
     return (
         f"[{label}]\n"
         f"POST {endpoint} HTTP/1.1\n"
@@ -267,7 +268,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         attempt = {
             "phase": phase,
             "endpoint": active_login,
-            "creds": f"{email}:{pwd}",
+            "creds": "[redacted]",
             "status": r.status,
             "body_length": r.body_length,
             "response_preview": preview,
@@ -279,8 +280,6 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             data = {}
         token, user_info = _extract_token_and_user_info(data if isinstance(data, dict) else {})
         attempt["token_observed"] = bool(token)
-        if user_info:
-            attempt["user_info"] = user_info
         all_attempts.append(attempt)
         return {"response": r, "attempt": attempt, "token": token, "user_info": user_info}
 
@@ -299,7 +298,10 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             "negative_control": baseline_control["attempt"] if baseline_control else {},
             "positive_control": positive_attempt,
         }
-        credentials_used = dict(extra_credentials or {"email": email, "password": password})
+        credentials_used = {
+            key: "[redacted]"
+            for key in (extra_credentials or {"email": email, "password": password})
+        }
         poc_http_exchange = "\n\n".join(
             filter(
                 None,
@@ -374,7 +376,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         if not outcome:
             continue
         if outcome["response"].status == 200 and outcome["token"]:
-            logger.info("SQLi auth bypass SUCCESS: %s", email)
+            logger.info("SQLi authentication bypass succeeded")
             successful_logins.append(
                 _success_result(
                     method="sqli_bypass",
@@ -411,7 +413,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         if not outcome:
             continue
         if outcome["response"].status == 200 and outcome["token"]:
-            logger.info("Default creds SUCCESS: %s:%s", email, pwd)
+            logger.info("Credential authentication succeeded")
             success = _success_result(
                 method="default_creds" if not operator_creds else phase,
                 email=email,
@@ -485,7 +487,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                     token = d
                                     break
                             if token:
-                                logger.info("Password reset SUCCESS: %s answer=%s", email, ans)
+                                logger.info("Password reset authentication succeeded")
                                 reset_preview = _preview_text(r.text)
                                 login_preview = _preview_text(r2.text)
                                 control_checks = {
@@ -495,7 +497,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                     "positive_control": {
                                         "phase": "password_reset",
                                         "endpoint": active_login,
-                                        "creds": f"{email}:[reset_password]",
+                                        "creds": "[redacted]",
                                         "status": r2.status,
                                         "body_length": r2.body_length,
                                         "response_preview": login_preview,
@@ -525,7 +527,10 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                         ]
                                     ),
                                     "login_endpoint": active_login,
-                                    "credentials_used": {"email": email, "security_answer": ans},
+                                    "credentials_used": {
+                                        "email": "[redacted]",
+                                        "security_answer": "[redacted]",
+                                    },
                                     "reset_endpoint": reset_path,
                                     "all_attempts": all_attempts,
                                     "control_checks": control_checks,
@@ -551,7 +556,8 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                                                     f"[password_reset]\n"
                                                     f"POST {reset_path} HTTP/1.1\n"
                                                     "Content-Type: application/json\n\n"
-                                                    f'{{"email":"{email}","answer":"{ans}","new":"[reset_password]","repeat":"[reset_password]"}}\n\n'
+                                                    '{"email":"[redacted]","answer":"[redacted]",'
+                                                    '"new":"[redacted]","repeat":"[redacted]"}\n\n'
                                                     f"HTTP/1.1 {r.status}\n\n"
                                                     f"{reset_preview}"
                                                 ),

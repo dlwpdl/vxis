@@ -16,7 +16,7 @@ related:
 |---|---|
 | Status | Accepted |
 | Date | 2026-04-16 |
-| 정식 템플릿 | `scripts/generate_benchmark_reports.py` 의 `WEBGOAT_FINDINGS` 섹션 |
+| 정식 템플릿 | `generate_benchmark_reports.py` 의 `WEBGOAT_FINDINGS` 섹션 |
 | 렌더러 | `ReportGenerator.generate_html_file(data, path)` 또는 `render_html(data)` |
 | Bilingual | `title`/`description`/`remediation`/`executive_summary` = `"English|||한국어"` |
 | client_name | 영어 고정, `\|\|\|` 금지 |

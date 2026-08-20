@@ -16,20 +16,21 @@ jobs:
   digest:
     name: Generate weekly growth digest
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
       - name: Install VXIS
         run: |
-          pip install -e . 2>/dev/null || true
-          echo "PYTHONPATH=src" >> $GITHUB_ENV
+          python -m pip install .
+          echo "PYTHONPATH=src" >> "$GITHUB_ENV"
 
       - name: Generate digest
         id: digest
@@ -43,14 +44,14 @@ jobs:
           PYEOF
 
       - name: Commit digest
-        if: always()
         run: |
           git config user.name "vxis-growth[bot]"
           git config user.email "vxis-growth@users.noreply.github.com"
           git add docs/growth-digests/ 2>/dev/null || true
           if ! git diff --staged --quiet; then
             git commit -m "docs(growth): weekly digest $(date -u +%Y-%m-%d)"
-            for i in 1 2 3; do
+            for attempt in 1 2 3; do
+              echo "Push attempt ${attempt}/3"
               git fetch origin main
               if git rebase origin/main; then
                 git push && break

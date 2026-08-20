@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
@@ -33,12 +34,15 @@ class ShodanPlugin(BasePlugin):
         """Check if shodan CLI is available AND has API credits."""
         import shutil
         import subprocess
+
         if shutil.which("shodan") is None:
             return False
         try:
             r = subprocess.run(
                 ["shodan", "info"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             # "Query credits available: 0" means no credits
             if "Query credits available: 0" in r.stdout:
@@ -54,9 +58,14 @@ class ShodanPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        # 'shodan host' requires API credits (paid plan).
-        # Check credits first; if zero, return a no-op to avoid 403 errors.
-        return f"shodan host $(dig +short {target} A | head -1) 2>&1 || echo '{{}}'"
+        # `shodan host` requires an IP.  Keep the resolver pipeline fixed and
+        # pass the target as a positional argument, never as shell source.
+        script = (
+            'ip=$(dig +short "$1" A | head -n 1); '
+            'if [ -n "$ip" ]; then shodan host "$ip" || printf "{}\\n"; '
+            'else printf "{}\\n"; fi'
+        )
+        return shlex.join(["bash", "-c", script, "--", target])
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         # Require SHODAN_API_KEY — skip gracefully if absent.
@@ -67,7 +76,9 @@ class ShodanPlugin(BasePlugin):
                 raw_output=raw_stdout,
                 parsed_data={"shodan_results": []},
                 findings=[],
-                errors=["SHODAN_API_KEY environment variable not configured; skipping Shodan scan."],
+                errors=[
+                    "SHODAN_API_KEY environment variable not configured; skipping Shodan scan."
+                ],
             )
 
         services: list[dict[str, Any]] = []

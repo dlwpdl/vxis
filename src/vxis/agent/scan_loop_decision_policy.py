@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlparse
 
@@ -16,6 +17,10 @@ from vxis.agent.scan_loop_state import (
     ReviewDecision,
     VectorCandidate,
 )
+from vxis.agent.tools.memory_tools import _evidence_fingerprint
+
+
+_REFUTATION_TTL = timedelta(days=30)
 
 
 def dag_blocks_finish(state: Any, *, prior_threshold: float = 0.5) -> bool:
@@ -63,8 +68,7 @@ class ScanLoopDecisionPolicyMixin:
                 continue
             if branch.id not in blocker_ids and branch.source_candidate_id not in blocker_ids:
                 if (
-                    branch.owner == "memory"
-                    or branch.id.startswith(("carry:", "memory:"))
+                    branch.owner == "memory" or branch.id.startswith(("carry:", "memory:"))
                 ) and not self._branch_has_finish_blocking_yield(branch):
                     branch.status = "exhausted"
                     branch.last_report = (
@@ -390,15 +394,9 @@ class ScanLoopDecisionPolicyMixin:
             return True
         if branch.source_finding_id:
             return score >= 65
-        if (
-            family == "disclosure"
-            and self._has_stronger_foothold_than_disclosure()
-        ):
+        if family == "disclosure" and self._has_stronger_foothold_than_disclosure():
             return score >= 78
-        if (
-            family == "disclosure"
-            and self._disclosure_campaign_lacks_reusable_material()
-        ):
+        if family == "disclosure" and self._disclosure_campaign_lacks_reusable_material():
             return score >= 82
         return branch.attempts < 2 or score >= 78
 
@@ -702,21 +700,6 @@ class ScanLoopDecisionPolicyMixin:
             token = str(identity.get("token") or "").strip()
             if token:
                 return token
-        for message in reversed(self.state.messages[-96:]):
-            if message.get("role") != "tool":
-                continue
-            content = message.get("content", {})
-            if not isinstance(content, dict) or content.get("name") != "run_skill":
-                continue
-            result = content.get("result", {})
-            if not isinstance(result, dict):
-                continue
-            data = result.get("data", {})
-            if not isinstance(data, dict):
-                continue
-            token = str(data.get("token") or "").strip()
-            if token:
-                return token
         return ""
 
     def _latest_authz_context_params(self) -> dict[str, Any]:
@@ -783,9 +766,13 @@ class ScanLoopDecisionPolicyMixin:
                     continue
                 method = str(item.get("method") or "").upper()
                 path = str(item.get("path") or item.get("url") or "").lower()
-                has_body = any(item.get(key) for key in ("body", "request_body", "json", "json_data"))
-                if method in {"POST", "PUT", "PATCH"} and has_body and any(
-                    marker in path for marker in business_markers
+                has_body = any(
+                    item.get(key) for key in ("body", "request_body", "json", "json_data")
+                )
+                if (
+                    method in {"POST", "PUT", "PATCH"}
+                    and has_body
+                    and any(marker in path for marker in business_markers)
                 ):
                     flows.append(dict(item))
                     if len(flows) >= 12:
@@ -1098,6 +1085,7 @@ class ScanLoopDecisionPolicyMixin:
         verdict: str,
         reasoning: str,
         confidence: str = "",
+        blocked_action: str = "",
     ) -> None:
         stage = "verifier"
         title = str(args.get("title", "finding review"))
@@ -1128,7 +1116,7 @@ class ScanLoopDecisionPolicyMixin:
             reason=(f"[{confidence}] " if confidence else "")
             + (reasoning or f"Verifier returned {verdict}."),
             action_hint=action_hint,
-            blocked_action="report_finding" if verdict == "REFUTED" else "",
+            blocked_action=blocked_action or ("report_finding" if verdict == "REFUTED" else ""),
             affected_component=component,
             source_finding_type=source_finding_type,
         )
@@ -1420,8 +1408,7 @@ class ScanLoopDecisionPolicyMixin:
         if str(branch.vector_id or "") != "NET-SERVICE-PIVOT":
             return None
         if any(
-            child_id in self.state.branches
-            and self.state.branches[child_id].owner == "agent_graph"
+            child_id in self.state.branches and self.state.branches[child_id].owner == "agent_graph"
             for child_id in branch.child_ids
         ):
             return None
@@ -2306,7 +2293,11 @@ class ScanLoopDecisionPolicyMixin:
             if open_candidates:
                 forced = self._forced_candidate_action(open_candidates[0])
                 if forced is not None:
-                    return forced[0], forced[1], f"suggesting first attempt on {open_candidates[0].id}"
+                    return (
+                        forced[0],
+                        forced[1],
+                        f"suggesting first attempt on {open_candidates[0].id}",
+                    )
         return None
 
     @staticmethod
@@ -2643,6 +2634,22 @@ class ScanLoopDecisionPolicyMixin:
         profile = getattr(self, "_target_memory_profile", None)
         return profile if isinstance(profile, dict) else {}
 
+    @staticmethod
+    def _refuted_memory_is_current(item: dict[str, Any], args: dict[str, Any]) -> bool:
+        try:
+            last_seen = datetime.fromisoformat(
+                str(item.get("last_seen", "")).replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError):
+            return False
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - last_seen > _REFUTATION_TTL:
+            return False
+        current_fingerprint = _evidence_fingerprint(args)
+        previous_fingerprint = str(item.get("evidence_fingerprint", ""))
+        return not current_fingerprint or current_fingerprint == previous_fingerprint
+
     def _matches_refuted_memory_pattern(self, args: dict[str, Any]) -> dict[str, Any] | None:
         profile = self._memory_profile()
         refuted = list(profile.get("refuted_patterns") or [])
@@ -2657,7 +2664,11 @@ class ScanLoopDecisionPolicyMixin:
             mem_component = str(item.get("affected_component", "")).strip().lower()
             if not mem_type or not mem_component:
                 continue
-            if mem_type == ftype and mem_component == component:
+            if (
+                mem_type == ftype
+                and mem_component == component
+                and self._refuted_memory_is_current(item, args)
+            ):
                 return item
         return None
 
@@ -2731,6 +2742,8 @@ class ScanLoopDecisionPolicyMixin:
             mem_type = str(item.get("finding_type", "")).strip().lower()
             mem_component = str(item.get("affected_component", "")).strip().lower()
             if not mem_type or not mem_component or mem_type not in action_types:
+                continue
+            if not self._refuted_memory_is_current(item, args if isinstance(args, dict) else {}):
                 continue
             if any(
                 mem_component in component or component in mem_component

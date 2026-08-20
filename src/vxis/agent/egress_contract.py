@@ -46,6 +46,8 @@ TOOL_TARGET_EGRESS: dict[str, TargetEgressContract] = {
     "link_chain": TargetEgressContract("offline", False, "not_applicable", "none"),
     "list_playbooks": TargetEgressContract("offline", False, "not_applicable", "none"),
     "load_playbook": TargetEgressContract("offline", False, "not_applicable", "none"),
+    "search_security_skills": TargetEgressContract("offline", False, "not_applicable", "none"),
+    "load_security_skill": TargetEgressContract("offline", False, "not_applicable", "none"),
     "query_scan_memory": TargetEgressContract("offline", False, "not_applicable", "none"),
     "verify_finding": TargetEgressContract(
         "llm_api",

@@ -1,16 +1,16 @@
-# `src/vxis/agent/tools/` — 25 BrainTool Implementations
+# `src/vxis/agent/tools/` — 27 BrainTool Implementations
 
-> The tools the Brain can call during a scan. `build_default_registry()` registers all 25 into a `ToolRegistry` that `ScanAgentLoop` passes to `think_in_loop` as the tool catalog.
+> The tools the Brain can call during a scan. `build_default_registry()` registers all 27 into a `ToolRegistry` that `ScanAgentLoop` passes to `think_in_loop` as the tool catalog.
 
 ## Registration entry point
 
 ```python
 from vxis.agent.tools import build_default_registry
 reg = build_default_registry(brain=agent_brain)
-# -> 25 tools registered
+# -> 27 tools registered
 ```
 
-## Tool catalog (25 tools, grouped by layer)
+## Tool catalog (27 tools, grouped by layer)
 
 ### Control tools (`control_tools.py`) — 3 tools
 
@@ -69,12 +69,21 @@ Both run inside the shared `vxis-sandbox` Docker container. Lifecycle: lazy-star
 
 | Tool | What it does |
 |---|---|
-| `shell_exec` | **Unrestricted shell** inside `vxis-sandbox`. Input: `command`, optional `timeout` (default 120, max 600). Returns `{exit_code, stdout, stderr}`. Use for sqlmap / nuclei / ffuf / gobuster / nmap / curl. **No command whitelist.** |
-| `python_exec` | **Multi-line Python 3** inside the same sandbox. Input: `code`, optional `timeout`. For custom PoC scripts, payload sprays, post-exploitation automation. |
+| `shell_exec` | Shell inside `vxis-sandbox`, available only after explicit operator approval. Input: `command`, optional `timeout` (default 120, max 600). Returns `{exit_code, stdout, stderr}`. |
+| `python_exec` | Multi-line Python 3 inside the same sandbox, behind the same explicit approval gate. Input: `code`, optional `timeout`. |
 
-**Security**: `shell_exec` bypasses the Hands-layer deferred mutation queue. Enterprise egress filter (`VXIS_EGRESS_STRICT=1`) constrains sandbox outbound traffic.
+**Security**: arbitrary execution is fail-closed unless the operator separately
+sets `VXIS_ALLOW_ARBITRARY_EXEC=1`. `--approve-destructive` and injection approval
+do not unlock it. The container uses host networking and static destination checks
+cannot constrain obfuscated/raw-socket code, so enable it only in an isolated,
+trusted environment. `VXIS_EGRESS_STRICT=1` is an additional best-effort check,
+not a packet-level firewall.
 
 **Shared workspace**: `/tmp/vxis-workspace` (host) ↔ `/workspace` (container).
+
+Docker logs rotate at 50 MiB × 3. Optional sandbox limits are
+`VXIS_SANDBOX_MEM_LIMIT`, `VXIS_SANDBOX_SHM_SIZE`, `VXIS_SANDBOX_CPUS`, and
+`VXIS_SANDBOX_PIDS_LIMIT`.
 
 ### Playbook tools (`playbook_tools.py`) — 2 tools
 
@@ -82,6 +91,13 @@ Both run inside the shared `vxis-sandbox` Docker container. Lifecycle: lazy-star
 |---|---|
 | `list_playbooks` | List all available playbook names (injection_vectors, auth_bypass, xss, etc.). |
 | `load_playbook` | Load a specific playbook by name. Returns stack-specific attack techniques and patterns. |
+
+### Security skill library (`security_skill_tools.py`) — 2 tools
+
+| Tool | What it does |
+|---|---|
+| `search_security_skills` | Search the local `Anthropic-Cybersecurity-Skills` `SKILL.md` library for relevant pentest methodology and verification guidance. Offline/read-only. |
+| `load_security_skill` | Load one matching security `SKILL.md` as reference material. Execution still goes through VXIS tools and scope gates. |
 
 ### Finding CRUD (`finding_tools.py`) — 3 tools
 
