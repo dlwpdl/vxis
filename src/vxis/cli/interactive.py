@@ -14,7 +14,7 @@ from rich.text import Text
 from InquirerPy import inquirer as _inquirer
 from InquirerPy.separator import Separator
 
-from vxis.cli.theme import BRASS, vxis_inquirer_style
+from vxis.cli.theme import BRASS, get_ui_language, set_ui_language, tr, vxis_inquirer_style
 
 console = Console()
 
@@ -116,7 +116,9 @@ def _configure_llm_environment(
     os.environ["UPSTREAM_LLM_MODEL"] = model
 
     if provider == "ollama":
-        resolved = (base_url or os.environ.get("VXIS_OLLAMA_BASE_URL") or _DEFAULT_OLLAMA_BASE_URL).rstrip("/")
+        resolved = (
+            base_url or os.environ.get("VXIS_OLLAMA_BASE_URL") or _DEFAULT_OLLAMA_BASE_URL
+        ).rstrip("/")
         os.environ["VXIS_OLLAMA_BASE_URL"] = resolved
         os.environ["VXIS_OLLAMA_UNCENSORED_MODEL"] = model
         os.environ["VXIS_WORKER_LLM_PROVIDER"] = provider
@@ -129,9 +131,7 @@ def _configure_llm_environment(
 
     if provider == "llamacpp":
         resolved = (
-            base_url
-            or os.environ.get("VXIS_LLAMACPP_BASE_URL")
-            or _DEFAULT_LLAMACPP_BASE_URL
+            base_url or os.environ.get("VXIS_LLAMACPP_BASE_URL") or _DEFAULT_LLAMACPP_BASE_URL
         ).rstrip("/")
         os.environ["VXIS_LLAMACPP_BASE_URL"] = resolved
         os.environ["VXIS_LLAMACPP_MODEL"] = model
@@ -155,9 +155,12 @@ def _configure_llm_environment(
 # key alone isn't enough: with no provider set a fresh process defaults the director
 # back to anthropic and preflight reports "no Brain" despite the saved Google key.
 _PERSISTED_BRAIN_ENV_KEYS = (
-    "UPSTREAM_LLM_PROVIDER", "UPSTREAM_LLM_MODEL",
-    "VXIS_DIRECTOR_LLM_PROVIDER", "VXIS_DIRECTOR_LLM_MODEL",
-    "VXIS_VERIFIER_LLM_PROVIDER", "VXIS_VERIFIER_LLM_MODEL",
+    "UPSTREAM_LLM_PROVIDER",
+    "UPSTREAM_LLM_MODEL",
+    "VXIS_DIRECTOR_LLM_PROVIDER",
+    "VXIS_DIRECTOR_LLM_MODEL",
+    "VXIS_VERIFIER_LLM_PROVIDER",
+    "VXIS_VERIFIER_LLM_MODEL",
 )
 
 
@@ -179,7 +182,9 @@ def _persist_brain_selection(key_env: str, api_key: str, *, path=None) -> None:
 
 def _cloud_provider_key_env(provider: str) -> str:
     """Return the required API-key env var for a cloud provider."""
-    return _CLOUD_PROVIDER_KEYS.get("gemini" if provider == "google" else provider, "TOGETHER_API_KEY")
+    return _CLOUD_PROVIDER_KEYS.get(
+        "gemini" if provider == "google" else provider, "TOGETHER_API_KEY"
+    )
 
 
 def _has_cloud_provider_key(provider: str) -> bool:
@@ -306,6 +311,7 @@ def _check_local_llm_ready(provider: str, base_url: str, timeout: float = 2.5) -
     except Exception as exc:
         return False, f"{provider} unreachable at {base_url.rstrip('/')}: {exc}"
 
+
 # ── 스캔 카테고리 정의 ──────────────────────────────────────────
 
 SCAN_CATEGORIES = {
@@ -323,7 +329,11 @@ SCAN_CATEGORIES = {
         "desc": "대상에 직접 접촉 없이 OSINT만으로 정보 수집",
         "profile": "passive",
         "plugins": [
-            "shodan", "crtsh", "subfinder", "dnstwist", "httpx",
+            "shodan",
+            "crtsh",
+            "subfinder",
+            "dnstwist",
+            "httpx",
         ],
     },
     "external": {
@@ -332,9 +342,19 @@ SCAN_CATEGORIES = {
         "desc": "웹/네트워크 취약점 + SSL/DNS + 시크릿 탐지",
         "profile": "standard",
         "plugins": [
-            "subfinder", "httpx", "nmap", "nuclei", "testssl",
-            "sslyze", "checkdmarc", "wafw00f", "trufflehog",
-            "gitleaks", "crtsh", "dnstwist", "shodan",
+            "subfinder",
+            "httpx",
+            "nmap",
+            "nuclei",
+            "testssl",
+            "sslyze",
+            "checkdmarc",
+            "wafw00f",
+            "trufflehog",
+            "gitleaks",
+            "crtsh",
+            "dnstwist",
+            "shodan",
         ],
     },
     "internal": {
@@ -344,7 +364,11 @@ SCAN_CATEGORIES = {
         "profile": "standard",
         "tier": 2,
         "plugins": [
-            "nmap", "bloodhound", "certipy", "netexec", "linpeas",
+            "nmap",
+            "bloodhound",
+            "certipy",
+            "netexec",
+            "linpeas",
         ],
     },
     "code": {
@@ -353,8 +377,14 @@ SCAN_CATEGORIES = {
         "desc": "소스코드 + 의존성 + CI/CD 파이프라인 보안 점검",
         "profile": "standard",
         "plugins": [
-            "semgrep", "bandit", "checkov", "poutine", "actionlint",
-            "gitleaks", "confused", "trivy",
+            "semgrep",
+            "bandit",
+            "checkov",
+            "poutine",
+            "actionlint",
+            "gitleaks",
+            "confused",
+            "trivy",
         ],
     },
     "cloud": {
@@ -363,7 +393,10 @@ SCAN_CATEGORIES = {
         "desc": "AWS / Azure / GCP 설정 감사 + 컨테이너 보안",
         "profile": "standard",
         "plugins": [
-            "prowler", "s3scanner", "trivy-k8s", "kube-bench",
+            "prowler",
+            "s3scanner",
+            "trivy-k8s",
+            "kube-bench",
         ],
     },
     "full": {
@@ -417,13 +450,52 @@ PROFILES = {
     },
 }
 
+_CATEGORY_EN = {
+    "ai_auto": (
+        "AI autonomous scan (Agent Mode)",
+        "AI runs recon, testing, exploitation, and verification",
+    ),
+    "zero_touch": (
+        "Zero-touch (OSINT only)",
+        "Collect public information without contacting the target",
+    ),
+    "external": ("External scan", "Web/network vulnerabilities, SSL/DNS, and secret discovery"),
+    "internal": ("Internal scan", "Active Directory and internal network assessment"),
+    "code": ("Code / supply-chain scan", "Source, dependencies, and CI/CD security checks"),
+    "cloud": ("Cloud scan", "AWS, Azure, GCP, and container configuration audit"),
+    "full": ("Full scan", "Run all external, code, and cloud plugins"),
+    "batch": ("Batch scan (CSV)", "Scan multiple CSV targets and create risk reports"),
+    "custom": ("Custom scan", "Choose the plugins to run"),
+}
+
+_PROFILE_EN = {
+    "passive": ("Information only", "Public information and lightweight checks"),
+    "standard": ("Safe assessment", "Read/verify for production; block dangerous attacks"),
+    "crown": ("Real-world verification", "Verify impact within the approved scope"),
+    "stealth": ("Low-noise assessment", "Reduce requests and check slowly"),
+    "aggressive": ("Lab full access", "Isolated labs only; allows stronger attacks"),
+}
+
+
+def _category_text(key: str, category: dict) -> tuple[str, str]:
+    if get_ui_language() == "en" and key in _CATEGORY_EN:
+        return _CATEGORY_EN[key]
+    return str(category["name"]), str(category["desc"])
+
+
+def _profile_text(key: str, profile: dict) -> tuple[str, str]:
+    if get_ui_language() == "en" and key in _PROFILE_EN:
+        return _PROFILE_EN[key]
+    return str(profile["name"]), str(profile["desc"])
+
 
 def _profile_display(profile: str) -> str:
     """Human-readable profile label for TUI summaries."""
     prof = PROFILES.get(profile)
     if not prof:
         return profile
-    return f"{prof['name']} ({profile})"
+    name, _ = _profile_text(profile, prof)
+    return f"{name} ({profile})"
 
 
 # NOW-3 #3: parallel/serial agent execution. The agent-graph worker LLM semaphore
@@ -478,9 +550,7 @@ def _specialized_profile_choices() -> list[dict]:
         badge = attack_level_badge(name)
         label = _PROFILE_KR.get(name, name)
         flags = (" · " + ", ".join(badge["flags"])) if badge["flags"] else ""
-        out.append(
-            {"name": f"[공격력 {badge['bars']}] {label} ({name}){flags}", "value": name}
-        )
+        out.append({"name": f"[공격력 {badge['bars']}] {label} ({name}){flags}", "value": name})
     return out
 
 
@@ -599,40 +669,47 @@ def print_banner() -> None:
 
 # ── 메인 메뉴 ──────────────────────────────────────────────────
 
+
 def _main_menu_choices() -> list:
     """NOW-3: collapsed top level — daily actions up front, the rest under 고급."""
     return [
-        {"name": "\U0001f50d  스캔 시작", "value": "scan"},
-        {"name": "\U0001f4ca  스캔 결과 조회", "value": "results"},
-        {"name": "\U0001f4c4  리포트 생성 / 내보내기", "value": "report"},
+        {"name": f"\U0001f50d  {tr('Start scan', '스캔 시작')}", "value": "scan"},
+        {"name": f"\U0001f4ca  {tr('View scan results', '스캔 결과 조회')}", "value": "results"},
+        {
+            "name": f"\U0001f4c4  {tr('Generate / export report', '리포트 생성 / 내보내기')}",
+            "value": "report",
+        },
         Separator(),
-        {"name": "\U0001f6e0\ufe0f   고급 (산업 스캔 · 클라이언트 · 플러그인 · 대시보드)", "value": "advanced"},
-        {"name": "\u2699\ufe0f   설정", "value": "settings"},
-        {"name": "\u274c  종료", "value": "exit"},
+        {
+            "name": f"\U0001f6e0\ufe0f   {tr('Advanced (industry · clients · plugins · dashboard)', '고급 (산업 스캔 · 클라이언트 · 플러그인 · 대시보드)')}",
+            "value": "advanced",
+        },
+        {"name": f"\u2699\ufe0f   {tr('Settings', '설정')}", "value": "settings"},
+        {"name": f"\u274c  {tr('Quit', '종료')}", "value": "exit"},
     ]
 
 
 def _advanced_menu_choices() -> list:
     """Advanced submenu — repeat-user / B2B features moved off the top level."""
     return [
-        {"name": "\U0001f3ed  산업 스캔 (도메인 리스트 · 기업 발굴 · 아웃리치)", "value": "industry"},
-        {"name": "\U0001f464  클라이언트 관리", "value": "client"},
-        {"name": "\U0001f50c  플러그인 관리", "value": "plugins"},
-        {"name": "\U0001f310  대시보드 열기", "value": "dashboard"},
+        {"name": f"\U0001f3ed  {tr('Industry scan', '산업 스캔')}", "value": "industry"},
+        {"name": f"\U0001f464  {tr('Client management', '클라이언트 관리')}", "value": "client"},
+        {"name": f"\U0001f50c  {tr('Plugin management', '플러그인 관리')}", "value": "plugins"},
+        {"name": f"\U0001f310  {tr('Open dashboard', '대시보드 열기')}", "value": "dashboard"},
         Separator(),
-        {"name": "\u2196\ufe0f   뒤로", "value": "back"},
+        {"name": f"\u2196\ufe0f   {tr('Back', '뒤로')}", "value": "back"},
     ]
 
 
 def main_menu() -> str | None:
     """메인 메뉴를 표시하고 선택된 액션을 반환."""
     return inquirer.select(
-        message="무엇을 하시겠습니까?",
+        message=tr("What would you like to do?", "무엇을 하시겠습니까?"),
         choices=_main_menu_choices(),
         pointer="\u276f",
         qmark="",
         amark="",
-        instruction="(↑↓ 방향키로 선택, Enter 확인)",
+        instruction=tr("(↑↓ select, Enter confirm)", "(↑↓ 방향키로 선택, Enter 확인)"),
     ).execute()
 
 
@@ -662,7 +739,9 @@ def _menu_select(title: str, choices: list) -> str | None:
         except Exception:
             pass
     return inquirer.select(
-        message=title, choices=choices, instruction="(↑↓ 방향키)",
+        message=title,
+        choices=choices,
+        instruction=tr("(↑↓ select)", "(↑↓ 방향키)"),
     ).execute()
 
 
@@ -702,22 +781,42 @@ def _text_input(title: str, prompt: str = "", *, default: str = "", validate=Non
 
 def _advanced_menu() -> str | None:
     """고급 서브메뉴 — 첫 화면과 같은 dossier Textual 메뉴."""
-    return _menu_select("고급 기능", _advanced_menu_choices())
+    return _menu_select(tr("Advanced", "고급 기능"), _advanced_menu_choices())
+
 
 # ── 스캔 위자드 ────────────────────────────────────────────────
+
 
 def _settings_menu_choices() -> list:
     """Settings submenu — real actions (was a static help message)."""
     return [
-        {"name": "\U0001f504  모델 소스 새로고침 (models.dev 캐시 비우기)", "value": "refresh_models"},
-        {"name": "\U0001f511  환경변수 / API 키 안내", "value": "env_help"},
+        {"name": f"\U0001f310  {tr('Language', '언어')}", "value": "language"},
+        {
+            "name": f"\U0001f504  {tr('Refresh model sources (clear models.dev cache)', '모델 소스 새로고침 (models.dev 캐시 비우기)')}",
+            "value": "refresh_models",
+        },
+        {
+            "name": f"\U0001f511  {tr('Environment / API key help', '환경변수 / API 키 안내')}",
+            "value": "env_help",
+        },
         Separator(),
-        {"name": "\u2196\ufe0f   뒤로", "value": "back"},
+        {"name": f"\u2196\ufe0f   {tr('Back', '뒤로')}", "value": "back"},
     ]
 
 
 def _settings_menu() -> str | None:
-    return _menu_select("설정", _settings_menu_choices())
+    return _menu_select(tr("Settings", "설정"), _settings_menu_choices())
+
+
+def _language_menu() -> str | None:
+    return _menu_select(
+        tr("Language", "언어"),
+        [
+            {"name": "English", "value": "en"},
+            {"name": "한국어", "value": "ko"},
+            {"name": f"\u2196\ufe0f   {tr('Back', '뒤로')}", "value": "back"},
+        ],
+    )
 
 
 # NOW-3: scan SCOPE first (AI auto recommended), advanced execution shapes
@@ -737,14 +836,16 @@ def _ordered_scan_choices() -> list:
         if key not in SCAN_CATEGORIES:
             continue
         cat = SCAN_CATEGORIES[key]
-        rec = "  [권장]" if key == "ai_auto" else ""
-        out.append({"name": f"{cat['icon']}  {cat['name']}{rec}    {cat['desc']}", "value": key})
-    out.append(Separator("── 고급 스캔 유형 ──"))
+        name, desc = _category_text(key, cat)
+        rec = f"  [{tr('Recommended', '권장')}]" if key == "ai_auto" else ""
+        out.append({"name": f"{cat['icon']}  {name}{rec}    {desc}", "value": key})
+    out.append(Separator(f"── {tr('Advanced scan types', '고급 스캔 유형')} ──"))
     for key in _SCAN_ADVANCED_ORDER + leftover:
         if key not in SCAN_CATEGORIES:
             continue
         cat = SCAN_CATEGORIES[key]
-        out.append({"name": f"{cat['icon']}  {cat['name']}    {cat['desc']}", "value": key})
+        name, desc = _category_text(key, cat)
+        out.append({"name": f"{cat['icon']}  {name}    {desc}", "value": key})
     return out
 
 
@@ -753,10 +854,10 @@ def scan_wizard() -> dict | None:
 
     # Step 1: 스캔 유형 선택
     scan_type = _select_back(
-        "스캔 유형을 선택하세요",
+        tr("Choose a scan type", "스캔 유형을 선택하세요"),
         _ordered_scan_choices(),
         qmark="\U0001f50d",
-        instruction="(↑↓ 방향키)",
+        instruction=tr("(↑↓ select)", "(↑↓ 방향키)"),
     )
 
     if scan_type is None or scan_type is _BACK:
@@ -773,7 +874,11 @@ def scan_wizard() -> dict | None:
         return _code_scan_wizard(cat)
 
     # Step 2: 타겟 입력
-    target = _text_input("스캔 대상", "도메인, IP, 또는 CIDR", validate=lambda v: len(v.strip()) > 0)
+    target = _text_input(
+        tr("Scan target", "스캔 대상"),
+        tr("domain, IP, or CIDR", "도메인, IP, 또는 CIDR"),
+        validate=lambda v: len(v.strip()) > 0,
+    )
 
     if not target:
         return None
@@ -786,14 +891,17 @@ def scan_wizard() -> dict | None:
         for key, prof in PROFILES.items():
             if scan_type == "zero_touch" and key != "passive":
                 continue
-            marker = " (권장)" if key == cat["profile"] else ""
-            profile_choices.append({
-                "name": f"{prof['icon']}  {prof['name']}   {prof['desc']}{marker}",
-                "value": key,
-            })
+            name, desc = _profile_text(key, prof)
+            marker = f" ({tr('recommended', '권장')})" if key == cat["profile"] else ""
+            profile_choices.append(
+                {
+                    "name": f"{prof['icon']}  {name}   {desc}{marker}",
+                    "value": key,
+                }
+            )
 
         profile = inquirer.select(
-            message="어느 정도까지 직접 확인할까요?",
+            message=tr("How far should VXIS verify directly?", "어느 정도까지 직접 확인할까요?"),
             choices=profile_choices,
             default=cat["profile"],
             pointer="\u276f",
@@ -811,17 +919,18 @@ def scan_wizard() -> dict | None:
 
     # Step 5: 플러그인 목록 표시 + 확인
     if selected_plugins:
-        _show_plugin_summary(selected_plugins, target, profile, cat["name"])
+        scan_name, _ = _category_text(scan_type, cat)
+        _show_plugin_summary(selected_plugins, target, profile, scan_name)
 
     confirm = inquirer.confirm(
-        message="스캔을 시작할까요?",
+        message=tr("Start the scan?", "스캔을 시작할까요?"),
         default=True,
         qmark="\U0001f680",
         amark="\u2705",
     ).execute()
 
     if not confirm:
-        console.print("[dim]스캔이 취소되었습니다.[/dim]")
+        console.print(f"[dim]{tr('Scan cancelled.', '스캔이 취소되었습니다.')}[/dim]")
         return None
 
     return {
@@ -836,23 +945,23 @@ def scan_wizard() -> dict | None:
 def _batch_wizard() -> dict | None:
     """PE 포트폴리오 배치 스캔 위자드."""
     csv_path = inquirer.filepath(
-        message="CSV 파일 경로를 입력하세요",
+        message=tr("Enter the CSV file path", "CSV 파일 경로를 입력하세요"),
         qmark="\U0001f4c1",
         amark="\u2705",
         validate=lambda val: val.strip().endswith(".csv"),
-        invalid_message=".csv 파일을 선택해주세요",
+        invalid_message=tr("Select a .csv file", ".csv 파일을 선택해주세요"),
     ).execute()
 
     if not csv_path:
         return None
 
-    profile_choices = [
-        {"name": f"{p['icon']}  {p['name']}   {p['desc']}", "value": k}
-        for k, p in PROFILES.items()
-    ]
+    profile_choices = []
+    for key, profile_data in PROFILES.items():
+        name, desc = _profile_text(key, profile_data)
+        profile_choices.append({"name": f"{profile_data['icon']}  {name}   {desc}", "value": key})
 
     profile = inquirer.select(
-        message="어느 정도까지 직접 확인할까요?",
+        message=tr("How far should VXIS verify directly?", "어느 정도까지 직접 확인할까요?"),
         choices=profile_choices,
         default="standard",
         pointer="\u276f",
@@ -861,7 +970,7 @@ def _batch_wizard() -> dict | None:
     ).execute()
 
     concurrent = inquirer.number(
-        message="동시 스캔 수",
+        message=tr("Concurrent scans", "동시 스캔 수"),
         default=3,
         min_allowed=1,
         max_allowed=10,
@@ -881,11 +990,11 @@ def _code_scan_wizard(cat: dict) -> dict | None:
     """코드 스캔 위자드 — GitHub URL 또는 로컬 경로 입력."""
 
     source_type = inquirer.select(
-        message="소스 코드 위치를 선택하세요",
+        message=tr("Choose the source location", "소스 코드 위치를 선택하세요"),
         choices=[
-            {"name": "\U0001f4c2  로컬 경로 (현재 디렉토리 또는 지정 경로)", "value": "local"},
-            {"name": "\U0001f310  GitHub URL (자동 clone 후 스캔)", "value": "github"},
-            {"name": "\u2b05\ufe0f   취소", "value": "cancel"},
+            {"name": f"\U0001f4c2  {tr('Local path', '로컬 경로')}", "value": "local"},
+            {"name": f"\U0001f310  {tr('GitHub URL', 'GitHub URL')}", "value": "github"},
+            {"name": f"\u2b05\ufe0f   {tr('Cancel', '취소')}", "value": "cancel"},
         ],
         pointer="\u276f",
         qmark="\U0001f4bb",
@@ -897,30 +1006,33 @@ def _code_scan_wizard(cat: dict) -> dict | None:
 
     if source_type == "local":
         path = inquirer.text(
-            message="스캔할 경로를 입력하세요",
+            message=tr("Enter the path to scan", "스캔할 경로를 입력하세요"),
             qmark="\U0001f4c2",
             amark="\u2705",
             default=".",
-            instruction="(현재 디렉토리: .)",
+            instruction=tr("(current directory: .)", "(현재 디렉토리: .)"),
         ).execute()
 
         if not path:
             return None
 
         import os
+
         target = os.path.abspath(path.strip())
 
         if not os.path.isdir(target):
-            console.print(f"[red]경로를 찾을 수 없습니다: {target}[/red]")
+            console.print(f"[red]{tr('Path not found', '경로를 찾을 수 없습니다')}: {target}[/red]")
             return None
 
     else:
         # GitHub URL → clone
         repo_url = inquirer.text(
-            message="GitHub 저장소 URL을 입력하세요",
+            message=tr("Enter the GitHub repository URL", "GitHub 저장소 URL을 입력하세요"),
             qmark="\U0001f310",
             amark="\u2705",
-            instruction="(예: https://github.com/owner/repo)",
+            instruction=tr(
+                "(example: https://github.com/owner/repo)", "(예: https://github.com/owner/repo)"
+            ),
             validate=lambda v: "github.com" in v or "gitlab.com" in v or len(v.strip()) > 0,
         ).execute()
 
@@ -940,27 +1052,31 @@ def _code_scan_wizard(cat: dict) -> dict | None:
         try:
             result = subprocess.run(
                 ["git", "clone", "--depth", "1", repo_url, clone_dir],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             if result.returncode != 0:
-                console.print(f"[red]Clone 실패:[/red] {result.stderr[:200]}")
+                console.print(
+                    f"[red]{tr('Clone failed', 'Clone 실패')}:[/red] {result.stderr[:200]}"
+                )
                 return None
-            console.print("[green]Clone 완료[/green]")
+            console.print(f"[green]{tr('Clone complete', 'Clone 완료')}[/green]")
         except Exception as exc:
-            console.print(f"[red]Clone 실패:[/red] {exc}")
+            console.print(f"[red]{tr('Clone failed', 'Clone 실패')}:[/red] {exc}")
             return None
 
         target = clone_dir
 
     profile = inquirer.select(
-        message="코드를 어느 깊이까지 확인할까요?",
+        message=tr("How deeply should VXIS inspect the code?", "코드를 어느 깊이까지 확인할까요?"),
         choices=[
             {
-                "name": "\U0001f6e1\ufe0f  안전 점검 - 현재 코드와 의존성 위주로 확인 (권장)",
+                "name": f"\U0001f6e1\ufe0f  {tr('Safe assessment - code and dependencies (recommended)', '안전 점검 - 현재 코드와 의존성 위주로 확인 (권장)')}",
                 "value": "standard",
             },
             {
-                "name": "\U0001f680  깊은 코드 점검 - 더 오래 걸리지만 더 넓게 확인",
+                "name": f"\U0001f680  {tr('Deep code assessment - slower, broader coverage', '깊은 코드 점검 - 더 오래 걸리지만 더 넓게 확인')}",
                 "value": "aggressive",
             },
         ],
@@ -972,17 +1088,18 @@ def _code_scan_wizard(cat: dict) -> dict | None:
 
     selected_plugins = cat["plugins"]
 
-    _show_plugin_summary(selected_plugins, target, profile, cat["name"])
+    scan_name, _ = _category_text("code", cat)
+    _show_plugin_summary(selected_plugins, target, profile, scan_name)
 
     confirm = inquirer.confirm(
-        message="스캔을 시작할까요?",
+        message=tr("Start the scan?", "스캔을 시작할까요?"),
         default=True,
         qmark="\U0001f680",
         amark="\u2705",
     ).execute()
 
     if not confirm:
-        console.print("[dim]스캔이 취소되었습니다.[/dim]")
+        console.print(f"[dim]{tr('Scan cancelled.', '스캔이 취소되었습니다.')}[/dim]")
         return None
 
     return {
@@ -998,6 +1115,7 @@ def _plugin_selector() -> list[str] | None:
     """체크박스로 플러그인 멀티 선택."""
     try:
         from vxis.plugins.registry import discover_plugins
+
         registry = discover_plugins()
     except Exception:
         console.print("[yellow]플러그인 목록을 불러올 수 없습니다.[/yellow]")
@@ -1015,57 +1133,68 @@ def _plugin_selector() -> list[str] | None:
         for name in names:
             plugin = registry[name]
             available = plugin.validate_environment()
-            status = "" if available else " [미설치]"
-            choices.append({
-                "name": f"{name}{status}",
-                "value": name,
-                "enabled": available,
-            })
+            status = "" if available else f" [{tr('not installed', '미설치')}]"
+            choices.append(
+                {
+                    "name": f"{name}{status}",
+                    "value": name,
+                    "enabled": available,
+                }
+            )
 
     selected = inquirer.checkbox(
-        message="실행할 플러그인을 선택하세요",
+        message=tr("Choose plugins to run", "실행할 플러그인을 선택하세요"),
         choices=choices,
         pointer="\u276f",
         qmark="\U0001f50c",
         amark="\u2705",
-        instruction="(Space 선택/해제, Enter 확인)",
+        instruction=tr("(Space toggle, Enter confirm)", "(Space 선택/해제, Enter 확인)"),
     ).execute()
 
     return selected if selected else None
 
 
 def _show_plugin_summary(
-    plugins: list[str], target: str, profile: str, scan_name: str,
+    plugins: list[str],
+    target: str,
+    profile: str,
+    scan_name: str,
 ) -> None:
     """선택된 스캔 설정 요약 표시."""
     table = Table.grid(padding=(0, 1))
     table.add_column(style="bold", width=14)
     table.add_column()
 
-    table.add_row("\U0001f3af 대상:", f"[cyan]{target}[/cyan]")
-    table.add_row("\U0001f4cb 스캔 유형:", f"[yellow]{scan_name}[/yellow]")
-    table.add_row("\U0001f6e1\ufe0f 실행 모드:", f"[green]{_profile_display(profile)}[/green]")
+    table.add_row(f"\U0001f3af {tr('Target', '대상')}:", f"[cyan]{target}[/cyan]")
+    table.add_row(f"\U0001f4cb {tr('Scan type', '스캔 유형')}:", f"[yellow]{scan_name}[/yellow]")
+    table.add_row(
+        f"\U0001f6e1\ufe0f {tr('Execution mode', '실행 모드')}:",
+        f"[green]{_profile_display(profile)}[/green]",
+    )
 
     # Plugin grid (4 columns)
     plugin_lines = []
     for i in range(0, len(plugins), 4):
-        chunk = plugins[i:i + 4]
+        chunk = plugins[i : i + 4]
         line = "  ".join(f"\u2705 {p}" for p in chunk)
         plugin_lines.append(line)
 
     table.add_row(
-        "\U0001f50c 플러그인:",
-        f"[dim]{len(plugins)}개 선택[/dim]",
+        f"\U0001f50c {tr('Plugins', '플러그인')}:",
+        f"[dim]{len(plugins)} {tr('selected', '개 선택')}[/dim]",
     )
 
     console.print()
-    console.print(Panel(table, title="스캔 설정 확인", border_style=BRASS))
+    console.print(
+        Panel(table, title=tr("Confirm scan settings", "스캔 설정 확인"), border_style=BRASS)
+    )
     for line in plugin_lines:
         console.print(f"  {line}")
     console.print()
 
 
 # ── 결과 조회 ──────────────────────────────────────────────────
+
 
 def results_menu() -> dict | None:
     """스캔 결과 조회 메뉴."""
@@ -1094,6 +1223,7 @@ def results_menu() -> dict | None:
 
 # ── 리포트 메뉴 ────────────────────────────────────────────────
 
+
 def report_menu() -> dict | None:
     """리포트 생성/내보내기 메뉴. 최근 스캔 목록을 먼저 보여줌."""
     import asyncio
@@ -1110,6 +1240,7 @@ def report_menu() -> dict | None:
         if ":///" in db_url:
             prefix, path = db_url.split("///", 1)
             from pathlib import Path as _P
+
             db_url = f"{prefix}///{_P(path).expanduser()}"
 
         async def _list_scans():
@@ -1123,7 +1254,9 @@ def report_menu() -> dict | None:
                     scan_info = []
                     for s in scans:
                         cr = await session.execute(
-                            select(func.count(FindingRecord.id)).where(FindingRecord.scan_id == s.id)
+                            select(func.count(FindingRecord.id)).where(
+                                FindingRecord.scan_id == s.id
+                            )
                         )
                         count = cr.scalar_one_or_none() or 0
                         time_str = s.started_at.strftime("%m-%d %H:%M") if s.started_at else "—"
@@ -1136,8 +1269,10 @@ def report_menu() -> dict | None:
         if scans:
             table = Table(
                 title="\U0001f4cb 최근 스캔 목록",
-                show_header=True, header_style="bold",
-                border_style=BRASS, expand=False,
+                show_header=True,
+                header_style="bold",
+                border_style=BRASS,
+                expand=False,
             )
             table.add_column("ID", style="bold cyan")
             table.add_column("대상")
@@ -1184,6 +1319,7 @@ def report_menu() -> dict | None:
 
 # ── 전체 인터랙티브 루프 ────────────────────────────────────────
 
+
 def _home_menu_action(use_home: bool) -> str | None:
     """The dossier Textual home when usable; the InquirerPy menu otherwise (and
     as a fallback if the Textual home fails to start)."""
@@ -1214,17 +1350,17 @@ def run_interactive() -> None:
         try:
             action = _home_menu_action(use_home)
         except KeyboardInterrupt:
-            console.print("\n[dim]종료합니다.[/dim]")
+            console.print(f"\n[dim]{tr('Exiting.', '종료합니다.')}[/dim]")
             break
 
         if action == "exit" or action is None:
-            console.print("[dim]종료합니다.[/dim]")
+            console.print(f"[dim]{tr('Exiting.', '종료합니다.')}[/dim]")
             break
 
         try:
             _dispatch(action)
         except KeyboardInterrupt:
-            console.print("\n[dim]취소되었습니다.[/dim]")
+            console.print(f"\n[dim]{tr('Cancelled.', '취소되었습니다.')}[/dim]")
             continue
 
 
@@ -1252,6 +1388,7 @@ def _dispatch(action: str) -> None:
 
     elif action == "plugins":
         from vxis.cli.installer import install_interactive
+
         install_interactive()
 
     elif action == "client":
@@ -1259,6 +1396,7 @@ def _dispatch(action: str) -> None:
 
     elif action == "dashboard":
         from vxis.cli.main import dashboard
+
         dashboard(host="127.0.0.1", port=8080)
 
     elif action == "industry":
@@ -1266,22 +1404,36 @@ def _dispatch(action: str) -> None:
 
     elif action == "settings":
         sub = _settings_menu()
-        if sub == "refresh_models":
+        if sub == "language":
+            language = _language_menu()
+            if language in {"en", "ko"}:
+                set_ui_language(language)
+                console.print(
+                    f"[green]{tr('Language changed to English.', '언어를 한국어로 변경했습니다.')}[/green]"
+                )
+        elif sub == "refresh_models":
             from vxis.llm.model_catalog import available_models, clear_cache
 
             removed = clear_cache()
             console.print(
-                "[dim]모델 캐시를 비웠습니다 — 새로 가져옵니다…[/dim]"
-                if removed else "[dim]캐시 없음 — 새로 가져옵니다…[/dim]"
+                f"[dim]{tr('Model cache cleared — refreshing…', '모델 캐시를 비웠습니다 — 새로 가져옵니다…')}[/dim]"
+                if removed
+                else f"[dim]{tr('No cache — refreshing…', '캐시 없음 — 새로 가져옵니다…')}[/dim]"
             )
             res = available_models("anthropic")  # force a live fetch + re-cache
             console.print(
-                f"[green]모델 소스 새로고침 완료: {_source_label_kr(res.source)} "
-                f"(anthropic {len(res.models)}개)[/green]"
+                f"[green]{tr('Model sources refreshed', '모델 소스 새로고침 완료')}: "
+                f"{_source_label_kr(res.source)} (anthropic {len(res.models)}"
+                f"{tr(' models', '개')})[/green]"
             )
         elif sub == "env_help":
-            console.print("[dim]설정은 .env 파일 또는 VXIS_ 환경변수로 관리합니다.[/dim]")
-            console.print("[dim]  예: VXIS_DB_URL, VXIS_LOG_LEVEL, VXIS_SHODAN_API_KEY[/dim]")
+            console.print(
+                f"[dim]{tr('Settings are managed through the .env file or VXIS_ environment variables.', '설정은 .env 파일 또는 VXIS_ 환경변수로 관리합니다.')}[/dim]"
+            )
+            console.print(
+                f"[dim]  {tr('Example', '예')}: VXIS_DB_URL, VXIS_LOG_LEVEL, "
+                "VXIS_SHODAN_API_KEY[/dim]"
+            )
 
 
 def _execute_scan(params: dict) -> None:
@@ -1301,9 +1453,7 @@ def _execute_scan(params: dict) -> None:
         root_logger.removeHandler(handler)
     file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
     file_handler.setFormatter(
-        logging.Formatter(
-            "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
-        )
+        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
     )
     root_logger.addHandler(file_handler)
     root_logger.setLevel(logging.INFO)
@@ -1312,13 +1462,16 @@ def _execute_scan(params: dict) -> None:
     console.print(f"[dim]로그: {log_path}[/dim]")
 
     # AI 자율 모드
-    if params.get("scan_type") == "ai_auto" or SCAN_CATEGORIES.get(params.get("scan_type", ""), {}).get("agent_mode"):
+    if params.get("scan_type") == "ai_auto" or SCAN_CATEGORIES.get(
+        params.get("scan_type", ""), {}
+    ).get("agent_mode"):
         _execute_agent_scan(params)
         return
 
     if params["scan_type"] == "batch":
         from pathlib import Path
         from vxis.cli.main import batch
+
         batch(
             csv_file=Path(params["csv_path"]),
             profile=params["profile"],
@@ -1372,6 +1525,7 @@ def _execute_scan(params: dict) -> None:
     except Exception as exc:
         console.print(f"\n[bold red]스캔 실패:[/bold red] {exc}")
         import traceback
+
         console.print(f"[dim]{traceback.format_exc()}[/dim]")
         return
 
@@ -1384,8 +1538,11 @@ def _execute_scan(params: dict) -> None:
 
     counts = result.severity_counts
     severity_colors = {
-        "critical": "red", "high": "red", "medium": "yellow",
-        "low": "blue", "informational": "dim",
+        "critical": "red",
+        "high": "red",
+        "medium": "yellow",
+        "low": "blue",
+        "informational": "dim",
     }
     parts = []
     for sev in ["critical", "high", "medium", "low", "informational"]:
@@ -1402,13 +1559,18 @@ def _execute_scan(params: dict) -> None:
         try:
             from vxis.config.schema import VXISConfig as _VXISConfig
             from vxis.core.db import create_engine as _create_engine
-            from vxis.core.delta import compute_delta, format_delta_summary, get_previous_scan_findings
+            from vxis.core.delta import (
+                compute_delta,
+                format_delta_summary,
+                get_previous_scan_findings,
+            )
 
             _config = _VXISConfig()
             _db_url = _config.db_url
             if ":///" in _db_url:
                 _prefix, _path = _db_url.split("///", 1)
                 from pathlib import Path as _Path
+
                 _db_url = f"{_prefix}///{_Path(_path).expanduser()}"
 
             _delta_engine = _create_engine(_db_url)
@@ -1553,8 +1715,11 @@ def _execute_scan(params: dict) -> None:
             return
 
         _sev_colors = {
-            "critical": "bold red", "high": "red",
-            "medium": "yellow", "low": "blue", "informational": "dim",
+            "critical": "bold red",
+            "high": "red",
+            "medium": "yellow",
+            "low": "blue",
+            "informational": "dim",
         }
         _detail_table = Table(
             title=f"\U0001f50d 취약점 목록 — {params['target']}",
@@ -1569,12 +1734,17 @@ def _execute_scan(params: dict) -> None:
         _detail_table.add_column("신뢰도", justify="right", width=7)
 
         _sev_order_map = {
-            "critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4,
+            "critical": 0,
+            "high": 1,
+            "medium": 2,
+            "low": 3,
+            "informational": 4,
         }
         _sorted = sorted(
             result.findings,
             key=lambda _f: _sev_order_map.get(
-                _f.effective_severity.value if hasattr(_f.effective_severity, "value")
+                _f.effective_severity.value
+                if hasattr(_f.effective_severity, "value")
                 else str(_f.effective_severity),
                 5,
             ),
@@ -1616,6 +1786,7 @@ def _show_results(params: dict) -> None:
     if ":///" in db_url:
         prefix, path = db_url.split("///", 1)
         from pathlib import Path as P
+
         db_url = f"{prefix}///{P(path).expanduser()}"
 
     async def _query():
@@ -1655,20 +1826,28 @@ def _show_results(params: dict) -> None:
                     if findings:
                         # Severity 테이블
                         sev_table = Table(
-                            show_header=True, header_style="bold",
-                            border_style="green", expand=False,
+                            show_header=True,
+                            header_style="bold",
+                            border_style="green",
+                            expand=False,
                         )
                         sev_table.add_column("심각도", no_wrap=True)
                         sev_table.add_column("건수", justify="right")
                         sev_table.add_column("주요 항목")
 
                         sev_colors = {
-                            "critical": "bold red", "high": "red",
-                            "medium": "yellow", "low": "blue", "informational": "dim",
+                            "critical": "bold red",
+                            "high": "red",
+                            "medium": "yellow",
+                            "low": "blue",
+                            "informational": "dim",
                         }
                         sev_kr = {
-                            "critical": "심각", "high": "높음",
-                            "medium": "중간", "low": "낮음", "informational": "정보",
+                            "critical": "심각",
+                            "high": "높음",
+                            "medium": "중간",
+                            "low": "낮음",
+                            "informational": "정보",
                         }
 
                         by_sev: dict[str, list] = {}
@@ -1705,8 +1884,10 @@ def _show_results(params: dict) -> None:
 
                     table = Table(
                         title="\U0001f4cb 최근 스캔 목록",
-                        show_header=True, header_style="bold",
-                        border_style=BRASS, expand=False,
+                        show_header=True,
+                        header_style="bold",
+                        border_style=BRASS,
+                        expand=False,
                     )
                     table.add_column("ID", style="bold cyan", no_wrap=True)
                     table.add_column("대상", no_wrap=True)
@@ -1880,8 +2061,7 @@ def _industry_csv_scan() -> None:
         return
 
     console.print(
-        f"\n[bold cyan]{len(companies)}개 기업[/bold cyan]을 발굴했습니다. "
-        f"스캔을 시작합니다...\n"
+        f"\n[bold cyan]{len(companies)}개 기업[/bold cyan]을 발굴했습니다. 스캔을 시작합니다...\n"
     )
 
     confirm = inquirer.confirm(
@@ -1923,9 +2103,7 @@ def _industry_csv_scan() -> None:
         )
 
         try:
-            result = asyncio.run(
-                scanner.scan_industry(companies, profile=profile)
-            )
+            result = asyncio.run(scanner.scan_industry(companies, profile=profile))
         except Exception as exc:
             console.print(f"[red]산업 스캔 실패:[/red] {exc}")
             return
@@ -2146,12 +2324,16 @@ def _industry_outreach_menu() -> None:
         from rich.table import Table
 
         status_colors = {
-            "pending": "yellow", "approved": "green",
-            "rejected": "red", "sent": "blue",
+            "pending": "yellow",
+            "approved": "green",
+            "rejected": "red",
+            "sent": "blue",
         }
         table = Table(
             title="\U0001f4e4 아웃리치 큐",
-            show_header=True, header_style="bold", border_style=BRASS,
+            show_header=True,
+            header_style="bold",
+            border_style=BRASS,
         )
         table.add_column("ID (앞 8자)", style="dim")
         table.add_column("기업명")
@@ -2172,9 +2354,7 @@ def _industry_outreach_menu() -> None:
                 item.created_at[:10] if item.created_at else "-",
             )
         console.print(table)
-        console.print(
-            "\n[dim]승인/거절하려면 '아웃리치 큐 관리'에서 해당 액션을 선택하세요.[/dim]"
-        )
+        console.print("\n[dim]승인/거절하려면 '아웃리치 큐 관리'에서 해당 액션을 선택하세요.[/dim]")
 
     elif action in ("approve", "reject"):
         pending = queue.get_pending()
@@ -2219,9 +2399,7 @@ def _industry_outreach_menu() -> None:
                 )
             else:
                 updated = queue.reject(selected_id, reason=notes or "")
-                console.print(
-                    f"[red]거절됨:[/red] {updated.company.name} ({updated.item_id[:8]})"
-                )
+                console.print(f"[red]거절됨:[/red] {updated.company.name} ({updated.item_id[:8]})")
         except Exception as exc:
             console.print(f"[red]처리 실패:[/red] {exc}")
 
@@ -2241,7 +2419,9 @@ def _show_industry_summary(result: object) -> None:
 
     grade_table = Table(
         title="\U0001f4ca 보안 등급 분포",
-        show_header=True, header_style="bold", border_style=BRASS,
+        show_header=True,
+        header_style="bold",
+        border_style=BRASS,
     )
     grade_table.add_column("등급", width=8)
     grade_table.add_column("기업 수", justify="right")
@@ -2339,12 +2519,14 @@ def _save_companies_csv(companies: list) -> None:
         writer = csv.DictWriter(fh, fieldnames=["name", "domain", "industry", "notes"])
         writer.writeheader()
         for c in companies:
-            writer.writerow({
-                "name": c.name,
-                "domain": c.domain,
-                "industry": c.industry,
-                "notes": c.notes,
-            })
+            writer.writerow(
+                {
+                    "name": c.name,
+                    "domain": c.domain,
+                    "industry": c.industry,
+                    "notes": c.notes,
+                }
+            )
 
     console.print(f"[green]CSV 저장됨:[/green] {csv_path}")
 
@@ -2369,6 +2551,7 @@ def _client_menu() -> None:
 
     if action == "list":
         from vxis.cli.main import client_list
+
         client_list()
     elif action == "add":
         _client_add_wizard()
@@ -2379,6 +2562,7 @@ def _client_menu() -> None:
         ).execute()
         if client_id:
             from vxis.cli.main import client_show
+
             client_show(client_id=client_id.strip())
 
 
@@ -2415,8 +2599,7 @@ def _select_local_llm() -> tuple[str, str, str] | None:
             qmark="\U0001f9e0",
             amark="\u2705",
             validate=lambda value: (
-                value.strip().isdigit()
-                and minimum <= int(value.strip()) <= maximum
+                value.strip().isdigit() and minimum <= int(value.strip()) <= maximum
             ),
             invalid_message=f"{minimum}~{maximum} 사이의 정수를 입력하세요",
         ).execute()
@@ -2436,13 +2619,16 @@ def _select_local_llm() -> tuple[str, str, str] | None:
         if not base_url:
             return None
 
-        if _prompt_context_window(
-            message="Ollama context window",
-            env_key="VXIS_OLLAMA_CONTEXT",
-            default=32768,
-            minimum=2048,
-            maximum=262144,
-        ) is None:
+        if (
+            _prompt_context_window(
+                message="Ollama context window",
+                env_key="VXIS_OLLAMA_CONTEXT",
+                default=32768,
+                minimum=2048,
+                maximum=262144,
+            )
+            is None
+        ):
             return None
 
         model = inquirer.select(
@@ -2498,14 +2684,16 @@ def _select_local_llm() -> tuple[str, str, str] | None:
             f"[yellow]llama.cpp 서버 모델 목록을 읽지 못했습니다:[/yellow] {base_url}/v1/models"
         )
 
-    choices.extend([
-        Separator("── fallback/default ──"),
-        {
-            "name": f"Qwen3.8-27B Uncensored Q6_K ({_DEFAULT_LLAMACPP_MODEL})",
-            "value": _DEFAULT_LLAMACPP_MODEL,
-        },
-        {"name": "Custom llama.cpp model id", "value": "__custom__"},
-    ])
+    choices.extend(
+        [
+            Separator("── fallback/default ──"),
+            {
+                "name": f"Qwen3.8-27B Uncensored Q6_K ({_DEFAULT_LLAMACPP_MODEL})",
+                "value": _DEFAULT_LLAMACPP_MODEL,
+            },
+            {"name": "Custom llama.cpp model id", "value": "__custom__"},
+        ]
+    )
 
     model = inquirer.select(
         message="llama.cpp 모델을 선택하세요",
@@ -2534,13 +2722,16 @@ def _select_local_llm() -> tuple[str, str, str] | None:
 
     detect_llamacpp_context.cache_clear()
     context_default = detect_llamacpp_context(base_url, model) or _default_llamacpp_context(health)
-    if _prompt_context_window(
-        message="llama.cpp context window (-c/--ctx-size와 맞추세요)",
-        env_key="VXIS_LLAMACPP_CONTEXT",
-        default=context_default,
-        minimum=512,
-        maximum=262144,
-    ) is None:
+    if (
+        _prompt_context_window(
+            message="llama.cpp context window (-c/--ctx-size와 맞추세요)",
+            env_key="VXIS_LLAMACPP_CONTEXT",
+            default=context_default,
+            minimum=512,
+            maximum=262144,
+        )
+        is None
+    ):
         return None
     return ("llamacpp", model, base_url)
 
@@ -2654,7 +2845,10 @@ def _select_brain_source():
         source = _select_back(
             "AI 두뇌 소스를 선택하세요",
             [
-                {"name": "Cloud API — OpenAI / Anthropic / Gemini / WaveSpeed / Together", "value": "cloud"},
+                {
+                    "name": "Cloud API — OpenAI / Anthropic / Gemini / WaveSpeed / Together",
+                    "value": "cloud",
+                },
                 {"name": "Local Runtime — Ollama / llama.cpp", "value": "local"},
             ],
             qmark="\U0001f9e0",
@@ -2743,7 +2937,9 @@ def _step_brain(state: dict):
             ).execute():
                 try:
                     _persist_brain_selection(key_env, api_key)
-                    console.print("[green]저장됨 — 다음 실행부터 자동 사용됩니다 (provider/model 포함).[/green]")
+                    console.print(
+                        "[green]저장됨 — 다음 실행부터 자동 사용됩니다 (provider/model 포함).[/green]"
+                    )
                 except Exception as exc:
                     console.print(f"[yellow]저장 실패(무시): {exc}[/yellow]")
 
@@ -2763,11 +2959,17 @@ def _step_ceiling(state: dict):
         ("aggressive", "\U0001f680", "랩 전체 허용", "격리/명시 승인 환경에서만 강한 공격 허용"),
     ]
     ceiling_choices = [
-        {"name": f"{icon}  [공격력 {attack_level_badge(value)['bars']}] {label} - {desc}", "value": value}
+        {
+            "name": f"{icon}  [공격력 {attack_level_badge(value)['bars']}] {label} - {desc}",
+            "value": value,
+        }
         for value, icon, label, desc in ceiling_opts
     ]
     ceiling_choices.append(
-        {"name": "⚙️  전문 프로필 직접 선택 (VC · 투자실사 · 컴플라이언스 등)", "value": "specialized"}
+        {
+            "name": "⚙️  전문 프로필 직접 선택 (VC · 투자실사 · 컴플라이언스 등)",
+            "value": "specialized",
+        }
     )
     while True:
         ceiling = _select_back(
@@ -2794,8 +2996,10 @@ def _step_ceiling(state: dict):
             state["profile"] = prof
             return True
         state["profile"] = {
-            "passive": "passive", "standard": "standard",
-            "crown": "crown", "aggressive": "aggressive",
+            "passive": "passive",
+            "standard": "standard",
+            "crown": "crown",
+            "aggressive": "aggressive",
         }.get(ceiling, "crown")
         return True
 
@@ -2805,7 +3009,10 @@ def _step_exec(state: dict):
     exec_mode = _select_back(
         "에이전트 실행 방식을 선택하세요",
         [
-            {"name": "\U0001f9f5  직렬 - 한 번에 하나씩 (안정적 · 저비용 · 권장)", "value": "serial"},
+            {
+                "name": "\U0001f9f5  직렬 - 한 번에 하나씩 (안정적 · 저비용 · 권장)",
+                "value": "serial",
+            },
             {"name": "⚡  병렬 - 여러 작업 동시 (빠름 · 모델 부하 큼)", "value": "parallel"},
         ],
         default="serial",
@@ -2821,7 +3028,10 @@ def _ghost_choices() -> list[dict]:
     """Stealth-mode options for the scan wizard (off is first / default)."""
     return [
         {"name": "\U0001f507  고스트 OFF — 직접 연결 (기본 · 빠름)", "value": "off"},
-        {"name": "\U0001f47b  고스트 ON — 프록시 로테이션 + UA 위장 + 타이밍 지연 (은밀)", "value": "on"},
+        {
+            "name": "\U0001f47b  고스트 ON — 프록시 로테이션 + UA 위장 + 타이밍 지연 (은밀)",
+            "value": "on",
+        },
     ]
 
 
@@ -2837,7 +3047,7 @@ def _step_ghost(state: dict):
     )
     if choice is None or choice is _BACK:
         return choice
-    state["ghost"] = (choice == "on")
+    state["ghost"] = choice == "on"
     return True
 
 
@@ -2864,23 +3074,25 @@ def _execute_agent_scan(params: dict) -> None:
     badge = attack_level_badge(profile)
 
     console.print()
-    console.print(Panel(
-        f"[bold cyan]\U0001f9e0 VXIS AI Agent Mode[/bold cyan]\n\n"
-        f"\U0001f3af 타겟: [white]{target}[/white]\n"
-        f"⚫ 박스 모드: [white]블랙박스[/white] "
-        f"[dim](외부 공격자 시점 · 소스/내부 정보 접근 없음)[/dim]\n"
-        f"\U0001f6e1\ufe0f 실행 허용 범위: [yellow]{profile_kr}[/yellow]\n"
-        f"\U0001f4ca 공격 레벨: [bold]{badge['bars']}[/bold] "
-        f"[dim]{badge['ceiling']}"
-        f"{' · ' + ', '.join(badge['flags']) if badge['flags'] else ''}[/dim]\n"
-        f"\U0001f9f5 실행 방식: [white]{exec_mode_kr}[/white] [dim](동시 워커 {worker_n})[/dim]\n"
-        f"\U0001f47b 고스트: [white]{'ON (프록시·UA·타이밍 위장)' if ghost else 'OFF (직접 연결)'}[/white]\n"
-        f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
-        f"[dim]AI는 넓게 생각하지만, 실제 요청과 공격 실행은 선택한 범위 안에서만 진행합니다.\n"
-        f"정보 수집만 모드에서도 공개 정보에서 중요한 위험이 보이면 보고합니다.[/dim]",
-        title="\U0001f9e0 Autonomous Pentesting",
-        border_style=BRASS,
-    ))
+    console.print(
+        Panel(
+            f"[bold cyan]\U0001f9e0 VXIS AI Agent Mode[/bold cyan]\n\n"
+            f"\U0001f3af 타겟: [white]{target}[/white]\n"
+            f"⚫ 박스 모드: [white]블랙박스[/white] "
+            f"[dim](외부 공격자 시점 · 소스/내부 정보 접근 없음)[/dim]\n"
+            f"\U0001f6e1\ufe0f 실행 허용 범위: [yellow]{profile_kr}[/yellow]\n"
+            f"\U0001f4ca 공격 레벨: [bold]{badge['bars']}[/bold] "
+            f"[dim]{badge['ceiling']}"
+            f"{' · ' + ', '.join(badge['flags']) if badge['flags'] else ''}[/dim]\n"
+            f"\U0001f9f5 실행 방식: [white]{exec_mode_kr}[/white] [dim](동시 워커 {worker_n})[/dim]\n"
+            f"\U0001f47b 고스트: [white]{'ON (프록시·UA·타이밍 위장)' if ghost else 'OFF (직접 연결)'}[/white]\n"
+            f"\U0001f9e0 AI 모델: [green]{model_short}[/green] ({provider})\n\n"
+            f"[dim]AI는 넓게 생각하지만, 실제 요청과 공격 실행은 선택한 범위 안에서만 진행합니다.\n"
+            f"정보 수집만 모드에서도 공개 정보에서 중요한 위험이 보이면 보고합니다.[/dim]",
+            title="\U0001f9e0 Autonomous Pentesting",
+            border_style=BRASS,
+        )
+    )
     console.print()
 
     # NOW-3 #1: web agent path is always black-box — pass explicitly so the
@@ -2915,6 +3127,7 @@ def _client_add_wizard() -> None:
     ).execute()
 
     from vxis.cli.main import client_add
+
     client_add(
         name=name.strip(),
         domains=domains.strip(),

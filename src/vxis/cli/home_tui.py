@@ -9,6 +9,7 @@ InquirerPy list anywhere). Brass is the single chrome accent.
 
 Off-TTY / no textual, the caller falls back to InquirerPy.
 """
+
 from __future__ import annotations
 
 import re
@@ -20,7 +21,7 @@ from textual.containers import Vertical
 from textual.widgets import Footer, Input, OptionList, Static
 from textual.widgets.option_list import Option
 
-from vxis.cli.theme import MUTED, vxis_textual_theme
+from vxis.cli.theme import MUTED, tr, vxis_textual_theme
 
 _WORDMARK = r"""
 __     __ __  __ ___  ____
@@ -30,15 +31,36 @@ __     __ __  __ ___  ____
    \_/    /_/\_\_____|____/
 """
 
+
 # (action value, label, one-line description) for the home screen.
-_HOME: list[tuple[str, str, str]] = [
-    ("scan", "Scan", "run an autonomous assessment"),
-    ("results", "Results", "browse past scans & findings"),
-    ("report", "Report", "generate / export a report"),
-    ("advanced", "Advanced", "industry · clients · plugins · dashboard"),
-    ("settings", "Settings", "brain · models · API keys"),
-    ("exit", "Quit", ""),
-]
+def _home_items() -> list[tuple[str, str, str]]:
+    return [
+        ("scan", tr("Scan", "스캔"), tr("run an autonomous assessment", "자율 보안 점검 실행")),
+        (
+            "results",
+            tr("Results", "결과"),
+            tr("browse past scans & findings", "지난 스캔과 취약점 조회"),
+        ),
+        (
+            "report",
+            tr("Report", "리포트"),
+            tr("generate / export a report", "리포트 생성 및 내보내기"),
+        ),
+        (
+            "advanced",
+            tr("Advanced", "고급"),
+            tr(
+                "industry · clients · plugins · dashboard",
+                "산업 · 클라이언트 · 플러그인 · 대시보드",
+            ),
+        ),
+        (
+            "settings",
+            tr("Settings", "설정"),
+            tr("brain · models · API keys", "브레인 · 모델 · API 키"),
+        ),
+        ("exit", tr("Quit", "종료"), ""),
+    ]
 
 
 def _home_row(label: str, desc: str) -> Text:
@@ -52,8 +74,7 @@ def _home_row(label: str, desc: str) -> Text:
 # Emoji / variation-selector / ZWJ ranges — stripped from submenu labels so the
 # Textual menu reads clean (the InquirerPy choice strings bundle an icon).
 _EMOJI_RE = re.compile(
-    "[\U0001f000-\U0001faff\U00002600-\U000027bf\U00002b00-\U00002bff"
-    "\U0001f1e6-\U0001f1ff️‍]+"
+    "[\U0001f000-\U0001faff\U00002600-\U000027bf\U00002b00-\U00002bff\U0001f1e6-\U0001f1ff️‍]+"
 )
 
 
@@ -79,6 +100,7 @@ class VxisMenu(App):
     """A framed, navigable dossier menu. Returns the selected item id from run()
     (or None on quit/back). Brass chrome throughout."""
 
+    ENABLE_COMMAND_PALETTE = False
     CSS = """
     Screen { background: $background; align: center middle; }
     #wrap { width: 88; height: auto; max-width: 96%; }
@@ -113,6 +135,12 @@ class VxisMenu(App):
         show_banner: bool = False,
     ) -> None:
         super().__init__()
+        for key, action, description in (
+            ("q", "quit_menu", tr("Quit", "종료")),
+            ("escape", "quit_menu", tr("Back", "뒤로")),
+        ):
+            self._bindings.key_to_bindings.pop(key, None)
+            self.bind(key, action, description=description)
         self._items = items  # (id, prompt-renderable)
         self._menu_title = title
         self._show_banner = show_banner
@@ -122,9 +150,11 @@ class VxisMenu(App):
             if self._show_banner:
                 banner = Static(_WORDMARK.strip("\n"), id="banner")
                 banner.border_title = "VXIS"
-                banner.border_subtitle = "autonomous pentesting"
+                banner.border_subtitle = tr("autonomous pentesting", "자율 모의해킹")
                 yield banner
-            menu = OptionList(*[Option(prompt, id=ident) for ident, prompt in self._items], id="menu")
+            menu = OptionList(
+                *[Option(prompt, id=ident) for ident, prompt in self._items], id="menu"
+            )
             menu.border_title = self._menu_title
             yield menu
         yield Footer()
@@ -147,8 +177,8 @@ class VxisHome(VxisMenu):
 
     def __init__(self) -> None:
         super().__init__(
-            items=[(val, _home_row(lbl, desc)) for val, lbl, desc in _HOME],
-            title="MAIN",
+            items=[(val, _home_row(lbl, desc)) for val, lbl, desc in _home_items()],
+            title=tr("MAIN", "메인"),
             show_banner=True,
         )
 
@@ -174,6 +204,7 @@ class VxisInput(App):
     """A single-field dossier text prompt (for the scan wizard's target etc.).
     run() returns the entered string, or None on Esc."""
 
+    ENABLE_COMMAND_PALETTE = False
     CSS = """
     Screen { background: $background; align: center middle; }
     #wrap { width: 72; height: auto; }
@@ -184,6 +215,9 @@ class VxisInput(App):
 
     def __init__(self, *, title: str, prompt: str = "", default: str = "") -> None:
         super().__init__()
+        for key, action, description in (("escape", "cancel", tr("Cancel", "취소")),):
+            self._bindings.key_to_bindings.pop(key, None)
+            self.bind(key, action, description=description)
         self._field_title = title
         self._prompt = prompt
         self._default = default

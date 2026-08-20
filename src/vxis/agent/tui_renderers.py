@@ -17,11 +17,13 @@ the literal tags we emit.
 
 Pure: no I/O, no global mutable state.
 """
+
 from __future__ import annotations
 
 from typing import Callable
 
 from vxis.agent.attack_taxonomy import attack_category
+from vxis.cli.theme import tr
 
 # Each renderer receives the (already-normalised) event payload dict and returns
 # Rich markup, or "" when the event carries no displayable detail. Colour carries
@@ -37,7 +39,7 @@ def _render_brain_thinking(data: dict[str, object]) -> str:
         reasoning = str(vectors[0].get("reasoning") or "").strip()
     if not reasoning:
         return ""
-    return f"[grey50]plan[/grey50]  {reasoning}"
+    return f"[grey50]{tr('plan', '계획')}[/grey50]  {reasoning}"
 
 
 def _render_attack(data: dict[str, object]) -> str:
@@ -52,21 +54,21 @@ def _render_hit(data: dict[str, object]) -> str:
     category = attack_category(str(data.get("vector_id") or data.get("finding_id") or ""))
     confidence = str(data.get("confidence") or "").strip()
     sev = f"  [dim]{confidence}[/dim]" if confidence else ""
-    return f"[bold green]found[/bold green]  [green]{category}[/green]{sev}"
+    return f"[bold green]{tr('found', '발견')}[/bold green]  [green]{category}[/green]{sev}"
 
 
 def _render_chain_start(data: dict[str, object]) -> str:
     category = attack_category(str(data.get("vector_id") or ""))
     endpoint = str(data.get("endpoint") or "")
     where = f"  [dim]{endpoint}[/dim]" if endpoint else ""
-    return f"[bold magenta]chain[/bold magenta]  {category}{where}"
+    return f"[bold magenta]{tr('chain', '체인')}[/bold magenta]  {category}{where}"
 
 
 def _render_chain_step(data: dict[str, object]) -> str:
     category = attack_category(str(data.get("vector_id") or ""))
     endpoint = str(data.get("endpoint") or "")
     where = f"  [dim]{endpoint}[/dim]" if endpoint else ""
-    return f"[magenta]chain step[/magenta]  {category}{where}"
+    return f"[magenta]{tr('chain step', '체인 단계')}[/magenta]  {category}{where}"
 
 
 def _render_error(data: dict[str, object]) -> str:
@@ -75,7 +77,7 @@ def _render_error(data: dict[str, object]) -> str:
         return ""
     stage = str(data.get("stage") or "").strip()
     where = f"  [dim]{stage}[/dim]" if stage else ""
-    return f"[bold red]✗ error[/bold red]{where}  [red]{msg}[/red]"
+    return f"[bold red]✗ {tr('error', '오류')}[/bold red]{where}  [red]{msg}[/red]"
 
 
 # event_type -> renderer. Add a new event type by adding one entry here.

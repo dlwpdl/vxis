@@ -4,6 +4,7 @@ Pure choice-builders keep the (interactive) menus testable: the main menu
 collapses 9 items to a short top level + an Advanced submenu, and the scan
 wizard leads with the recommended AI auto scan and groups advanced types.
 """
+
 from InquirerPy.separator import Separator
 
 from vxis.cli import interactive
@@ -26,10 +27,11 @@ class TestScanWizardOrder:
     def _dict_choices(self):
         return [c for c in interactive._ordered_scan_choices() if isinstance(c, dict)]
 
-    def test_ai_auto_is_first_and_recommended(self):
+    def test_ai_auto_is_first_and_recommended(self, monkeypatch):
+        monkeypatch.setenv("VXIS_UI_LANGUAGE", "en")
         first = self._dict_choices()[0]
         assert first["value"] == "ai_auto"
-        assert "권장" in first["name"]
+        assert "Recommended" in first["name"]
 
     def test_all_categories_present(self):
         assert {c["value"] for c in self._dict_choices()} == set(SCAN_CATEGORIES.keys())
@@ -49,14 +51,51 @@ class TestScanWizardOrder:
 class TestSettingsMenu:
     def test_settings_offers_model_refresh_and_back(self):
         from vxis.cli import interactive
+
         vals = {c["value"] for c in interactive._settings_menu_choices() if isinstance(c, dict)}
         assert "refresh_models" in vals
         assert "back" in vals
+
+    def test_settings_offers_language_selection(self):
+        vals = {c["value"] for c in interactive._settings_menu_choices() if isinstance(c, dict)}
+        assert "language" in vals
+
+    def test_menu_labels_follow_selected_language(self, monkeypatch):
+        monkeypatch.setenv("VXIS_UI_LANGUAGE", "en")
+        english = {
+            c["value"]: c["name"]
+            for c in interactive._settings_menu_choices()
+            if isinstance(c, dict)
+        }
+        assert "Language" in english["language"]
+
+        monkeypatch.setenv("VXIS_UI_LANGUAGE", "ko")
+        korean = {
+            c["value"]: c["name"]
+            for c in interactive._settings_menu_choices()
+            if isinstance(c, dict)
+        }
+        assert "언어" in korean["language"]
+
+
+def test_language_selection_persists_and_applies_immediately(tmp_path, monkeypatch):
+    from vxis.cli.theme import get_ui_language, set_ui_language, tr
+
+    monkeypatch.setenv("VXIS_UI_LANGUAGE", "en")
+    path = tmp_path / ".env"
+
+    set_ui_language("ko", path=path)
+
+    assert get_ui_language() == "ko"
+    assert tr("Settings", "설정") == "설정"
+    assert path.read_text(encoding="utf-8") == "VXIS_UI_LANGUAGE=ko\n"
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 class TestBackNavigation:
     def test_back_choices_appends_back_sentinel(self):
         from vxis.cli import interactive
+
         base = [{"name": "A", "value": "a"}, {"name": "B", "value": "b"}]
         out = interactive._back_choices(base)
         assert out[0]["value"] == "a" and out[1]["value"] == "b"  # originals preserved
@@ -65,13 +104,15 @@ class TestBackNavigation:
 
     def test_steps_complete_when_all_advance(self):
         from vxis.cli import interactive
+
         seq = []
-        steps = [lambda s: (seq.append(0) or True), lambda s: (seq.append(1) or True)]
+        steps = [lambda s: seq.append(0) or True, lambda s: seq.append(1) or True]
         assert interactive._run_wizard_steps(steps, {}) is True
         assert seq == [0, 1]
 
     def test_back_returns_to_previous_step(self):
         from vxis.cli import interactive
+
         seq = []
         state = {"used": False}
 
@@ -91,10 +132,12 @@ class TestBackNavigation:
 
     def test_none_aborts(self):
         from vxis.cli import interactive
+
         assert interactive._run_wizard_steps([lambda s: None], {}) is False
 
     def test_back_from_first_step_aborts(self):
         from vxis.cli import interactive
+
         assert interactive._run_wizard_steps([lambda s: interactive._BACK], {}) is False
 
 
@@ -121,6 +164,7 @@ class TestBrainFirstDelegation:
         assert not missing, f"TUI did not pass scan params (become OptionInfo): {missing}"
         # and nothing passed should be a typer OptionInfo
         import typer.models as tmodels
+
         leaked = {k for k, v in captured.items() if isinstance(v, tmodels.OptionInfo)}
         assert not leaked, f"OptionInfo leaked for: {leaked}"
 
@@ -128,10 +172,14 @@ class TestBrainFirstDelegation:
 class TestPreviewModelDemotion:
     def _m(self, mid):
         from vxis.llm.model_registry import ModelInfo
-        return ModelInfo(model_id=mid, provider="gemini", context_window=1_000_000, max_output_tokens=64_000)
+
+        return ModelInfo(
+            model_id=mid, provider="gemini", context_window=1_000_000, max_output_tokens=64_000
+        )
 
     def test_is_preview_model(self):
         from vxis.cli import interactive
+
         assert interactive._is_preview_model("gemini-3.1-pro-preview") is True
         assert interactive._is_preview_model("gpt-5.4-exp") is True
         assert interactive._is_preview_model("models/gemini-2.0-flash-exp") is True
@@ -142,6 +190,7 @@ class TestPreviewModelDemotion:
         # newest-first list leads with a preview model; the picker must demote it so
         # the ⭐ recommended (first) is a GA model
         from vxis.cli import interactive
+
         models = [self._m("gemini-3.1-pro-preview"), self._m("gemini-2.5-pro")]
         choices = interactive._cloud_model_choices("gemini", models)
         first_value = choices[0]["value"]
@@ -156,9 +205,11 @@ class TestGhostStep:
 
     def test_ghost_choices_offer_off_and_on(self):
         from vxis.cli import interactive
+
         vals = {c["value"] for c in interactive._ghost_choices()}
         assert vals == {"off", "on"}
 
     def test_ghost_off_is_first_and_default(self):
         from vxis.cli import interactive
+
         assert interactive._ghost_choices()[0]["value"] == "off"

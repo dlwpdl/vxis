@@ -23,6 +23,7 @@ the UI thread). brain_thinking/attack/hit/chain fold into a
 carries the delegated-agent snapshot (nested via parent_id). Headless/non-TTY
 never construct this — the CLI falls back to ``ScanLiveDisplay``.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -38,6 +39,7 @@ from vxis.agent.tui_renderers import render_detail
 from vxis.cli.theme import BRASS as _BRASS
 from vxis.cli.theme import GREEN as _GREEN
 from vxis.cli.theme import HAIR as _HAIR
+from vxis.cli.theme import tr
 from vxis.cli.theme import vxis_textual_theme
 
 _AGENT_ICON = {"running": "●", "waiting": "◌", "done": "✓", "blocked": "■"}
@@ -56,7 +58,7 @@ def _as_int(value: Any, default: int = 0) -> int:
 
 
 def _iter_label(it: Any) -> str:
-    found = f"  [dim]· {it.found} found[/dim]" if it.found else ""
+    found = f"  [dim]· {it.found} {tr('found', '발견')}[/dim]" if it.found else ""
     tint = "green" if it.found else "white"
     return f"[dim]{it.index:>2}[/dim]  [{tint}]{it.topic}[/{tint}]{found}"
 
@@ -65,17 +67,28 @@ def _agent_label(agent: dict) -> str:
     status = str(agent.get("status") or "").lower()
     icon = _AGENT_ICON.get(status, "·")
     aid = str(agent.get("id") or "?")
-    category = attack_category(str(agent.get("task") or agent.get("skill") or agent.get("role") or ""))
-    color = {"running": "bold cyan", "waiting": "yellow", "done": "green", "blocked": "red"}.get(status, "white")
+    category = attack_category(
+        str(agent.get("task") or agent.get("skill") or agent.get("role") or "")
+    )
+    color = {"running": "bold cyan", "waiting": "yellow", "done": "green", "blocked": "red"}.get(
+        status, "white"
+    )
     # Escape the bracket so Rich renders a literal "[running]" instead of parsing
     # "[running]" as a (bogus) markup tag and swallowing the status text entirely.
-    tail = f"  [dim]\\[{status}][/dim]" if status else ""
+    status_label = {
+        "running": tr("running", "실행 중"),
+        "waiting": tr("waiting", "대기"),
+        "done": tr("done", "완료"),
+        "blocked": tr("blocked", "차단"),
+    }.get(status, status)
+    tail = f"  [dim]\\[{status_label}][/dim]" if status_label else ""
     return f"[{color}]{icon} {aid}[/{color}]  {category}{tail}"
 
 
 class ScanTUI(App):
     """Interactive scan view. Feed it events via :meth:`feed_event`."""
 
+    ENABLE_COMMAND_PALETTE = False
     CSS = """
     Screen { background: $background; }
     Header { background: $surface; color: $primary; text-style: bold; }
@@ -109,9 +122,9 @@ class ScanTUI(App):
     }
     """
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("e", "expand_all", "Expand"),
-        ("i", "focus_input", "Message"),
+        ("q", "quit", tr("Quit", "종료")),
+        ("e", "expand_all", tr("Expand", "펼치기")),
+        ("i", "focus_input", tr("Message", "메시지")),
     ]
 
     def __init__(
@@ -126,6 +139,13 @@ class ScanTUI(App):
         operator_inbox: Any = None,
     ) -> None:
         super().__init__()
+        for key, action, description in (
+            ("q", "quit", tr("Quit", "종료")),
+            ("e", "expand_all", tr("Expand", "펼치기")),
+            ("i", "focus_input", tr("Message", "메시지")),
+        ):
+            self._bindings.key_to_bindings.pop(key, None)
+            self.bind(key, action, description=description)
         # Mid-scan operator steering: the Input submits here; the scan loop drains it.
         self._operator_inbox = operator_inbox
         self.model = ScanEventModel()
@@ -134,9 +154,9 @@ class ScanTUI(App):
         # clear()+rebuild (which wiped cursor/selection/expansion on every event).
         # Keys: "director", "agents", ("iter", pos), ("agent", id).
         self._tnodes: dict[Any, Any] = {}
-        self._tlabels: dict[Any, str] = {}          # last label per key (diff guard)
-        self._tagent_parent: dict[str, Any] = {}    # agent id -> parent key (reparent detect)
-        self._tagent_branch: dict[str, bool] = {}   # agent id -> created as expandable branch
+        self._tlabels: dict[Any, str] = {}  # last label per key (diff guard)
+        self._tagent_parent: dict[str, Any] = {}  # agent id -> parent key (reparent detect)
+        self._tagent_branch: dict[str, bool] = {}  # agent id -> created as expandable branch
         # Detail pane "follow" mode: stream the narrative live (Strix-style) until
         # the operator drills into a specific node; drilling freezes on that node.
         self._follow = True
@@ -146,8 +166,11 @@ class ScanTUI(App):
         self._done = False
         self._evt_count = 0
         self._meta = {
-            "target": target, "profile": profile, "brain": brain,
-            "box_mode": box_mode or "black", "ghost": ghost,
+            "target": target,
+            "profile": profile,
+            "brain": brain,
+            "box_mode": box_mode or "black",
+            "ghost": ghost,
             "injection_mode": "pending",
             "context": "ctx n/a",
             "brain_decisions": 0,
@@ -158,12 +181,18 @@ class ScanTUI(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Horizontal():
-            tree: Tree = Tree(f"Scan: {self._meta['target']}", id="tree")
+            tree: Tree = Tree(f"{tr('Scan', '스캔')}: {self._meta['target']}", id="tree")
             tree.root.expand()
             yield tree
             yield RichLog(id="detail", markup=True, wrap=True, highlight=False)
-        cmd = Input(placeholder="message the agent…  (i to focus · ⏎ to send)", id="cmd")
-        cmd.border_title = "STEER"
+        cmd = Input(
+            placeholder=tr(
+                "message the agent…  (i to focus · ⏎ to send)",
+                "에이전트에게 메시지…  (i 포커스 · ⏎ 전송)",
+            ),
+            id="cmd",
+        )
+        cmd.border_title = tr("STEER", "지시")
         yield cmd
         yield Static(self._status_text(), id="status")
         yield Footer()
@@ -175,13 +204,12 @@ class ScanTUI(App):
         self.sub_title = self._meta["target"]
         tree = self.query_one("#tree", Tree)
         tree.show_root = False  # the target lives in the header/border-title, not a root node
-        tree.border_title = "SCAN TREE"
+        tree.border_title = tr("SCAN TREE", "스캔 트리")
         tree.focus()
         detail = self.query_one("#detail", RichLog)
-        detail.border_title = "DETAIL"
+        detail.border_title = tr("DETAIL", "상세")
         detail.write(
-            "[dim]Scan starting — the Brain's first decision can take ~10-30s on a "
-            "large-context model. Steps appear on the left; select one to inspect.[/dim]"
+            f"[dim]{tr("Scan starting — the Brain's first decision can take ~10-30s on a large-context model. Steps appear on the left; select one to inspect.", '스캔 시작 — 대용량 컨텍스트 모델의 첫 판단은 약 10~30초 걸릴 수 있습니다. 왼쪽 단계에서 항목을 선택해 확인하세요.')}[/dim]"
         )
         if self.scan_runner is not None:
             self.run_worker(self._drive_scan, thread=True, exclusive=True, name="scan")
@@ -224,8 +252,10 @@ class ScanTUI(App):
         self._dbg("worker started")
         try:
             asyncio.run(self.scan_runner())
-            self._dbg(f"scan returned: iterations={len(self.model.iterations)} "
-                      f"agents={len(self.model.agents)} events={self._evt_count}")
+            self._dbg(
+                f"scan returned: iterations={len(self.model.iterations)} "
+                f"agents={len(self.model.agents)} events={self._evt_count}"
+            )
         except BaseException as exc:
             self.scan_error = exc
             self._dbg(f"scan ERROR: {exc!r}")
@@ -240,7 +270,8 @@ class ScanTUI(App):
         try:
             self._sync()
             self.query_one("#detail", RichLog).write(
-                "[bold green]── scan complete ──[/bold green] [dim]press q to exit · ↑↓ to browse[/dim]"
+                f"[bold green]── {tr('scan complete', '스캔 완료')} ──[/bold green] "
+                f"[dim]{tr('press q to exit · ↑↓ to browse', 'q 종료 · ↑↓ 탐색')}[/dim]"
             )
         except Exception:
             pass
@@ -320,9 +351,9 @@ class ScanTUI(App):
     def _reconcile_director(self) -> None:
         tree = self.query_one("#tree", Tree)
         iters = self.model.iterations
-        cur_topic = iters[-1].topic if iters else "starting…"
-        state = "done" if self._done else "running"
-        dlabel = f"[bold]Director[/bold] — {cur_topic} [dim][{state}][/dim]"
+        cur_topic = iters[-1].topic if iters else tr("starting…", "시작 중…")
+        state = tr("done", "완료") if self._done else tr("running", "실행 중")
+        dlabel = f"[bold]{tr('Director', '디렉터')}[/bold] — {cur_topic} [dim][{state}][/dim]"
 
         director = self._tnodes.get("director")
         if director is None:
@@ -356,7 +387,11 @@ class ScanTUI(App):
         if agents_node is None:
             agents_node = tree.root.add("", data={"kind": "agents"}, expand=True)
             self._tnodes["agents"] = agents_node
-        self._set_label("agents", agents_node, f"[bold]Agents[/bold] [dim]({len(self.model.agents)})[/dim]")
+        self._set_label(
+            "agents",
+            agents_node,
+            f"[bold]{tr('Agents', '에이전트')}[/bold] [dim]({len(self.model.agents)})[/dim]",
+        )
 
         self._walk_agents(agents_node, "agents", agent_tree)
         self._prune_agents()
@@ -402,8 +437,9 @@ class ScanTUI(App):
     def _prune_agents(self) -> None:
         """Drop nodes for agents the model no longer reports (rare; e.g. merged)."""
         live = set(self.model.agents)
-        stale = [k for k in self._tnodes
-                 if isinstance(k, tuple) and k[0] == "agent" and k[1] not in live]
+        stale = [
+            k for k in self._tnodes if isinstance(k, tuple) and k[0] == "agent" and k[1] not in live
+        ]
         for key in stale:
             self._remove_agent(key)
 
@@ -457,7 +493,11 @@ class ScanTUI(App):
             return []
         kind = data.get("kind")
         if kind == "iter":
-            return [m for et, pl in self._raw.get(data.get("pos", -1), []) if (m := render_detail(et, pl))]
+            return [
+                m
+                for et, pl in self._raw.get(data.get("pos", -1), [])
+                if (m := render_detail(et, pl))
+            ]
         if kind == "root":
             out: list[str] = []
             for pos in sorted(self._raw):
@@ -482,10 +522,10 @@ class ScanTUI(App):
         if isinstance(data, dict):
             kind = data.get("kind")
             if kind == "iter":
-                return f"ITER {int(data.get('pos', 0)) + 1:02d}"
+                return f"{tr('ITER', '반복')} {int(data.get('pos', 0)) + 1:02d}"
             if kind == "agent":
                 return str((data.get("agent") or {}).get("id", "AGENT")).upper()
-        return "DIRECTOR"
+        return tr("DIRECTOR", "디렉터")
 
     def _render_detail(self, data: Any) -> None:
         log = self.query_one("#detail", RichLog)
@@ -519,7 +559,10 @@ class ScanTUI(App):
         if accepted:
             log = self.query_one("#detail", RichLog)
             self._narrative_started = True
-            log.write(f"[{_BRASS}]▸ operator:[/] {text}  [dim](queued for the next decision)[/dim]")
+            log.write(
+                f"[{_BRASS}]▸ {tr('operator', '운영자')}:[/] {text}  "
+                f"[dim]{tr('(queued for the next decision)', '(다음 판단에 반영 대기)')}[/dim]"
+            )
         # hand focus back to the tree so ↑/↓ navigation resumes immediately
         try:
             self.query_one("#tree", Tree).focus()
@@ -561,17 +604,21 @@ class ScanTUI(App):
             cost_color = _BRASS
             cost = f"~${spent_usd:.4f} · {total_tok:,} tok"
         found = sum(it.found for it in self.model.iterations)
-        state = f"[{_GREEN}]● done[/]" if self._done else f"[{_BRASS}]● running[/]"
-        found_txt = f"{found} findings"
+        state = (
+            f"[{_GREEN}]● {tr('done', '완료')}[/]"
+            if self._done
+            else f"[{_BRASS}]● {tr('running', '실행 중')}[/]"
+        )
+        found_txt = f"{found} {tr('findings', '발견')}"
         found_str = f"[{_GREEN}]{found_txt}[/]" if found else f"[dim]{found_txt}[/dim]"
         sep = f"  [{_HAIR}]│[/]  "
         return (
-            f" {state}{sep}[{cost_color}]{cost}[/]{sep}box {m['box_mode']}"
-            f"{sep}inject {m['injection_mode']}"
-            f"{sep}ghost {'on' if m['ghost'] else 'off'}"
-            f"{sep}[dim]{m['context']}[/dim]{sep}brain {m['brain_decisions']}"
+            f" {state}{sep}[{cost_color}]{cost}[/]{sep}{tr('box', '박스')} {m['box_mode']}"
+            f"{sep}{tr('inject', '인젝션')} {m['injection_mode']}"
+            f"{sep}ghost {tr('on', '켜짐') if m['ghost'] else tr('off', '꺼짐')}"
+            f"{sep}[dim]{m['context']}[/dim]{sep}{tr('brain', '브레인')} {m['brain_decisions']}"
             f"{sep}{found_str}"
-            f"{sep}[dim]q quit · ↑↓ move · e expand[/dim]"
+            f"{sep}[dim]{tr('q quit · ↑↓ move · e expand', 'q 종료 · ↑↓ 이동 · e 펼치기')}[/dim]"
         )
 
 
