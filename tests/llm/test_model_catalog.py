@@ -167,3 +167,20 @@ def test_clear_cache_removes_file(tmp_path, monkeypatch):
 def test_gemini_flagship_is_ga_not_preview():
     from vxis.llm.model_registry import flagship
     assert "preview" not in flagship("gemini").lower()  # don't default to a preview model
+
+
+def test_gemini_3_7_flash_metadata():
+    from vxis.llm.model_registry import get_compression_policy, get_model_info
+
+    model = get_model_info("google/gemini-3.7-flash")
+    assert model is not None
+    assert model.provider == "wavespeed"
+    assert (model.context_window, model.max_output_tokens) == (1_048_576, 65_536)
+    assert model.supports_vision and model.supports_json_mode and model.reasoning_model
+    direct = get_model_info("gemini-3.7-flash")
+    assert direct is not None and direct.provider == "gemini"
+    assert (direct.context_window, direct.max_output_tokens) == (
+        model.context_window,
+        model.max_output_tokens,
+    )
+    assert get_compression_policy("wavespeed", model.model_id).profile == "cloud-segmented"

@@ -92,15 +92,14 @@ _DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 _DEFAULT_OLLAMA_MODEL = "qwen2.5-coder:14b"
 _DEFAULT_LLAMACPP_BASE_URL = "http://localhost:8080"
 _DEFAULT_LLAMACPP_CONTEXT = 8192
-_DEFAULT_LLAMACPP_MODEL = (
-    "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m"
-)
+_DEFAULT_LLAMACPP_MODEL = "Qwen3.8-27B-Uncensored-Q6_K"
 _LOCAL_LLM_PROVIDERS = {"ollama", "llamacpp"}
 _CLOUD_PROVIDER_KEYS = {
     "together": "TOGETHER_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GOOGLE_API_KEY",
     "openai": "OPENAI_API_KEY",
+    "wavespeed": "WAVESPEED_API_KEY",
 }
 
 
@@ -491,6 +490,7 @@ _CLOUD_PROVIDERS = [
     ("anthropic", "Anthropic — Claude"),
     ("openai", "OpenAI — GPT"),
     ("gemini", "Google — Gemini"),
+    ("wavespeed", "WaveSpeedAI — 통합 LLM 게이트웨이"),
     ("together", "Together.ai — 통합 게이트웨이"),
 ]
 
@@ -1288,12 +1288,28 @@ def _execute_scan(params: dict) -> None:
     """스캔 위자드 결과로 실제 스캔 실행."""
     import asyncio
     import logging
+    from pathlib import Path
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
+    from vxis.cli.main import _create_secure_scan_log
+
+    # Route logs to a file, not stderr: a StreamHandler writes log lines and
+    # tracebacks straight into the terminal that the Rich Live TUI is redrawing,
+    # which garbles the live view. (main.py's scan path does the same.)
+    log_path = _create_secure_scan_log(Path("logs"))
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+    file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S"
+        )
     )
+    root_logger.addHandler(file_handler)
+    root_logger.setLevel(logging.INFO)
+    for noisy in ("httpx", "httpcore", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+    console.print(f"[dim]로그: {log_path}[/dim]")
 
     # AI 자율 모드
     if params.get("scan_type") == "ai_auto" or SCAN_CATEGORIES.get(params.get("scan_type", ""), {}).get("agent_mode"):
@@ -2485,7 +2501,7 @@ def _select_local_llm() -> tuple[str, str, str] | None:
     choices.extend([
         Separator("── fallback/default ──"),
         {
-            "name": f"Huihui Qwen3.6 35B A3B Q4_K_M ({_DEFAULT_LLAMACPP_MODEL})",
+            "name": f"Qwen3.8-27B Uncensored Q6_K ({_DEFAULT_LLAMACPP_MODEL})",
             "value": _DEFAULT_LLAMACPP_MODEL,
         },
         {"name": "Custom llama.cpp model id", "value": "__custom__"},
@@ -2638,7 +2654,7 @@ def _select_brain_source():
         source = _select_back(
             "AI 두뇌 소스를 선택하세요",
             [
-                {"name": "Cloud API — OpenAI / Anthropic / Gemini / Together", "value": "cloud"},
+                {"name": "Cloud API — OpenAI / Anthropic / Gemini / WaveSpeed / Together", "value": "cloud"},
                 {"name": "Local Runtime — Ollama / llama.cpp", "value": "local"},
             ],
             qmark="\U0001f9e0",

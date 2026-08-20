@@ -151,6 +151,14 @@ document.body.addEventListener('sse:message', function(evt) {
       document.getElementById('progress-bar').classList.replace('bg-cyan-500', 'bg-green-500');
     }
 
+    if (data.event === 'scan_partial') {
+      document.getElementById('scan-status').innerHTML =
+        '<span class="w-2.5 h-2.5 rounded-full bg-yellow-500 inline-block"></span>' +
+        '<span class="text-sm text-yellow-400">부분 완료 — ' + data.findings +
+        '개 발견, ' + data.failed_plugins + '개 플러그인 실패</span>';
+      document.getElementById('progress-bar').classList.replace('bg-cyan-500', 'bg-yellow-500');
+    }
+
     if (data.event === 'scan_failed') {
       document.getElementById('scan-status').innerHTML =
         '<span class="w-2.5 h-2.5 rounded-full bg-red-500 inline-block"></span>' +

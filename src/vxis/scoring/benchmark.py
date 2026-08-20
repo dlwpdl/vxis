@@ -91,6 +91,14 @@ class BenchmarkRunner:
             profile=profile,
         )
 
+        brain_error = str(getattr(ctx, "brain_health_warning", "") or "")
+        loop_incomplete = getattr(ctx, "scan_loop_completed", None) is False
+        if brain_error or loop_incomplete:
+            reason = brain_error or str(
+                getattr(ctx, "scan_loop_error", "") or "scan loop did not complete"
+            )
+            raise RuntimeError(f"Invalid benchmark scan: {reason}")
+
         pipeline_score = getattr(ctx, "score_detail", None)
         if isinstance(pipeline_score, VXISScore):
             score = pipeline_score
@@ -223,14 +231,12 @@ class BenchmarkRunner:
         baseline = self.load_baseline(target_type=current.target_type)
 
         if baseline is None:
-            logger.info(
-                "[BENCHMARK] No baseline found for %s — using current as baseline",
-                current.target_type,
+            raise BaselineNotFoundError(
+                f"benchmark baseline missing for target type {current.target_type!r}"
             )
-            baseline = current  # type: ignore[assignment]
 
         engine = ScoringEngine(current.target_type)
-        return engine.compare(baseline, current)  # type: ignore[arg-type]
+        return engine.compare(baseline, current)
 
     def generate_report(
         self,

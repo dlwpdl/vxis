@@ -5,8 +5,14 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-from dataclasses import dataclass, field
+import urllib.error
 import urllib.request
+from dataclasses import dataclass, field
+
+import httpx
+
+
+_PROXY_PROBE_URL = "https://api64.ipify.org?format=json"
 
 
 @dataclass
@@ -55,9 +61,6 @@ def check_target_reachable(
             return True, (time.monotonic() - t0) * 1000
         return False, 0.0
 
-    import urllib.request
-    import urllib.error
-
     # ghost:// prefix 제거
     _target = target.replace("ghost://", "https://") if target.startswith("ghost://") else target
     if not _target.startswith(("http://", "https://")):
@@ -92,8 +95,6 @@ def _gemini_model_available(model: str, api_key: str, *, _opener=None) -> bool:
     models endpoint returns False."""
     if not model or not api_key:
         return True
-    import urllib.error
-
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}?key={api_key}"
     opener = _opener or urllib.request.urlopen
     try:
@@ -110,11 +111,10 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
     """Brain 백엔드 상태 체크.
 
     Architecture:
-        interactive=True   → InteractiveBrain (claude -p JSON bridge)
+        interactive=True   → disabled legacy bridge (kept for library compatibility)
         interactive=False  → AgentBrain (LLM API only — no claude -p)
 
-    For Claude Code as Brain, use either `vxis scan --interactive` or
-    register the MCP server: `claude mcp add vxis python -m vxis.mcp_server`.
+    For Claude Code, register the MCP server instead of using the legacy bridge.
     """
     if interactive:
         if shutil.which("claude") is not None:
@@ -133,35 +133,19 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
     )
     provider = hybrid.director.provider
     model = hybrid.director.model
-    if provider == "ollama":
-        base_url = hybrid.director.base_url or os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-        model = model or os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", "qwen2.5-coder:14b")
-        try:
-            req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
-                if 200 <= getattr(resp, "status", 200) < 500:
-                    return f"local:ollama/{model}", True
-        except Exception:
-            return f"local:ollama/{model} (unreachable)", False
-    if provider == "llamacpp":
-        base_url = hybrid.director.base_url or os.environ.get("VXIS_LLAMACPP_BASE_URL", "http://localhost:8080").rstrip("/")
-        model = model or os.environ.get(
-            "VXIS_LLAMACPP_MODEL",
-            "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
-        )
-        try:
-            req = urllib.request.Request(f"{base_url}/v1/models", method="GET")
-            with urllib.request.urlopen(req, timeout=2.5) as resp:
-                if 200 <= getattr(resp, "status", 200) < 500:
-                    return f"local:llamacpp/{model}", True
-        except Exception:
-            return f"local:llamacpp/{model} (unreachable)", False
+    if provider in {"ollama", "llamacpp"}:
+        from vxis.agent.brain import AgentBrain
+
+        label = f"local:{provider}/{model}"
+        ok, reason = AgentBrain(provider=provider, model=model).healthcheck()
+        return (label if ok else f"{label} (Brain call failed — {reason})", ok)
 
     api_key_envs = {
         "anthropic": "ANTHROPIC_API_KEY",
         "together":  "TOGETHER_API_KEY",
         "openai":    "OPENAI_API_KEY",
         "gemini":    "GOOGLE_API_KEY",
+        "wavespeed": "WAVESPEED_API_KEY",
         "deepseek":   "DEEPSEEK_API_KEY",
     }
     key_env = api_key_envs.get(provider)
@@ -189,7 +173,7 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
                 f"model like gemini-2.5-pro)",
                 False,
             )
-    elif provider in ("openai", "together", "deepseek", "anthropic") and model:
+    elif provider in ("openai", "together", "deepseek", "anthropic", "wavespeed") and model:
         from vxis.llm.model_registry import get_model_info, list_models
 
         # Fast, no-network reject: an id we don't know about is almost always a
@@ -215,7 +199,8 @@ def _brain_unavailable_message(reason: str = "") -> str:
     non-callable (preview/unavailable) model or a bad key value."""
     base = (
         "No Brain backend available. Install 'claude' CLI, start Ollama/llama.cpp, or set "
-        "ANTHROPIC_API_KEY / TOGETHER_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY"
+        "ANTHROPIC_API_KEY / TOGETHER_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY / "
+        "WAVESPEED_API_KEY"
     )
     detail = (reason or "").strip()
     # Suppress the no-key/no-backend labels ("none", "none (director LLM key
@@ -246,12 +231,32 @@ def check_github_token() -> bool:
     return bool(os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN"))
 
 
+def _configured_proxies() -> list[str]:
+    proxies: list[str] = []
+    for name in ("VXIS_PROXY_POOL", "VXIS_GHOST_PROXIES"):
+        proxies.extend(item.strip() for item in os.environ.get(name, "").split(",") if item.strip())
+    return list(dict.fromkeys(proxies))
+
+
 def check_proxy_pool() -> int:
-    """Ghost 모드용 프록시 풀 크기."""
-    pool = os.environ.get("VXIS_PROXY_POOL", "")
-    if not pool:
-        return 0
-    return len([p for p in pool.split(",") if p.strip()])
+    """Ghost 모드용 중복 제거된 프록시 풀 크기."""
+    return len(_configured_proxies())
+
+
+def check_proxy_ready(proxy: str, timeout: float = 5.0) -> bool:
+    """Confirm that one proxy can reach a neutral canary without direct fallback."""
+    try:
+        with httpx.Client(
+            proxy=proxy,
+            timeout=timeout,
+            follow_redirects=True,
+            trust_env=False,
+        ) as client:
+            response = client.get(_PROXY_PROBE_URL)
+        data = response.json() if response.status_code == 200 else {}
+        return isinstance(data, dict) and bool(data.get("ip"))
+    except (httpx.HTTPError, ImportError, TypeError, ValueError):
+        return False
 
 
 def run_preflight(
@@ -268,14 +273,19 @@ def run_preflight(
     result = PreflightResult()
 
     # Ghost preflight must not contact the target before the routed transport is active.
-    result.proxy_pool_size = check_proxy_pool()
+    proxies = _configured_proxies()
+    result.proxy_pool_size = len(proxies)
     if ghost:
-        if result.proxy_pool_size:
+        if not proxies:
+            result.errors.append(
+                "Ghost mode requires a non-empty proxy pool; refusing direct fallback"
+            )
+        elif all(check_proxy_ready(proxy) for proxy in proxies):
             result.target_reachable = True
             result.warnings.append("Target reachability probe deferred to Ghost transport")
         else:
             result.errors.append(
-                "Ghost mode requires a non-empty VXIS_PROXY_POOL; refusing direct fallback"
+                "Ghost proxy preflight failed; refusing direct fallback"
             )
     else:
         result.target_reachable, result.target_latency_ms = check_target_reachable(

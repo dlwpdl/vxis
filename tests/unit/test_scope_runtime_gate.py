@@ -57,7 +57,42 @@ def test_python_exec_network_hint_without_parseable_target_fails_closed():
 
 def test_shell_exec_non_network_payload_still_bypasses_scope_target_parse():
     set_active_scope(_enforcer(["app.acme.com"]))
-    assert enforce_scope_invocation("shell_exec", {"command": "whoami"}) is None
+    decision = enforce_scope_invocation("shell_exec", {"command": "whoami"})
+    assert decision is not None and decision.allowed is False
+    assert "VXIS_ALLOW_ARBITRARY_EXEC" in decision.reason
+
+
+def test_shell_exec_is_blocked_without_scope_or_explicit_approval():
+    decision = enforce_scope_invocation("shell_exec", {"command": "whoami"})
+    assert decision is not None and decision.allowed is False
+    assert "VXIS_ALLOW_ARBITRARY_EXEC" in decision.reason
+
+
+def test_destructive_http_approval_does_not_unlock_arbitrary_exec():
+    set_active_scope(_enforcer(["app.acme.com"]), approve_destructive=True)
+    decision = enforce_scope_invocation(
+        "shell_exec", {"command": "curl https://app.acme.com/health"}
+    )
+    assert decision is not None and decision.allowed is False
+    assert "VXIS_ALLOW_ARBITRARY_EXEC" in decision.reason
+
+
+def test_obfuscated_network_shell_is_blocked_by_default_after_destructive_approval():
+    set_active_scope(_enforcer(["app.acme.com"]), approve_destructive=True)
+    decision = enforce_scope_invocation(
+        "shell_exec",
+        {"command": "h=169.254.169.254; exec 3<>/dev/tcp/$h/80"},
+    )
+    assert decision is not None and decision.allowed is False
+
+
+def test_dedicated_arbitrary_exec_opt_in_allows_in_scope_shell(monkeypatch):
+    monkeypatch.setenv("VXIS_ALLOW_ARBITRARY_EXEC", "1")
+    set_active_scope(_enforcer(["app.acme.com"]))
+    decision = enforce_scope_invocation(
+        "shell_exec", {"command": "curl https://app.acme.com/health"}
+    )
+    assert decision is not None and decision.allowed is True
 
 
 def test_check_url_recovers_host_from_schemeless_target():

@@ -31,7 +31,7 @@ python tools/growth_loop_runner.py --targets dvwa --until 06:00
 
 # CLI 직접 스캔 (Brain-First 파이프라인)
 vxis scan http://localhost:8081                    # LLM API Brain 자율 실행
-vxis scan http://localhost:8081 --interactive      # Claude Code가 Brain (MCP)
+claude mcp add vxis -- vxis-mcp                    # Claude Code에 VXIS MCP 등록
 vxis scan http://localhost:8081 -g                 # Ghost 익명화 켜기
 vxis scan http://app.acme.com --approve-destructive # 파괴적 액션 사전 승인(기본 차단)
 ```

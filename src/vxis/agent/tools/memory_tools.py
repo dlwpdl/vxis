@@ -13,9 +13,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import hashlib
+from contextlib import contextmanager
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator, TypeVar
 from urllib.parse import urlparse
 
 from vxis.agent.tool_registry import ToolResult
@@ -24,6 +27,23 @@ logger = logging.getLogger(__name__)
 
 # KB location — data dir at repo root (gitignored for privacy)
 _KB_PATH = Path(__file__).parent.parent.parent.parent.parent / "data" / "scan_kb.json"
+_T = TypeVar("_T")
+
+
+def _evidence_fingerprint(item: dict[str, Any]) -> str:
+    material = "\n".join(
+        str(item.get(key, ""))
+        for key in (
+            "evidence",
+            "poc_script_code",
+            "technical_analysis",
+            "request_or_payload",
+            "response_or_effect",
+            "control_comparison",
+        )
+    )
+    normalized = " ".join(material.lower().split())
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16] if normalized else ""
 
 
 def _canonical_finding_type(value: str) -> str:
@@ -288,7 +308,43 @@ def _ensure_kb_dir() -> None:
     _KB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 
-def _load_kb() -> dict[str, Any]:
+@contextmanager
+def _kb_write_lock() -> Iterator[None]:
+    _ensure_kb_dir()
+    lock_path = _KB_PATH.with_name(f"{_KB_PATH.name}.lock")
+    with lock_path.open("a+b") as lock_file:
+        if os.name == "nt":
+            import msvcrt
+
+            if lock_file.seek(0, os.SEEK_END) == 0:
+                lock_file.write(b"\0")
+                lock_file.flush()
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _serialized_kb_write(func: Callable[..., _T]) -> Callable[..., _T]:
+    @wraps(func)
+    def locked(*args: Any, **kwargs: Any) -> _T:
+        with _kb_write_lock():
+            return func(*args, **kwargs)
+
+    return locked
+
+
+def _load_kb(*, strict: bool = False) -> dict[str, Any]:
     if not _KB_PATH.exists():
         return {"targets": {}}
     try:
@@ -301,15 +357,22 @@ def _load_kb() -> dict[str, Any]:
         return kb
     except Exception as e:
         logger.warning("Failed to load scan KB: %s", e)
+        if strict:
+            raise
         return {"targets": {}}
 
 
 def _save_kb(kb: dict[str, Any]) -> None:
     _ensure_kb_dir()
+    temp_path = _KB_PATH.with_name(f".{_KB_PATH.name}.{os.getpid()}.tmp")
     try:
-        _KB_PATH.write_text(json.dumps(kb, indent=2, default=str), encoding="utf-8")
+        temp_path.write_text(json.dumps(kb, indent=2, default=str), encoding="utf-8")
+        os.replace(temp_path, _KB_PATH)
     except Exception as e:
         logger.warning("Failed to save scan KB: %s", e)
+        raise
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def _target_key(url: str) -> str:
@@ -321,6 +384,7 @@ def _target_key(url: str) -> str:
         return url
 
 
+@_serialized_kb_write
 def record_scan_result(
     target: str,
     findings: list[dict[str, Any]],
@@ -335,7 +399,7 @@ def record_scan_result(
     """Append a scan result to the KB. Called by ScanPipelineV2 at scan end."""
     if not findings and not fingerprint:
         return
-    kb = _load_kb()
+    kb = _load_kb(strict=True)
     key = _target_key(target)
     targets = kb.setdefault("targets", {})
     entry = targets.setdefault(key, {"scans": [], "known_findings": []})
@@ -402,7 +466,10 @@ def record_scan_result(
 
     refuted_patterns = entry.setdefault("refuted_patterns", [])
     known_refuted = {
-        (str(item.get("finding_type", "")), str(item.get("affected_component", "")))
+        (
+            _canonical_finding_type(str(item.get("finding_type", ""))),
+            str(item.get("affected_component", "")),
+        ): item
         for item in refuted_patterns
         if isinstance(item, dict)
     }
@@ -410,19 +477,26 @@ def record_scan_result(
         if _is_soft_refutation_reason(str(item.get("reasoning", ""))):
             continue
         pair = (
-            str(item.get("finding_type", "")),
+            _canonical_finding_type(str(item.get("finding_type", ""))),
             str(item.get("affected_component", "")),
         )
-        if not pair[0] or pair in known_refuted:
+        if not pair[0]:
+            continue
+        fingerprint = str(item.get("evidence_fingerprint", "")) or _evidence_fingerprint(item)
+        if pair in known_refuted:
+            known_refuted[pair]["last_seen"] = timestamp
+            if fingerprint:
+                known_refuted[pair]["evidence_fingerprint"] = fingerprint
             continue
         refuted_patterns.append({
-            "finding_type": _canonical_finding_type(pair[0]),
+            "finding_type": pair[0],
             "affected_component": pair[1],
             "title": str(item.get("title", ""))[:120],
             "reasoning": str(item.get("reasoning", ""))[:240],
             "last_seen": timestamp,
+            "evidence_fingerprint": fingerprint,
         })
-        known_refuted.add(pair)
+        known_refuted[pair] = refuted_patterns[-1]
     entry["refuted_patterns"] = refuted_patterns[-50:]
 
     successful_tactics = entry.setdefault("successful_tactics", [])
@@ -497,9 +571,10 @@ def load_target_memory_profile(target: str) -> dict[str, Any]:
     }
 
 
+@_serialized_kb_write
 def migrate_scan_kb() -> dict[str, int]:
     """Rebuild aggregate memory for all targets using current canonicalization rules."""
-    kb = _load_kb()
+    kb = _load_kb(strict=True)
     targets = kb.get("targets") or {}
     migrated_targets = 0
     for key, entry in list(targets.items()):

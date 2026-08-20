@@ -67,6 +67,12 @@ _PROVIDERS: dict[str, dict[str, str]] = {
         "env_key": "OPENAI_API_KEY",
         "format": "openai",
     },
+    "wavespeed": {
+        "base_url": "https://llm.wavespeed.ai/v1",
+        "default_model": "google/gemini-3.7-flash",
+        "env_key": "WAVESPEED_API_KEY",
+        "format": "openai",
+    },
     "deepseek": {
         "base_url": "https://api.deepseek.com/v1",
         "default_model": "deepseek-chat",
@@ -147,8 +153,15 @@ def _get_api_key() -> str:
 
 def _get_any_available_key() -> str:
     """어떤 provider든 키가 있으면 반환 (is_available() 전용)."""
-    for env_var in ("TOGETHER_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
-                    "GOOGLE_API_KEY", "GEMINI_API_KEY", "DEEPSEEK_API_KEY"):
+    for env_var in (
+        "TOGETHER_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "WAVESPEED_API_KEY",
+    ):
         key = os.environ.get(env_var, "")
         if key:
             return key
@@ -231,6 +244,7 @@ def chat(
 
     # Fallback chain: try other providers that have keys
     _FALLBACK_ORDER = [
+        ("wavespeed", "WAVESPEED_API_KEY"),
         ("google", "GOOGLE_API_KEY"),
         ("anthropic", "ANTHROPIC_API_KEY"),
         ("openai", "OPENAI_API_KEY"),

@@ -1,0 +1,22 @@
+# Reviewed false positives: synthetic test credentials, protocol nonces,
+# generated cache content, and intentional honeypot decoys. Keep these
+# fingerprint-specific so new findings in the same files still fail CI.
+822e1ce1931ffc77cf9832dd482faa6791229899:tests/unit/test_brain_healthcheck.py:generic-api-key:16
+822e1ce1931ffc77cf9832dd482faa6791229899:tests/unit/test_preflight_model.py:generic-api-key:10
+a82b7be1c8856cabfbaa6a746112bb94830822e5:tests/llm/test_hybrid_config.py:generic-api-key:147
+9ec7cc1eb431049467cc44bfa30f51f03a084a90:tests/agent/skills/test_attempt_auth_multi_identity.py:generic-api-key:47
+9ec7cc1eb431049467cc44bfa30f51f03a084a90:tests/agent/skills/test_attempt_auth_multi_identity.py:generic-api-key:59
+e2761aa5f5f8610a86c931131b6d0a1cda812823:tests/agent/skills/desktop/test_local_storage_secrets_skill.py:jwt:64
+a358d241e484c6ebfde0e4b71785d6ba2ed80bb2:.vxis/cache/extractions/a6d43e570fb62e50.json:generic-api-key:64
+a358d241e484c6ebfde0e4b71785d6ba2ed80bb2:.vxis/cache/extractions/9113f7ace6c456fe.json:generic-api-key:64
+cf6e173a4dc10df0cdbab6256efe146bc5b68c51:src/vxis/agent/agents/game_protocol.py:generic-api-key:161
+cf6e173a4dc10df0cdbab6256efe146bc5b68c51:src/vxis/agent/agents/game_protocol.py:generic-api-key:201
+cf6e173a4dc10df0cdbab6256efe146bc5b68c51:src/vxis/agent/agents/game_protocol.py:generic-api-key:391
+cf6e173a4dc10df0cdbab6256efe146bc5b68c51:src/vxis/agent/agents/game_recon.py:generic-api-key:237
+4df5b5971185d0f6af0b675ed4bcb540d18c3fa5:tests/unit/test_phase4_cpr.py:generic-api-key:123
+e077d58ea08d4980e906644e3d4f40d9691a5f69:src/vxis/agent/agents/game_realtime_agent.py:generic-api-key:156
+e077d58ea08d4980e906644e3d4f40d9691a5f69:src/vxis/agent/agents/game_realtime_agent.py:generic-api-key:203
+a0c15d0ae523a2a4b06f8a5287a26ba04d4a266c:src/vxis/synthesis/honeypot_advanced.py:stripe-access-token:284
+a0c15d0ae523a2a4b06f8a5287a26ba04d4a266c:src/vxis/synthesis/honeypot_advanced.py:slack-bot-token:285
+22d44f0d84c75b7dd03aa0d6ef6cf307d5ae583a:tests/unit/test_config.py:generic-api-key:175
+21af6f7b92bb163c47be21e36d0ecb1bf9f79d89:generate_benchmark_reports.py:generic-api-key:991

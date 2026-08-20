@@ -1,12 +1,12 @@
 # `.github/` — GitHub-Level Configuration
 
-> All GitHub-specific automation + metadata. Primary content: 12 workflow definitions under `workflows/`.
+> All GitHub-specific automation + metadata. Primary content: 14 workflow definitions under `workflows/`.
 
 ## Contents
 
 | Path | Purpose |
 |---|---|
-| `workflows/*.yml` | 12 GitHub Actions workflows — see [`../GITHUB_ACTIONS.md`](../GITHUB_ACTIONS.md) for the full system overview |
+| `workflows/*.yml` | 14 GitHub Actions workflows — see [`../GITHUB_ACTIONS.md`](../GITHUB_ACTIONS.md) for the full system overview |
 
 ## Quick reference — workflow groups
 
@@ -16,7 +16,7 @@
 | **Signal pipeline** | `signal-ingest.yml`, `signal-analyze.yml`, `action-bridge.yml` | Unify signals → decide actions → open issues |
 | **Self-coding loop** | `auto-implement.yml` | Claude Code spawns on `claude-implement` label → writes patches → opens PRs |
 | **PR quality gates** | `lint.yml`, `test.yml`, `benchmark.yml` | Block bad merges |
-| **Growth measurement** | `growth-loop.yml`, `growth-digest.yml` | Weekly benchmark + summary, feeds back into issue opener |
+| **Growth measurement** | `growth-loop.yml`, `growth-digest.yml` | Manually approved isolated benchmark + review-only proposals and summaries |
 
 **Full documentation**: [`../GITHUB_ACTIONS.md`](../GITHUB_ACTIONS.md) — explains how these workflows chain together to form the self-improvement cycle.
 

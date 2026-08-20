@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-_LOCAL_PROVIDERS = {"llamacpp", "ollama"}
 _ROLE_ALIASES = {
     "director": "director",
     "root": "director",
@@ -227,7 +226,7 @@ def _resolve_context_window(*, provider: str, model: str, context_window: int | 
             return int(policy.context_window)
     except Exception:
         pass
-    return 8_192 if provider in _LOCAL_PROVIDERS else 300_000
+    return 8_192 if provider in {"llamacpp", "ollama"} else 300_000
 
 
 def _skill_char_budget(role: str, *, local_profile: bool) -> int:

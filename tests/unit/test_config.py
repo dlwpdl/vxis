@@ -192,7 +192,7 @@ class TestEnvVarOverride:
         assert config.db_url == "postgresql+asyncpg://localhost/vxis_test"
 
     def test_shodan_api_key_set_via_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("VXIS_SHODAN_API_KEY", "test-key-abc123")
+        monkeypatch.setenv("VXIS_SHODAN_API_KEY", "test-key-abc123")  # gitleaks:allow
         config = VXISConfig()
         assert config.shodan_api_key is not None
         # SecretStr — raw value must be accessed via get_secret_value()

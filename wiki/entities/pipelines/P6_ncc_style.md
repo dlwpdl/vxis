@@ -42,7 +42,7 @@ Report — 모든 exploitation·synthesis 완료 후 최종 deliverable.
 
 ## Triggers
 - `ScanPipelineV2._generate_report(ctx)` 호출.
-- `scripts/generate_benchmark_reports.py` 으로 벤치마크 리포트 생성.
+- `generate_benchmark_reports.py` 으로 벤치마크 리포트 생성.
 
 ## Related Pipelines
 - [P8 Synthesis](./P8_synthesis.md) — 앞 단계 (체인 공급)

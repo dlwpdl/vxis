@@ -1,7 +1,12 @@
 # `src/vxis/growth/` — Growth Layer / Self-Growth Intelligence
 
-Bootstrap layer for the weekly Growth Loop benchmarks (GH Actions `growth-loop.yml`). Runs VXIS against a fixed set of benchmark targets (DVWA/Juice Shop/WebGoat), scores the results, compares against the previous week, and optionally auto-improves via code edits.
+Bootstrap layer for the manually approved Growth Loop benchmark (GH Actions
+`growth-loop.yml`). It runs VXIS against fixed training targets plus an
+unexposed holdout, scores the results, and stores bounded LLM suggestions for
+human review. It does not apply, execute, commit, or push generated code.
 
-Phase A's benchmark captures will feed into this eventually — Phase B will re-enable the auto-improve loop once Brain-First tuning is stable.
+Automatic promotion remains disabled until generation, secret-free validation,
+and promotion can run on separate isolated workers with a verified patch digest.
 
-Key concept: "AI이 타겟 공격 → 점수 → 약점 인식 → 코드 개선 → 재공격" cycle per CLAUDE.md scoring rules.
+Key concept: "AI가 타겟 평가 → 점수 → 약점 인식 → 검토 제안" cycle per
+CLAUDE.md scoring rules.

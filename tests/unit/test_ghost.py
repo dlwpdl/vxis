@@ -110,7 +110,7 @@ def test_ua_pool_all_strings():
 async def test_ghost_transport_overrides_ua():
     """GhostTransport이 User-Agent 헤더를 UA풀 값으로 교체."""
     layer = make_layer()
-    layer.activate([])
+    layer.activate(["socks5://1.2.3.4:1080"])  # proxy present → egress allowed
 
     mock_inner = AsyncMock()
     mock_inner.handle_async_request = AsyncMock(return_value=httpx.Response(200, content=b"ok"))
@@ -164,8 +164,30 @@ async def test_ghost_transport_reuses_cached_proxy_transport():
 
 
 @pytest.mark.asyncio
-async def test_ghost_transport_no_proxy_direct_connect():
-    """프록시 없으면 직접 연결 fallback."""
+async def test_ghost_transport_no_proxy_fails_closed(monkeypatch):
+    """Active + 프록시 없음 → 직접 연결로 새지 않고 fail-closed."""
+    from vxis.ghost.layer import GhostDirectEgressError
+
+    monkeypatch.delenv("VXIS_ALLOW_DIRECT_EGRESS", raising=False)
+    monkeypatch.delenv("VXIS_ALLOW_GHOST_DIRECT_EGRESS", raising=False)
+    layer = make_layer()
+    layer.activate([])  # active but no proxy
+
+    mock_inner = AsyncMock()
+    mock_inner.handle_async_request = AsyncMock(return_value=httpx.Response(200, content=b"ok"))
+
+    transport = GhostTransport(layer, inner=mock_inner)
+    request = httpx.Request("GET", "https://example.com")
+
+    with pytest.raises(GhostDirectEgressError):
+        await transport.handle_async_request(request)
+    assert not mock_inner.handle_async_request.called
+
+
+@pytest.mark.asyncio
+async def test_ghost_transport_no_proxy_direct_egress_optin(monkeypatch):
+    """VXIS_ALLOW_DIRECT_EGRESS=1 → 명시적 opt-in 시에만 직접 연결 허용."""
+    monkeypatch.setenv("VXIS_ALLOW_DIRECT_EGRESS", "1")
     layer = make_layer()
     layer.activate([])
 
@@ -328,10 +350,55 @@ async def test_ghost_verifier_handles_failure():
     assert result["error"] is not None
 
 
+@pytest.mark.asyncio
+async def test_ghost_verifier_fails_closed_when_active_without_proxy(monkeypatch):
+    """Active + 프록시 없음 → 직접 IP를 '익명화 IP'로 기록하지 않고 에러."""
+    monkeypatch.delenv("VXIS_ALLOW_DIRECT_EGRESS", raising=False)
+    monkeypatch.delenv("VXIS_ALLOW_GHOST_DIRECT_EGRESS", raising=False)
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.activate([])  # active, no proxy → GhostTransport fails closed
+    try:
+        result = await GhostVerifier().check()
+    finally:
+        ghost_layer.deactivate()
+
+    assert result["ghost_active"] is True
+    assert result["detected_ip"] is None
+    assert result["error"] is not None
+
+
+def test_ghost_activate_off_deactivates():
+    from vxis.ghost.layer import ghost_layer
+    from vxis.primitives.ghost import ghost_activate
+
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+    result = ghost_activate("off")
+    assert result["active"] is False
+    assert ghost_layer.is_active() is False
+
+
+def test_ghost_activate_refuses_pool_without_usable_proxy(monkeypatch):
+    from vxis.ghost.layer import ghost_layer
+    from vxis.primitives.ghost import ghost_activate, ghost_deactivate
+
+    ghost_deactivate()
+    monkeypatch.delenv("VXIS_PROXY_POOL", raising=False)
+    monkeypatch.setenv("VXIS_GHOST_PROXIES", "not-a-proxy")  # invalid → dropped
+
+    result = ghost_activate("standard")
+
+    assert result["active"] is False
+    assert result["proxy_count"] == 0
+    assert "proxy" in result.get("error", "").lower()
+    assert ghost_layer.is_active() is False
+
+
 def test_ghost_preflight_requires_proxy_and_never_probes_target(monkeypatch):
     from vxis.cli import preflight
 
     monkeypatch.delenv("VXIS_PROXY_POOL", raising=False)
+    monkeypatch.delenv("VXIS_GHOST_PROXIES", raising=False)
     with (
         patch.object(preflight, "check_target_reachable") as target_probe,
         patch.object(preflight, "check_brain", return_value=("test", True)),
@@ -349,8 +416,10 @@ def test_ghost_preflight_defers_target_probe_when_proxy_configured(monkeypatch):
     from vxis.cli import preflight
 
     monkeypatch.setenv("VXIS_PROXY_POOL", "socks5://127.0.0.1:9050")
+    monkeypatch.delenv("VXIS_GHOST_PROXIES", raising=False)
     with (
         patch.object(preflight, "check_target_reachable") as target_probe,
+        patch.object(preflight, "check_proxy_ready", return_value=True) as proxy_probe,
         patch.object(preflight, "check_brain", return_value=("test", True)),
         patch.object(preflight, "check_docker", return_value=True),
         patch.object(preflight, "check_github_token", return_value=True),
@@ -358,8 +427,58 @@ def test_ghost_preflight_defers_target_probe_when_proxy_configured(monkeypatch):
         result = preflight.run_preflight("https://example.com", ghost=True)
 
     target_probe.assert_not_called()
+    proxy_probe.assert_called_once_with("socks5://127.0.0.1:9050")
     assert result.can_scan is True
     assert any("deferred" in warning.lower() for warning in result.warnings)
+
+
+def test_ghost_preflight_rejects_unreachable_proxy(monkeypatch):
+    from vxis.cli import preflight
+
+    monkeypatch.setenv("VXIS_PROXY_POOL", "socks5://127.0.0.1:9050")
+    monkeypatch.delenv("VXIS_GHOST_PROXIES", raising=False)
+    with (
+        patch.object(preflight, "check_target_reachable") as target_probe,
+        patch.object(preflight, "check_proxy_ready", return_value=False),
+        patch.object(preflight, "check_brain", return_value=("test", True)),
+        patch.object(preflight, "check_docker", return_value=True),
+        patch.object(preflight, "check_github_token", return_value=True),
+    ):
+        result = preflight.run_preflight("https://example.com", ghost=True)
+
+    target_probe.assert_not_called()
+    assert result.can_scan is False
+    assert any("proxy preflight failed" in error.lower() for error in result.errors)
+
+
+def test_proxy_preflight_uses_explicit_proxy_without_ambient_fallback(monkeypatch):
+    from vxis.cli import preflight
+
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"ip": "203.0.113.10"}
+    client = MagicMock()
+    client.__enter__.return_value = client
+    client.get.return_value = response
+
+    with patch.object(preflight.httpx, "Client", return_value=client) as client_factory:
+        assert preflight.check_proxy_ready("socks5://127.0.0.1:9050") is True
+
+    client_factory.assert_called_once_with(
+        proxy="socks5://127.0.0.1:9050",
+        timeout=5.0,
+        follow_redirects=True,
+        trust_env=False,
+    )
+    client.get.assert_called_once_with(preflight._PROXY_PROBE_URL)
+
+
+def test_proxy_pool_includes_legacy_ghost_env(monkeypatch):
+    from vxis.cli import preflight
+
+    monkeypatch.delenv("VXIS_PROXY_POOL", raising=False)
+    monkeypatch.setenv("VXIS_GHOST_PROXIES", "socks5://127.0.0.1:9050")
+
+    assert preflight.check_proxy_pool() == 1
 
 
 @pytest.mark.asyncio

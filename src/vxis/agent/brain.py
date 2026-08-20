@@ -189,6 +189,8 @@ class AgentBrain:
             base_url = os.environ.get("VXIS_LLAMACPP_BASE_URL", "").rstrip("/") or "-"
         elif self._provider == "ollama":
             base_url = os.environ.get("VXIS_OLLAMA_BASE_URL", "").rstrip("/") or "-"
+        elif self._provider == "wavespeed":
+            base_url = "https://llm.wavespeed.ai/v1"
 
         try:
             policy = get_compression_policy(self._provider, self._model)
@@ -355,7 +357,11 @@ class AgentBrain:
         before the scan instead of letting every call fail silently mid-scan."""
         self._last_llm_error = ""
         try:
-            out = self._call_llm_direct("healthcheck — reply with OK", "OK")
+            out = self._call_llm_direct(
+                "healthcheck — reply with OK",
+                "OK",
+                extra_body=self._extra_body_for_endpoint(self._provider, self._model),
+            )
         except Exception as exc:  # a health probe must never raise
             return False, f"{self._provider}/{self._model}: {exc}"
         if out:
@@ -1394,8 +1400,12 @@ class AgentBrain:
         elif provider == "deepseek":
             return self._call_deepseek(system_prompt, user_prompt, model, extra_body=extra_body)
         elif provider == "ollama":
-            # fallback dict에서 base_url을 꺼내야 하므로 환경변수에서 직접 읽음
-            base_url = os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434")
+            endpoint = self._hybrid_model_config.director
+            base_url = (
+                endpoint.base_url
+                if endpoint.provider == provider and endpoint.base_url
+                else os.environ.get("VXIS_OLLAMA_BASE_URL", "http://localhost:11434")
+            )
             return self._call_openai_compatible(
                 system_prompt,
                 user_prompt,
@@ -1405,7 +1415,12 @@ class AgentBrain:
                 extra_body=extra_body,
             )
         elif provider == "llamacpp":
-            base_url = os.environ.get("VXIS_LLAMACPP_BASE_URL", "http://localhost:8080")
+            endpoint = self._hybrid_model_config.director
+            base_url = (
+                endpoint.base_url
+                if endpoint.provider == provider and endpoint.base_url
+                else os.environ.get("VXIS_LLAMACPP_BASE_URL", "http://localhost:8080")
+            )
             return self._call_openai_compatible(
                 system_prompt,
                 user_prompt,
@@ -1414,7 +1429,7 @@ class AgentBrain:
                 base_url=base_url,
                 extra_body=extra_body,
             )
-        elif provider in ("together", "openai"):
+        elif provider in ("together", "openai", "wavespeed"):
             return self._call_openai_compatible(
                 system_prompt,
                 user_prompt,
@@ -1436,7 +1451,7 @@ class AgentBrain:
         image_path: str = "",
         extra_body: dict[str, Any] | None = None,
     ) -> str | None:
-        """OpenAI 호환 API 호출 (Together, OpenAI, Ollama).
+        """OpenAI 호환 API 호출 (Together, OpenAI, WaveSpeed, Ollama).
 
         Ollama는 키가 없으며 base_url만 사용 (http://localhost:11434).
 
@@ -1452,10 +1467,12 @@ class AgentBrain:
             urls = {
                 "together": "https://api.together.xyz/v1/chat/completions",
                 "openai": "https://api.openai.com/v1/chat/completions",
+                "wavespeed": "https://llm.wavespeed.ai/v1/chat/completions",
             }
             keys = {
                 "together": os.environ.get("TOGETHER_API_KEY", ""),
                 "openai": os.environ.get("OPENAI_API_KEY", ""),
+                "wavespeed": os.environ.get("WAVESPEED_API_KEY", ""),
             }
             url = urls.get(provider)
             api_key = keys.get(provider)
@@ -2155,11 +2172,9 @@ class AgentBrain:
         """Call LLM — API only. Delegates to _call_llm_direct for unified logic.
 
         ARCHITECTURE: AgentBrain is the CLI path and uses LLM API exclusively.
-        Claude Code as Brain belongs to a SEPARATE path (MCP server or
-        --interactive InteractiveBrain).
+        Claude Code integration belongs to the separate MCP server path.
 
         If you want claude as Brain, use:
-          - `vxis scan --interactive` (legacy JSON bridge)
           - `claude mcp add vxis python -m vxis.mcp_server` (modern MCP)
         """
         provider = self._provider
@@ -2172,11 +2187,12 @@ class AgentBrain:
                 "together": "moonshotai/Kimi-K2.5",
                 "anthropic": "claude-sonnet-4-6",
                 "gemini": "gemini-2.5-pro",
+                "wavespeed": "google/gemini-3.7-flash",
                 "deepseek": "deepseek-chat",
                 "ollama": os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", "qwen2.5-coder:14b"),
                 "llamacpp": os.environ.get(
                     "VXIS_LLAMACPP_MODEL",
-                    "huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+                    "Qwen3.8-27B-Uncensored-Q6_K",
                 ),
             }
             model = _defaults.get(provider, "")
@@ -2187,6 +2203,7 @@ class AgentBrain:
             "together": "TOGETHER_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
             "gemini": "GOOGLE_API_KEY",
+            "wavespeed": "WAVESPEED_API_KEY",
             "deepseek": "DEEPSEEK_API_KEY",
         }
         if provider in _key_envs and not os.environ.get(_key_envs[provider]):
@@ -2198,6 +2215,7 @@ class AgentBrain:
                         "together": "moonshotai/Kimi-K2.5",
                         "anthropic": "claude-sonnet-4-6",
                         "gemini": "gemini-2.5-pro",
+                        "wavespeed": "google/gemini-3.7-flash",
                         "deepseek": "deepseek-chat",
                     }.get(_p, model)
                     break

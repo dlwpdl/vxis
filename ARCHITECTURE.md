@@ -279,7 +279,7 @@ The long-term model is not "one universal sandbox". It is:
 ## Three Brain backends (only AgentBrain is live)
 
 1. **`AgentBrain`** (`agent/brain.py`) — **LIVE** path, uses LLM API (OpenAI/Anthropic/Gemini/DeepSeek via fallback chain)
-2. `InteractiveBrain` (`agent/brain_interactive.py`) — stdin/stdout NDJSON; Claude Code via `vxis scan --interactive` (legacy)
+2. `InteractiveBrain` (`agent/brain_interactive.py`) — legacy stdin/stdout NDJSON library; the CLI flag is disabled until it implements the live loop contract
 3. `FileBasedBrain` (`agent/brain_filebased.py`) — file protocol, rarely used
 
 All three increment the **unified `brain_decision_count`** counter.

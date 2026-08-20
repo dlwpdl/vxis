@@ -14,6 +14,7 @@ from vxis.agent.scan_loop_state import (
 )
 from vxis.agent.scan_loop_v3 import v3_prepare_decision
 from vxis.agent.tool_registry import ToolResult
+from vxis.agent.tools.memory_tools import _evidence_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -686,7 +687,9 @@ class ScanLoopActionMixin:
                 title,
             )
         )
-        suffix = hashlib.sha1(fingerprint.encode("utf-8")).hexdigest()[:10]
+        suffix = hashlib.sha1(
+            fingerprint.encode("utf-8"), usedforsecurity=False
+        ).hexdigest()[:10]
         branch_id = f"gap:{vector_id.lower()}:{suffix}"
         evidence = _sanitize_evidence_text(
             {
@@ -750,9 +753,9 @@ class ScanLoopActionMixin:
 
         Behaviour is shared by both report paths and parameterized for their drift:
         - skill/auto path (`_dispatch_report_finding_checked`): require_confirmed=True
-          → REFUTED and UNCONFIRMED both block.
-        - Brain-direct path (scan_loop_run auto-verify): require_confirmed=False +
-          spawn_gap_on_unconfirmed=True → REFUTED blocks, UNCONFIRMED proceeds and
+          → REFUTED blocks; high/critical UNCONFIRMED also blocks.
+        - Brain-direct path (scan_loop_run auto-verify): require_confirmed=True +
+          spawn_gap_on_unconfirmed=True → high/critical UNCONFIRMED blocks and
           spawns a recursive gap branch.
 
         NOW-1/1.2: all reportable severities (critical/high/medium/low) are verified;
@@ -761,8 +764,30 @@ class ScanLoopActionMixin:
         verdict writeback + report exclusion of UNCONFIRMED is NOW-1/1.3.
         """
         severity = str(args.get("severity", "")).lower()
-        if severity not in {"critical", "high", "medium", "low"} or "verify_finding" not in self.registry.list_tools():
+        if severity not in {"critical", "high", "medium", "low"}:
             return None
+
+        def verifier_unavailable(reason: str) -> ToolResult | None:
+            if severity not in {"critical", "high"}:
+                logger.warning("verify_finding unavailable for %s finding: %s", severity, reason)
+                return None
+            self.state.verdict_counts["ERROR"] = self.state.verdict_counts.get("ERROR", 0) + 1
+            self._record_verifier_decision(
+                args=args,
+                verdict="ERROR",
+                reasoning=reason,
+                confidence="none",
+                blocked_action="report_finding",
+            )
+            return ToolResult(
+                ok=False,
+                summary=f"report_finding BLOCKED: verifier unavailable. {reason[:220]}",
+                data={"verifier_blocked": True, "verdict": "ERROR", "reasoning": reason},
+                error="verifier_unavailable",
+            )
+
+        if "verify_finding" not in self.registry.list_tools():
+            return verifier_unavailable("verify_finding is not registered")
 
         verify_args = {
             "title": args.get("title", ""),
@@ -779,9 +804,15 @@ class ScanLoopActionMixin:
         if baseline_size is not None:
             verify_args["baseline_size"] = baseline_size
 
-        verdict_result = await self.registry.dispatch("verify_finding", verify_args)
+        try:
+            verdict_result = await self.registry.dispatch("verify_finding", verify_args)
+        except Exception as exc:
+            logger.exception("verify_finding dispatch failed")
+            return verifier_unavailable(str(exc) or type(exc).__name__)
         if not verdict_result.ok:
-            return None
+            return verifier_unavailable(
+                verdict_result.summary or verdict_result.error or "verify_finding failed"
+            )
 
         verdict_data = verdict_result.data or {}
         verdict = str(verdict_data.get("verdict", "UNCONFIRMED"))
@@ -795,6 +826,11 @@ class ScanLoopActionMixin:
         args["verifier_verdict"] = verdict
         args["verifier_confidence"] = confidence
         args["verifier_reasoning"] = reasoning[:300]
+        blocks_report = verdict == "REFUTED" or (
+            verdict != "CONFIRMED"
+            and require_confirmed
+            and severity in {"high", "critical"}
+        )
         self.state.verdict_counts[verdict] = self.state.verdict_counts.get(verdict, 0) + 1
         _belief_entry = {
             "iter": self.state.iteration,
@@ -804,6 +840,7 @@ class ScanLoopActionMixin:
             "affected_component": args.get("affected_component", ""),
             "confidence": confidence,
             "reasoning": reasoning[:300],
+            "evidence_fingerprint": _evidence_fingerprint(args),
         }
         if verdict == "CONFIRMED":
             self.state.confirmed_findings.append(_belief_entry)
@@ -814,6 +851,7 @@ class ScanLoopActionMixin:
             verdict=verdict,
             reasoning=reasoning,
             confidence=confidence,
+            blocked_action="report_finding" if blocks_report else "",
         )
         self.state.add_message("tool", {
             "name": "verify_finding",
@@ -853,11 +891,7 @@ class ScanLoopActionMixin:
                 data={"verifier_blocked": True, "verdict": verdict, "reasoning": reasoning},
                 error="verifier_blocked",
             )
-        if (
-            verdict != "CONFIRMED"
-            and require_confirmed
-            and severity in {"high", "critical"}
-        ):
+        if blocks_report:
             return ToolResult(
                 ok=False,
                 summary=(

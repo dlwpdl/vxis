@@ -1,6 +1,8 @@
-# GitHub Actions — The VXIS Self-Growth System
+# GitHub Actions — VXIS Automation
 
-> How VXIS automates its own improvement via 12 GitHub Actions workflows. This is the infrastructure layer that runs OUTSIDE the scan pipeline.
+> How VXIS uses 14 GitHub Actions workflows. Generated code is never trusted
+> merely because it came from the growth system; merge and execution require
+> separate review and normal CI.
 
 ## TL;DR — The Growth Cycle in One Picture
 
@@ -43,9 +45,9 @@
     ┌──────────────── measurement loop ───────────────────────────┐
     │                                                              │
     │              growth-loop                                     │
-    │     (weekly Sun 15:00 UTC + on push to main)                │
-    │     runs benchmark scans → scores delta vs last week        │
-    │     if regressed → open another issue → cycle continues    │
+    │     (manual confirmation in an isolated evaluation only)   │
+    │     runs benchmark scans → stores review-only proposals    │
+    │     generated proposals are not applied or executed        │
     │                         ↓                                   │
     │              growth-digest                                   │
     │          (weekly Sun 18:00 UTC)                             │
@@ -54,7 +56,7 @@
     └──────────────────────────────────────────────────────────────┘
 ```
 
-## The 12 workflows — by category
+## The 14 workflows — by category
 
 ### A. Threat Intelligence Feeders (produce raw signals)
 
@@ -88,7 +90,7 @@ cve-watch finds CVE-2026-XXXX in sqlmap
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| **`auto-implement.yml`** | Issue labeled `claude-implement` + manual | Spawns a Claude Code session that reads the issue, writes the fix, opens a PR. This is the **self-coding** piece — VXIS literally writes its own improvements when signal-analyze or growth-loop creates an actionable issue. |
+| **`auto-implement.yml`** | Issue labeled `claude-implement` + manual | Spawns a Claude Code session that reads the issue, writes the fix, and opens a PR. Growth-loop suggestions must first be reviewed and converted into an explicitly approved issue. |
 
 **Safety:** PR is NEVER auto-merged. It must pass lint + test + benchmark gates AND be reviewed by a human (or a code-reviewer agent) before merging.
 
@@ -106,12 +108,13 @@ cve-watch finds CVE-2026-XXXX in sqlmap
 
 | Workflow | Schedule | What it does |
 |---|---|---|
-| **`growth-loop.yml`** | Weekly (Sun 15:00 UTC) + push to `src/vxis/**` + repository_dispatch `growth-loop-validate` | Runs `vxis scan` against the canonical benchmark targets, scores the results via `src/vxis/scoring/`, compares against the previous week's score stored in the repo. Writes a markdown report to `docs/superpowers/benchmarks/`. If regressed → opens a new `claude-implement` issue with the delta. **This is the heartbeat of self-improvement.** |
+| **`growth-loop.yml`** | Manual only; operator must confirm an isolated evaluation | Measures fixed training targets plus a holdout, emits bounded review-only suggestions, uploads two JSON artifacts, and opens a summary issue. It never applies, executes, commits, or pushes generated code. |
 | **`growth-digest.yml`** | Weekly (Sun 18:00 UTC) | Summarizes the week's growth-loop runs, signal-ingest output, auto-implement merges, and score deltas into a single digest. Posted to the repo (and optionally to Slack / email via `integrations/`). |
 
 ## The end-to-end feedback loop, explained
 
-VXIS is designed to be **a system that improves itself without human intervention**, bounded by human review at each merge.
+VXIS automates signal collection and measurement, but code changes remain
+human-gated. The growth evaluator does not execute generated patches.
 
 ### Cycle 1: Threat-driven improvement
 1. **Signal**: cve-watch discovers CVE-2026-XXXX affecting Juice Shop, which means VXIS's sqlmap scan should now detect a new variant.
@@ -120,11 +123,11 @@ VXIS is designed to be **a system that improves itself without human interventio
 4. **Label**: Maintainer (or auto-labeler) adds `claude-implement`.
 5. **Code**: auto-implement spawns Claude Code → writes the new detection rule → opens PR.
 6. **Gate**: lint + test + benchmark all pass → merged.
-7. **Measure**: growth-loop runs on merge → confirms the new detection works → score goes up.
+7. **Measure**: an operator runs growth-loop in an isolated environment → reviews the score and suggestions.
 8. **Digest**: Sunday digest reports "+X% detection this week thanks to the CVE-2026-XXXX rule".
 
 ### Cycle 2: Performance-driven improvement
-1. **Signal**: growth-loop's weekly run shows Juice Shop score dropped by 50 points vs last week (regression).
+1. **Signal**: a manually approved growth-loop run shows a weak scoring dimension.
 2. **Analyze**: Delta analysis identifies the specific findings that are missing.
 3. **Issue**: Auto-opens an issue "Juice Shop XSS detection regressed — investigate reflected param handling".
 4. **Label**: `claude-implement` added.
@@ -144,11 +147,9 @@ VXIS is designed to be **a system that improves itself without human interventio
 | Threat intelligence feeders (CVE/Upstream/Domain) | ✅ Live | On reduced bootstrap schedule |
 | Signal ingest/analyze | ✅ Live | Feeds the issue opener |
 | `auto-implement.yml` | ⚠ Scaffolded | Needs a `claude-implement` label to fire; manual approval required before merge |
-| `growth-loop.yml` | ⚠ Partial | Runs benchmarks on schedule, but the auto-improve half (opening issues on regression) was paused during Phase A architecture migration. Phase B re-enables. |
+| `growth-loop.yml` | ✅ Review-only | Manual confirmation, immutable target images, read-only contents permission, no generated-code execution, bounded proposal artifact. |
 | `growth-digest.yml` | ⚠ Stub | Emits a weekly summary but no downstream notifications wired yet |
 | PR gates (lint/test/benchmark) | ✅ Live | Active on every PR to main |
-
-**Phase A effect:** Because the Brain-First architecture migration deleted 14960 lines and added 2500 new lines, the `growth-loop.yml` benchmark baselines need to be reset after Phase B tuning lands (so the self-improvement loop has a meaningful reference point again).
 
 ## The recurring "chore(signals): ingest batch YYYY-MM-DDTHH:MM" commits
 
@@ -165,8 +166,8 @@ These are **automated commits from `signal-ingest.yml`** — every time the sign
 
 ## How the Growth Layer makes VXIS better, concretely
 
-1. **More coverage over time**: New CVEs → new detection rules → more findings on the same target. Measurable via `growth-loop.yml`'s weekly score delta.
-2. **Fewer false positives over time**: failed findings from growth-loop → `signal-analyze` extracts patterns → issues opened for prompt tuning → auto-implement writes adapter changes → next week's score improves.
+1. **More coverage over time**: New CVEs → reviewed detection rules → more findings on the same target. Measurable with manually approved growth evaluations.
+2. **Fewer false positives over time**: weak dimensions and review-only proposals inform separately reviewed code changes.
 3. **Fresh scanner versions**: upstream-watch keeps Dockerfile dependencies current → new sqlmap / nuclei versions automatically propagated via the self-coding loop.
 4. **Adaptive prompts**: growth-digest summaries reveal which prompt strategies worked → signal-analyze opens PRs to strengthen successful patterns.
 5. **Target-specific knowledge**: When VXIS scans a new target type repeatedly, the knowledge store (`src/vxis/knowledge/`) accumulates patterns. Phase B's episodic memory will feed this back into the Brain via RAG at scan start.
@@ -183,6 +184,6 @@ All workflow definitions: `.github/workflows/*.yml`
 
 Related config:
 - `pyproject.toml` — Python deps the actions use
-- `poetry.lock` — pinned versions
-- `docs/superpowers/benchmarks/` — baselines that growth-loop compares against
+- `uv.lock` — pinned versions
+- `tools/benchmark/` — growth-loop score history and per-run proposal log
 - `data/signals/` — unified signal DB (committed by signal-ingest)

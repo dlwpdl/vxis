@@ -8,6 +8,7 @@ Supports two modes:
 from __future__ import annotations
 
 import asyncio
+import shlex
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -67,8 +68,8 @@ async def run_tool(
             limit=_BUFFER_LIMIT,
         )
     else:
-        cmd_list: list[str] = command if isinstance(command, list) else command.split()
-        command_label = " ".join(cmd_list)
+        cmd_list: list[str] = command if isinstance(command, list) else shlex.split(command)
+        command_label = shlex.join(cmd_list)
         process = await asyncio.create_subprocess_exec(
             *cmd_list,
             stdout=asyncio.subprocess.PIPE,

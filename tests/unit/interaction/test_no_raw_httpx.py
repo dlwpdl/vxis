@@ -18,6 +18,7 @@ ALLOWED: frozenset[str] = frozenset({
     "src/vxis/interaction/hands.py",
     "src/vxis/agent/tools/hands_tools.py",
     "src/vxis/ghost/transport.py",
+    "src/vxis/cli/preflight.py",  # ghost proxy-readiness probe — tests a specific proxy directly
 })
 
 

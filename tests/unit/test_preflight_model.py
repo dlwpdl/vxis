@@ -7,7 +7,7 @@ from vxis.cli import preflight
 def _openai_env(monkeypatch, model):
     monkeypatch.setenv("UPSTREAM_LLM_PROVIDER", "openai")
     monkeypatch.setenv("UPSTREAM_LLM_MODEL", model)
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0123456789abcdef")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-0123456789abcdef")  # gitleaks:allow
     for k in (
         "VXIS_DIRECTOR_LLM_PROVIDER", "VXIS_DIRECTOR_LLM_MODEL",
         "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY",

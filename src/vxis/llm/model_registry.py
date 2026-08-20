@@ -151,6 +151,28 @@ _MODELS: tuple[ModelInfo, ...] = (
     ),
     # ── Google Gemini ─────────────────────────────────────────
     ModelInfo(
+        model_id="google/gemini-3.7-flash",
+        provider="wavespeed",
+        context_window=1_048_576,
+        max_output_tokens=65_536,
+        supports_vision=True,
+        supports_json_mode=True,
+        reasoning_model=True,
+        family="gemini-3.7",
+        notes="Gemini 3.7 Flash through WaveSpeedAI",
+    ),
+    ModelInfo(
+        model_id="gemini-3.7-flash",
+        provider="gemini",
+        context_window=1_048_576,
+        max_output_tokens=65_536,
+        supports_vision=True,
+        supports_json_mode=True,
+        reasoning_model=True,
+        family="gemini-3.7",
+        notes="Stable Flash model; thinking levels: low, medium, high",
+    ),
+    ModelInfo(
         model_id="gemini-3.1-pro-preview",
         provider="gemini",
         context_window=1_000_000,
@@ -261,17 +283,39 @@ _MODELS: tuple[ModelInfo, ...] = (
         notes="Uncensored general-purpose",
     ),
     # ── llama.cpp (local OpenAI-compatible server) ────────────
+    # Director: dense 27B, Heretic-decensored (structure-preserving, unlike crude
+    # abliteration), MTP head for per-turn latency. Supports 256K context + a
+    # tunable thinking mode; started conservatively so the memory compressor
+    # matches a Mac-sized llama-server launch. No neutral tool-calling benchmark
+    # exists yet — pilot against VXIS agent tests before trusting 1-tool/turn.
     ModelInfo(
-        model_id="huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+        model_id="Qwen3.8-27B-Uncensored-Q6_K",
+        provider="llamacpp",
+        context_window=32_768,
+        max_output_tokens=4_096,
+        supports_vision=False,  # text-only seat; mmproj-*.gguf omitted (latent VLM)
+        supports_json_mode=False,  # tools via llama-server --jinja, not json_mode
+        reasoning_model=False,  # has a thinking mode; leave off until piloted
+        family="qwen3.8",
+        aliases=("qwen3.8-27b-uncensored", "qwen3.8-27b"),
+        notes="orcarouter/Qwen3.8-27B-Uncensored-GGUF Q6_K (22.4GB). Run via local llama-server with --jinja for tools; start context small on <=32GB Macs.",
+    ),
+    # Fallback offensive-security WORKER (executor under a constrained harness) —
+    # NOT a director: base Qwen3.6-35B-A3B is MoE ~3B active and the CyberStrike
+    # LoRA teaches only tool-call FORMATTING (self-eval ~42% correct tool routing,
+    # but 100% clean termination, 0 fabricated observations). Use the clean GGUF
+    # (Q6/Q8) — not the huihui-abliterated build, not MLX 4-bit.
+    ModelInfo(
+        model_id="CyberStrike-OffSec-35B-Q6_K",
         provider="llamacpp",
         context_window=8_192,
         max_output_tokens=4_096,
         supports_vision=False,
         supports_json_mode=False,
         reasoning_model=False,
-        family="huihui-qwen3.6",
-        aliases=("huihui-qwen3.6-35b-a3b",),
-        notes="Run via local llama-server; on 64GB Macs start at 2048 context even though the model can be configured higher.",
+        family="cyberstrike-offsec",
+        aliases=("cyberstrike-offsec-35b",),
+        notes="oyildirim/CyberStrike-OffSec-35B-GGUF. Offensive-native executor for the worker slot only; harness must constrain tool choice.",
     ),
 )
 
@@ -494,7 +538,7 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
             profile="local-medium",
         )
 
-    if provider in {"openai", "anthropic", "gemini", "together", "deepseek"}:
+    if provider in {"openai", "anthropic", "gemini", "together", "deepseek", "wavespeed"}:
         segment_cap = _context_segment_cap()
         threshold = max(12_000, min(segment_cap, int(context_window * 0.85)))
         return CompressionPolicy(

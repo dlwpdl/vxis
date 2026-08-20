@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
@@ -54,9 +55,14 @@ class ShodanPlugin(BasePlugin):
         ctx: DAGContext,
         tool_config: dict[str, Any],
     ) -> str:
-        # 'shodan host' requires API credits (paid plan).
-        # Check credits first; if zero, return a no-op to avoid 403 errors.
-        return f"shodan host $(dig +short {target} A | head -1) 2>&1 || echo '{{}}'"
+        # `shodan host` requires an IP.  Keep the resolver pipeline fixed and
+        # pass the target as a positional argument, never as shell source.
+        script = (
+            'ip=$(dig +short "$1" A | head -n 1); '
+            'if [ -n "$ip" ]; then shodan host "$ip" || printf "{}\\n"; '
+            'else printf "{}\\n"; fi'
+        )
+        return shlex.join(["bash", "-c", script, "--", target])
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         # Require SHODAN_API_KEY — skip gracefully if absent.

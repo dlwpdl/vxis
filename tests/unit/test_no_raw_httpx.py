@@ -30,6 +30,7 @@ ALLOWED: frozenset[str] = frozenset({
     "src/vxis/interaction/hands.py",        # the SessionManager / TargetSession owner
     "src/vxis/agent/tools/hands_tools.py",  # tool-call wrapper around Hands
     "src/vxis/ghost/transport.py",          # httpx.AsyncBaseTransport impl — legitimately owns raw httpx
+    "src/vxis/cli/preflight.py",            # ghost proxy-readiness probe: must test a specific proxy directly, not via the ghost-routed SessionManager
 })
 
 # Pre-existing offenders carved out of phase-B.4 scope. These are tracked for

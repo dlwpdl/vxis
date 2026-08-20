@@ -16,6 +16,12 @@ from vxis.agent.policy.scan_policy import PROFILE_POLICY_TABLE
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
 
 
+@pytest.fixture(autouse=True)
+def _approve_arbitrary_exec(monkeypatch):
+    """This suite isolates ceiling/injection gates from the outer exec approval gate."""
+    monkeypatch.setenv("VXIS_ALLOW_ARBITRARY_EXEC", "1")
+
+
 class _StubShell:
     name = "shell_exec"
     description = "stub"
@@ -76,8 +82,7 @@ async def test_dispatch_allows_non_exploitation_tool_under_low_ceiling():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_allows_shell_when_no_active_policy():
-    # legacy: ceiling off → shell not gated
+async def test_dispatch_allows_shell_when_no_active_policy_after_explicit_opt_in():
     reg = _reg()
     r = await reg.dispatch("shell_exec", {"command": "id"})
     assert r.ok is True
@@ -118,8 +123,8 @@ async def test_dispatch_allows_shell_under_injection_full():
 
 
 @pytest.mark.asyncio
-async def test_dispatch_allows_shell_when_no_injection_decision():
-    reg = _reg()  # legacy: no decision set
+async def test_dispatch_allows_shell_when_no_injection_decision_after_explicit_opt_in():
+    reg = _reg()
     r = await reg.dispatch("shell_exec", {"command": "id"})
     assert r.ok is True
 

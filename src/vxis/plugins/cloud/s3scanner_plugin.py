@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
@@ -78,15 +79,16 @@ class S3ScannerPlugin(BasePlugin):
         #   s3scanner scan --bucket NAME --json          (single bucket)
         #   s3scanner scan --bucket-file FILE --json     (multi-bucket file)
         #
-        # For multiple buckets we write a bucket-file via process substitution
-        # so a single invocation handles all names.  The bucket list is joined
-        # with newlines and fed through bash process substitution.
-        bucket_list = "\n".join(buckets)
-        # Shell command: create a temp file, write bucket names, scan, clean up
-        return (
-            f"bash -c 'TMP=$(mktemp); printf \"{bucket_list}\" > \"$TMP\"; "
-            f"s3scanner scan --bucket-file \"$TMP\" --json; rm -f \"$TMP\"'"
+        # The common runner does not invoke a shell.  This plugin explicitly
+        # starts bash only for the temporary bucket file, with bucket names as
+        # positional arguments so target data is never parsed as shell code.
+        script = (
+            "tmp=$(mktemp) || exit 1; "
+            "trap 'rm -f \"$tmp\"' EXIT; "
+            "printf '%s\\n' \"$@\" > \"$tmp\"; "
+            's3scanner scan --bucket-file "$tmp" --json'
         )
+        return shlex.join(["bash", "-c", script, "--", *map(str, buckets)])
 
     def parse_output(self, raw_stdout: str, raw_stderr: str) -> PluginOutput:
         findings: list[dict[str, Any]] = []

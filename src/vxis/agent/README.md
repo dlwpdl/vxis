@@ -21,14 +21,14 @@
 | **`tool_registry.py`** | `BrainTool` runtime-checkable Protocol, `ToolResult` dataclass, and `ToolRegistry` async dispatcher. `describe_all()` output is the Brain's tool catalog. |
 | **`memory_compressor.py`** | LLM-based memory compression — Strix pattern. Local runtimes compress early; cloud runtimes segment history around 200K tokens instead of filling the whole context window. |
 | **`egress.py`** | Enterprise egress filter. When `VXIS_EGRESS_STRICT=1`, builds an allowlist from the target URL and blocks sandbox outbound to non-target hosts. |
-| **`tools/`** | Subpackage with 23 BrainTool implementations. See [`tools/README.md`](tools/README.md). |
+| **`tools/`** | Subpackage with 27 BrainTool implementations. See [`tools/README.md`](tools/README.md). |
 
 ## Brain backends (three, only AgentBrain is live)
 
 | File | Backend | Status |
 |---|---|---|
 | `brain.py` → `AgentBrain` | LLM API (OpenAI / Anthropic / Gemini / DeepSeek fallback chain) | **LIVE** |
-| `brain_interactive.py` → `InteractiveBrain` | stdin/stdout NDJSON — external Claude Code process | Legacy (`vxis scan --interactive`) |
+| `brain_interactive.py` → `InteractiveBrain` | stdin/stdout NDJSON — external process bridge | Legacy library only; CLI flag fails fast |
 | `brain_filebased.py` → `FileBasedBrain` | File-based protocol | Rarely used |
 
 All three implement `think()` which increments the unified `_BRAIN_DECISION_COUNT` counter.

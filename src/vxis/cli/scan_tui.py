@@ -196,7 +196,18 @@ class ScanTUI(App):
         if not os.environ.get("VXIS_TUI_DEBUG"):
             return
         try:
-            with open("/tmp/vxis_tui_debug.log", "a", encoding="utf-8") as fh:
+            from vxis.config.schema import VXISConfig
+
+            log_dir = VXISConfig().data_dir.expanduser() / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            log_dir.chmod(0o700)
+            path = log_dir / f"tui_debug_{os.getpid()}.log"
+            flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            descriptor = os.open(path, flags, 0o600)
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "a", encoding="utf-8") as fh:
                 fh.write(msg + "\n")
         except Exception:
             pass

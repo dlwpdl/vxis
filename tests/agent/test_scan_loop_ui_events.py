@@ -19,6 +19,19 @@ class _ShellTool:
         )
 
 
+class _ConfirmingVerifier:
+    name = "verify_finding"
+    description = "confirm test finding"
+    input_schema = {"type": "object"}
+
+    async def run(self, **kwargs) -> ToolResult:
+        return ToolResult(
+            ok=True,
+            summary="confirmed",
+            data={"verdict": "CONFIRMED", "confidence": "high", "reasoning": "test proof"},
+        )
+
+
 def test_scan_loop_emits_ui_events_for_regular_dispatch() -> None:
     async def _run() -> list[tuple[str, dict]]:
         reg = ToolRegistry()
@@ -92,6 +105,7 @@ def test_scan_loop_spawns_followup_branches_from_finding() -> None:
         _reset_for_tests()
         reg = ToolRegistry()
         reg.register(ReportFindingTool())
+        reg.register(_ConfirmingVerifier())
 
         loop = ScanAgentLoop(
             target="http://example.test",

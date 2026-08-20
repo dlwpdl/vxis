@@ -18,6 +18,8 @@ from vxis.agent.llm_cost import (
 
 def test_model_prices_has_realistic_known_models() -> None:
     # flash is exercised numerically below; just assert the table is populated.
+    assert MODEL_PRICES["gemini-3.7-flash"] == (0.75, 3.75)
+    assert estimate_cost("google/gemini-3.7-flash", 1_000_000, 1_000_000) == (4.5, True)
     assert MODEL_PRICES["gemini-2.5-flash"] == (0.30, 2.50)
     assert "claude-opus-4-8" in MODEL_PRICES
 

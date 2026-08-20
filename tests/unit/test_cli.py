@@ -221,6 +221,8 @@ class TestScanCommand:
             vxis_score=None,
             peak_context_bytes=0,
             llm_usage={},
+            scan_loop_completed=True,
+            scan_status="completed",
         )
 
     @contextmanager
@@ -266,6 +268,15 @@ class TestScanCommand:
         assert result.exit_code != 0
         assert "not implemented" in result.output
 
+    def test_scan_interactive_fails_fast_before_preflight(self):
+        with patch("vxis.cli.preflight.run_preflight") as run_preflight:
+            result = runner.invoke(app, ["scan", "example.com", "--interactive"])
+
+        assert result.exit_code == 2
+        assert "--interactive is disabled" in result.output
+        assert "AgentBrain" in result.output
+        run_preflight.assert_not_called()
+
     def test_scan_no_report_flag_suppresses_report_path(self):
         """With --no-report the report path message is not shown."""
         mock_result = self._make_mock_result()
@@ -276,6 +287,58 @@ class TestScanCommand:
         assert result.exit_code == 0
         # The "Report would be written to" message should not appear
         assert "Report would be written to" not in result.output
+
+    def test_incomplete_scan_is_not_reported_as_success(self):
+        mock_result = self._make_mock_result()
+        mock_result.scan_loop_completed = False
+        mock_result.scan_status = "partial"
+        mock_result.scan_loop_error = "brain unavailable"
+
+        with self._patch_scan_runtime(mock_result):
+            result = runner.invoke(app, ["scan", "example.com", "--no-report"])
+
+        assert result.exit_code != 0
+        assert "Scan completed" not in result.output
+        assert "partial" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# diff command
+# ---------------------------------------------------------------------------
+
+
+class TestDiffCommand:
+    def test_diff_displays_findings_with_unknown_resolution(self):
+        from vxis.core.scan_diff import ScanDiffResult
+        from vxis.models.finding import Finding, Severity
+
+        finding = Finding(
+            id="finding-1",
+            scan_id="1",
+            title="Coverage not confirmed",
+            description="The comparison scan did not cover this finding.",
+            severity=Severity.high,
+            target="example.test",
+            finding_type="sqli",
+            source_plugin="test",
+        )
+        diff = ScanDiffResult(unknown_findings=[finding])
+
+        with (
+            patch(
+                "vxis.core.scan_diff.compare_scans",
+                AsyncMock(return_value=diff),
+            ),
+            patch(
+                "vxis.cli.main._get_config",
+                return_value=SimpleNamespace(db_url="sqlite+aiosqlite:///:memory:"),
+            ),
+        ):
+            result = runner.invoke(app, ["diff", "1", "2"])
+
+        assert result.exit_code == 0
+        assert "Unknown" in result.output
+        assert "Coverage not confirmed" in result.output
 
 
 # ---------------------------------------------------------------------------

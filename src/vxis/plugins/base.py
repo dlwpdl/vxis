@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import subprocess
@@ -10,6 +11,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from vxis.core.context import DAGContext, PluginOutput
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,11 @@ class PluginMeta:
     optional_depends: tuple[str, ...] = ()
     timeout_seconds: int = 600
     produces: tuple[str, ...] = ()
+    # Alternate names the real tool may be installed under (to dodge PATH
+    # collisions), and a substring that must appear in its `-version` output to
+    # confirm identity. Empty marker = accept the first same-named binary found.
+    binary_aliases: tuple[str, ...] = ()
+    identity_marker: str = ""
 
 
 class BasePlugin(ABC):
@@ -50,9 +58,54 @@ class BasePlugin(ABC):
         """Parse raw tool output into structured PluginOutput."""
         ...
 
+    def resolve_binary(self) -> str | None:
+        """Absolute path of the tool binary, identity-verified when required.
+
+        Several recon tools share a name with an unrelated program on PATH — the
+        canonical case is ProjectDiscovery ``httpx`` vs the Python ``httpx`` HTTP
+        library CLI, which silently shadows it and rejects every PD flag, turning
+        a scan into a cryptic non-zero exit. When ``identity_marker`` is set we
+        run ``-version`` on each candidate (``tool_binary`` first, then
+        ``binary_aliases``) and only accept one whose output contains the marker.
+
+        Returns None when nothing suitable is found.
+        """
+        candidates = (self.meta.tool_binary, *self.meta.binary_aliases)
+        marker = self.meta.identity_marker.lower()
+        for name in candidates:
+            path = shutil.which(name)
+            if path is None:
+                continue
+            if not marker:
+                return path
+            # ponytail: one subprocess per candidate, no cache — only marker'd
+            # plugins pay it, and validate_environment runs once per scan.
+            for flag in ("-version", "--version", "version", "-V"):
+                try:
+                    result = subprocess.run(
+                        [path, flag], capture_output=True, text=True, timeout=5
+                    )
+                except (subprocess.TimeoutExpired, OSError):
+                    continue
+                if marker in (result.stdout + result.stderr).lower():
+                    return path
+        if marker and shutil.which(self.meta.tool_binary):
+            logger.warning(
+                "%s: a '%s' binary is on PATH but does not identify as '%s' — "
+                "skipping. Install the real '%s'%s.",
+                self.meta.name,
+                self.meta.tool_binary,
+                self.meta.identity_marker,
+                self.meta.tool_binary,
+                f" or expose it as one of: {', '.join(self.meta.binary_aliases)}"
+                if self.meta.binary_aliases
+                else "",
+            )
+        return None
+
     def validate_environment(self) -> bool:
-        """Check if the tool binary is available on the system."""
-        return shutil.which(self.meta.tool_binary) is not None
+        """Check that the correct tool binary is available (identity-verified)."""
+        return self.resolve_binary() is not None
 
     def detect_version(self) -> str:
         """Detect installed tool version at runtime.

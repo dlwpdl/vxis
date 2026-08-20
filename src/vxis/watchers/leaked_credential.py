@@ -275,7 +275,11 @@ class LeakedCredentialWatcher(BaseWatcher):
 
                 sha = item.get("sha", "")
                 html_url = item.get("html_url", "")
-                item_hash = sha[:12] if sha else hashlib.md5(html_url.encode()).hexdigest()[:12]
+                item_hash = (
+                    sha[:12]
+                    if sha
+                    else hashlib.md5(html_url.encode(), usedforsecurity=False).hexdigest()[:12]
+                )
                 item_id = f"github:cred:{item_hash}:{domain}"
 
                 repo = item.get("repository", {})

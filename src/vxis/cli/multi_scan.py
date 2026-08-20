@@ -67,10 +67,29 @@ def _build_pipeline(
     )
 
 
+def _ghost_run_target(entry: str, kind: TargetKind, *, ghost: bool) -> str:
+    """Prefix a web target with ghost:// so the pipeline activates Ghost.
+
+    Ghost is HTTP-proxy anonymization, so it only applies to web entries; other
+    kinds are returned unchanged. parse_ghost_trigger rebuilds the URL as
+    ``https://`` + everything after ``ghost://``, so we hand it the host/path
+    only (scheme stripped) to avoid a doubled scheme.
+    """
+    if not ghost or kind != TargetKind.WEB:
+        return entry
+    if entry.startswith("ghost://"):
+        return entry
+    rest = entry.split("://", 1)[-1]
+    if not rest:
+        return entry
+    return f"ghost://{rest}"
+
+
 async def _scan_target(
     target: ManifestTarget,
     scan_id: str,
     max_iters: int,
+    ghost: bool = False,
 ) -> list[Finding] | None:
     """Run a single target scan and return its findings.
 
@@ -115,10 +134,14 @@ async def _scan_target(
     set_active_scope(build_target_scope_enforcer(target.entry))
     try:
         ctx = await pipeline.run(
-            target=target.entry,
+            target=_ghost_run_target(target.entry, target.kind, ghost=ghost),
             kind=target.kind,
             target_hints=dict(target.hints),
         )
+
+        if getattr(ctx, "scan_loop_completed", None) is False:
+            reason = str(getattr(ctx, "scan_loop_error", "") or "scan loop did not complete")
+            raise RuntimeError(f"Incomplete scan for target {target.name!r}: {reason}")
 
         findings: list[Finding] = list(ctx.findings) if ctx.findings else []
         logger.info(
@@ -202,17 +225,17 @@ def _emit_report(
 # Public entry point
 # ---------------------------------------------------------------------------
 
-def multi_scan(manifest: ScanManifest) -> int:
+def multi_scan(manifest: ScanManifest, *, ghost: bool = False) -> int:
     """Orchestrate a multi-target scan and return a POSIX exit code.
 
     Returns:
         0  — success (report generated, zero or more findings)
         1  — all targets were skipped or no output could be written
     """
-    return asyncio.run(_async_multi_scan(manifest))
+    return asyncio.run(_async_multi_scan(manifest, ghost=ghost))
 
 
-async def _async_multi_scan(manifest: ScanManifest) -> int:
+async def _async_multi_scan(manifest: ScanManifest, *, ghost: bool = False) -> int:
     base_scan_id = _build_base_scan_id()
     output_path = _resolve_output(manifest.output)
 
@@ -232,6 +255,7 @@ async def _async_multi_scan(manifest: ScanManifest) -> int:
             target=target,
             scan_id=per_target_scan_id,
             max_iters=manifest.max_iters_per_target,
+            ghost=ghost,
         )
         if findings is None:
             continue

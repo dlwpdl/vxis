@@ -57,14 +57,34 @@ class TestIsLocalBenchmark:
     def test_remote_host_port_3000_with_path_is_NOT_benchmark(self) -> None:
         assert _is_local_benchmark("http://api.prod.io:3000/admin") is False
 
-    # ── ghost:// scheme — always auto-approved regardless of host ───────────
+    # ── ghost:// scheme still has to resolve to a local benchmark ───────
 
-    def test_ghost_scheme_local_is_benchmark(self) -> None:
-        assert _is_local_benchmark("ghost://localhost:3000") is True
+    def test_ghost_scheme_local_is_not_benchmark(self) -> None:
+        assert _is_local_benchmark("ghost://localhost:3000") is False
 
-    def test_ghost_scheme_remote_is_benchmark(self) -> None:
-        """ghost:// is a VXIS-internal scheme — always safe to auto-approve."""
-        assert _is_local_benchmark("ghost://remote.host.com:9999") is True
+    def test_ghost_scheme_remote_is_not_benchmark(self) -> None:
+        assert _is_local_benchmark("ghost://remote.host.com:9999") is False
+
+    def test_ipv6_loopback_benchmark_port_is_benchmark(self) -> None:
+        assert _is_local_benchmark("http://[::1]:3000") is True
+
+    def test_other_ipv6_host_is_not_benchmark(self) -> None:
+        assert _is_local_benchmark("http://[::2]:3000") is False
+
+    def test_loopback_range_address_is_benchmark(self) -> None:
+        assert _is_local_benchmark("http://127.0.0.2:8082") is True
+
+    def test_localhost_subdomain_is_not_benchmark(self) -> None:
+        assert _is_local_benchmark("https://localhost.evil.example:3000") is False
+
+    def test_localhost_in_query_is_not_benchmark(self) -> None:
+        assert (
+            _is_local_benchmark("https://evil.example/?next=http://localhost:3000")
+            is False
+        )
+
+    def test_localhost_userinfo_is_not_benchmark(self) -> None:
+        assert _is_local_benchmark("http://localhost:3000@evil.example") is False
 
     # ── edge cases ───────────────────────────────────────────────────────────
 

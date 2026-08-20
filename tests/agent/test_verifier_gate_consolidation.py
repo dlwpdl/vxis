@@ -13,7 +13,10 @@ import pytest
 
 from vxis.agent.scan_loop import ScanAgentLoop
 from vxis.agent.tool_registry import ToolRegistry, ToolResult
-from vxis.agent.tools.finding_tools import _reset_for_tests as _reset_findings
+from vxis.agent.tools.finding_tools import (
+    _get_findings,
+    _reset_for_tests as _reset_findings,
+)
 
 
 class _VerifyStub:
@@ -137,7 +140,39 @@ async def test_informational_severity_skips_verification():
 
 
 @pytest.mark.asyncio
-async def test_no_verify_tool_passes():
+async def test_no_verify_tool_blocks_critical_finding():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
     result = await loop._verify_and_gate(_args("critical"), require_confirmed=True)
+    assert isinstance(result, ToolResult)
+    assert result.ok is False
+    assert result.error == "verifier_unavailable"
+    assert _get_findings() == []
+
+
+@pytest.mark.asyncio
+async def test_verify_tool_error_blocks_high_finding():
+    class BrokenVerifier:
+        name = "verify_finding"
+        description = "broken verifier"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            return ToolResult(ok=False, summary="verifier offline", error="offline")
+
+    reg = ToolRegistry()
+    reg.register(BrokenVerifier())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
+
+    result = await loop._verify_and_gate(_args("high"), require_confirmed=True)
+
+    assert isinstance(result, ToolResult)
+    assert result.ok is False
+    assert result.error == "verifier_unavailable"
+    assert _get_findings() == []
+
+
+@pytest.mark.asyncio
+async def test_no_verify_tool_keeps_medium_degradation_policy():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    result = await loop._verify_and_gate(_args("medium"), require_confirmed=True)
     assert result is None

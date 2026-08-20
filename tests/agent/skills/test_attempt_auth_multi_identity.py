@@ -44,7 +44,7 @@ class _FakeSession:
                 200,
                 {
                     "authentication": {
-                        "token": "tok-alice-12345678901234567890",
+                        "token": "tok-alice-12345678901234567890",  # gitleaks:allow -- test token
                         "email": email,
                         "role": "user",
                         "id": 1,
@@ -56,7 +56,7 @@ class _FakeSession:
                 200,
                 {
                     "authentication": {
-                        "token": "tok-bob-12345678901234567890",
+                        "token": "tok-bob-12345678901234567890",  # gitleaks:allow -- test token
                         "email": email,
                         "role": "user",
                         "id": 2,
@@ -78,6 +78,7 @@ class _FakeSessionManager:
 @pytest.mark.asyncio
 async def test_attempt_auth_returns_multiple_authenticated_identities(
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     manager = _FakeSessionManager()
     monkeypatch.setattr("vxis.interaction.hands.SessionManager", lambda: manager)
@@ -110,3 +111,20 @@ async def test_attempt_auth_returns_multiple_authenticated_identities(
     assert result["owner_map"] == {"1": "alice", "2": "bob"}
     assert "operator_credentials:alice" in manager.identities
     assert "operator_credentials:bob" in manager.identities
+
+    persisted_evidence = json.dumps(
+        {
+            "all_attempts": result["all_attempts"],
+            "control_checks": result["control_checks"],
+            "credentials_used": result["credentials_used"],
+            "poc_http_exchange": result["poc_http_exchange"],
+        }
+    )
+    for secret in (
+        "alice-pass",
+        "bob-pass",
+        "tok-alice-12345678901234567890",
+        "tok-bob-12345678901234567890",
+    ):
+        assert secret not in persisted_evidence
+        assert secret not in caplog.text

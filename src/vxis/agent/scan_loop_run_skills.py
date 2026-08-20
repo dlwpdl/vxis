@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from vxis.agent.scan_loop_policy import _DESKTOP_SKILLS
+from vxis.agent.tools.skill_runner import redact_sensitive_output
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +77,11 @@ class ScanLoopScheduledSkillsMixin:
                             self.state.add_message("tool", {
                                 "name": "run_skill",
                                 "args": {"skill": _real_skill, "queue_id": skill_name},
-                                "result": {"ok": True, "summary": sr.summary, "data": sr.data},
+                                "result": {
+                                    "ok": True,
+                                    "summary": sr.summary,
+                                    "data": redact_sensitive_output(sr.data),
+                                },
                             })
                             logger.info(
                                 "skill %s completed (queue=%s): %s",
@@ -112,19 +117,18 @@ class ScanLoopScheduledSkillsMixin:
                                         )
                                     authz_params = self.state.authz_context_params()
                                     method = sr.data.get("method", "?")
-                                    creds = sr.data.get("credentials_used", {})
                                     # Auto-report auth finding
                                     severity = "critical" if "sqli" in method else "high"
                                     ftype = "sql_injection" if "sqli" in method else "weak_auth"
                                     login_endpoint = sr.data.get("login_endpoint", self.state.target)
                                     control_checks = sr.data.get("control_checks", {}) or {}
-                                    poc_blob = (
+                                    poc_blob = redact_sensitive_output(
                                         sr.data.get("poc_http_exchange")
                                         or (
                                             f"Method: {method}\n"
-                                            f"Credentials used: {creds}\n"
-                                            f"Token: {auth_token[:120]}\n"
-                                            f"User info: {sr.data.get('user_info', {})}\n"
+                                            "Credentials used: [redacted]\n"
+                                            "Token: [redacted]\n"
+                                            "User info: [redacted]\n"
                                             f"Control checks: {control_checks}"
                                         )
                                     )
@@ -948,6 +952,6 @@ class ScanLoopScheduledSkillsMixin:
                                         "evidence": str(_ev)[:500],
                                     })
 
-                    except Exception:
-                        logger.exception("skill %s failed", skill_name)
+                    except Exception as exc:
+                        logger.error("skill %s failed (%s)", skill_name, type(exc).__name__)
         return auth_token

@@ -7,6 +7,7 @@ is shared between test functions.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -41,6 +42,14 @@ class TestAuditLoggerInit:
         AuditLogger(log_path)
         # File should not exist yet — only created on first write
         assert not log_path.exists()
+
+    def test_log_directory_and_file_are_private(self, tmp_path: Path) -> None:
+        log_path = tmp_path / "private" / "audit.jsonl"
+        logger = AuditLogger(log_path)
+        logger.log_scan_end("scan-private", finding_count=0, status="completed")
+
+        assert os.stat(log_path.parent).st_mode & 0o777 == 0o700
+        assert os.stat(log_path).st_mode & 0o777 == 0o600
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +111,19 @@ class TestLogToolRun:
         redacted = redact_command("--password SuperSecret run")
         assert "SuperSecret" not in redacted
         assert redacted == "--password *** run"
+
+    @pytest.mark.parametrize(
+        "command, secret",
+        [
+            ("curl https://alice:SuperSecret@example.com/private", "SuperSecret"),  # gitleaks:allow
+            ("curl -H 'Authorization: Bearer secret-token' https://example.com", "secret-token"),
+            ("curl -H 'Cookie: session=raw-cookie' https://example.com", "raw-cookie"),
+        ],
+    )
+    def test_redact_command_handles_url_and_header_credentials(
+        self, command: str, secret: str
+    ) -> None:
+        assert secret not in redact_command(command)
 
     def test_log_tool_run_optional_fields_can_be_none(self, tmp_path: Path) -> None:
         logger = AuditLogger(tmp_path / "audit.jsonl")
@@ -215,3 +237,16 @@ class TestLogScanLifecycle:
         assert rec["scan_id"] == "scan-100"
         assert rec["finding_count"] == 42
         assert rec["status"] == "completed"
+
+    def test_scan_start_redacts_target_userinfo_and_secret_config(self, tmp_path: Path) -> None:
+        logger = AuditLogger(tmp_path / "audit.jsonl")
+        logger.log_scan_start(
+            "scan-secret",
+            "https://alice:SuperSecret@example.com/private",
+            "standard",
+            {"api_key": "raw-api-key", "profile": "standard"},
+        )
+
+        rendered = json.dumps(_read_lines(tmp_path / "audit.jsonl")[0])
+        assert "SuperSecret" not in rendered
+        assert "raw-api-key" not in rendered

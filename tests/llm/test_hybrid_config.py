@@ -144,7 +144,9 @@ def test_frontier_autopromote_gemini_uses_ga_model_not_preview() -> None:
     # GA flagship, not a preview model a standard key can't call. Previously the
     # frontier table hardcoded gemini-3.1-pro-preview, drifting from the GA default
     # used on explicit selection — so "just export a Google key" silently 404'd.
-    config = resolve_hybrid_model_config(env={"GOOGLE_API_KEY": "AIzaTESTKEY1234567890"})
+    config = resolve_hybrid_model_config(
+        env={"GOOGLE_API_KEY": "AIzaTESTKEY1234567890"}  # gitleaks:allow -- test key
+    )
     assert config.director.provider == "gemini"
     assert config.director.model == "gemini-2.5-pro"
     assert "preview" not in config.director.model
@@ -155,3 +157,24 @@ def test_frontier_autopromote_anthropic_openai_unchanged() -> None:
     assert (a.director.provider, a.director.model) == ("anthropic", "claude-sonnet-4-6")
     o = resolve_hybrid_model_config(env={"OPENAI_API_KEY": "sk-x"})
     assert (o.director.provider, o.director.model) == ("openai", "gpt-5.4")
+
+
+def test_wavespeed_model_ref_uses_wavespeed_provider() -> None:
+    config = resolve_hybrid_model_config(
+        env={
+            "VXIS_DIRECTOR_LLM": "wavespeed/google/gemini-3.7-flash",
+            "VXIS_DIRECTOR_LLM_EXTRA_BODY_JSON": '{"reasoning_effort": "high"}',
+        }
+    )
+
+    assert config.director.provider == "wavespeed"
+    assert config.director.model == "google/gemini-3.7-flash"
+    assert config.director.extra_body == {"reasoning_effort": "high"}
+
+
+def test_wavespeed_key_auto_selects_wavespeed_director() -> None:
+    config = resolve_hybrid_model_config(
+        env={"WAVESPEED_API_KEY": "ws-test-0123456789abcdef"}  # gitleaks:allow
+    )
+
+    assert config.director.ref == "wavespeed/google/gemini-3.7-flash"

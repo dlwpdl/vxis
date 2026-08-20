@@ -14,11 +14,48 @@ default to evidence.
 from __future__ import annotations
 import json
 import logging
+import re
 from typing import Any
 
 from vxis.agent.tool_registry import ToolResult
 
 logger = logging.getLogger(__name__)
+
+_SENSITIVE_OUTPUT_KEYS = frozenset(
+    {
+        "authorization",
+        "api_key",
+        "bearer",
+        "cookie",
+        "cookies",
+        "credentials",
+        "credentials_used",
+        "creds",
+        "identities",
+        "owner_map",
+        "password",
+        "password_hash",
+        "poc_http_exchange",
+        "private_key",
+        "primary_identity",
+        "secret",
+        "token",
+        "user_info",
+    }
+)
+_INLINE_SECRET_RE = re.compile(
+    r"(?i)([\"']?(?:authorization|cookie|password|secret|token|api[_-]?key)"
+    r"[\"']?\s*[:=]\s*)"
+    r"(?:bearer\s+)?(?:[\"'][^\"']*[\"']|[^\s,}]+)"
+)
+_BEARER_SECRET_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
+
+
+def _is_sensitive_output_key(key: Any) -> bool:
+    normalized = re.sub(r"[^a-z0-9]+", "_", str(key).lower()).strip("_")
+    return normalized in _SENSITIVE_OUTPUT_KEYS or normalized.endswith(
+        ("_token", "_secret", "_password", "_cookie", "_api_key", "_private_key")
+    )
 
 _SKILL_ALIASES: dict[str, str] = {
     "auth_bypass": "attempt_auth",
@@ -53,6 +90,29 @@ def _with_egress_metadata(result: Any, egress: dict[str, Any]) -> dict[str, Any]
     data = dict(result) if isinstance(result, dict) else {"result": result}
     data["_egress"] = egress
     return data
+
+
+def redact_sensitive_output(value: Any) -> Any:
+    """Remove credentials and identity blobs from logs, PoCs, and message history."""
+    if isinstance(value, dict):
+        return {
+            key: (
+                "[redacted]"
+                if _is_sensitive_output_key(key)
+                else redact_sensitive_output(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_sensitive_output(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_sensitive_output(item) for item in value)
+    if isinstance(value, str):
+        return _BEARER_SECRET_RE.sub(
+            "Bearer [redacted]",
+            _INLINE_SECRET_RE.sub(r"\1[redacted]", value),
+        )
+    return value
 
 
 class RunSkillTool:
@@ -283,8 +343,13 @@ class RunSkillTool:
             else:
                 result = await fn(target_url=target_url, **params)
         except Exception as e:
-            logger.exception("run_skill %s failed", skill_name)
-            return ToolResult(ok=False, summary=f"run_skill {skill_name}: {type(e).__name__}: {e}", error=str(e))
+            error = type(e).__name__
+            logger.error("run_skill %s failed (%s)", skill_name, error)
+            return ToolResult(
+                ok=False,
+                summary=f"run_skill {skill_name} failed ({error})",
+                error=error,
+            )
 
         # Build a compact summary
         summary_parts = [f"skill:{skill_name}"]
@@ -308,8 +373,10 @@ class RunSkillTool:
 
         elif skill_name == "attempt_auth":
             if result.get("authenticated"):
-                summary_parts.append(f"AUTHENTICATED via {result['method']}! token={result['token'][:30]}...")
-                summary_parts.append(f"user: {result.get('user_info', {})}")
+                summary_parts.append(f"AUTHENTICATED via {result['method']} (token acquired)")
+                summary_parts.append(
+                    f"identities={len(result.get('identities') or [])}"
+                )
                 controls = result.get("control_checks", {})
                 if controls:
                     summary_parts.append(f"controls: neg={controls.get('negative_control', {}).get('status', '?')} pos={controls.get('positive_control', {}).get('status', '?')}")

@@ -543,15 +543,15 @@ class VXISConfig(BaseSettings):
         description="llama.cpp server OpenAI-compatible base URL. Default: http://localhost:8080",
     )
     llamacpp_model: str = Field(
-        default="huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m",
+        default="Qwen3.8-27B-Uncensored-Q6_K",
         description="Default llama.cpp model id exposed by the local server.",
     )
     llamacpp_hf_repo: str = Field(
-        default="shennguyen/Huihui-Qwen3.6-35B-A3B-Claude-4.7-Opus-abliterated-GGUF",
+        default="orcarouter/Qwen3.8-27B-Uncensored-GGUF",
         description="Optional Hugging Face repo used to launch llama.cpp locally.",
     )
     llamacpp_hf_file: str = Field(
-        default="huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m.gguf",
+        default="Qwen3.8-27B-Uncensored-Q6_K.gguf",
         description="Optional GGUF file name used to launch llama.cpp locally.",
     )
     llamacpp_context: int = Field(

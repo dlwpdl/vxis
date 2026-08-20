@@ -31,7 +31,18 @@ class GhostVerifier:
         # Lazy import — see TYPE_CHECKING note above.
         from vxis.interaction.hands import TargetSession  # noqa: PLC0415
 
-        session = TargetSession(_IP_CHECK_URL, verify_ssl=True)
+        # Route the IP probe through the Ghost transport when active, so we
+        # verify the *proxied* exit IP — never the host's direct IP. A raw
+        # TargetSession does NOT get GhostTransport (only SessionManager wires
+        # it), which is why this probe used to report the direct IP as the
+        # "anonymized" one. When active-but-no-proxy, GhostTransport fails
+        # closed and check() records the error instead of a fake exit IP.
+        transport = None
+        if ghost_layer.is_active():
+            from vxis.ghost.transport import GhostTransport  # noqa: PLC0415
+
+            transport = GhostTransport(ghost_layer)
+        session = TargetSession(_IP_CHECK_URL, verify_ssl=True, transport=transport)
         try:
             resp = await session.get("/")
             if resp.status == 200:

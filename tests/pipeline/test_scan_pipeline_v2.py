@@ -95,9 +95,13 @@ async def test_scan_pipeline_v2_uses_platform_launcher_runtime():
         shared_notes=["launcher:desktop prepared"],
     )
 
-    with patch("vxis.pipeline.scan_pipeline_v2.prepare_target_runtime", new=AsyncMock(return_value=runtime)), patch(
-        "vxis.pipeline.scan_pipeline_v2.ScanAgentLoop"
-    ) as mock_loop_cls:
+    with (
+        patch(
+            "vxis.pipeline.scan_pipeline_v2.prepare_target_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls,
+    ):
         mock_loop = MagicMock()
         mock_loop.run = AsyncMock(return_value=fake_loop_result)
         mock_loop_cls.return_value = mock_loop
@@ -184,37 +188,44 @@ async def test_scan_pipeline_v2_seeds_loop_from_target_memory():
     )
 
     fake_state = MagicMock()
-    with patch("vxis.pipeline.scan_pipeline_v2.prepare_target_runtime", new=AsyncMock(return_value=runtime)), patch(
-        "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
-        return_value={
-            "target_known": True,
-            "prior_scan_count": 2,
-            "known_findings": [
-                {
-                    "finding_type": "sql_injection",
-                    "affected_component": "/rest/products/search?q=",
-                    "title": "SQL injection on q",
-                }
-            ],
-            "successful_tactics": [
-                {"finding_type": "sql_injection", "reasoning": "Confirmed with transcript"}
-            ],
-            "refuted_patterns": [
-                {"finding_type": "error_oracle", "affected_component": "/api/foo"}
-            ],
-            "branch_leads": [
-                {
-                    "id": "branch-1",
-                    "vector_id": "WEB-SQLI-001",
-                    "title": "Dump product table",
-                    "role": "post_exploit_worker",
-                    "phase": "data_access",
-                    "objective": "Extract rows",
-                    "next_step": "Run sqlmap --dump",
-                }
-            ],
-        },
-    ), patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls:
+    with (
+        patch(
+            "vxis.pipeline.scan_pipeline_v2.prepare_target_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
+            return_value={
+                "target_known": True,
+                "prior_scan_count": 2,
+                "known_findings": [
+                    {
+                        "finding_type": "sql_injection",
+                        "affected_component": "/rest/products/search?q=",
+                        "title": "SQL injection on q",
+                    }
+                ],
+                "successful_tactics": [
+                    {"finding_type": "sql_injection", "reasoning": "Confirmed with transcript"}
+                ],
+                "refuted_patterns": [
+                    {"finding_type": "error_oracle", "affected_component": "/api/foo"}
+                ],
+                "branch_leads": [
+                    {
+                        "id": "branch-1",
+                        "vector_id": "WEB-SQLI-001",
+                        "title": "Dump product table",
+                        "role": "post_exploit_worker",
+                        "phase": "data_access",
+                        "objective": "Extract rows",
+                        "next_step": "Run sqlmap --dump",
+                    }
+                ],
+            },
+        ),
+        patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls,
+    ):
         mock_loop = MagicMock()
         mock_loop.run = AsyncMock(return_value=fake_loop_result)
         mock_loop.state = fake_state
@@ -226,7 +237,9 @@ async def test_scan_pipeline_v2_seeds_loop_from_target_memory():
     assert fake_state.ensure_vector_candidate.called
     assert fake_state.ensure_branch.called
     assert fake_state.add_shared_note.call_count >= 3
-    shared_note_blob = " ".join(str(call.args[0]) for call in fake_state.add_shared_note.call_args_list)
+    shared_note_blob = " ".join(
+        str(call.args[0]) for call in fake_state.add_shared_note.call_args_list
+    )
     assert "memory strategy:" in shared_note_blob
     assert "memory refuted:" in shared_note_blob
     branch_call = fake_state.ensure_branch.call_args
@@ -260,17 +273,43 @@ async def test_scan_pipeline_v2_dedups_carryover_review_titles():
     )
 
     fake_state = MagicMock()
-    with patch("vxis.pipeline.scan_pipeline_v2.prepare_target_runtime", new=AsyncMock(return_value=runtime)), patch(
-        "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
-        return_value={"target_known": False, "prior_scan_count": 0, "known_findings": []},
-    ), patch("vxis.growth.scan_retrospective.load_latest_target_retrospective", return_value={
-        "improvement_hints": [],
-        "review_queue": [
-            {"id": "a", "status": "open", "title": "needs_chains", "affected_component": "http://localhost:3000"},
-            {"id": "b", "status": "open", "title": "carryover:needs_chains", "affected_component": "http://localhost:3000"},
-            {"id": "c", "status": "open", "title": "needs_chains", "affected_component": "http://localhost:3000"},
-        ],
-    }), patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls:
+    with (
+        patch(
+            "vxis.pipeline.scan_pipeline_v2.prepare_target_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
+            return_value={"target_known": False, "prior_scan_count": 0, "known_findings": []},
+        ),
+        patch(
+            "vxis.growth.scan_retrospective.load_latest_target_retrospective",
+            return_value={
+                "improvement_hints": [],
+                "review_queue": [
+                    {
+                        "id": "a",
+                        "status": "open",
+                        "title": "needs_chains",
+                        "affected_component": "http://localhost:3000",
+                    },
+                    {
+                        "id": "b",
+                        "status": "open",
+                        "title": "carryover:needs_chains",
+                        "affected_component": "http://localhost:3000",
+                    },
+                    {
+                        "id": "c",
+                        "status": "open",
+                        "title": "needs_chains",
+                        "affected_component": "http://localhost:3000",
+                    },
+                ],
+            },
+        ),
+        patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls,
+    ):
         mock_loop = MagicMock()
         mock_loop.run = AsyncMock(return_value=fake_loop_result)
         mock_loop.state = fake_state
@@ -307,16 +346,39 @@ async def test_scan_pipeline_v2_skips_broken_magicmock_carryover_items():
     )
 
     fake_state = MagicMock()
-    with patch("vxis.pipeline.scan_pipeline_v2.prepare_target_runtime", new=AsyncMock(return_value=runtime)), patch(
-        "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
-        return_value={"target_known": False, "prior_scan_count": 0, "known_findings": []},
-    ), patch("vxis.growth.scan_retrospective.load_latest_target_retrospective", return_value={
-        "improvement_hints": [],
-        "review_queue": [
-            {"id": "a", "status": "open", "title": "needs_chains", "affected_component": "http://localhost:3000", "reason": "normal"},
-            {"id": "b", "status": "open", "title": "sqli", "affected_component": "http://localhost:3000", "reason": "<MagicMock name='mock'>"},
-        ],
-    }), patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls:
+    with (
+        patch(
+            "vxis.pipeline.scan_pipeline_v2.prepare_target_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
+            return_value={"target_known": False, "prior_scan_count": 0, "known_findings": []},
+        ),
+        patch(
+            "vxis.growth.scan_retrospective.load_latest_target_retrospective",
+            return_value={
+                "improvement_hints": [],
+                "review_queue": [
+                    {
+                        "id": "a",
+                        "status": "open",
+                        "title": "needs_chains",
+                        "affected_component": "http://localhost:3000",
+                        "reason": "normal",
+                    },
+                    {
+                        "id": "b",
+                        "status": "open",
+                        "title": "sqli",
+                        "affected_component": "http://localhost:3000",
+                        "reason": "<MagicMock name='mock'>",
+                    },
+                ],
+            },
+        ),
+        patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls,
+    ):
         mock_loop = MagicMock()
         mock_loop.run = AsyncMock(return_value=fake_loop_result)
         mock_loop.state = fake_state
@@ -352,34 +414,56 @@ async def test_scan_pipeline_v2_exposes_aggregated_findings_after_recording():
         shared_notes=[],
     )
 
-    with patch("vxis.pipeline.scan_pipeline_v2.prepare_target_runtime", new=AsyncMock(return_value=runtime)), patch(
-        "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
-        side_effect=[
-            {"target_known": False, "prior_scan_count": 0, "known_findings": []},
-            {
-                "target_known": True,
-                "prior_scan_count": 2,
-                "known_findings": [{"finding_type": "sql_injection", "affected_component": "/rest/products/search"}],
-                "aggregated_findings": [{"finding_type": "sql_injection", "affected_component": "/rest/products/search", "title": "SQL injection on q", "severity": "critical", "occurrences": 2}],
-            },
-        ],
-    ), patch("vxis.pipeline.scan_pipeline_v2._record_scan_memory") as mock_record, patch(
-        "vxis.pipeline.scan_pipeline_v2.ScanAgentLoop"
-    ) as mock_loop_cls, patch(
-        "vxis.pipeline.scan_pipeline_v2._get_finding_dicts",
-        return_value=[{
-            "id": "VXIS-0001",
-            "title": "SQL injection on q",
-            "severity": "critical",
-            "finding_type": "sql_injection",
-            "affected_component": "/rest/products/search",
-            "description": "confirmed",
-            "impact": "db access",
-            "technical_analysis": "confirmed",
-            "poc_description": "replay",
-            "poc_script_code": "GET /rest/products/search?q='",
-            "remediation_steps": "parameterize",
-        }],
+    with (
+        patch(
+            "vxis.pipeline.scan_pipeline_v2.prepare_target_runtime",
+            new=AsyncMock(return_value=runtime),
+        ),
+        patch(
+            "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
+            side_effect=[
+                {"target_known": False, "prior_scan_count": 0, "known_findings": []},
+                {
+                    "target_known": True,
+                    "prior_scan_count": 2,
+                    "known_findings": [
+                        {
+                            "finding_type": "sql_injection",
+                            "affected_component": "/rest/products/search",
+                        }
+                    ],
+                    "aggregated_findings": [
+                        {
+                            "finding_type": "sql_injection",
+                            "affected_component": "/rest/products/search",
+                            "title": "SQL injection on q",
+                            "severity": "critical",
+                            "occurrences": 2,
+                        }
+                    ],
+                },
+            ],
+        ),
+        patch("vxis.pipeline.scan_pipeline_v2._record_scan_memory") as mock_record,
+        patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls,
+        patch(
+            "vxis.pipeline.scan_pipeline_v2._get_finding_dicts",
+            return_value=[
+                {
+                    "id": "VXIS-0001",
+                    "title": "SQL injection on q",
+                    "severity": "critical",
+                    "finding_type": "sql_injection",
+                    "affected_component": "/rest/products/search",
+                    "description": "confirmed",
+                    "impact": "db access",
+                    "technical_analysis": "confirmed",
+                    "poc_description": "replay",
+                    "poc_script_code": "GET /rest/products/search?q='",
+                    "remediation_steps": "parameterize",
+                }
+            ],
+        ),
     ):
         mock_loop = MagicMock()
         mock_loop.run = AsyncMock(return_value=fake_loop_result)
@@ -448,8 +532,9 @@ async def test_scan_pipeline_v2_copies_findings_from_store_into_ctx():
         )
         return fake_loop_result
 
-    with patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls, patch(
-        "vxis.pipeline.scan_pipeline_v2._reset_finding_store"
+    with (
+        patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as mock_loop_cls,
+        patch("vxis.pipeline.scan_pipeline_v2._reset_finding_store"),
     ):
         mock_loop = MagicMock()
         mock_loop.run = AsyncMock(side_effect=_fake_loop_run)
@@ -702,15 +787,26 @@ class TestBuildFindingCVSS:
             "INFO finding incorrectly carries the 9.8/Critical CVSS vector"
         )
 
-    def test_critical_finding_keeps_high_base_score(self) -> None:
-        """Critical findings must retain their high base score."""
+    @pytest.mark.parametrize(
+        ("severity", "expected_score"),
+        [
+            ("critical", 9.8),
+            ("high", 8.1),
+            ("medium", 4.6),
+            ("low", 2.6),
+            ("informational", 0.0),
+        ],
+    )
+    def test_generic_cvss_vector_and_score_stay_consistent(
+        self, severity: str, expected_score: float
+    ) -> None:
         finding = _build_finding_from_dict(
-            {"title": "Critical finding", "severity": "critical", "description": "d"},
+            {"title": "Finding", "severity": severity, "description": "d"},
             scan_id="VXIS-TEST",
             target="http://localhost",
         )
         assert finding.cvss is not None
-        assert finding.cvss.base_score == 9.5
+        assert finding.cvss.base_score == expected_score
 
     def test_medium_finding_not_critical_vector(self) -> None:
         finding = _build_finding_from_dict(
@@ -720,3 +816,142 @@ class TestBuildFindingCVSS:
         )
         assert finding.cvss is not None
         assert finding.cvss.vector_string != _CRITICAL_VECTOR
+
+
+@pytest.mark.asyncio
+async def test_loop_exception_preserves_partial_results_and_marks_scan_partial():
+    from vxis.agent.tools.finding_tools import LinkChainTool, ReportFindingTool
+
+    pipe = ScanPipeline(
+        brain=MagicMock(),
+        auto_approve_injection=True,
+        generate_report=False,
+    )
+
+    async def failing_run():
+        report = ReportFindingTool()
+        await report.run(
+            title="Debug disclosure",
+            severity="low",
+            finding_type="information_disclosure",
+            affected_component="/debug",
+            description="Debug details are public.",
+        )
+        await report.run(
+            title="User IDOR",
+            severity="medium",
+            finding_type="idor",
+            affected_component="/api/users/1",
+            description="Another user's record is returned.",
+        )
+        linked = await LinkChainTool().run(
+            finding_ids=["VXIS-0001", "VXIS-0002"],
+            rationale="Debug IDs feed the user lookup.",
+        )
+        assert linked.ok is True
+        raise RuntimeError("loop crashed")
+
+    with (
+        patch(
+            "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
+            return_value={"target_known": False},
+        ),
+        patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as loop_cls,
+    ):
+        loop = MagicMock()
+        loop.run = AsyncMock(side_effect=failing_run)
+        loop.state = SimpleNamespace(messages=[])
+        loop_cls.return_value = loop
+
+        ctx = await pipe.run("http://example.test")
+
+    assert ctx.scan_loop_completed is False
+    assert ctx.scan_status == "partial"
+    assert ctx.scan_loop_error == "loop crashed"
+    assert len(ctx.findings) == 2
+    assert len(ctx.attack_chains) == 1
+    assert ctx.phase_logs[0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_incomplete_loop_result_is_never_marked_done():
+    pipe = ScanPipeline(
+        brain=MagicMock(),
+        auto_approve_injection=True,
+        generate_report=False,
+    )
+    result = {
+        "completed": False,
+        "iterations": 3,
+        "review_history": [],
+        "branches": [],
+    }
+
+    with (
+        patch(
+            "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
+            return_value={"target_known": False},
+        ),
+        patch("vxis.pipeline.scan_pipeline_v2._record_scan_memory"),
+        patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as loop_cls,
+    ):
+        loop = MagicMock()
+        loop.run = AsyncMock(return_value=result)
+        loop.state = SimpleNamespace(messages=[])
+        loop_cls.return_value = loop
+
+        ctx = await pipe.run("http://example.test")
+
+    assert ctx.scan_loop_completed is False
+    assert ctx.scan_status == "failed"
+    assert "finish_scan" in ctx.scan_loop_error
+    assert ctx.phase_logs[0]["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_report_is_generated_after_mitre_and_target_aggregation():
+    pipe = ScanPipeline(brain=MagicMock(), auto_approve_injection=True)
+    observed: dict[str, object] = {}
+
+    async def capture_report(ctx):
+        observed["mitre"] = getattr(ctx, "mitre_coverage", None)
+        observed["aggregated"] = getattr(ctx, "aggregated_findings", None)
+
+    pipe._generate_report = capture_report
+    result = {
+        "completed": True,
+        "iterations": 1,
+        "review_history": [],
+        "branches": [],
+    }
+    profiles = [
+        {"target_known": False},
+        {
+            "target_known": True,
+            "aggregated_findings": [
+                {
+                    "finding_type": "idor",
+                    "affected_component": "/api/users",
+                    "severity": "medium",
+                }
+            ],
+        },
+    ]
+
+    with (
+        patch(
+            "vxis.pipeline.scan_pipeline_v2._load_target_memory_profile",
+            side_effect=profiles,
+        ),
+        patch("vxis.pipeline.scan_pipeline_v2._record_scan_memory"),
+        patch("vxis.pipeline.scan_pipeline_v2.ScanAgentLoop") as loop_cls,
+    ):
+        loop = MagicMock()
+        loop.run = AsyncMock(return_value=result)
+        loop.state = SimpleNamespace(messages=[])
+        loop_cls.return_value = loop
+
+        await pipe.run("http://example.test")
+
+    assert isinstance(observed["mitre"], dict)
+    assert observed["aggregated"] == profiles[1]["aggregated_findings"]

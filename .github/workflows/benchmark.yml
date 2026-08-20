@@ -19,26 +19,29 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
-  issues: write
-  pull-requests: write
   contents: read
+
+concurrency:
+  group: benchmark-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   deterministic:
     name: Deterministic Benchmark Contract
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
 
       - name: Install dependencies
         run: uv sync --locked --extra dev
@@ -56,6 +59,7 @@ jobs:
   live-benchmark:
     name: Live Juice Shop Benchmark
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     if: github.event_name != 'pull_request'
 
     strategy:
@@ -65,23 +69,23 @@ jobs:
 
     services:
       juice-shop:
-        image: bkimminich/juice-shop
+        image: bkimminich/juice-shop@sha256:e68144772ebaaca0ec117b38d44903af92416793230288ef7c5437fc4f26850a
         ports:
           - 3000:3000
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4.2.0
 
       - name: Install dependencies
         run: uv sync --locked --extra dev --extra browser
@@ -91,7 +95,7 @@ jobs:
 
       - name: Wait for Juice Shop
         run: |
-          for i in {1..60}; do
+          for _ in {1..60}; do
             if curl -fsS http://localhost:3000 >/dev/null; then
               echo "Juice Shop is ready"
               exit 0
@@ -113,6 +117,8 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           VXIS_SCAN_PROFILE: crown
+          # Dedicated opt-in is limited to this isolated loopback benchmark job.
+          VXIS_ALLOW_ARBITRARY_EXEC: "1"
           VXIS_BENCHMARK_TARGET_JUICE_SHOP: ${{ vars.BENCHMARK_TARGET_JUICE_SHOP || 'http://localhost:3000' }}
         run: |
           uv run python -m vxis.scoring.benchmark_cli \
@@ -124,7 +130,7 @@ jobs:
 
       - name: Upload benchmark results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: benchmark-results-${{ matrix.target_type }}
           path: benchmark_result_${{ matrix.target_type }}.json
@@ -133,12 +139,13 @@ jobs:
   live-gate:
     name: Live Regression Gate
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: live-benchmark
     if: always() && github.event_name != 'pull_request'
 
     steps:
       - name: Download all benchmark results
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: benchmark-results-*
           merge-multiple: true
@@ -153,6 +160,12 @@ jobs:
           results = [json.loads(path.read_text()) for path in Path(".").glob("benchmark_result_*.json")]
           if not results:
               print("No live benchmark results found")
+              sys.exit(1)
+
+          skipped = [item for item in results if item.get("skipped")]
+          if skipped:
+              reasons = ", ".join(str(item.get("reason") or "unknown") for item in skipped)
+              print(f"LIVE BENCHMARK INVALID - skipped result(s): {reasons}")
               sys.exit(1)
 
           regressions = [item for item in results if not item.get("skipped") and item.get("regression")]

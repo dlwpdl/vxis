@@ -16,6 +16,7 @@ Design constraints:
 from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,15 +29,52 @@ _SECRET_ASSIGN_RE = re.compile(
     r"(?i)\b((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|secret[_-]?key)=)([^\s]+)"
 )
 _SHORT_PASSWORD_FLAG_RE = re.compile(r"(?i)((?:^|\s)-p\s+)([^\s]+)")
+_URL_USERINFO_RE = re.compile(r"(?i)\b(https?://)[^/@\s]+@")
+_HEADER_SECRET_RE = re.compile(
+    r"(?i)((?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key)"
+    r"\s*:\s*)([^'\"]+)"
+)
+_BARE_BEARER_RE = re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+")
 _SHORT_PASSWORD_PLUGINS = {"bloodhound", "certipy", "netexec"}
+_SENSITIVE_RECORD_KEYS = {
+    "api_key",
+    "authorization",
+    "cookie",
+    "credentials",
+    "password",
+    "password_hash",
+    "private_key",
+    "secret",
+    "token",
+}
 
 
 def redact_command(command: str, *, plugin_name: str = "") -> str:
     redacted = _SECRET_FLAG_RE.sub(r"\1***", str(command))
     redacted = _SECRET_ASSIGN_RE.sub(r"\1***", redacted)
+    redacted = _URL_USERINFO_RE.sub(r"\1[redacted]@", redacted)
+    redacted = _HEADER_SECRET_RE.sub(r"\1***", redacted)
+    redacted = _BARE_BEARER_RE.sub("Bearer ***", redacted)
     if plugin_name in _SHORT_PASSWORD_PLUGINS:
         redacted = _SHORT_PASSWORD_FLAG_RE.sub(r"\1***", redacted)
     return redacted
+
+
+def _redact_record(value: Any, *, key: str = "") -> Any:
+    normalized = re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_")
+    if normalized in _SENSITIVE_RECORD_KEYS or normalized.endswith(
+        ("_token", "_secret", "_password", "_cookie", "_api_key", "_private_key")
+    ):
+        return "***"
+    if isinstance(value, dict):
+        return {item_key: _redact_record(item, key=str(item_key)) for item_key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_record(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_redact_record(item) for item in value)
+    if isinstance(value, str):
+        return redact_command(value)
+    return value
 
 
 class AuditLogger:
@@ -52,7 +90,8 @@ class AuditLogger:
 
     def __init__(self, log_path: Path) -> None:
         self.log_path = log_path
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        log_path.parent.chmod(0o700)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -68,10 +107,22 @@ class AuditLogger:
         Args:
             record: Arbitrary dictionary to serialise and append.
         """
-        record["timestamp"] = datetime.now(timezone.utc).isoformat()
-        line = json.dumps(record, default=str) + "\n"
-        with self.log_path.open("a", encoding="utf-8") as fh:
-            fh.write(line)
+        safe_record = _redact_record(record)
+        safe_record["timestamp"] = datetime.now(timezone.utc).isoformat()
+        line = json.dumps(safe_record, default=str) + "\n"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        descriptor = os.open(self.log_path, flags, 0o600)
+        try:
+            os.fchmod(descriptor, 0o600)
+            handle = os.fdopen(descriptor, "a", encoding="utf-8")
+            descriptor = -1
+            with handle:
+                handle.write(line)
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
 
     # ------------------------------------------------------------------
     # Public logging methods

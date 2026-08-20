@@ -2,6 +2,11 @@ __pycache__/
 *.pyc
 .DS_Store
 .venv/
+
+# Local tool artifacts (regenerable — not source)
+graphify-out/
+.hermes/
+tasks/
 *.egg-info/
 dist/
 build/

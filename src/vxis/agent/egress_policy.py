@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import ast
-import os
 import re
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from vxis.ghost.layer import ghost_layer
+from vxis.ghost.layer import direct_egress_allowed, ghost_layer
 
 
 _RAW_SHELL_RE = re.compile(
@@ -16,6 +15,17 @@ _RAW_SHELL_RE = re.compile(
     r"ping|traceroute|tracepath|telnet)\b",
     re.IGNORECASE,
 )
+# Proxy-defeating patterns: even a "proxy-aware" tool leaks if told to ignore
+# the proxy env. curl/wget --noproxy, `env -i` (wipes HTTP_PROXY), and
+# `unset *proxy` all defeat the env-proxy that shell_exec relies on.
+_PROXY_BYPASS_RE = re.compile(
+    r"(?:--no-?proxy\b"
+    r"|(?:^|[;&|()\n]\s*)env\s+-i\b"
+    r"|(?:^|[;&|()\n]\s*)unset\s+[^\n;&|]*proxy)",
+    re.IGNORECASE,
+)
+# Dynamic-import forms that dodge the static import/call checks below.
+_DYNAMIC_IMPORT_CALLS = {"__import__", "importlib.import_module", "import_module"}
 _RAW_PYTHON_IMPORT_ROOTS = {"socket", "subprocess", "scapy"}
 _RAW_PYTHON_IMPORT_MODULES = {"asyncio.subprocess", "dns.resolver"}
 _RAW_PYTHON_CALLS = {
@@ -49,10 +59,6 @@ class EgressPolicyDecision:
         return {key: value for key, value in asdict(self).items() if value not in ("", None)}
 
 
-def direct_egress_allowed() -> bool:
-    return _truthy_env("VXIS_ALLOW_DIRECT_EGRESS") or _truthy_env("VXIS_ALLOW_GHOST_DIRECT_EGRESS")
-
-
 def enforce_direct_tool_policy(tool_name: str, *, mode: str, alternative: str) -> EgressPolicyDecision:
     if not ghost_layer.is_active() or direct_egress_allowed():
         return EgressPolicyDecision(allowed=True, mode=mode)
@@ -67,6 +73,15 @@ def enforce_direct_tool_policy(tool_name: str, *, mode: str, alternative: str) -
 def evaluate_shell_egress(command: str) -> EgressPolicyDecision:
     if not ghost_layer.is_active() or direct_egress_allowed():
         return EgressPolicyDecision(allowed=True, mode="env_proxy")
+    bypass = _PROXY_BYPASS_RE.search(command)
+    if bypass:
+        return EgressPolicyDecision(
+            allowed=False,
+            reason="shell_exec command disables the Ghost proxy env (--noproxy / env -i / unset *proxy)",
+            match=bypass.group(0).strip(),
+            mode="proxy_bypass",
+            alternative="Drop the proxy-bypass flag so HTTP_PROXY is honored; set VXIS_ALLOW_DIRECT_EGRESS=1 for explicit opt-in.",
+        )
     match = _RAW_SHELL_RE.search(command)
     if not match:
         return EgressPolicyDecision(allowed=True, mode="env_proxy")
@@ -103,6 +118,13 @@ def evaluate_python_egress(code: str) -> EgressPolicyDecision:
             dotted = _dotted_name(node.func)
             if dotted in _RAW_PYTHON_CALLS:
                 return _blocked_python(dotted, "raw_python_call")
+            if dotted in _DYNAMIC_IMPORT_CALLS:
+                # __import__("socket") / importlib.import_module("subprocess")
+                # dodge the static Import checks above.
+                modname = _first_str_arg(node)
+                root = modname.split(".", 1)[0]
+                if root in _RAW_PYTHON_IMPORT_ROOTS or modname in _RAW_PYTHON_IMPORT_MODULES:
+                    return _blocked_python(modname, "raw_python_dynamic_import")
     return EgressPolicyDecision(allowed=True, mode="env_proxy")
 
 
@@ -134,8 +156,13 @@ def _blocked_python(match: str, mode: str) -> EgressPolicyDecision:
     )
 
 
-def _truthy_env(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+def _first_str_arg(node: ast.Call) -> str:
+    """First positional arg of a call if it's a constant string, else ''."""
+    for arg in node.args:
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            return arg.value
+        break
+    return ""
 
 
 def _dotted_name(node: ast.AST) -> str:

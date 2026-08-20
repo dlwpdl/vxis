@@ -6,6 +6,7 @@ checked even when no P1 engagement is active. Fail-closed.
 """
 from __future__ import annotations
 
+import os
 import re
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -35,6 +36,7 @@ _PYTHON_SYMBOL_TARGET_RE = re.compile(
     re.IGNORECASE,
 )
 _TARGET_KEYS = ("url", "target_url", "base_url", "target")
+_ARBITRARY_EXEC_TOOLS = frozenset({"shell_exec", "python_exec"})
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,27 @@ def set_active_scope(enforcer: ScopeEnforcer, *, approve_destructive: bool = Fal
 def clear_active_scope() -> None:
     _ACTIVE.set(None)
     _APPROVE.set(False)
+
+
+def arbitrary_exec_approved() -> bool:
+    """Whether the operator accepted unrestricted host-network execution risk."""
+    return os.environ.get("VXIS_ALLOW_ARBITRARY_EXEC", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _exec_approval_denial(tool_name: str) -> ScopeGateDecision:
+    return ScopeGateDecision(
+        allowed=False,
+        reason=(
+            f"{tool_name} requires VXIS_ALLOW_ARBITRARY_EXEC=1; this is a separate "
+            "high-risk opt-in because arbitrary code can bypass static destination checks"
+        ),
+        policy="unrestricted_exec_opt_in",
+        requires_approval=True,
+    )
 
 
 def build_target_scope_enforcer(target: str, *, scope_arg: str | None = None) -> ScopeEnforcer:
@@ -88,6 +111,11 @@ def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateD
     """Return None when no scope is active or the tool is offline; otherwise allow/block."""
     enforcer = _ACTIVE.get()
     if enforcer is None:
+        if (
+            tool_name in _ARBITRARY_EXEC_TOOLS
+            and not arbitrary_exec_approved()
+        ):
+            return _exec_approval_denial(tool_name)
         return None
     # Lazy import on purpose: importing vxis.agent.egress_contract at module top
     # would execute vxis.agent.__init__ during vxis.scope import and can create a
@@ -100,12 +128,17 @@ def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateD
 
     urls = _extract_urls(tool_name, args)
     if not urls:
-        if tool_name in {"shell_exec", "python_exec"} and _payload_looks_networked(args):
+        if tool_name in _ARBITRARY_EXEC_TOOLS and _payload_looks_networked(args):
             return ScopeGateDecision(
                 allowed=False,
                 reason=f"{tool_name} contains network tooling but no parseable URL/host target",
                 policy="deny",
             )
+        if (
+            tool_name in _ARBITRARY_EXEC_TOOLS
+            and not arbitrary_exec_approved()
+        ):
+            return _exec_approval_denial(tool_name)
         return None
     method = str(args.get("method") or "GET")
     body = args.get("body") if isinstance(args.get("body"), dict) else None
@@ -122,6 +155,11 @@ def enforce_scope_invocation(tool_name: str, args: dict[str, Any]) -> ScopeGateD
             policy=result.policy.value,
             requires_approval=result.requires_approval,
         )
+    if (
+        tool_name in _ARBITRARY_EXEC_TOOLS
+        and not arbitrary_exec_approved()
+    ):
+        return _exec_approval_denial(tool_name)
     return ScopeGateDecision(allowed=True)
 
 

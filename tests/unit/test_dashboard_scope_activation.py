@@ -36,6 +36,7 @@ def _clean_scope() -> None:  # type: ignore[return]
 @dataclass
 class _FakeResult:
     findings: list = field(default_factory=list)
+    errors: list = field(default_factory=list)
     duration_seconds: float = 0.1
 
 
@@ -74,10 +75,14 @@ class TestDashboardScopeActivation:
         # What we observed inside the stub run — captured by closure
         captured: dict = {}
 
-        async def _fake_run_scan(*, target, profile, selected_plugins):  # noqa: ARG001
+        async def _fake_run_scan(  # noqa: ARG001
+            *, target, profile, selected_plugins, tier, require_runnable_plugins
+        ):
             # Check that the scope is active and blocks an off-target URL
             decision = enforce_scope_invocation("nmap", {"target": "http://evil.com"})
             captured["during_blocked"] = decision
+            captured["tier"] = tier
+            captured["required"] = require_runnable_plugins
             return _FakeResult()
 
         fake_orchestrator = MagicMock()
@@ -104,6 +109,8 @@ class TestDashboardScopeActivation:
         decision = captured["during_blocked"]
         assert decision is not None, "Scope was not active during run"
         assert decision.allowed is False, f"Expected blocked, got: {decision}"
+        assert captured["tier"] == 2
+        assert captured["required"] is True
 
     @pytest.mark.asyncio
     async def test_scope_active_during_run_allows_in_scope_target(self):
@@ -113,7 +120,9 @@ class TestDashboardScopeActivation:
 
         captured: dict = {}
 
-        async def _fake_run_scan(*, target, profile, selected_plugins):  # noqa: ARG001
+        async def _fake_run_scan(  # noqa: ARG001
+            *, target, profile, selected_plugins, tier, require_runnable_plugins
+        ):
             decision = enforce_scope_invocation("nmap", {"target": "http://example.com"})
             captured["during_allowed"] = decision
             return _FakeResult()
@@ -191,3 +200,27 @@ class TestDashboardScopeActivation:
         # Scope must be cleared even after exception
         post = enforce_scope_invocation("nmap", {"target": "http://evil.com"})
         assert post is None, f"Scope was not cleared after failure: {post}"
+
+    @pytest.mark.asyncio
+    async def test_plugin_errors_are_reported_as_partial_not_clean(self):
+        managed = _make_managed("http://example.com")
+        fake_orchestrator = MagicMock()
+        fake_orchestrator.run_scan = AsyncMock(
+            return_value=_FakeResult(
+                errors=[{"plugin": "nuclei", "state": "failed", "error": "boom"}]
+            )
+        )
+
+        with (
+            patch("vxis.dashboard.scan_manager.VXISConfig", return_value=MagicMock()),
+            patch(
+                "vxis.dashboard.scan_manager.ScanOrchestrator",
+                return_value=fake_orchestrator,
+            ),
+        ):
+            from vxis.dashboard.scan_manager import ScanManager
+
+            await ScanManager()._run_scan(managed, plugins=None)
+
+        assert managed.status == "partial"
+        assert "1 plugin" in managed.error

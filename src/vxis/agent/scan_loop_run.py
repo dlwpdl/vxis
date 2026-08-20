@@ -10,6 +10,7 @@ from vxis.agent.scan_loop_execution_monitor import ScanLoopExecutionMonitorMixin
 from vxis.agent.scan_loop_run_auto import ScanLoopAutoOrchestrationMixin
 from vxis.agent.scan_loop_run_followups import ScanLoopRunFollowupMixin
 from vxis.agent.scan_loop_run_skills import ScanLoopScheduledSkillsMixin
+from vxis.agent.tool_registry import ToolResult
 from vxis.agent.scan_loop_v3 import (
     v3_after_action,
     v3_finalize_runtime,
@@ -36,7 +37,9 @@ class ScanLoopRunMixin(
             rows = get_llm_usage_stats().get("rows") or []
         except Exception:
             return False
-        return budget_exceeded(rows, getattr(self, "_cost_budget_usd", None), getattr(self, "_token_budget", None))
+        return budget_exceeded(
+            rows, getattr(self, "_cost_budget_usd", None), getattr(self, "_token_budget", None)
+        )
 
     def _finalize_cost_exhausted_scan(self) -> None:
         """Graceful stop on a budget cap — mark completed so the pipeline reports
@@ -444,6 +447,8 @@ class ScanLoopRunMixin(
                     "http_request",
                     "http_get",
                     "http_post",
+                    "browser_navigate",
+                    "browser_render",
                 ):
                     blob = ""
                     if isinstance(args, dict):
@@ -534,21 +539,30 @@ class ScanLoopRunMixin(
 
                 # NOW-1: single verifier chokepoint. Brain-direct report_finding is
                 # gated through _verify_and_gate (shared with the skill/auto path).
-                # require_confirmed=False preserves the historical behaviour here —
-                # UNCONFIRMED proceeds and spawns a recursive gap branch; only REFUTED
-                # blocks the dispatch. (All-severity gating is NOW-1/1.2.)
+                # High/critical hard claims must be confirmed before they enter
+                # the finding store; UNCONFIRMED still spawns a recursive gap
+                # branch so the loop digs for stronger evidence instead.
                 if name == "report_finding" and isinstance(args, dict):
                     args.pop("_replay_gate_machine", None)
                     try:
                         _verify_block = await self._verify_and_gate(
                             args,
-                            require_confirmed=False,
+                            require_confirmed=True,
                             spawn_gap_on_unconfirmed=True,
                             baseline_size=_baseline_size,
                         )
-                    except Exception:
-                        logger.exception("auto-verify failed — proceeding with report_finding")
-                        _verify_block = None
+                    except Exception as exc:
+                        logger.exception("auto-verify failed")
+                        _verify_block = (
+                            ToolResult(
+                                ok=False,
+                                summary=f"report_finding BLOCKED: verifier failed. {exc}",
+                                data={"verifier_blocked": True, "verdict": "ERROR"},
+                                error="verifier_unavailable",
+                            )
+                            if str(args.get("severity", "")).lower() in {"critical", "high"}
+                            else None
+                        )
                     if _verify_block is not None:
                         self.state.add_message(
                             "tool",
@@ -569,7 +583,7 @@ class ScanLoopRunMixin(
                             args.get("affected_component", "?"),
                         )
                         self._emit_control_plane(
-                            f"Auto-verifier refuted finding: {args.get('title', 'report_finding')}"
+                            f"Auto-verifier blocked finding: {args.get('title', 'report_finding')}"
                         )
                         continue
                     if str(args.get("severity", "")).lower() in {"critical", "high"}:
@@ -961,7 +975,7 @@ class ScanLoopRunMixin(
                                     status="blocked",
                                     summary=_replan_msg,
                                     blocker="judge replan required",
-                            )
+                                )
                             self._emit_control_plane(_replan_msg)
                             continue
 
@@ -1070,6 +1084,21 @@ class ScanLoopRunMixin(
                         _real_skills_completed.add(_real_sk)
                         _skills_completed.add(_real_sk)
                         if isinstance(result.data, dict):
+                            if _real_sk == "attempt_auth" and result.data.get("authenticated"):
+                                identities = result.data.get("identities") or []
+                                if not identities and result.data.get("token"):
+                                    user_info = result.data.get("user_info") or {}
+                                    identities = [
+                                        {
+                                            "name": result.data.get("primary_identity")
+                                            or user_info.get("email")
+                                            or "authenticated",
+                                            "token": result.data["token"],
+                                            "role": user_info.get("role", ""),
+                                            "email": user_info.get("email", ""),
+                                        }
+                                    ]
+                                self.state.record_auth_identities(identities)
                             await self._promote_direct_run_skill_result(_real_sk, result.data)
                         _has_findings = bool(
                             isinstance(result.data, dict) and (result.data.get("findings") or [])
@@ -1725,7 +1754,9 @@ class ScanLoopRunMixin(
                     if _v3_gate is not None:
                         self._reject_finish_scan(
                             title=str(_v3_gate.get("title") or "v3_cognitive_gate"),
-                            reason=str(_v3_gate.get("reason") or "v3 cognitive gate blocked finish"),
+                            reason=str(
+                                _v3_gate.get("reason") or "v3 cognitive gate blocked finish"
+                            ),
                             action_hint=str(
                                 _v3_gate.get("action_hint")
                                 or "Resolve the top v3 coverage or hypothesis gap."

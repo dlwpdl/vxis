@@ -66,6 +66,7 @@ class ScanResult:
     scan_id: str
     target: str
     profile: str
+    status: str = "completed"
     findings: list[Finding] = field(default_factory=list)
     tool_runs: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
@@ -144,6 +145,7 @@ class ScanOrchestrator:
         selected_plugins: list[str] | None = None,
         client_config_path: Path | None = None,
         tier: int = 1,
+        require_runnable_plugins: bool = False,
     ) -> ScanResult:
         """Execute a full scan against *target*.
 
@@ -154,6 +156,8 @@ class ScanOrchestrator:
                                 All discovered plugins are used when None.
             client_config_path: Optional path to a client-specific config file
                                 (reserved for future use in Phase 1+).
+            require_runnable_plugins: Fail instead of reporting a clean scan when
+                                environment/tier filtering leaves no runnable plugin.
 
         Returns:
             A populated ScanResult with findings, tool run summaries, and
@@ -225,6 +229,13 @@ class ScanOrchestrator:
             if selected_plugins is not None:
                 allowed = set(selected_plugins)
                 registry = {k: v for k, v in registry.items() if k in allowed}
+                if not registry:
+                    requested = ", ".join(sorted(allowed)) or "(empty allowlist)"
+                    raise RuntimeError(
+                        f"None of the requested plugins are installed and runnable: {requested}"
+                    )
+            elif require_runnable_plugins and not registry:
+                raise RuntimeError("No runnable plugins are installed for this scan")
 
             logger.info(
                 "Scan %s: %d plugins selected for target '%s' with profile '%s'.",
@@ -302,6 +313,46 @@ class ScanOrchestrator:
                         node.state.value,
                         node.error or "unknown error",
                     )
+                elif (
+                    node.state == TaskState.COMPLETED
+                    and node.result is not None
+                    and node.result.errors
+                ):
+                    plugin_errors.append(
+                        {
+                            "plugin": node_name,
+                            "state": "completed_with_errors",
+                            "error": "; ".join(str(error) for error in node.result.errors),
+                        }
+                    )
+
+            successful_nodes = [
+                node
+                for node in completed_nodes.values()
+                if node.state == TaskState.COMPLETED
+                and node.result is not None
+                and (not node.result.errors or bool(node.result.findings))
+            ]
+            if registry and not successful_nodes:
+                error_message = "No plugin completed successfully"
+                finished_at = datetime.now(timezone.utc)
+                self.audit_logger.log_scan_end(
+                    scan_id,
+                    finding_count=0,
+                    status="failed",
+                )
+                await self.event_bus.emit(
+                    ScanLifecycleEvent(
+                        event_type=EventType.SCAN_FAILED,
+                        scan_id=scan_id,
+                        target=target,
+                        profile=profile,
+                        plugin_count=len(registry),
+                        duration_seconds=(finished_at - started_at).total_seconds(),
+                        error=error_message,
+                    )
+                )
+                raise RuntimeError(error_message)
 
             # --- 8. Normalize findings from all completed nodes ---
             all_raw_findings: list[Finding] = []
@@ -354,10 +405,12 @@ class ScanOrchestrator:
 
             # --- 12. Persist to database ---
             finished_at = datetime.now(timezone.utc)
+            scan_status = "partial" if plugin_errors else "completed"
             await self._persist(
                 scan_id=scan_id,
                 target=target,
                 profile=profile,
+                status=scan_status,
                 findings=enriched,
                 tool_runs=tool_runs,
                 started_at=started_at,
@@ -368,7 +421,7 @@ class ScanOrchestrator:
             self.audit_logger.log_scan_end(
                 scan_id=scan_id,
                 finding_count=len(enriched),
-                status="completed",
+                status=scan_status,
             )
 
             await self.event_bus.emit(
@@ -396,6 +449,7 @@ class ScanOrchestrator:
                 scan_id=scan_id,
                 target=target,
                 profile=profile,
+                status=scan_status,
                 findings=enriched,
                 tool_runs=tool_runs,
                 errors=plugin_errors,
@@ -581,7 +635,7 @@ class ScanOrchestrator:
                     r = await run_tool(
                         command=command_str,
                         timeout=timeout,
-                        shell=True,
+                        shell=False,
                         on_line=_on_line,
                     )
                 except TimeoutError:
@@ -821,6 +875,7 @@ class ScanOrchestrator:
         scan_id: str,
         target: str,
         profile: str,
+        status: str,
         findings: list[Finding],
         tool_runs: list[dict[str, Any]],
         started_at: datetime,
@@ -835,6 +890,7 @@ class ScanOrchestrator:
             scan_id:     Logical scan identifier (UUID string).
             target:      Primary scan target.
             profile:     Scan profile name.
+            status:      Final scan status (``completed`` or ``partial``).
             findings:    Enriched, deduplicated findings to persist.
             tool_runs:   Tool execution summaries.
             started_at:  Scan start timestamp (UTC).
@@ -850,7 +906,7 @@ class ScanOrchestrator:
                 scan_record = ScanRecord(
                     target=target,
                     profile=profile,
-                    status="completed",
+                    status=status,
                     started_at=started_at,
                     finished_at=finished_at,
                     config_snapshot={"scan_id": scan_id, "profile": profile},

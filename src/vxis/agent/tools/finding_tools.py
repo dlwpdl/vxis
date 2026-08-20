@@ -64,6 +64,7 @@ def reset_active_finding_store(token: Token[FindingStore]) -> None:
 def _store() -> FindingStore:
     return _ACTIVE_STORE.get()
 
+
 _VALID_SEVERITIES = ("critical", "high", "medium", "low", "informational")
 _REPEAT_MARKERS = (
     "repeat_count",
@@ -207,6 +208,20 @@ def _base_path(component: str) -> str:
     # Strip trailing numeric segments (/1, /2, /123)
     path = _NUMERIC_SEGMENT_RE.sub("/", path).rstrip("/")
     return path
+
+
+def _component_origin(component: str) -> str:
+    """Return the URL origin used to keep cross-host findings distinct."""
+    try:
+        parsed = urlparse(component)
+        host = str(parsed.hostname or "").lower()
+        if not host:
+            return ""
+        port = parsed.port
+        authority = f"{host}:{port}" if port is not None else host
+        return f"{parsed.scheme.lower()}://{authority}" if parsed.scheme else authority
+    except (TypeError, ValueError):
+        return ""
 
 
 def _canonical_finding_type(value: str) -> str:
@@ -777,7 +792,11 @@ class ReportFindingTool:
     description = (
         "Submit a discovered vulnerability. Returns the assigned finding ID. "
         "Include enough detail (title, severity, component, evidence, description) "
-        "for a penetration test report. HIGH/CRITICAL findings must include control, "
+        "for a penetration test report. Rate severity from demonstrated impact and "
+        "current prerequisites: do not assume stolen credentials or a separate "
+        "compromise, and do not rate single-user, read-only, or enumeration impact "
+        "as HIGH without broader confidentiality or integrity proof. HIGH/CRITICAL "
+        "findings must include control, "
         "repeat_count>=2, and a negative/refutation result. The ID is stable and can "
         "be used in link_chain."
     )
@@ -935,6 +954,7 @@ class ReportFindingTool:
         new_type = _normalize(_canonical_finding_type(kwargs["finding_type"]))
         new_component = _normalize(kwargs["affected_component"])
         new_base = _base_path(kwargs["affected_component"])
+        new_origin = _component_origin(kwargs["affected_component"])
         normalized_extra_evidence = _normalize_extra_evidence(kwargs.get("extra_evidence"))
         normalized_replay_gate = _normalize_replay_gate(
             kwargs.get("replay_gate"),
@@ -945,9 +965,14 @@ class ReportFindingTool:
             ex_type = _normalize(_canonical_finding_type(existing["finding_type"]))
             ex_component = _normalize(existing["affected_component"])
             ex_base = _base_path(existing["affected_component"])
+            ex_origin = _component_origin(existing["affected_component"])
 
             # Exact match OR same base path + same finding type
-            if ex_type == new_type and (ex_component == new_component or ex_base == new_base):
+            if (
+                ex_type == new_type
+                and ex_origin == new_origin
+                and (ex_component == new_component or ex_base == new_base)
+            ):
                 variants = existing.setdefault("variant_titles", [])
                 title = str(kwargs.get("title", "")).strip()
                 if title and title not in variants:
@@ -1004,16 +1029,33 @@ class ReportFindingTool:
                         new_component,
                         existing["id"],
                     )
-                # NOW-1/1.3: upgrade the deduped finding's verdict UPGRADE-ONLY — a
-                # later CONFIRMED re-report promotes a previously-unconfirmed finding
-                # (so it stops being excluded); a later UNCONFIRMED must never
-                # un-confirm an already-CONFIRMED finding.
-                if (
-                    str(kwargs.get("verifier_verdict", "")).upper() == "CONFIRMED"
-                    and existing.get("verifier_verdict") != "CONFIRMED"
-                ):
-                    existing["verifier_verdict"] = "CONFIRMED"
-                    existing["verified"] = True
+                severity_upgraded = _VALID_SEVERITIES.index(severity) < _VALID_SEVERITIES.index(
+                    str(existing.get("severity", "informational"))
+                )
+                proof_upgraded = bool(proof.get("ok")) and (
+                    severity_upgraded or not bool((existing.get("proof") or {}).get("ok"))
+                )
+                verdict_ranks = {"": 0, "UNCONFIRMED": 1, "CONFIRMED": 2}
+                new_verdict = str(kwargs.get("verifier_verdict", "")).upper()
+                old_verdict = str(existing.get("verifier_verdict", "")).upper()
+                verifier_upgraded = verdict_ranks.get(new_verdict, 0) > verdict_ranks.get(
+                    old_verdict, 0
+                )
+                if severity_upgraded:
+                    existing["severity"] = severity
+                    existing["finding_type"] = str(kwargs["finding_type"])
+                    existing["description"] = normalized["description"]
+                    existing["impact"] = normalized["impact"]
+                    existing["poc_description"] = normalized["poc_description"]
+                    existing["remediation"] = normalized["remediation_steps"]
+                    existing["remediation_steps"] = normalized["remediation_steps"]
+                if proof_upgraded:
+                    existing["proof"] = proof
+                if severity_upgraded or proof_upgraded or verifier_upgraded:
+                    existing["title"] = str(kwargs["title"])
+                if verifier_upgraded:
+                    existing["verifier_verdict"] = new_verdict
+                    existing["verified"] = new_verdict == "CONFIRMED"
                     existing["verifier_confidence"] = str(kwargs.get("verifier_confidence", ""))
                     existing["verifier_reasoning"] = str(kwargs.get("verifier_reasoning", ""))
                 if normalized_replay_gate and (
@@ -1237,6 +1279,12 @@ class LinkChainTool:
                 ok=False,
                 summary="link_chain: need at least 2 finding IDs",
                 error="insufficient_findings",
+            )
+        if len(set(finding_ids)) != len(finding_ids):
+            return ToolResult(
+                ok=False,
+                summary="link_chain: a finding cannot link to itself or appear twice",
+                error="duplicate_finding_ids",
             )
         if not rationale:
             return ToolResult(

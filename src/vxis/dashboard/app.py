@@ -17,8 +17,10 @@ from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import case, func, select
+from starlette.background import BackgroundTask
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from vxis.config.schema import VXISConfig
 from vxis.core.db import create_engine, get_session, init_db
 from vxis.core.finding_records import convert_finding_records
 from vxis.models.db_models import FindingRecord, ScanRecord
@@ -28,7 +30,15 @@ from vxis.report.charts import severity_bar_svg, severity_donut_svg
 # Engine — uses the default VXIS database path; can be overridden in tests
 # ---------------------------------------------------------------------------
 
-_DEFAULT_DB_URL = "sqlite+aiosqlite:///vxis.db"
+
+def _expand_db_url(db_url: str) -> str:
+    if ":///" in db_url:
+        prefix, path = db_url.split("///", 1)
+        return f"{prefix}///{Path(path).expanduser()}"
+    return db_url
+
+
+_DEFAULT_DB_URL = _expand_db_url(VXISConfig().db_url)
 
 # Module-level engine; replaced in tests via app.state.engine
 _engine = create_engine(_DEFAULT_DB_URL)
@@ -404,6 +414,7 @@ async def export_report(
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename=filename,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            background=BackgroundTask(tmp_path.unlink, missing_ok=True),
         )
 
     if format == "attestation":
@@ -433,6 +444,7 @@ async def export_report(
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             filename=filename,
             headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            background=BackgroundTask(tmp_path.unlink, missing_ok=True),
         )
 
     # Default: html
@@ -457,6 +469,7 @@ async def export_report(
         media_type="text/html",
         filename=filename,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        background=BackgroundTask(Path(tmp.name).unlink, missing_ok=True),
     )
 
 
@@ -718,7 +731,20 @@ async def scan_new_page(request: Request) -> HTMLResponse:
 @app.post("/api/scan/start", response_class=HTMLResponse)
 async def scan_start_api(request: Request) -> HTMLResponse:
     """Start a scan from dashboard form. Returns redirect to live view."""
+    from vxis.dashboard.auth import current_user
     from vxis.dashboard.scan_manager import scan_manager
+
+    if os.environ.get("VXIS_DASHBOARD_SCAN_ENABLED", "").lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return HTMLResponse("Dashboard scan start is disabled", status_code=503)
+
+    user = await current_user(request)
+    if user is None or user.role != "admin":
+        return HTMLResponse("Forbidden", status_code=403)
 
     form = await request.form()
     target = str(form.get("target", "")).strip()
@@ -731,11 +757,17 @@ async def scan_start_api(request: Request) -> HTMLResponse:
             status_code=400,
         )
 
-    managed = await scan_manager.start_scan(
-        target=target,
-        scan_type=scan_type,
-        profile=profile or None,
-    )
+    try:
+        managed = await scan_manager.start_scan(
+            target=target,
+            scan_type=scan_type,
+            profile=profile or None,
+        )
+    except ValueError:
+        return HTMLResponse(
+            '<p class="text-red-400 text-sm">스캔 설정이 유효하지 않거나 허용 범위를 벗어났습니다.</p>',
+            status_code=400,
+        )
 
     return HTMLResponse(
         f'<script>window.location.href="/scan/{managed.scan_id}/live";</script>'
@@ -811,7 +843,7 @@ async def scan_sse_events(request: Request, scan_id: str):
                     yield f"data: {json.dumps(data)}\n\n"
 
                     # Stop streaming after completion/failure
-                    if data.get("event") in ("scan_completed", "scan_failed"):
+                    if data.get("event") in ("scan_completed", "scan_partial", "scan_failed"):
                         yield f"data: {json.dumps({'event': 'done'})}\n\n"
                         break
 

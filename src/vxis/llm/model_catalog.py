@@ -57,7 +57,8 @@ def _fetch_models_dev(timeout: float = 2.5) -> dict | None:
         req = urllib.request.Request(
             MODELS_DEV_URL, method="GET", headers={"User-Agent": "vxis-model-catalog"}
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (trusted infra URL)
+        # MODELS_DEV_URL is a module constant, never operator/signal input.
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
             if not 200 <= getattr(resp, "status", 200) < 300:
                 return None
             body = resp.read().decode("utf-8", errors="replace")

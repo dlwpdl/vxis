@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
 from vxis.agent.scan_loop import ScanAgentLoop, VectorCandidate
@@ -1123,11 +1124,7 @@ def test_forced_branch_action_prefers_test_idor_for_idor_branch():
 
 def test_best_skill_params_for_idor_carries_latest_auth_token():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
-    loop.state.add_message("tool", {
-        "name": "run_skill",
-        "args": {"skill": "attempt_auth"},
-        "result": {"ok": True, "data": {"authenticated": True, "token": "abc123token"}},
-    })
+    loop.state.record_auth_identities([{"name": "alice", "token": "abc123token"}])
     loop.state.add_message("tool", {
         "name": "run_skill",
         "args": {"skill": "enumerate_endpoints"},
@@ -1737,6 +1734,7 @@ async def test_memory_refuted_pattern_blocks_repeated_run_skill_probe():
                 "affected_component": "http://localhost:3000/#/search?q=test",
                 "title": "Reflected XSS on search",
                 "reasoning": "Prior replay only reflected inert text without executable context.",
+                "last_seen": datetime.now(timezone.utc).isoformat(),
             }
         ],
     }
@@ -1798,6 +1796,7 @@ async def test_memory_success_tactic_hint_injected_for_matching_action():
 async def test_direct_injection_promotion_skips_medium_noise():
     reg = ToolRegistry()
     reg.register(ReportFindingTool())
+    reg.register(ConfirmingVerifyTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=2)
 
     original_dispatch = reg.dispatch
@@ -1911,6 +1910,76 @@ async def test_scan_loop_runs_to_finish(monkeypatch):
     assert result["completed"] is True
     assert call_count["n"] >= 5
     assert len(loop.state.messages) >= 2  # system + user + tool result
+
+
+@pytest.mark.asyncio
+async def test_scan_loop_redacts_sensitive_tool_history_without_mutating_dispatch():
+    class SecretTool:
+        name = "secret_tool"
+        description = "test-only secret echo"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs) -> ToolResult:
+            assert kwargs["token"] == "dispatch-secret"
+            return ToolResult(
+                ok=True,
+                summary="completed",
+                data={"authorization": "Bearer result-secret", "value": "safe"},
+            )
+
+    reg = ToolRegistry()
+    reg.register(SecretTool())
+    loop = ScanAgentLoop(target="http://localhost", registry=reg, max_iters=1)
+
+    async def decide_once(_state):
+        return [("secret_tool", {"token": "dispatch-secret"})]
+
+    loop._decide = decide_once  # type: ignore[method-assign]
+    await loop.run()
+
+    message = next(
+        item for item in reversed(loop.state.messages)
+        if item.get("role") == "tool" and item.get("content", {}).get("name") == "secret_tool"
+    )
+    assert message["content"]["args"]["token"] == "[redacted]"
+    assert message["content"]["result"]["data"]["authorization"] == "[redacted]"
+    assert message["content"]["result"]["data"]["value"] == "safe"
+
+
+@pytest.mark.asyncio
+async def test_direct_auth_skill_keeps_token_only_in_runtime_auth_state():
+    class AuthSkillTool:
+        name = "run_skill"
+        description = "test-only auth skill"
+        input_schema = {"type": "object"}
+
+        async def run(self, **_kwargs) -> ToolResult:
+            return ToolResult(
+                ok=True,
+                summary="authenticated",
+                data={
+                    "authenticated": True,
+                    "token": "runtime-secret",
+                    "identities": [{"name": "alice", "token": "runtime-secret"}],
+                },
+            )
+
+    reg = ToolRegistry()
+    reg.register(AuthSkillTool())
+    loop = ScanAgentLoop(target="http://localhost", registry=reg, max_iters=1)
+
+    async def decide_once(_state):
+        return [("run_skill", {"skill": "attempt_auth"})]
+
+    loop._decide = decide_once  # type: ignore[method-assign]
+    await loop.run()
+
+    assert loop._latest_auth_token() == "runtime-secret"
+    history = next(
+        item for item in reversed(loop.state.messages)
+        if item.get("role") == "tool" and item.get("content", {}).get("name") == "run_skill"
+    )
+    assert history["content"]["result"]["data"]["token"] == "[redacted]"
 
 
 def test_retrieval_observation_sanitizes_binary_samples():
@@ -2031,7 +2100,7 @@ async def test_unconfirmed_verifier_result_is_kept_in_review_queue():
     assert any(
         item["stage"] == "verifier"
         and item["verdict"] == "UNCONFIRMED"
-        and item["blocked_action"] == ""
+        and item["blocked_action"] == "report_finding"
         for item in result["review_history"]
     )
 
@@ -2042,6 +2111,7 @@ async def test_short_smoke_can_finish_after_single_high_finding_once_branch_guar
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
     reg.register(ReplayHttpTool())
+    reg.register(ConfirmingVerifyTool())
 
     decisions = iter([
         [("report_finding", {
@@ -2080,6 +2150,7 @@ async def test_finish_scan_rejected_when_high_finding_lacks_machine_replay_gate(
     reg = ToolRegistry()
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
+    reg.register(ConfirmingVerifyTool())
 
     decisions = iter([
         [("report_finding", {
@@ -2176,6 +2247,7 @@ async def test_auto_chain_links_information_disclosure_to_weak_auth():
     reg.register(FinishTool())
     reg.register(ReportFindingTool())
     reg.register(LinkChainTool())
+    reg.register(ConfirmingVerifyTool())
 
     decisions = iter([
         [("report_finding", {
@@ -2215,7 +2287,8 @@ async def test_auto_chain_links_information_disclosure_to_weak_auth():
 
 
 @pytest.mark.asyncio
-async def test_vector_candidates_record_attempt_outcomes_for_brain_tools():
+async def test_vector_candidates_record_attempt_outcomes_for_brain_tools(monkeypatch):
+    monkeypatch.setenv("VXIS_ALLOW_ARBITRARY_EXEC", "1")
     reg = ToolRegistry()
     reg.register(FinishTool())
 
@@ -2520,6 +2593,7 @@ async def test_memory_refuted_pattern_suppresses_repeat_report_finding():
             {
                 "finding_type": "error_oracle",
                 "affected_component": "/api/foo",
+                "last_seen": datetime.now(timezone.utc).isoformat(),
             }
         ],
     }
