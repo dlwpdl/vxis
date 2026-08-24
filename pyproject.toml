@@ -51,7 +51,7 @@ proxy = [
     # dependency-free passive X-Ray fallback until upstream accepts >=1.2.1.
 ]
 sdk = [
-    "openai-agents==0.14.6",
+    "openai-agents==0.22.0",
     "cryptography>=50.0.0",
 ]
 
