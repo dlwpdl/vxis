@@ -29,7 +29,8 @@ from __future__ import annotations
 from typing import Any
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
+from textual.screen import ModalScreen
 from textual.widgets import Footer, Header, Input, RichLog, Static, Tree
 
 from vxis.agent.attack_taxonomy import attack_category
@@ -83,6 +84,109 @@ def _agent_label(agent: dict) -> str:
     }.get(status, status)
     tail = f"  [dim]\\[{status_label}][/dim]" if status_label else ""
     return f"[{color}]{icon} {aid}[/{color}]  {category}{tail}"
+
+
+# ── Approval modals ──────────────────────────────────────────────────────────
+# Under the TUI the scan runs in a worker thread, so it can't drop to a blocking
+# console prompt. These modal screens let the operator make the same injection /
+# per-action decision the --no-tui console gate offers, from inside the app.
+
+_MODAL_CSS = """
+$ns { align: center middle; }
+$ns #box {
+    width: 86; max-width: 96%; height: auto;
+    border: round $primary; background: $surface; padding: 1 2;
+}
+"""
+
+
+class InjectionModeScreen(ModalScreen[str]):
+    """Three-way injection gate: read-only / full / deny. Escape = read-only
+    (the safe default, matching the console gate)."""
+
+    CSS = _MODAL_CSS.replace("$ns", "InjectionModeScreen")
+    BINDINGS = [
+        ("r", "readonly", tr("Read-only", "읽기전용")),
+        ("f", "full", tr("Full", "전체")),
+        ("n", "deny", tr("Deny", "거부")),
+        ("escape", "readonly", tr("Read-only", "읽기전용")),
+    ]
+
+    def __init__(self, summary: dict | None) -> None:
+        super().__init__()
+        self._summary = summary or {}
+
+    def compose(self) -> ComposeResult:
+        s = self._summary
+        frameworks = ", ".join(s.get("frameworks") or []) or "(none)"
+        body = (
+            f"[bold red]⚠ {tr('INJECTION APPROVAL REQUIRED', '인젝션 승인 필요')}[/bold red]\n\n"
+            f"{tr('Target', '타겟')}: [cyan]{s.get('target') or '?'}[/cyan]\n"
+            f"{tr('Title', '제목')}:  {s.get('title') or '(none)'}\n"
+            f"{tr('Frameworks', '프레임워크')}: {frameworks}\n\n"
+            f"  [green]R[/green] = {tr('read-only (GET/HEAD only; mutations BLOCKED)', '읽기전용 (GET/HEAD만; 변경 차단)')}\n"
+            f"  [yellow]F[/yellow] = {tr('full (all methods auto-execute — MAY MUTATE DATA)', '전체 (모든 메서드 자동 실행 — 데이터 변경 가능)')}\n"
+            f"  [red]N[/red] = {tr('deny (recon-only)', '거부 (정찰만)')}\n\n"
+            f"[dim]{tr('Esc = read-only (safe default)', 'Esc = 읽기전용 (안전 기본값)')}[/dim]"
+        )
+        yield Vertical(Static(body), id="box")
+        yield Footer()
+
+    def action_readonly(self) -> None:
+        self.dismiss("readonly")
+
+    def action_full(self) -> None:
+        self.dismiss("full")
+
+    def action_deny(self) -> None:
+        self.dismiss("deny")
+
+
+class ActionApprovalScreen(ModalScreen[bool]):
+    """Per-action y/N gate for one data-mutating request. Escape/N = deny
+    (the safe default, matching the console gate)."""
+
+    CSS = _MODAL_CSS.replace("$ns", "ActionApprovalScreen")
+    BINDINGS = [
+        ("y", "approve", tr("Approve", "승인")),
+        ("n", "deny", tr("Deny", "거부")),
+        ("escape", "deny", tr("Deny", "거부")),
+    ]
+
+    def __init__(self, action: Any) -> None:
+        super().__init__()
+        self._action = action
+
+    def compose(self) -> ComposeResult:
+        a = self._action
+        risk = str(getattr(a, "risk", "?")).upper()
+        method = getattr(a, "method", "?")
+        url = getattr(a, "url", "")
+        desc = (getattr(a, "description_en", "") or "")[:200]
+        lines = [
+            f"[bold yellow]⚠ {tr('DATA-MUTATING ACTION — APPROVE?', '데이터 변경 작업 — 승인?')}[/bold yellow]",
+            "",
+            f"#{getattr(a, 'id', '?')} [{risk}] [cyan]{method}[/cyan] {url}",
+            f"[dim]{desc}[/dim]",
+        ]
+        data = getattr(a, "data", None)
+        if data:
+            import json as _j
+
+            lines.append(f"[dim]data:[/dim] {_j.dumps(data, ensure_ascii=False)[:200]}")
+        lines += [
+            "",
+            f"[green]y[/green] {tr('approve', '승인')}   "
+            f"[red]n/Esc[/red] {tr('deny (default)', '거부 (기본값)')}",
+        ]
+        yield Vertical(Static("\n".join(lines)), id="box")
+        yield Footer()
+
+    def action_approve(self) -> None:
+        self.dismiss(True)
+
+    def action_deny(self) -> None:
+        self.dismiss(False)
 
 
 class ScanTUI(App):
@@ -245,6 +349,26 @@ class ScanTUI(App):
             self.call_from_thread(self.feed_event, event_type, data)
         except Exception as exc:
             self._dbg(f"call_from_thread FAILED for {event_type}: {exc!r}")
+
+    async def request_modal(self, screen: ModalScreen) -> Any:
+        """Bridge an approval decision from the scan worker thread into the UI.
+
+        The scan runs in a worker thread (see :meth:`_drive_scan`), so an
+        approval callback there can't touch the UI directly. Push ``screen`` onto
+        the UI thread and await its ``dismiss(...)`` value on the worker's own
+        event loop — blocking neither loop. Returns the dismissed value.
+        """
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+
+        def _on_dismiss(result: Any) -> None:
+            if not fut.done():
+                loop.call_soon_threadsafe(fut.set_result, result)
+
+        self.call_from_thread(self.push_screen, screen, _on_dismiss)
+        return await fut
 
     def _drive_scan(self) -> None:
         import asyncio

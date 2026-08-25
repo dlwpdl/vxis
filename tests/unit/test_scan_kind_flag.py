@@ -20,6 +20,7 @@ def _stub_preflight() -> object:
             "brain_ready": True,
             "brain_backend": "stub",
             "docker_available": True,
+            "sandbox_image_ready": True,
             "github_token": True,
             "proxy_pool_size": 0,
             "warnings": [],

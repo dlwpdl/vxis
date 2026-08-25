@@ -143,3 +143,39 @@ def test_healthcheck_calls_wavespeed_openai_compatible_endpoint(monkeypatch):
     payload = json.loads(requests[0].data)
     assert payload["model"] == "google/gemini-3.7-flash"
     assert payload["reasoning_effort"] == "high"
+
+
+def test_healthcheck_calls_openrouter_with_reasoning(monkeypatch):
+    monkeypatch.setenv("VXIS_DIRECTOR_LLM", "openrouter/stealth/ox-alpha")
+    monkeypatch.setenv("VXIS_DIRECTOR_LLM_EXTRA_BODY_JSON", '{"reasoning": {"effort": "high"}}')
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-0123456789abcdef")  # gitleaks:allow
+    for key in ("VXIS_DIRECTOR_LLM_PROVIDER", "VXIS_DIRECTOR_LLM_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    brain = AgentBrain()
+    requests = []
+
+    class _Resp:
+        status = 200
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"OK"}}],"usage":{}}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    def _urlopen(req, timeout=0):
+        requests.append(req)
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    assert brain.healthcheck() == (True, "")
+    assert len(requests) == 1
+    assert requests[0].full_url == "https://openrouter.ai/api/v1/chat/completions"
+    assert requests[0].get_header("Authorization") == "Bearer sk-or-test-0123456789abcdef"
+    payload = json.loads(requests[0].data)
+    assert payload["model"] == "stealth/ox-alpha"
+    assert payload["reasoning"] == {"effort": "high"}

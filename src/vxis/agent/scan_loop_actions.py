@@ -1240,7 +1240,7 @@ class ScanLoopActionMixin:
         snapshot["memory_directives"] = [
             note for note in self.state.shared_notes if str(note).startswith("memory")
         ][-4:]
-        snapshot["chain_candidates"] = self._suggest_chain_candidates(limit=3)
+        snapshot["chain_candidates"] = self._chain_candidates_for_display(limit=3)
         snapshot["agents"] = self._agent_graph_agents_from_messages()[:6]
         snapshot["service_pivots"] = [
             {
@@ -2091,6 +2091,45 @@ class ScanLoopActionMixin:
                 [best_candidate["source_id"], best_candidate["target_id"]]
             )
             logger.info("auto-linked chain %s -> %s", best_candidate["source_id"], finding_id)
+
+    def _chain_candidates_for_display(self, *, limit: int = 3) -> list[dict[str, str]]:
+        """Cached ``_suggest_chain_candidates`` for the control-plane SNAPSHOT only.
+
+        The snapshot is display/telemetry (the TUI agent tree + the
+        ``ctx.control_plane`` read at scan end). Every DECISION path calls
+        ``_suggest_chain_candidates`` directly for a fresh result, so this cache
+        can never change scan behaviour. ``_suggest_chain_candidates`` is O(N^2)
+        in findings (measured ~4 ms at 50 findings, ~17 ms at 100) and
+        ``_emit_control_plane`` runs 10+×/iteration, so recomputing it on every
+        emit was the one real per-iteration cost in the snapshot.
+
+        ponytail: keyed on a cheap findings+chains signature (id/severity/type/
+        component + chain count), not full finding content. An evidence-only edit
+        to an existing finding lags the DISPLAYED hints until one of those fields
+        (or the finding/chain count) changes — cosmetically invisible, self-
+        healing, and never a scan-logic effect.
+        """
+        from vxis.agent.tools.finding_tools import _get_chains, _get_findings
+
+        findings = _get_findings() or []
+        chains = _get_chains() or []
+        sig = (
+            limit,
+            len(chains),
+            tuple(
+                (
+                    f.get("id"),
+                    f.get("severity"),
+                    f.get("finding_type"),
+                    f.get("affected_component"),
+                )
+                for f in findings
+            ),
+        )
+        if sig != getattr(self, "_cp_chain_sig", None):
+            self._cp_chain_sig = sig
+            self._cp_chain_cache = self._suggest_chain_candidates(limit=limit)
+        return self._cp_chain_cache
 
     def _suggest_chain_candidates(self, *, limit: int = 3) -> list[dict[str, str]]:
         try:

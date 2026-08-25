@@ -24,7 +24,6 @@ import os
 import re
 import secrets
 import socket
-import shutil
 import time
 import uuid
 from dataclasses import dataclass
@@ -35,11 +34,12 @@ from urllib import request as urlrequest
 from vxis.agent.egress_policy import blocked_policy_data, evaluate_shell_egress
 from vxis.agent.text_clean import strip_terminal_noise
 from vxis.agent.tool_registry import ToolResult
+from vxis.core.docker_env import DEFAULT_SANDBOX_IMAGE, docker_cli_present
 from vxis.ghost.routing import wrap_shell_command_for_ghost
 
 logger = logging.getLogger(__name__)
 
-SANDBOX_IMAGE = "vxis/sandbox:latest"
+SANDBOX_IMAGE = DEFAULT_SANDBOX_IMAGE
 SANDBOX_CONTAINER = "vxis-sandbox"
 SANDBOX_WORKSPACE_ROOT = "/tmp/vxis-workspaces"
 SANDBOX_WORKSPACE_HOST = "/tmp/vxis-workspace"  # legacy single-sandbox path
@@ -152,8 +152,8 @@ def sanitize_session_name(prefix: str, raw: str | None) -> str:
 
 
 def _docker_available() -> bool:
-    """Check if the docker CLI is on PATH."""
-    return shutil.which("docker") is not None
+    """Check if the docker CLI is on PATH (delegated to the shared probe)."""
+    return docker_cli_present()
 
 
 async def _run_docker(*args: str, timeout: float = 30.0) -> tuple[int, str, str]:

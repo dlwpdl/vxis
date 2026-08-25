@@ -4,12 +4,17 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 
 import httpx
+
+from vxis.core.docker_env import (
+    DEFAULT_SANDBOX_IMAGE,
+    docker_daemon_ready,
+    sandbox_image_present,
+)
 
 
 _PROXY_PROBE_URL = "https://api64.ipify.org?format=json"
@@ -24,6 +29,7 @@ class PreflightResult:
     brain_backend: str = "unknown"  # "claude-code" | "api" | "none"
     brain_ready: bool = False
     docker_available: bool = False
+    sandbox_image_ready: bool = False
     github_token: bool = False
     proxy_pool_size: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -146,6 +152,7 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
         "together": "TOGETHER_API_KEY",
         "openai": "OPENAI_API_KEY",
         "gemini": "GOOGLE_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
         "wavespeed": "WAVESPEED_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY",
     }
@@ -174,7 +181,18 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
                 f"model like gemini-2.5-pro)",
                 False,
             )
-    elif provider in ("openai", "together", "deepseek", "anthropic", "wavespeed") and model:
+    elif (
+        provider
+        in (
+            "openai",
+            "openrouter",
+            "together",
+            "deepseek",
+            "anthropic",
+            "wavespeed",
+        )
+        and model
+    ):
         from vxis.llm.model_registry import get_model_info, list_models
 
         # Fast, no-network reject: an id we don't know about is almost always a
@@ -201,7 +219,7 @@ def _brain_unavailable_message(reason: str = "") -> str:
     base = (
         "No Brain backend available. Install 'claude' CLI, start Ollama/llama.cpp, or set "
         "ANTHROPIC_API_KEY / TOGETHER_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY / "
-        "WAVESPEED_API_KEY"
+        "OPENROUTER_API_KEY / WAVESPEED_API_KEY"
     )
     detail = (reason or "").strip()
     # Suppress the no-key/no-backend labels ("none", "none (director LLM key
@@ -214,18 +232,8 @@ def _brain_unavailable_message(reason: str = "") -> str:
 
 
 def check_docker() -> bool:
-    """Docker daemon 접근 가능 여부."""
-    if not shutil.which("docker"):
-        return False
-    try:
-        result = subprocess.run(
-            ["docker", "info"],
-            capture_output=True,
-            timeout=3,
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+    """Docker daemon 접근 가능 여부 (공유 프로브 vxis.core.docker_env 에 위임)."""
+    return docker_daemon_ready()
 
 
 def check_github_token() -> bool:
@@ -306,6 +314,17 @@ def run_preflight(
     result.docker_available = check_docker()
     if not result.docker_available:
         result.warnings.append("Docker not available — sandboxed scanners may be limited")
+    else:
+        # Daemon up is not enough: shell_exec/python_exec run inside the
+        # vxis-sandbox image, so a missing/unbuilt image silently kills every
+        # sandboxed tool mid-scan. Surface it here instead.
+        result.sandbox_image_ready = sandbox_image_present(DEFAULT_SANDBOX_IMAGE)
+        if not result.sandbox_image_ready:
+            result.warnings.append(
+                f"Sandbox image '{DEFAULT_SANDBOX_IMAGE}' not built — shell_exec/python_exec "
+                f"tools will be unavailable. Build it: docker build -t {DEFAULT_SANDBOX_IMAGE} "
+                "docker/sandbox/"
+            )
 
     # 4. GitHub token (optional upstream/news integrations)
     result.github_token = check_github_token()

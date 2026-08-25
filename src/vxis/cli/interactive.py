@@ -99,6 +99,7 @@ _CLOUD_PROVIDER_KEYS = {
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GOOGLE_API_KEY",
     "openai": "OPENAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
     "wavespeed": "WAVESPEED_API_KEY",
 }
 
@@ -560,6 +561,7 @@ _CLOUD_PROVIDERS = [
     ("anthropic", "Anthropic — Claude"),
     ("openai", "OpenAI — GPT"),
     ("gemini", "Google — Gemini"),
+    ("openrouter", "OpenRouter — 통합 LLM 게이트웨이"),
     ("wavespeed", "WaveSpeedAI — 통합 LLM 게이트웨이"),
     ("together", "Together.ai — 통합 게이트웨이"),
 ]

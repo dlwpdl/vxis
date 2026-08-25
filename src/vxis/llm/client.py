@@ -284,6 +284,8 @@ class LLMClient:
             available.append({"name": "google-api", "type": "api", "cost": "free tier"})
         if os.environ.get("OPENAI_API_KEY"):
             available.append({"name": "openai-api", "type": "api", "cost": "$0.15/M"})
+        if os.environ.get("OPENROUTER_API_KEY"):
+            available.append({"name": "openrouter-api", "type": "api", "cost": "free model"})
         if os.environ.get("WAVESPEED_API_KEY"):
             available.append({"name": "wavespeed-api", "type": "api", "cost": "pay per token"})
 

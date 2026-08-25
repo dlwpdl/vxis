@@ -178,3 +178,24 @@ def test_wavespeed_key_auto_selects_wavespeed_director() -> None:
     )
 
     assert config.director.ref == "wavespeed/google/gemini-3.7-flash"
+
+
+def test_openrouter_model_ref_preserves_model_slug_and_reasoning() -> None:
+    config = resolve_hybrid_model_config(
+        env={
+            "VXIS_DIRECTOR_LLM": "openrouter/stealth/ox-alpha",
+            "VXIS_DIRECTOR_LLM_EXTRA_BODY_JSON": '{"reasoning": {"effort": "high"}}',
+        }
+    )
+
+    assert config.director.provider == "openrouter"
+    assert config.director.model == "stealth/ox-alpha"
+    assert config.director.extra_body == {"reasoning": {"effort": "high"}}
+
+
+def test_openrouter_key_auto_selects_ox_alpha() -> None:
+    config = resolve_hybrid_model_config(
+        env={"OPENROUTER_API_KEY": "sk-or-test-0123456789abcdef"}  # gitleaks:allow
+    )
+
+    assert config.director.ref == "openrouter/stealth/ox-alpha"

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 # model_id -> (input_usd_per_1M, output_usd_per_1M). Public list prices.
 MODEL_PRICES: dict[str, tuple[float, float]] = {
+    "stealth/ox-alpha": (0.0, 0.0),
     "gemini-3.7-flash": (0.75, 3.75),
     "google/gemini-3.7-flash": (0.75, 3.75),
     "gemini-2.5-pro": (1.25, 10.0),

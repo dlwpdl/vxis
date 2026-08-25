@@ -97,18 +97,20 @@ def get_llm_usage_stats() -> dict[str, Any]:
 def reset_llm_usage_stats() -> None:
     """Reset live LLM usage telemetry (test + per-scan hook)."""
     with _LLM_USAGE_LOCK:
-        _LLM_USAGE_STATS.update({
-            "provider": "",
-            "model": "",
-            "calls": 0,
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-            "cost_usd": 0.0,
-            "tokens_estimated": False,
-            "cost_estimated": False,
-            "rows": [],
-        })
+        _LLM_USAGE_STATS.update(
+            {
+                "provider": "",
+                "model": "",
+                "calls": 0,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+                "tokens_estimated": False,
+                "cost_estimated": False,
+                "rows": [],
+            }
+        )
 
 
 def llm_health_warning(call_count: int, usage_stats: dict[str, Any]) -> str | None:
@@ -163,6 +165,7 @@ def _estimate_usage_cost(provider: str, total_tokens: int) -> tuple[float, bool]
         "together": 0.50,
         "anthropic": 3.00,
         "gemini": 0.0,
+        "openrouter": 0.0,
     }.get(provider)
     if per_million is None:
         return 0.0, False
@@ -211,15 +214,29 @@ def _record_llm_usage(
         _LLM_USAGE_STATS["provider"] = provider
         _LLM_USAGE_STATS["model"] = model
         _LLM_USAGE_STATS["calls"] = int(_LLM_USAGE_STATS.get("calls", 0)) + 1
-        _LLM_USAGE_STATS["input_tokens"] = int(_LLM_USAGE_STATS.get("input_tokens", 0)) + input_tokens
-        _LLM_USAGE_STATS["output_tokens"] = int(_LLM_USAGE_STATS.get("output_tokens", 0)) + output_tokens
-        _LLM_USAGE_STATS["total_tokens"] = int(_LLM_USAGE_STATS.get("total_tokens", 0)) + total_tokens
-        _LLM_USAGE_STATS["cost_usd"] = round(float(_LLM_USAGE_STATS.get("cost_usd", 0.0)) + cost_usd, 4)
-        _LLM_USAGE_STATS["tokens_estimated"] = bool(_LLM_USAGE_STATS.get("tokens_estimated", False) or tokens_estimated)
-        _LLM_USAGE_STATS["cost_estimated"] = bool(_LLM_USAGE_STATS.get("cost_estimated", False) or cost_estimated)
-        _LLM_USAGE_STATS.setdefault("rows", []).append({
-            "model": model,
-            "role": role,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-        })
+        _LLM_USAGE_STATS["input_tokens"] = (
+            int(_LLM_USAGE_STATS.get("input_tokens", 0)) + input_tokens
+        )
+        _LLM_USAGE_STATS["output_tokens"] = (
+            int(_LLM_USAGE_STATS.get("output_tokens", 0)) + output_tokens
+        )
+        _LLM_USAGE_STATS["total_tokens"] = (
+            int(_LLM_USAGE_STATS.get("total_tokens", 0)) + total_tokens
+        )
+        _LLM_USAGE_STATS["cost_usd"] = round(
+            float(_LLM_USAGE_STATS.get("cost_usd", 0.0)) + cost_usd, 4
+        )
+        _LLM_USAGE_STATS["tokens_estimated"] = bool(
+            _LLM_USAGE_STATS.get("tokens_estimated", False) or tokens_estimated
+        )
+        _LLM_USAGE_STATS["cost_estimated"] = bool(
+            _LLM_USAGE_STATS.get("cost_estimated", False) or cost_estimated
+        )
+        _LLM_USAGE_STATS.setdefault("rows", []).append(
+            {
+                "model": model,
+                "role": role,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+            }
+        )

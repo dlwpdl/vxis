@@ -7,7 +7,7 @@ for AI-powered relevance filtering.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -42,22 +42,29 @@ TARGETS: list[WatchTarget] = [
     WatchTarget(
         owner="usestrix",
         repo="strix",
-        reason="AI agent pentest framework — architecture, agent patterns, vuln dedup, scan modes",
-        include_paths=("src/", "strix/", "agents/", "lib/"),
+        # Latest layout (v1.5.3, 2026-08): src/agents/lib gone; code lives in
+        # strix/, technique packs in skills/ (VXIS skill-injection parallel),
+        # scan-mode fixtures in benchmarks/.
+        reason="AI agent pentest framework — agent loop, skill packs, vuln dedup, scan modes",
+        branches=("main",),
+        include_paths=("strix/", "skills/", "benchmarks/"),
         relevance_tags=(
             "agent-architecture",
+            "skill-injection",
             "vuln-dedup",
             "scan-mode",
             "browser-automation",
-            "ci-integration",
             "report-generation",
         ),
     ),
     WatchTarget(
         owner="vxcontrol",
         repo="pentagi",
+        # Go monorepo (v2.1.0): internal/pkg/cmd live UNDER backend/; telemetry
+        # in observability/.
         reason="Multi-agent pentest system — knowledge graph, memory system, sandboxed execution",
-        include_paths=("backend/", "internal/", "pkg/", "cmd/"),
+        branches=("main",),
+        include_paths=("backend/", "observability/"),
         relevance_tags=(
             "knowledge-graph",
             "multi-agent",
@@ -69,13 +76,52 @@ TARGETS: list[WatchTarget] = [
     WatchTarget(
         owner="0x4m4",
         repo="hexstrike-ai",
-        reason="MCP server for security tools — tool integration patterns, MCP protocol usage",
-        include_paths=("src/", "tools/", "agents/"),
+        # Flat repo (only assets/ subdir); the old src/tools/agents paths no
+        # longer exist, so an include_paths filter watched NOTHING. Watch all,
+        # let exclude_paths trim docs/CI noise.
+        reason="MCP server for 150+ security tools — tool integration patterns, MCP protocol usage",
+        branches=("master", "main"),
+        include_paths=(),
         relevance_tags=(
             "mcp-server",
             "tool-integration",
             "web-automation",
             "agent-framework",
+        ),
+    ),
+    WatchTarget(
+        owner="KeygraphHQ",
+        repo="shannon",
+        # "shaddn" — autonomous AI pentester (v2.5.3, 47k★). Source-driven:
+        # reads app source → maps attack surface → executes real web/API
+        # exploits (SQLi/XSS/SSRF/auth) to prove them. TS; code in apps/.
+        reason="Autonomous AI pentester — source analysis → attack-surface mapping → real exploit execution",
+        branches=("main",),
+        include_paths=("apps/",),
+        relevance_tags=(
+            "agent-architecture",
+            "source-analysis",
+            "exploit-execution",
+            "attack-surface-mapping",
+            "web-api-pentest",
+            "report-generation",
+        ),
+    ),
+    WatchTarget(
+        owner="elder-plinius",
+        repo="T3MP3ST",
+        # Tempest — multi-agent offensive meta-harness: 8 parallel specialist
+        # agents (recon/scan/exploit/pivot) under an "Op-Admiral" coordinator.
+        # Parallel-agent topology + orchestration patterns. TS; code in src/.
+        reason="Multi-agent offensive meta-harness — parallel specialist agents under a coordinator",
+        branches=("main",),
+        include_paths=("src/",),
+        relevance_tags=(
+            "multi-agent",
+            "orchestration",
+            "parallel-agents",
+            "agent-architecture",
+            "red-team",
         ),
     ),
     # ── Core Security Tools (used by VXIS plugins) ──

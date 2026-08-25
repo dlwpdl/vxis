@@ -88,6 +88,10 @@ def test_configure_cloud_environment_sets_director_and_verifier(monkeypatch) -> 
             os.environ.pop(key, None)
 
 
+def test_openrouter_uses_dedicated_key_env() -> None:
+    assert interactive._cloud_provider_key_env("openrouter") == "OPENROUTER_API_KEY"
+
+
 def test_fetch_llamacpp_models_from_openai_compatible_endpoint() -> None:
     body = b'{"data": [{"id": "model-a"}, {"id": "model-b"}]}'
 
@@ -187,8 +191,13 @@ class TestSpecializedProfileChoices:
 class TestCloudModelChoices:
     def _models(self, n):
         from vxis.llm.model_registry import ModelInfo
-        return [ModelInfo(model_id=f"m{i}", provider="openai",
-                          context_window=128_000, max_output_tokens=8_000) for i in range(n)]
+
+        return [
+            ModelInfo(
+                model_id=f"m{i}", provider="openai", context_window=128_000, max_output_tokens=8_000
+            )
+            for i in range(n)
+        ]
 
     def test_caps_at_limit_plus_custom(self):
         ch = interactive._cloud_model_choices("openai", self._models(20), limit=5)

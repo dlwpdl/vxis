@@ -51,7 +51,6 @@ from vxis.agent.brain_prompts import (
     AgentAction,
     AgentObservation,
     AgentStep,
-    _parse_llm_json,
     build_agent_system_prompt,
     build_compact_agent_system_prompt,
 )
@@ -191,6 +190,8 @@ class AgentBrain:
             base_url = os.environ.get("VXIS_OLLAMA_BASE_URL", "").rstrip("/") or "-"
         elif self._provider == "wavespeed":
             base_url = "https://llm.wavespeed.ai/v1"
+        elif self._provider == "openrouter":
+            base_url = "https://openrouter.ai/api/v1"
 
         try:
             policy = get_compression_policy(self._provider, self._model)
@@ -866,137 +867,6 @@ class AgentBrain:
         # ── Knowledge Store 학습 ──
         self._learn_from_result(action, result)
 
-    # ── Brain-First: Probe Interpretation + Chain Generation ─────
-
-    def interpret_probe_result(
-        self,
-        vector_id: str,
-        endpoint: str,
-        param: str,
-        payload: str,
-        body: str,
-        status: int,
-        current_findings: list[dict],
-    ) -> dict:
-        """Brain이 HTTP 응답을 해석하여 exploitation level을 결정한다.
-
-        Pattern matching이 hit을 탐지한 후, Brain이 실제 심각도를 판단.
-
-        Returns:
-            {level: int(1-4), confidence: str, evidence_summary: str, escalation_hint: str}
-        """
-        system_prompt = (
-            "You are an expert penetration tester evaluating attack results. "
-            "Given an HTTP probe result, determine the exploitation level achieved:\n"
-            "Level 1: Detected (vulnerability signature present, not yet exploitable)\n"
-            "Level 2: Confirmed (vulnerability confirmed, PoC works)\n"
-            "Level 3: Data Extracted (sensitive data leaked, credentials, PII)\n"
-            "Level 4: Full Exploit (RCE, admin access, complete system compromise)\n\n"
-            "OUTPUT RULE: Your ENTIRE response must be a single raw JSON object. "
-            "No text before {. No text after }. No markdown. No explanation. "
-            'Schema: {"level": <1-4>, "confidence": "high|medium|low", '
-            '"evidence_summary": "<1 sentence>", "escalation_hint": "<next step>"}'
-        )
-        prev = [
-            {"type": f.get("type", ""), "component": f.get("component", "")}
-            for f in current_findings[-5:]
-        ]
-        user_prompt = (
-            f"Vector: {vector_id}\n"
-            f"Endpoint: {endpoint}\n"
-            f"Param: {param}\n"
-            f"Payload: {payload[:200]}\n"
-            f"HTTP Status: {status}\n"
-            f"Response (first 800 chars): {body[:800]}\n"
-            f"Previous findings: {prev}\n\n"
-            "Output ONLY the raw JSON object. Zero additional text."
-        )
-        try:
-            response = self._call_llm_with_fallback(system_prompt, user_prompt)
-            if not response:
-                return {
-                    "level": 2,
-                    "confidence": "low",
-                    "evidence_summary": "",
-                    "escalation_hint": "",
-                }
-            result = _parse_llm_json(response)
-            level = max(1, min(4, int(result.get("level", 2))))
-            return {
-                "level": level,
-                "confidence": result.get("confidence", "medium"),
-                "evidence_summary": str(result.get("evidence_summary", ""))[:200],
-                "escalation_hint": str(result.get("escalation_hint", ""))[:200],
-            }
-        except Exception as exc:
-            logger.debug("Brain.interpret_probe_result failed: %s", exc)
-            return {"level": 2, "confidence": "low", "evidence_summary": "", "escalation_hint": ""}
-
-    def generate_chain_attacks(
-        self,
-        finding_type: str,
-        endpoint: str,
-        description: str,
-        target: str,
-        current_findings: list[dict],
-    ) -> list[dict]:
-        """Brain이 finding에서 다음 공격 체인을 생성한다.
-
-        하드코딩된 체인 대신, Brain이 컨텍스트를 분석해서
-        실제로 의미있는 다음 공격 단계를 결정한다.
-
-        Returns:
-            list of {vector_id, endpoint, method, param, payloads, reasoning, expected_level}
-        """
-        system_prompt = (
-            "You are an expert penetration tester doing attack chaining. "
-            "Given a confirmed vulnerability, generate 1-3 follow-up attacks to escalate impact. "
-            "Think: what is the NEXT step toward Crown Jewel (RCE, admin access, credential theft)?\n\n"
-            "OUTPUT RULE: Your ENTIRE response must be a single raw JSON array. "
-            "No text before [. No text after ]. No markdown. No explanation. "
-            'Each item: {"vector_id": "WEB-CHAIN-XXX", "endpoint": "<path>", '
-            '"method": "GET"|"POST", "param": "<param_name>", '
-            '"payloads": ["<payload1>", "<payload2>"], '
-            '"reasoning": "<why>", "expected_level": 3|4}'
-        )
-        prev = [
-            {"type": f.get("type", ""), "component": f.get("component", "")}
-            for f in current_findings[-5:]
-        ]
-        user_prompt = (
-            f"Target: {target}\n"
-            f"Confirmed vuln: {finding_type} on {endpoint}\n"
-            f"Description: {description[:300]}\n"
-            f"Other findings: {prev}\n\n"
-            "Output ONLY the raw JSON array. Zero additional text."
-        )
-        try:
-            response = self._call_llm_with_fallback(system_prompt, user_prompt)
-            if not response:
-                return []
-            result = _parse_llm_json(response)
-            if not isinstance(result, list):
-                return []
-            attacks = []
-            for atk in result[:3]:
-                if not isinstance(atk, dict):
-                    continue
-                attacks.append(
-                    {
-                        "vector_id": str(atk.get("vector_id", "WEB-CHAIN")),
-                        "endpoint": str(atk.get("endpoint", endpoint)),
-                        "method": str(atk.get("method", "GET")).upper(),
-                        "param": str(atk.get("param", "")),
-                        "payloads": [str(p) for p in atk.get("payloads", [""])[:5]],
-                        "reasoning": str(atk.get("reasoning", ""))[:200],
-                        "expected_level": max(1, min(4, int(atk.get("expected_level", 3)))),
-                    }
-                )
-            return attacks
-        except Exception as exc:
-            logger.debug("Brain.generate_chain_attacks failed: %s", exc)
-            return []
-
     # ── Phase 3: Compiled Pattern Matching ───────────────────────
 
     def _try_compiled_patterns(
@@ -1429,7 +1299,7 @@ class AgentBrain:
                 base_url=base_url,
                 extra_body=extra_body,
             )
-        elif provider in ("together", "openai", "wavespeed"):
+        elif provider in ("together", "openai", "openrouter", "wavespeed"):
             return self._call_openai_compatible(
                 system_prompt,
                 user_prompt,
@@ -1451,7 +1321,7 @@ class AgentBrain:
         image_path: str = "",
         extra_body: dict[str, Any] | None = None,
     ) -> str | None:
-        """OpenAI 호환 API 호출 (Together, OpenAI, WaveSpeed, Ollama).
+        """OpenAI 호환 API 호출 (Together, OpenAI, OpenRouter, WaveSpeed, Ollama).
 
         Ollama는 키가 없으며 base_url만 사용 (http://localhost:11434).
 
@@ -1467,11 +1337,13 @@ class AgentBrain:
             urls = {
                 "together": "https://api.together.xyz/v1/chat/completions",
                 "openai": "https://api.openai.com/v1/chat/completions",
+                "openrouter": "https://openrouter.ai/api/v1/chat/completions",
                 "wavespeed": "https://llm.wavespeed.ai/v1/chat/completions",
             }
             keys = {
                 "together": os.environ.get("TOGETHER_API_KEY", ""),
                 "openai": os.environ.get("OPENAI_API_KEY", ""),
+                "openrouter": os.environ.get("OPENROUTER_API_KEY", ""),
                 "wavespeed": os.environ.get("WAVESPEED_API_KEY", ""),
             }
             url = urls.get(provider)
@@ -2130,39 +2002,6 @@ class AgentBrain:
             pass
         return value
 
-    @staticmethod
-    def _call_claude_subprocess(system_prompt: str, user_prompt: str) -> str | None:
-        """claude -p 서브프로세스로 현재 Claude Code 세션을 Brain으로 사용.
-
-        API 키 없이 로그인된 Claude Code 세션을 직접 활용한다.
-
-        모델 선택 (우선순위):
-          1. VXIS_BRAIN_MODEL 환경변수 (명시적 지정)
-          2. 기본값: claude-opus-4-6 (가장 강력한 Brain)
-        """
-        import subprocess
-        import re as _re_ctrl
-
-        model = os.environ.get("VXIS_BRAIN_MODEL", "claude-opus-4-6")
-        combined = f"{system_prompt}\n\n---\n\n{user_prompt}"
-        try:
-            result = subprocess.run(
-                ["claude", "-p", combined, "--model", model],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                output = result.stdout
-                # ANSI 이스케이프 코드 제거 (터미널 색상/포맷 코드)
-                output = _re_ctrl.sub(r"\x1b\[[0-9;]*[mGKHFJA-Za-z]", "", output)
-                # JSON에서 invalid한 control chars 제거 (탭·개행·캐리지리턴 제외)
-                output = _re_ctrl.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", output)
-                return output.strip() if output.strip() else None
-        except (FileNotFoundError, subprocess.TimeoutExpired, Exception) as exc:
-            logger.debug("claude -p subprocess failed: %s", exc)
-        return None
-
     def _call_llm(
         self,
         system_prompt: str,
@@ -2187,6 +2026,7 @@ class AgentBrain:
                 "together": "moonshotai/Kimi-K2.5",
                 "anthropic": "claude-sonnet-4-6",
                 "gemini": "gemini-2.5-pro",
+                "openrouter": "stealth/ox-alpha",
                 "wavespeed": "google/gemini-3.7-flash",
                 "deepseek": "deepseek-chat",
                 "ollama": os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", "qwen2.5-coder:14b"),
@@ -2203,6 +2043,7 @@ class AgentBrain:
             "together": "TOGETHER_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
             "gemini": "GOOGLE_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
             "wavespeed": "WAVESPEED_API_KEY",
             "deepseek": "DEEPSEEK_API_KEY",
         }
@@ -2215,6 +2056,7 @@ class AgentBrain:
                         "together": "moonshotai/Kimi-K2.5",
                         "anthropic": "claude-sonnet-4-6",
                         "gemini": "gemini-2.5-pro",
+                        "openrouter": "stealth/ox-alpha",
                         "wavespeed": "google/gemini-3.7-flash",
                         "deepseek": "deepseek-chat",
                     }.get(_p, model)
