@@ -138,7 +138,6 @@ class ScanLoopRunMixin(
         _auto_browser_done = False
         _auto_nuclei_done = False
         _auto_login_done = False
-        _tools_used: set[str] = set()
         # Phase E: skill auto-execution sequence
         _skill_sequence = [
             # Phase 1: Recon
@@ -1776,10 +1775,6 @@ class ScanLoopRunMixin(
                 break
             if _halt_due_no_progress:
                 break
-            # Track which tools Brain actually called this iteration
-            for name, _ in actions:
-                _tools_used.add(name)
-
             # Sample messages[] byte size at the end of each iteration.
             # Phase B fix: populates peak_context_bytes metric that was 0 in Task 11.
             self.state.update_peak_size()

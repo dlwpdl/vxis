@@ -7,7 +7,7 @@ This directory contains executable benchmark manifests for the `crown` engine.
 Start the local target:
 
 ```bash
-docker compose -f infra/benchmarks/docker-compose.smoke.yml up -d
+docker compose -f infra/benchmarks/juice-shop.yml up -d
 ```
 
 Run the same manifest entrypoint used by CI:
