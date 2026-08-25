@@ -8,7 +8,6 @@ from vxis.agent.evidence import (
     check_security_headers,
 )
 from vxis.agent.memory import AgentMemory, ScanMemory, format_memory_context
-from vxis.agent.sandbox import DockerSandbox, SandboxManager, get_sandbox_manager
 
 __all__ = [
     "FileBasedBrain",
@@ -16,9 +15,6 @@ __all__ = [
     "AgentMemory",
     "ScanMemory",
     "format_memory_context",
-    "DockerSandbox",
-    "SandboxManager",
-    "get_sandbox_manager",
     "EvidenceBundle",
     "EvidenceCollector",
     "check_security_headers",

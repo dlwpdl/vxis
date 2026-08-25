@@ -305,8 +305,8 @@ def scan(
         "--tui/--no-tui",
         help="Interactive Textual TUI (navigable iteration tree + drill-in) when "
         "on a real terminal. --no-tui forces the classic Rich-Live dashboard. "
-        "Injection approval defaults to read-only under the TUI; use --no-tui for "
-        "the interactive yes/no gate on a real target.",
+        "Injection approval prompts in both modes: a modal under the TUI, a "
+        "console yes/no gate under --no-tui (safe default if dismissed).",
     ),
     allow_inject: bool = typer.Option(
         False,
@@ -527,6 +527,13 @@ def scan(
         "[green]✓ available[/green]" if pf.docker_available else "[yellow]⚠ not available[/yellow]"
     )
     pf_table.add_row("Docker:", _d_status)
+    if pf.docker_available:
+        _s_status = (
+            "[green]✓ image ready[/green]"
+            if pf.sandbox_image_ready
+            else "[yellow]⚠ image not built[/yellow]"
+        )
+        pf_table.add_row("Sandbox:", _s_status)
     _g_status = "[green]✓ set[/green]" if pf.github_token else "[yellow]⚠ not set[/yellow]"
     pf_table.add_row("GitHub Token:", _g_status)
     if ghost:
@@ -746,14 +753,31 @@ def scan(
                 pass
             return approvals
 
-        # Under the Textual TUI we can't drop to a blocking console prompt mid-app,
-        # so injection approval fails SAFE to read-only and mutating deferred
-        # actions are denied (the TUI shows this; --no-tui gives the yes/no gate).
+        # Under the Textual TUI the scan runs in a worker thread, so we can't drop
+        # to a blocking console prompt. Instead the operator makes the SAME
+        # decision via a modal screen, bridged worker→UI→worker by
+        # ScanTUI.request_modal. If the modal can't be shown (app already gone),
+        # fail SAFE: read-only for the mode gate, deny for each mutating action.
         async def _tui_injection(_summary):
-            return "readonly"
+            from vxis.cli.scan_tui import InjectionModeScreen
+
+            try:
+                mode = await tui_app.request_modal(InjectionModeScreen(_summary))
+            except Exception:
+                mode = "readonly"
+            return mode or "readonly"
 
         async def _tui_deferred(actions):
-            return [False] * len(actions)
+            from vxis.cli.scan_tui import ActionApprovalScreen
+
+            approvals: list[bool] = []
+            for action in actions:
+                try:
+                    ok = await tui_app.request_modal(ActionApprovalScreen(action))
+                except Exception:
+                    ok = False
+                approvals.append(bool(ok))
+            return approvals
 
         injection_cb = _tui_injection if tui_mode else _injection_gate
         approval_cb = _tui_deferred if tui_mode else _deferred_approval
@@ -831,9 +855,9 @@ def scan(
             # Interactive Textual TUI owns the event loop, so the scan runs in a
             # worker thread; events fan out to BOTH the live TUI and the (now
             # passive) ScanLiveDisplay, which still aggregates runtime/findings for
-            # the post-scan summary below. Injection approval defaults to read-only
-            # under the TUI (no interactive prompt mid-app); --no-tui restores the
-            # yes/no gate.
+            # the post-scan summary below. Injection approval prompts the operator
+            # via a modal screen (bridged from the worker thread by
+            # ScanTUI.request_modal); dismissing fails safe to read-only.
             from vxis.cli.scan_tui import ScanTUI
 
             tui_app = ScanTUI(

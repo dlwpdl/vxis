@@ -200,6 +200,7 @@ class TestScanCommand:
             brain_ready=True,
             brain_backend="mock-brain",
             docker_available=True,
+            sandbox_image_ready=True,
             github_token=True,
             proxy_pool_size=0,
             warnings=[],
