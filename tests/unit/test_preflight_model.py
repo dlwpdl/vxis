@@ -48,3 +48,16 @@ def test_valid_callable_model_ready(monkeypatch):
     label, ready = preflight.check_brain(interactive=False)
     assert ready is True
     assert "gpt-5.4" in label
+
+
+def test_openrouter_model_ready(monkeypatch):
+    monkeypatch.setenv("VXIS_DIRECTOR_LLM", "openrouter/stealth/ox-alpha")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-0123456789abcdef")  # gitleaks:allow
+    for key in ("VXIS_DIRECTOR_LLM_PROVIDER", "VXIS_DIRECTOR_LLM_MODEL"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr("vxis.agent.brain.AgentBrain.healthcheck", lambda self: (True, ""))
+
+    label, ready = preflight.check_brain(interactive=False)
+
+    assert ready is True
+    assert label == "api:openrouter/stealth/ox-alpha"

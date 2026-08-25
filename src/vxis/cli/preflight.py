@@ -146,6 +146,7 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
         "together": "TOGETHER_API_KEY",
         "openai": "OPENAI_API_KEY",
         "gemini": "GOOGLE_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
         "wavespeed": "WAVESPEED_API_KEY",
         "deepseek": "DEEPSEEK_API_KEY",
     }
@@ -174,7 +175,18 @@ def check_brain(interactive: bool = False) -> tuple[str, bool]:
                 f"model like gemini-2.5-pro)",
                 False,
             )
-    elif provider in ("openai", "together", "deepseek", "anthropic", "wavespeed") and model:
+    elif (
+        provider
+        in (
+            "openai",
+            "openrouter",
+            "together",
+            "deepseek",
+            "anthropic",
+            "wavespeed",
+        )
+        and model
+    ):
         from vxis.llm.model_registry import get_model_info, list_models
 
         # Fast, no-network reject: an id we don't know about is almost always a
@@ -201,7 +213,7 @@ def _brain_unavailable_message(reason: str = "") -> str:
     base = (
         "No Brain backend available. Install 'claude' CLI, start Ollama/llama.cpp, or set "
         "ANTHROPIC_API_KEY / TOGETHER_API_KEY / OPENAI_API_KEY / GOOGLE_API_KEY / "
-        "WAVESPEED_API_KEY"
+        "OPENROUTER_API_KEY / WAVESPEED_API_KEY"
     )
     detail = (reason or "").strip()
     # Suppress the no-key/no-backend labels ("none", "none (director LLM key

@@ -230,3 +230,13 @@ def test_gemini_3_7_flash_metadata():
         model.max_output_tokens,
     )
     assert get_compression_policy("wavespeed", model.model_id).profile == "cloud-segmented"
+
+
+def test_openrouter_ox_alpha_metadata():
+    from vxis.llm.model_registry import get_compression_policy, get_model_info
+
+    model = get_model_info("stealth/ox-alpha")
+    assert model is not None and model.provider == "openrouter"
+    assert (model.context_window, model.max_output_tokens) == (1_048_576, 131_072)
+    assert model.supports_vision and model.supports_json_mode and model.reasoning_model
+    assert get_compression_policy("openrouter", model.model_id).profile == "cloud-segmented"

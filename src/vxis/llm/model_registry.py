@@ -173,6 +173,18 @@ _MODELS: tuple[ModelInfo, ...] = (
         notes="Stable Flash model; thinking levels: low, medium, high",
     ),
     ModelInfo(
+        model_id="stealth/ox-alpha",
+        provider="openrouter",
+        context_window=1_048_576,
+        max_output_tokens=131_072,
+        supports_vision=True,
+        supports_json_mode=True,
+        reasoning_model=True,
+        family="ox-alpha",
+        notes="Free OpenRouter stealth preview for coding and agentic work",
+        release_date="2026-08-20",
+    ),
+    ModelInfo(
         model_id="gemini-3.1-pro-preview",
         provider="gemini",
         context_window=1_000_000,
@@ -538,7 +550,15 @@ def get_compression_policy(provider: str, model_id: str) -> CompressionPolicy:
             profile="local-medium",
         )
 
-    if provider in {"openai", "anthropic", "gemini", "together", "deepseek", "wavespeed"}:
+    if provider in {
+        "openai",
+        "anthropic",
+        "gemini",
+        "together",
+        "deepseek",
+        "openrouter",
+        "wavespeed",
+    }:
         segment_cap = _context_segment_cap()
         threshold = max(12_000, min(segment_cap, int(context_window * 0.85)))
         return CompressionPolicy(

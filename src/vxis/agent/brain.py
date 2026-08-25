@@ -191,6 +191,8 @@ class AgentBrain:
             base_url = os.environ.get("VXIS_OLLAMA_BASE_URL", "").rstrip("/") or "-"
         elif self._provider == "wavespeed":
             base_url = "https://llm.wavespeed.ai/v1"
+        elif self._provider == "openrouter":
+            base_url = "https://openrouter.ai/api/v1"
 
         try:
             policy = get_compression_policy(self._provider, self._model)
@@ -1429,7 +1431,7 @@ class AgentBrain:
                 base_url=base_url,
                 extra_body=extra_body,
             )
-        elif provider in ("together", "openai", "wavespeed"):
+        elif provider in ("together", "openai", "openrouter", "wavespeed"):
             return self._call_openai_compatible(
                 system_prompt,
                 user_prompt,
@@ -1451,7 +1453,7 @@ class AgentBrain:
         image_path: str = "",
         extra_body: dict[str, Any] | None = None,
     ) -> str | None:
-        """OpenAI 호환 API 호출 (Together, OpenAI, WaveSpeed, Ollama).
+        """OpenAI 호환 API 호출 (Together, OpenAI, OpenRouter, WaveSpeed, Ollama).
 
         Ollama는 키가 없으며 base_url만 사용 (http://localhost:11434).
 
@@ -1467,11 +1469,13 @@ class AgentBrain:
             urls = {
                 "together": "https://api.together.xyz/v1/chat/completions",
                 "openai": "https://api.openai.com/v1/chat/completions",
+                "openrouter": "https://openrouter.ai/api/v1/chat/completions",
                 "wavespeed": "https://llm.wavespeed.ai/v1/chat/completions",
             }
             keys = {
                 "together": os.environ.get("TOGETHER_API_KEY", ""),
                 "openai": os.environ.get("OPENAI_API_KEY", ""),
+                "openrouter": os.environ.get("OPENROUTER_API_KEY", ""),
                 "wavespeed": os.environ.get("WAVESPEED_API_KEY", ""),
             }
             url = urls.get(provider)
@@ -2187,6 +2191,7 @@ class AgentBrain:
                 "together": "moonshotai/Kimi-K2.5",
                 "anthropic": "claude-sonnet-4-6",
                 "gemini": "gemini-2.5-pro",
+                "openrouter": "stealth/ox-alpha",
                 "wavespeed": "google/gemini-3.7-flash",
                 "deepseek": "deepseek-chat",
                 "ollama": os.environ.get("VXIS_OLLAMA_UNCENSORED_MODEL", "qwen2.5-coder:14b"),
@@ -2203,6 +2208,7 @@ class AgentBrain:
             "together": "TOGETHER_API_KEY",
             "anthropic": "ANTHROPIC_API_KEY",
             "gemini": "GOOGLE_API_KEY",
+            "openrouter": "OPENROUTER_API_KEY",
             "wavespeed": "WAVESPEED_API_KEY",
             "deepseek": "DEEPSEEK_API_KEY",
         }
@@ -2215,6 +2221,7 @@ class AgentBrain:
                         "together": "moonshotai/Kimi-K2.5",
                         "anthropic": "claude-sonnet-4-6",
                         "gemini": "gemini-2.5-pro",
+                        "openrouter": "stealth/ox-alpha",
                         "wavespeed": "google/gemini-3.7-flash",
                         "deepseek": "deepseek-chat",
                     }.get(_p, model)

@@ -67,6 +67,12 @@ _PROVIDERS: dict[str, dict[str, str]] = {
         "env_key": "OPENAI_API_KEY",
         "format": "openai",
     },
+    "openrouter": {
+        "base_url": "https://openrouter.ai/api/v1",
+        "default_model": "stealth/ox-alpha",
+        "env_key": "OPENROUTER_API_KEY",
+        "format": "openai",
+    },
     "wavespeed": {
         "base_url": "https://llm.wavespeed.ai/v1",
         "default_model": "google/gemini-3.7-flash",
@@ -161,6 +167,7 @@ def _get_any_available_key() -> str:
         "GOOGLE_API_KEY",
         "GEMINI_API_KEY",
         "DEEPSEEK_API_KEY",
+        "OPENROUTER_API_KEY",
         "WAVESPEED_API_KEY",
     ):
         key = os.environ.get(env_var, "")
@@ -317,16 +324,17 @@ def _call_openai_compat(
     max_tokens: int,
 ) -> LLMResponse | None:
     url = f"{base_url}/chat/completions"
-    payload = json.dumps(
-        {
-            "model": model,
-            "max_tokens": max_tokens,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        }
-    ).encode("utf-8")
+    payload_obj = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+    if provider == "openrouter":
+        payload_obj["reasoning"] = {"effort": "high"}
+    payload = json.dumps(payload_obj).encode("utf-8")
 
     req = urllib.request.Request(
         url,
