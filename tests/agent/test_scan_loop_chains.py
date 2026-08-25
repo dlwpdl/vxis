@@ -452,3 +452,63 @@ async def test_suggest_chain_candidates_collapses_same_target_family():
         and c["crown_jewel"] == "sensitive record exposure"
     ]
     assert len(family) == 1
+
+
+
+@pytest.mark.asyncio
+async def test_display_chain_cache_matches_direct_and_invalidates():
+    """The control-plane snapshot's cached chain candidates must equal a fresh
+    _suggest_chain_candidates call for the same state, hit the cache on repeat,
+    and recompute once a new finding changes the signature. Guards that the
+    display cache can never diverge from the decision-path direct computation."""
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
+
+    await reg.dispatch("report_finding", {
+        "title": "debug leak",
+        "severity": "medium",
+        "finding_type": "information_disclosure",
+        "affected_component": "/debug",
+        "description": "debug endpoint exposed",
+        "evidence": "GET /debug HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlogin_path=/login token_hint=abc",
+    })
+    await reg.dispatch("report_finding", {
+        "title": "weak auth",
+        "severity": "medium",
+        "finding_type": "weak_auth",
+        "affected_component": "/login",
+        "description": "weak authentication evidence",
+        "evidence": (
+            "POST /login HTTP/1.1\n\nusername=bad&password=bad\n\n"
+            "HTTP/1.1 401 Unauthorized\n\n"
+            "POST /login HTTP/1.1\n\nusername=admin&password=admin\n\n"
+            "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
+        ),
+    })
+    assert len(_get_findings()) == 2  # both stored -> a real state to chain over
+
+    # cached display result equals a fresh direct computation for the same state
+    cached = loop._chain_candidates_for_display(limit=3)
+    assert cached == loop._suggest_chain_candidates(limit=3)
+    sig_before = loop._cp_chain_sig
+    # a repeat call is a cache hit — same stored object, signature unchanged
+    assert loop._chain_candidates_for_display(limit=3) is cached
+    assert loop._cp_chain_sig == sig_before
+
+    # A state change (a new finding entering the store — the input the signature
+    # keys on) must invalidate the display cache. Append directly to bypass the
+    # report_finding acceptance gate, which is irrelevant to the cache logic.
+    from vxis.agent.tools.finding_tools import _store
+
+    _store().findings.append({
+        "id": "F-EXTRA",
+        "severity": "critical",
+        "finding_type": "ssrf",
+        "affected_component": "/fetch",
+        "title": "ssrf sink",
+    })
+    assert len(_get_findings()) == 3
+    recached = loop._chain_candidates_for_display(limit=3)
+    assert loop._cp_chain_sig != sig_before  # signature invalidated by the new finding
+    assert recached == loop._suggest_chain_candidates(limit=3)
