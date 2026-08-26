@@ -1192,9 +1192,17 @@ class ScanLoopDecisionPolicyMixin:
                     "Either rescope the task, route around the blocker, or close the worker explicitly before finish_scan."
                 )
         if focus and focus.status not in {"proven", "exhausted", "dead", "blocked"}:
+            next_step = str(focus.next_step or "").strip()
+            if next_step:
+                return (
+                    f"Focus on branch {focus.id} [{focus.role}/{focus.phase}] only. "
+                    f"Execute this next step: {next_step} "
+                    "Do not switch families or call finish_scan until this branch is proven, exhausted, or blocked."
+                )
             return (
                 f"Focus on branch {focus.id} [{focus.role}/{focus.phase}] and advance it with a concrete "
-                f"exploit, data-access, or chain-building step before trying to finish again."
+                f"exploit, data-access, or chain-building step before trying to finish again. "
+                "Do not switch families or call finish_scan until this branch is proven, exhausted, or blocked."
             )
         findings = list(self.state.findings or [])
         auth_titles = " ".join(str(f.get("title", "")).lower() for f in findings)
@@ -2336,10 +2344,28 @@ class ScanLoopDecisionPolicyMixin:
         return out
 
     def _desired_chain_count(self, findings: list[dict[str, Any]]) -> int:
+        try:
+            from vxis.agent.tools.finding_tools import _canonical_finding_type
+        except Exception:
+
+            def _canonical_finding_type(value: str) -> str:
+                return str(value or "").lower().strip()
+
         chainable = self._chainable_findings(findings)
         if len(chainable) < 2:
             return 0
         if len(chainable) < 4:
+            types = {
+                _canonical_finding_type(str(finding.get("finding_type", "")))
+                for finding in chainable
+            }
+            if len(chainable) >= 3 and types & {"weak_auth", "sql_injection"} and types & {
+                "broken_access_control",
+                "idor",
+                "information_disclosure",
+                "business_logic",
+            }:
+                return 2
             return 1
         return max(2, len(chainable) // 3)
 
@@ -2347,6 +2373,19 @@ class ScanLoopDecisionPolicyMixin:
         active = self.state.active_branches()
         if not active:
             return None
+        active.sort(
+            key=lambda branch: (
+                not self._branch_has_open_crown_goal(branch),
+                not bool(branch.source_finding_id),
+                str(branch.role or "").lower() != "post_exploit_worker",
+                str(branch.phase or "").lower()
+                not in {"session_reuse", "privilege_probe", "data_access", "chain_closure"},
+                -branch.priority,
+                branch.attempts,
+                branch.last_iter,
+                branch.id,
+            )
+        )
         return active[0]
 
     def _llm_discipline_profile(self) -> str:

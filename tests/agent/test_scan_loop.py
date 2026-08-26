@@ -1816,6 +1816,54 @@ async def test_suggested_replan_prioritizes_retryable_family_candidate():
     assert forced[1]["params"]["round"] == 2
 
 
+def test_judge_replan_hint_anchors_to_exact_focus_branch_step():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=60)
+    branch = loop.state.ensure_branch(
+        "web:auth-bypass:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        priority=95,
+        role="post_exploit_worker",
+        phase="data_access",
+        objective="Use the obtained session to enumerate authenticated data-bearing routes.",
+        next_step="Probe /api/profile and admin routes with the authenticated session.",
+        crown_jewel="authenticated data exfiltration",
+    )
+    loop._focus_branch = lambda: branch  # type: ignore[method-assign]
+
+    hint = loop._judge_replan_hint()
+
+    assert "web:auth-bypass:post-auth-enum" in hint
+    assert "Probe /api/profile and admin routes" in hint
+    assert "finish_scan" in hint
+    assert "Do not switch" in hint
+
+
+def test_focus_branch_prefers_live_crown_post_exploit_branch_over_generic_root():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=60)
+    loop.state.ensure_branch(
+        "web:auth-bypass",
+        "WEB-AUTH-001",
+        "Authentication bypass",
+        priority=100,
+        role="exploit_worker",
+        phase="exploit_validation",
+    )
+    post_auth = loop.state.ensure_branch(
+        "web:auth-bypass:post-auth-enum",
+        "WEB-AUTH-PIVOT",
+        "Expand authenticated route coverage",
+        priority=95,
+        role="post_exploit_worker",
+        phase="data_access",
+        objective="Use the obtained session to enumerate authenticated data-bearing routes.",
+        next_step="Probe /api/profile and admin routes with the authenticated session.",
+        crown_jewel="authenticated data exfiltration",
+    )
+
+    assert loop._focus_branch() is post_auth
+
+
 def test_spawned_child_branch_promotes_to_post_exploit_role():
     reg = ToolRegistry()
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
@@ -2209,6 +2257,42 @@ def test_retrieval_observation_sanitizes_binary_samples():
     sample = loop.state.retrieval_observations_as_dicts()[0]["sample"]
     assert "\x00" not in sample
     assert "\\x00ABC\\x01\\x02" in sample
+
+
+def test_desired_chain_count_requires_two_chains_for_three_foothold_plus_impact_findings():
+    loop = ScanAgentLoop(target="http://localhost", registry=ToolRegistry(), max_iters=8)
+
+    desired = loop._desired_chain_count(
+        [
+            {"severity": "high", "finding_type": "sql_injection", "title": "SQLi foothold"},
+            {
+                "severity": "high",
+                "finding_type": "broken_access_control",
+                "title": "Admin data exposed",
+            },
+            {
+                "severity": "medium",
+                "finding_type": "information_disclosure",
+                "title": "Debug endpoint leaked tokens",
+            },
+        ]
+    )
+
+    assert desired == 2
+
+
+def test_desired_chain_count_stays_one_for_three_same_family_findings():
+    loop = ScanAgentLoop(target="http://localhost", registry=ToolRegistry(), max_iters=8)
+
+    desired = loop._desired_chain_count(
+        [
+            {"severity": "medium", "finding_type": "information_disclosure"},
+            {"severity": "high", "finding_type": "information_disclosure"},
+            {"severity": "medium", "finding_type": "information_disclosure"},
+        ]
+    )
+
+    assert desired == 1
 
 
 @pytest.mark.asyncio
@@ -2975,6 +3059,12 @@ async def test_repeated_finish_unattempted_candidates_suggests_brain_replan():
         and item["title"] == "judge_replan_ignored"
         for item in result["review_history"]
     )
+    halt_items = [
+        item
+        for item in result["review_history"]
+        if item["stage"] == "judge" and item["title"] == "judge_replan_ignored"
+    ]
+    assert halt_items
     assert any(
         isinstance(m.get("content"), dict)
         and ((m["content"].get("result") or {}).get("data") or {}).get("judge_replan_halt")
@@ -3056,6 +3146,15 @@ async def test_repeated_finish_unfinished_branches_suggests_post_auth_replan():
         and item["title"] == "judge_replan_ignored"
         for item in result["review_history"]
     )
+    halt_items = [
+        item
+        for item in result["review_history"]
+        if item["stage"] == "judge" and item["title"] == "judge_replan_ignored"
+    ]
+    assert halt_items
+    action_hint = str(halt_items[-1].get("action_hint", ""))
+    assert "Focus on branch " in action_hint
+    assert "Execute this next step:" in action_hint
 
 
 @pytest.mark.asyncio
