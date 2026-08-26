@@ -1018,6 +1018,46 @@ def test_dag_finish_blocking_branches_drops_redundant_root_family_branch_when_ch
     assert all(item.id != root.id for item in blockers)
 
 
+def test_live_agent_graph_child_owns_focus_over_parent_crown_followup():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    parent = loop.state.ensure_branch(
+        "agent:agent-0001:crown-chain",
+        "WEB-CROWN-PIVOT",
+        "Crown follow-up",
+        priority=96,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        owner="root",
+        parent_branch_id="agent:agent-0001",
+        source_candidate_id="agent:agent-0001",
+        objective="Turn foothold into crown impact.",
+        next_step="Create a post_exploit_worker child and validate reuse.",
+        crown_jewel="authenticated data access",
+    )
+    child = loop.state.ensure_branch(
+        "agent:agent-0002",
+        "agent_graph:post_exploit_worker",
+        "post_exploit_worker: delegated crown proof",
+        priority=97,
+        role="post_exploit_worker",
+        phase="delegated_task",
+        owner="agent_graph",
+        parent_branch_id=parent.id,
+        source_candidate_id=parent.source_candidate_id,
+        objective="Validate the delegated crown proof.",
+        next_step="Run the delegated child for a valid EvidenceArtifact.",
+        crown_jewel="authenticated data access",
+    )
+    parent.status = "active"
+    child.status = "active"
+
+    blockers = loop._dag_finish_blocking_branches()
+
+    assert loop._focus_branch() is child
+    assert any(item.id == child.id for item in blockers)
+    assert all(item.id != parent.id for item in blockers)
+
+
 def test_dag_finish_blocking_branches_drops_redundant_memory_branch_when_live_family_branch_exists():
     reg = ToolRegistry()
 

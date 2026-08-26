@@ -53,6 +53,8 @@ class ScanLoopDecisionPolicyMixin:
         blockers: list[BranchState] = []
         blocker_ids = set(dag_finish_blocker_node_ids(self.state, prior_threshold=0.65))
         for branch in self.state.active_branches():
+            if self._should_yield_to_live_agent_graph_child(branch):
+                continue
             if self._should_exhaust_stale_root_branch(branch):
                 branch.status = "exhausted"
                 branch.last_report = (
@@ -104,6 +106,19 @@ class ScanLoopDecisionPolicyMixin:
             if child is None:
                 continue
             if child.status not in _TERMINAL_BRANCH_STATUSES:
+                return True
+        return False
+
+    def _should_yield_to_live_agent_graph_child(self, branch: BranchState) -> bool:
+        if branch.owner == "agent_graph":
+            return False
+        if str(branch.role or "").lower() != "post_exploit_worker":
+            return False
+        for child_id in branch.child_ids:
+            child = self.state.branches.get(child_id)
+            if child is None or child.status in _TERMINAL_BRANCH_STATUSES:
+                continue
+            if child.owner == "agent_graph":
                 return True
         return False
 
@@ -2372,7 +2387,11 @@ class ScanLoopDecisionPolicyMixin:
         return max(2, len(chainable) // 3)
 
     def _focus_branch(self) -> BranchState | None:
-        active = self.state.active_branches()
+        active = [
+            branch
+            for branch in self.state.active_branches()
+            if not self._should_yield_to_live_agent_graph_child(branch)
+        ] or self.state.active_branches()
         if not active:
             return None
         active.sort(
