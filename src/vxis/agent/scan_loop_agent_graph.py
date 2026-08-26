@@ -329,6 +329,14 @@ class ScanLoopAgentGraphMixin:
                 crown_parent_id = f"{parent_branch_id}:crown-chain"
                 if crown_parent_id in self.state.branches:
                     parent_branch_id = crown_parent_id
+            parent_branch = self.state.branches.get(parent_branch_id) if parent_branch_id else None
+            source_candidate_id = ""
+            source_finding_id = ""
+            if parent_branch is not None:
+                source_candidate_id = str(
+                    parent_branch.source_candidate_id or parent_branch.id or ""
+                ).strip()
+                source_finding_id = str(parent_branch.source_finding_id or "").strip()
             skills = (
                 [
                     str(skill).strip()
@@ -415,6 +423,8 @@ class ScanLoopAgentGraphMixin:
                 phase="delegated_task",
                 owner="agent_graph",
                 parent_branch_id=parent_branch_id,
+                source_candidate_id=source_candidate_id,
+                source_finding_id=source_finding_id,
                 objective=str(envelope.get("objective") or task),
                 next_step=next_step,
                 blocker=(

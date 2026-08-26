@@ -1038,6 +1038,7 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
     )
 
     followup = loop.state.branches["agent:agent-0001:crown-chain"]
+    followup.source_finding_id = "VXIS-0007"
     forced = loop._forced_branch_action(followup)
     assert forced is not None
     assert forced[0] == "agent_graph"
@@ -1060,6 +1061,8 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
     child_branch = loop.state.branches[child_branch_id]
     assert child_branch.role == "post_exploit_worker"
     assert child_branch.parent_branch_id == followup.id
+    assert child_branch.source_candidate_id == followup.source_candidate_id
+    assert child_branch.source_finding_id == "VXIS-0007"
     assert child_branch_id in followup.child_ids
     assert "post_auth_enum" in child_branch.watch_terms
     assert loop._forced_branch_action(child_branch) == (
