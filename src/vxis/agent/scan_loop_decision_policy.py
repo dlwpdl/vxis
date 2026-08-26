@@ -113,7 +113,10 @@ class ScanLoopDecisionPolicyMixin:
     @staticmethod
     def _campaign_id_for_branch(branch: BranchState) -> str:
         return str(
-            branch.source_finding_id or branch.source_candidate_id or branch.parent_branch_id or branch.id
+            branch.source_finding_id
+            or branch.source_candidate_id
+            or branch.parent_branch_id
+            or branch.id
         )
 
     def _should_yield_to_live_agent_graph_child(self, branch: BranchState) -> bool:
@@ -2379,12 +2382,17 @@ class ScanLoopDecisionPolicyMixin:
                 _canonical_finding_type(str(finding.get("finding_type", "")))
                 for finding in chainable
             }
-            if len(chainable) >= 3 and types & {"weak_auth", "sql_injection"} and types & {
-                "broken_access_control",
-                "idor",
-                "information_disclosure",
-                "business_logic",
-            }:
+            if (
+                len(chainable) >= 3
+                and types & {"weak_auth", "sql_injection"}
+                and types
+                & {
+                    "broken_access_control",
+                    "idor",
+                    "information_disclosure",
+                    "business_logic",
+                }
+            ):
                 return 2
             return 1
         return max(2, len(chainable) // 3)
