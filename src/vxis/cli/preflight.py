@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -114,20 +113,8 @@ def _gemini_model_available(model: str, api_key: str, *, _opener=None) -> bool:
         return True  # transient/network — don't block a scan on the check itself
 
 
-def check_brain(interactive: bool = False) -> tuple[str, bool]:
-    """Brain 백엔드 상태 체크.
-
-    Architecture:
-        interactive=True   → disabled legacy bridge (kept for library compatibility)
-        interactive=False  → AgentBrain (LLM API only — no claude -p)
-
-    For Claude Code, register the MCP server instead of using the legacy bridge.
-    """
-    if interactive:
-        if shutil.which("claude") is not None:
-            return "claude-code", True
-        return "claude-code (binary missing)", False
-
+def check_brain() -> tuple[str, bool]:
+    """Brain 백엔드 상태 체크."""
     # AgentBrain path — role-aware director backend required. Legacy
     # UPSTREAM_* still works, but if a frontier key is available the hybrid
     # resolver promotes it to director and keeps the local model as worker.
@@ -272,7 +259,6 @@ def check_proxy_ready(proxy: str, timeout: float = 5.0) -> bool:
 def run_preflight(
     target: str,
     ghost: bool = False,
-    interactive: bool = False,
     kind: str = "web",
 ) -> PreflightResult:
     """전체 pre-flight 체크 실행.
@@ -306,7 +292,7 @@ def run_preflight(
                 result.errors.append(f"Target unreachable: {target}")
 
     # 2. Brain 백엔드
-    result.brain_backend, result.brain_ready = check_brain(interactive=interactive)
+    result.brain_backend, result.brain_ready = check_brain()
     if not result.brain_ready:
         result.errors.append(_brain_unavailable_message(result.brain_backend))
 

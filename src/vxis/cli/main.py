@@ -13,9 +13,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import sys
+from functools import partial
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import typer
 from rich.console import Console
@@ -140,33 +140,32 @@ def _textual_available() -> bool:
     return importlib.util.find_spec("textual") is not None
 
 
-def _should_use_tui(tui_flag: bool, interactive: bool) -> bool:
+def _should_use_tui(tui_flag: bool) -> bool:
     """Decide whether to launch the interactive Textual scan TUI.
 
     Default-on (`--tui`, the user's choice), but only when it can actually work:
-    a real TTY, textual installed, and NOT the Claude-Code `--interactive` brain
-    (which already owns stdin/stdout as a JSON protocol). Anything else
-    (`--no-tui`, headless/CI, piped output) falls back to the Rich-Live display
-    so there is zero regression off-terminal.
+    a real TTY and textual installed. Anything else (`--no-tui`, headless/CI,
+    piped output) falls back to the Rich-Live display so there is zero
+    regression off-terminal.
     """
     import sys
 
-    if not tui_flag or interactive:
+    if not tui_flag:
         return False
     if not sys.stdout.isatty():
         return False
     return _textual_available()
 
 
-def _tui_skip_reason(tui_flag: bool, interactive: bool) -> str | None:
+def _tui_skip_reason(tui_flag: bool) -> str | None:
     """Human reason the Textual TUI will NOT launch — surfaced to the operator so
     a silent fallback to the Rich-Live display is never mysterious. Returns None
     when the TUI will launch, or when the skip is the user's explicit choice
-    (`--no-tui` / `--interactive`), which need no warning.
+    (`--no-tui`), which needs no warning.
     """
     import sys
 
-    if not tui_flag or interactive:
+    if not tui_flag:
         return None
     if not _textual_available():
         return (
@@ -200,6 +199,146 @@ def _require_optional_dependency(module_name: str, extra: str, command: str) -> 
         f"or [cyan]pip install 'vxis[{extra}]'[/cyan]"
     )
     raise typer.Exit(code=2)
+
+
+async def _console_injection_gate(display: Any, summary: dict[str, Any]) -> str:
+    """Pause the live display and ask the operator for the injection mode."""
+    try:
+        if display._live is not None:
+            display._live.stop()
+    except Exception:
+        pass
+
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold red]⚠ INJECTION APPROVAL REQUIRED[/bold red]\n\n"
+            f"Target: [cyan]{summary.get('target')}[/cyan]\n"
+            f"Title:  {summary.get('title') or '(none)'}\n"
+            f"Frameworks: {', '.join(summary.get('frameworks') or []) or '(none)'}\n"
+            f"Planned checks: {summary.get('phase_count') or 'dynamic'} "
+            f"(SQLi/XSS/RCE/SSRF/Path/Cmd 등)\n\n"
+            f"[bold]Choose mode:[/bold]\n"
+            f"  [green]R[/green] = [green]read-only[/green] (GET/HEAD probes only; POST/PUT/DELETE and exploit primitives are BLOCKED)\n"
+            f"  [yellow]F[/yellow] = [yellow]full[/yellow] (all HTTP methods auto-execute — may MUTATE DATA)\n"
+            f"  [red]N[/red] = [red]deny[/red] (skip injection entirely, recon-only)\n\n"
+            f"[dim]Default is R (safest). F on customer products can DELETE/MODIFY real data.[/dim]",
+            title="VXIS Safety Gate",
+            border_style="red",
+        )
+    )
+    try:
+        answer = input("Mode? [R]eadonly / [F]ull / [N]o (default R): ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+
+    if answer in ("f", "full", "yes", "y"):
+        mode = "full"
+        console.print("[yellow]⚠ FULL mode — all methods will auto-execute[/yellow]")
+    elif answer in ("n", "no", "deny"):
+        mode = "deny"
+        console.print("[red]❌ DENIED — recon-only[/red]")
+    else:
+        mode = "readonly"
+        console.print(
+            "[green]✅ READ-ONLY mode — GET/HEAD only; mutating methods + exploit primitives blocked[/green]"
+        )
+    console.print()
+
+    try:
+        display.__enter__()
+    except Exception:
+        pass
+    return mode
+
+
+async def _console_deferred_approval(display: Any, actions: list) -> list[bool]:
+    """Pause the live display and ask for per-action approval."""
+    try:
+        if display._live is not None:
+            display._live.stop()
+    except Exception:
+        pass
+
+    console.print()
+    console.print(
+        Panel.fit(
+            f"[bold yellow]⚠ DATA-MUTATING ACTIONS — PER-ACTION APPROVAL[/bold yellow]\n\n"
+            f"Brain queued [cyan]{len(actions)}[/cyan] requests that would "
+            f"mutate data (POST/PUT/PATCH/DELETE).\n"
+            f"You will be asked to approve each one individually.\n\n"
+            f"[dim]Press Enter (or n) to DENY — safe default.[/dim]",
+            title="Deferred Action Approval",
+            border_style="yellow",
+        )
+    )
+
+    approvals: list[bool] = []
+    for action in actions:
+        risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(action.risk, "⚪")
+        console.print(
+            f"\n  {risk_icon} [bold]#{action.id}[/bold] "
+            f"[{action.risk.upper()}] "
+            f"[cyan]{action.method}[/cyan] "
+            f"{action.url}"
+        )
+        console.print(f"     [dim]{action.description_en[:140]}[/dim]")
+        if action.data:
+            import json as _j
+
+            data_preview = _j.dumps(action.data, ensure_ascii=False)[:200]
+            console.print(f"     [dim]data:[/dim] {data_preview}")
+
+        try:
+            answer = input("     Approve? (y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        ok = answer in ("y", "yes")
+        approvals.append(ok)
+        console.print(f"     [{'green' if ok else 'red'}]{'✅ APPROVED' if ok else '❌ DENIED'}[/]")
+
+    approved = sum(approvals)
+    console.print(
+        f"\n[bold]Summary:[/bold] {approved}/{len(actions)} approved, "
+        f"{len(actions) - approved} denied\n"
+    )
+
+    try:
+        display.__enter__()
+    except Exception:
+        pass
+    return approvals
+
+
+async def _tui_injection_gate(tui_app: Any, summary: dict[str, Any]) -> str:
+    from vxis.cli.scan_tui import InjectionModeScreen
+
+    try:
+        mode = await tui_app.request_modal(InjectionModeScreen(summary))
+    except Exception:
+        mode = "readonly"
+    return mode or "readonly"
+
+
+async def _tui_deferred_approval(tui_app: Any, actions: list) -> list[bool]:
+    from vxis.cli.scan_tui import ActionApprovalScreen
+
+    approvals: list[bool] = []
+    for action in actions:
+        try:
+            ok = await tui_app.request_modal(ActionApprovalScreen(action))
+        except Exception:
+            ok = False
+        approvals.append(bool(ok))
+    return approvals
+
+
+def _build_scan_approval_callbacks(
+    *, display: Any, tui_mode: bool, tui_app: Any = None
+) -> tuple[Any, Any]:
+    if tui_mode:
+        return partial(_tui_injection_gate, tui_app), partial(_tui_deferred_approval, tui_app)
+    return partial(_console_injection_gate, display), partial(_console_deferred_approval, display)
 
 
 @app.callback()
@@ -370,7 +509,7 @@ def scan(
     """
     if interactive:
         err_console.print(
-            "[bold red]--interactive is disabled:[/bold red] the legacy InteractiveBrain "
+            "[bold red]--interactive is disabled:[/bold red] the legacy stdin/stdout bridge "
             "does not implement the live scan-loop contract. Configure AgentBrain or use "
             "the VXIS MCP server instead."
         )
@@ -453,42 +592,28 @@ def scan(
         os.environ["VXIS_CLIENT_ID"] = client
     else:
         os.environ.pop("VXIS_CLIENT_ID", None)
-    # Logging policy: TUI(non-interactive)는 로그를 파일로 보냄 → Live 간섭 0
-    # interactive 모드는 stdin/stdout이 JSON 프로토콜이라 stderr로 보내야 함
+    # Route ALL logs to file so Rich Live / TUI rendering is never interrupted.
     log_level = logging.DEBUG if verbose else logging.INFO
-    log_path: Optional[Path] = None
+    log_dir = Path("logs")
+    log_path = _create_secure_scan_log(log_dir)
 
-    if interactive:
-        logging.basicConfig(
-            stream=sys.stderr,
-            level=log_level,
-            format="%(asctime)s [%(name)s] %(message)s",
+    root_logger = logging.getLogger()
+    for h in list(root_logger.handlers):
+        root_logger.removeHandler(h)
+
+    file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
             datefmt="%H:%M:%S",
         )
-    else:
-        # Route ALL logs to file so Rich Live TUI is never interrupted
-        log_dir = Path("logs")
-        log_path = _create_secure_scan_log(log_dir)
-
-        # Reset any previous handlers (re-runs in same session)
-        root_logger = logging.getLogger()
-        for h in list(root_logger.handlers):
-            root_logger.removeHandler(h)
-
-        file_handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
-        file_handler.setLevel(log_level)
-        file_handler.setFormatter(
-            logging.Formatter(
-                "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-                datefmt="%H:%M:%S",
-            )
-        )
-        root_logger.addHandler(file_handler)
-        root_logger.setLevel(log_level)
-        # Silence noisy library loggers from polluting the file too much
-        logging.getLogger("httpx").setLevel(logging.WARNING)
-        logging.getLogger("httpcore").setLevel(logging.WARNING)
-        logging.getLogger("urllib3").setLevel(logging.WARNING)
+    )
+    root_logger.addHandler(file_handler)
+    root_logger.setLevel(log_level)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
 
     _print_banner()
 
@@ -508,7 +633,7 @@ def scan(
 
     # ── Pre-flight checks ──────────────────────────────────
     console.print("[dim]Running pre-flight checks...[/dim]")
-    pf = run_preflight(target, ghost=ghost, interactive=interactive, kind=_kind.value)
+    pf = run_preflight(target, ghost=ghost, kind=_kind.value)
 
     pf_table = Table.grid(padding=(0, 2))
     pf_table.add_column(style="bold", no_wrap=True)
@@ -563,7 +688,7 @@ def scan(
         raise typer.Exit(code=2)
 
     # ── Live display 준비 ───────────────────────────────────
-    brain_label = "Claude Code" if interactive else pf.brain_backend
+    brain_label = pf.brain_backend
     display_ghost = ghost
     if p1_engagement is not None:
         try:
@@ -592,19 +717,14 @@ def scan(
     display.init_phases(_runtime_display_stages())
 
     ctx = None
+    tui_app = None
 
     async def _run(event_sink, tui_mode, do_refresh):
         nonlocal ctx
         from vxis.pipeline.scan_pipeline_v2 import ScanPipeline
+        from vxis.agent.brain import AgentBrain
 
-        if interactive:
-            from vxis.agent.brain_interactive import InteractiveBrain
-
-            brain = InteractiveBrain()
-        else:
-            from vxis.agent.brain import AgentBrain
-
-            brain = AgentBrain()
+        brain = AgentBrain()
 
         # Config + 환경변수로 profile/ghost 전파
         import os as _os
@@ -632,155 +752,12 @@ def scan(
                 display.refresh()
                 await _aio.sleep(0.25)
 
-        # ── Injection approval gate: 알려진 벤치마크 자동 통과, 그 외 사용자 승인 필수 ──
-        # allow_inject = explicit CLI override (user accepted responsibility)
-        # _is_local_benchmark = loopback host + known benchmark port, or ghost://
         _is_benchmark = allow_inject or _is_local_benchmark(target)
-
-        async def _injection_gate(summary: dict) -> str:
-            """Live TUI를 잠시 멈추고 3-way 선택: full / readonly / deny."""
-            # Live 정지
-            try:
-                if display._live is not None:
-                    display._live.stop()
-            except Exception:
-                pass
-
-            console.print()
-            console.print(
-                Panel.fit(
-                    f"[bold red]⚠ INJECTION APPROVAL REQUIRED[/bold red]\n\n"
-                    f"Target: [cyan]{summary.get('target')}[/cyan]\n"
-                    f"Title:  {summary.get('title') or '(none)'}\n"
-                    f"Frameworks: {', '.join(summary.get('frameworks') or []) or '(none)'}\n"
-                    f"Planned checks: {summary.get('phase_count') or 'dynamic'} "
-                    f"(SQLi/XSS/RCE/SSRF/Path/Cmd 등)\n\n"
-                    f"[bold]Choose mode:[/bold]\n"
-                    f"  [green]R[/green] = [green]read-only[/green] (GET/HEAD probes only; POST/PUT/DELETE and exploit primitives are BLOCKED)\n"
-                    f"  [yellow]F[/yellow] = [yellow]full[/yellow] (all HTTP methods auto-execute — may MUTATE DATA)\n"
-                    f"  [red]N[/red] = [red]deny[/red] (skip injection entirely, recon-only)\n\n"
-                    f"[dim]Default is R (safest). F on customer products can DELETE/MODIFY real data.[/dim]",
-                    title="VXIS Safety Gate",
-                    border_style="red",
-                )
-            )
-            try:
-                answer = input("Mode? [R]eadonly / [F]ull / [N]o (default R): ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                answer = ""
-
-            if answer in ("f", "full", "yes", "y"):
-                mode = "full"
-                console.print("[yellow]⚠ FULL mode — all methods will auto-execute[/yellow]")
-            elif answer in ("n", "no", "deny"):
-                mode = "deny"
-                console.print("[red]❌ DENIED — recon-only[/red]")
-            else:
-                mode = "readonly"
-                console.print(
-                    "[green]✅ READ-ONLY mode — GET/HEAD only; mutating methods + exploit primitives blocked[/green]"
-                )
-            console.print()
-
-            # Live 재시작
-            try:
-                display.__enter__()
-            except Exception:
-                pass
-            return mode
-
-        async def _deferred_approval(actions: list) -> list[bool]:
-            """Per-action y/N prompt for data-mutating operations.
-
-            Pauses the Live TUI, shows each queued action with risk level,
-            method, URL and payload, and returns a list of booleans aligned
-            with the input list.
-            """
-            try:
-                if display._live is not None:
-                    display._live.stop()
-            except Exception:
-                pass
-
-            console.print()
-            console.print(
-                Panel.fit(
-                    f"[bold yellow]⚠ DATA-MUTATING ACTIONS — PER-ACTION APPROVAL[/bold yellow]\n\n"
-                    f"Brain queued [cyan]{len(actions)}[/cyan] requests that would "
-                    f"mutate data (POST/PUT/PATCH/DELETE).\n"
-                    f"You will be asked to approve each one individually.\n\n"
-                    f"[dim]Press Enter (or n) to DENY — safe default.[/dim]",
-                    title="Deferred Action Approval",
-                    border_style="yellow",
-                )
-            )
-
-            approvals: list[bool] = []
-            for action in actions:
-                risk_icon = {"low": "🟢", "medium": "🟡", "high": "🔴"}.get(action.risk, "⚪")
-                console.print(
-                    f"\n  {risk_icon} [bold]#{action.id}[/bold] "
-                    f"[{action.risk.upper()}] "
-                    f"[cyan]{action.method}[/cyan] "
-                    f"{action.url}"
-                )
-                console.print(f"     [dim]{action.description_en[:140]}[/dim]")
-                if action.data:
-                    import json as _j
-
-                    data_preview = _j.dumps(action.data, ensure_ascii=False)[:200]
-                    console.print(f"     [dim]data:[/dim] {data_preview}")
-
-                try:
-                    answer = input("     Approve? (y/N): ").strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    answer = ""
-                ok = answer in ("y", "yes")
-                approvals.append(ok)
-                console.print(
-                    f"     [{'green' if ok else 'red'}]{'✅ APPROVED' if ok else '❌ DENIED'}[/]"
-                )
-
-            _apv = sum(approvals)
-            console.print(
-                f"\n[bold]Summary:[/bold] {_apv}/{len(actions)} approved, "
-                f"{len(actions) - _apv} denied\n"
-            )
-
-            try:
-                display.__enter__()
-            except Exception:
-                pass
-            return approvals
-
-        # Under the Textual TUI the scan runs in a worker thread, so we can't drop
-        # to a blocking console prompt. Instead the operator makes the SAME
-        # decision via a modal screen, bridged worker→UI→worker by
-        # ScanTUI.request_modal. If the modal can't be shown (app already gone),
-        # fail SAFE: read-only for the mode gate, deny for each mutating action.
-        async def _tui_injection(_summary):
-            from vxis.cli.scan_tui import InjectionModeScreen
-
-            try:
-                mode = await tui_app.request_modal(InjectionModeScreen(_summary))
-            except Exception:
-                mode = "readonly"
-            return mode or "readonly"
-
-        async def _tui_deferred(actions):
-            from vxis.cli.scan_tui import ActionApprovalScreen
-
-            approvals: list[bool] = []
-            for action in actions:
-                try:
-                    ok = await tui_app.request_modal(ActionApprovalScreen(action))
-                except Exception:
-                    ok = False
-                approvals.append(bool(ok))
-            return approvals
-
-        injection_cb = _tui_injection if tui_mode else _injection_gate
-        approval_cb = _tui_deferred if tui_mode else _deferred_approval
+        injection_cb, approval_cb = _build_scan_approval_callbacks(
+            display=display,
+            tui_mode=tui_mode,
+            tui_app=tui_app,
+        )
 
         pipeline = ScanPipeline(
             brain=brain,
@@ -846,8 +823,8 @@ def scan(
     # (submit) and the scan loop (drain). _run() closes over it; the TUI gets it
     # directly. Harmless when --no-tui (nothing submits to it).
     operator_inbox = OperatorInbox()
-    use_tui = _should_use_tui(tui, interactive)
-    _tui_reason = _tui_skip_reason(tui, interactive)
+    use_tui = _should_use_tui(tui)
+    _tui_reason = _tui_skip_reason(tui)
     if _tui_reason:
         console.print(f"[yellow]ℹ Interactive TUI off:[/yellow] [dim]{_tui_reason}[/dim]")
     try:

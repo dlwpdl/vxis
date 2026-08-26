@@ -18,7 +18,7 @@ def test_check_brain_accepts_local_ollama_provider() -> None:
         ),
         patch("vxis.agent.brain.AgentBrain.healthcheck", return_value=(True, "")),
     ):
-        label, ready = check_brain(interactive=False)
+        label, ready = check_brain()
 
     assert ready is True
     assert label == "local:ollama/qwen2.5-coder:14b"
@@ -36,7 +36,7 @@ def test_check_brain_uses_default_ollama_model_when_not_set() -> None:
         ),
         patch("vxis.agent.brain.AgentBrain.healthcheck", return_value=(True, "")),
     ):
-        label, ready = check_brain(interactive=False)
+        label, ready = check_brain()
 
     assert ready is True
     assert label == "local:ollama/qwen2.5-coder:14b"
@@ -55,7 +55,7 @@ def test_check_brain_accepts_local_llamacpp_provider() -> None:
         ),
         patch("vxis.agent.brain.AgentBrain.healthcheck", return_value=(True, "")),
     ):
-        label, ready = check_brain(interactive=False)
+        label, ready = check_brain()
 
     assert ready is True
     assert label == "local:llamacpp/huihui-qwen3.6-35b-a3b-claude-4.7-opus-abliterated-q4_k_m"
@@ -77,7 +77,7 @@ def test_check_brain_rejects_local_backend_when_completion_fails() -> None:
             return_value=(False, "llamacpp/local-35b: HTTP 503"),
         ),
     ):
-        label, ready = check_brain(interactive=False)
+        label, ready = check_brain()
 
     assert ready is False
     assert label == ("local:llamacpp/local-35b (Brain call failed — llamacpp/local-35b: HTTP 503)")
@@ -98,7 +98,7 @@ def test_check_brain_normalizes_google_to_gemini() -> None:
         ),
         patch("vxis.cli.preflight._gemini_model_available", return_value=True),
     ):
-        label, ready = check_brain(interactive=False)
+        label, ready = check_brain()
 
     assert ready is True
     assert label == "api:gemini/gemini-2.5-flash"
@@ -121,7 +121,7 @@ def test_check_brain_promotes_frontier_director_when_local_worker_has_key() -> N
         ),
         patch("vxis.agent.brain.AgentBrain.healthcheck", return_value=(True, "")),
     ):
-        label, ready = check_brain(interactive=False)
+        label, ready = check_brain()
 
     assert ready is True
     assert label == "api:openai/gpt-5.4"
