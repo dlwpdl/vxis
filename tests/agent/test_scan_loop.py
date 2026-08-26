@@ -1591,6 +1591,47 @@ def test_campaign_groups_for_ui_rolls_up_same_finding_campaign():
     assert groups[0]["branch_count"] >= 1
 
 
+def test_campaign_groups_for_ui_rolls_up_crown_parent_and_delegated_child():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    parent = loop.state.ensure_branch(
+        "agent:agent-0001:crown-chain",
+        "WEB-CROWN-PIVOT",
+        "Crown follow-up",
+        priority=96,
+        role="post_exploit_worker",
+        phase="session_reuse",
+        owner="root",
+        parent_branch_id="agent:agent-0001",
+        source_candidate_id="agent:agent-0001",
+        objective="Turn foothold into crown impact.",
+        next_step="Create a delegated post-exploit child.",
+        crown_jewel="authenticated data access",
+    )
+    child = loop.state.ensure_branch(
+        "agent:agent-0002",
+        "agent_graph:post_exploit_worker",
+        "delegated crown proof",
+        priority=97,
+        role="post_exploit_worker",
+        phase="delegated_task",
+        owner="agent_graph",
+        parent_branch_id=parent.id,
+        source_candidate_id=parent.source_candidate_id,
+        objective="Validate delegated proof.",
+        next_step="Run delegated child.",
+        crown_jewel="authenticated data access",
+    )
+    parent.status = "active"
+    child.status = "active"
+
+    groups = loop._campaign_groups_for_ui(limit=8)
+    merged = next(group for group in groups if group["campaign_id"] == "agent:agent-0001")
+
+    assert merged["branch_count"] == 2
+    assert "delegated_task" in merged["phases"]
+    assert "session_reuse" in merged["phases"]
+
+
 def test_focus_campaign_for_ui_includes_related_findings_and_reviews():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
     loop.state.ensure_branch(

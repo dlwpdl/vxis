@@ -109,6 +109,12 @@ class ScanLoopDecisionPolicyMixin:
                 return True
         return False
 
+    @staticmethod
+    def _campaign_id_for_branch(branch: BranchState) -> str:
+        return str(
+            branch.source_finding_id or branch.source_candidate_id or branch.parent_branch_id or branch.id
+        )
+
     def _should_yield_to_live_agent_graph_child(self, branch: BranchState) -> bool:
         if branch.owner == "agent_graph":
             return False
@@ -435,7 +441,7 @@ class ScanLoopDecisionPolicyMixin:
         blockers = {branch.id for branch in self._dag_finish_blocking_branches()}
         for branch in self.state.active_branches():
             key = (
-                branch.source_finding_id or branch.parent_branch_id or branch.id,
+                self._campaign_id_for_branch(branch),
                 branch.crown_jewel or self._branch_family(branch) or "generic",
             )
             group = by_key.get(key)
@@ -502,15 +508,11 @@ class ScanLoopDecisionPolicyMixin:
         focus = self._focus_branch()
         selected = groups[0]
         if focus is not None:
+            focus_campaign_id = self._campaign_id_for_branch(focus)
             focus_family = self._branch_family(focus)
             for group in groups:
                 campaign_id = str(group.get("campaign_id") or "")
-                if focus.source_finding_id and campaign_id == focus.source_finding_id:
-                    selected = group
-                    break
-                if not focus.source_finding_id and campaign_id == (
-                    focus.parent_branch_id or focus.id
-                ):
+                if campaign_id == focus_campaign_id:
                     selected = group
                     break
                 if str(group.get("family") or "") == focus_family:
