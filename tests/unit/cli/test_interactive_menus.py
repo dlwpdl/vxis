@@ -77,6 +77,30 @@ class TestSettingsMenu:
         }
         assert "언어" in korean["language"]
 
+    def test_results_menu_labels_follow_selected_language(self, monkeypatch):
+        monkeypatch.setenv("VXIS_UI_LANGUAGE", "en")
+        english = {c["value"]: c["name"] for c in interactive._results_menu_choices()}
+        assert "Recent scans" in english["list"]
+        assert "Find by scan ID" in english["by_id"]
+
+        monkeypatch.setenv("VXIS_UI_LANGUAGE", "ko")
+        korean = {c["value"]: c["name"] for c in interactive._results_menu_choices()}
+        assert "최근 스캔 목록" in korean["list"]
+        assert "스캔 ID로 조회" in korean["by_id"]
+
+    def test_report_format_labels_follow_selected_language(self, monkeypatch):
+        monkeypatch.setenv("VXIS_UI_LANGUAGE", "en")
+        english = {c["value"]: c["name"] for c in interactive._report_format_choices()}
+        assert "HTML report" in english["html"]
+        assert "DOCX report" in english["docx"]
+        assert "Cancel" in english["cancel"]
+
+        monkeypatch.setenv("VXIS_UI_LANGUAGE", "ko")
+        korean = {c["value"]: c["name"] for c in interactive._report_format_choices()}
+        assert "HTML 리포트" in korean["html"]
+        assert "DOCX 리포트" in korean["docx"]
+        assert "취소" in korean["cancel"]
+
 
 def test_language_selection_persists_and_applies_immediately(tmp_path, monkeypatch):
     from vxis.cli.theme import get_ui_language, set_ui_language, tr

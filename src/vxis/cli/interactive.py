@@ -1198,15 +1198,19 @@ def _show_plugin_summary(
 # ── 결과 조회 ──────────────────────────────────────────────────
 
 
+def _results_menu_choices() -> list[dict[str, str]]:
+    return [
+        {"name": f"\U0001f4cb  {tr('Recent scans', '최근 스캔 목록')}", "value": "list"},
+        {"name": f"\U0001f50d  {tr('Find by scan ID', '스캔 ID로 조회')}", "value": "by_id"},
+        {"name": f"\u2b05\ufe0f   {tr('Back', '뒤로')}", "value": "back"},
+    ]
+
+
 def results_menu() -> dict | None:
     """스캔 결과 조회 메뉴."""
     action = inquirer.select(
-        message="조회할 항목을 선택하세요",
-        choices=[
-            {"name": "\U0001f4cb  최근 스캔 목록", "value": "list"},
-            {"name": "\U0001f50d  스캔 ID로 조회", "value": "by_id"},
-            {"name": "\u2b05\ufe0f   뒤로", "value": "back"},
-        ],
+        message=tr("Choose what to view", "조회할 항목을 선택하세요"),
+        choices=_results_menu_choices(),
         pointer="\u276f",
         qmark="\U0001f4ca",
         amark="\u2705",
@@ -1216,7 +1220,7 @@ def results_menu() -> dict | None:
         return None
     if action == "by_id":
         scan_id = inquirer.text(
-            message="스캔 ID를 입력하세요",
+            message=tr("Enter the scan ID", "스캔 ID를 입력하세요"),
             qmark="\U0001f50d",
         ).execute()
         return {"action": "by_id", "scan_id": scan_id}
@@ -1224,6 +1228,15 @@ def results_menu() -> dict | None:
 
 
 # ── 리포트 메뉴 ────────────────────────────────────────────────
+
+
+def _report_format_choices() -> list[dict[str, str]]:
+    return [
+        {"name": f"\U0001f4c4  HTML {tr('report', '리포트')}", "value": "html"},
+        {"name": f"\U0001f4d8  DOCX {tr('report', '리포트')}", "value": "docx"},
+        {"name": "\u2709\ufe0f   Attestation Letter", "value": "attestation"},
+        {"name": f"\u2b05\ufe0f   {tr('Cancel', '취소')}", "value": "cancel"},
+    ]
 
 
 def report_menu() -> dict | None:
@@ -1270,29 +1283,29 @@ def report_menu() -> dict | None:
         scans = asyncio.run(_list_scans())
         if scans:
             table = Table(
-                title="\U0001f4cb 최근 스캔 목록",
+                title=f"\U0001f4cb {tr('Recent scans', '최근 스캔 목록')}",
                 show_header=True,
                 header_style="bold",
                 border_style=BRASS,
                 expand=False,
             )
             table.add_column("ID", style="bold cyan")
-            table.add_column("대상")
-            table.add_column("프로필")
-            table.add_column("발견", justify="right")
-            table.add_column("시간")
+            table.add_column(tr("Target", "대상"))
+            table.add_column(tr("Profile", "프로필"))
+            table.add_column(tr("Findings", "발견"), justify="right")
+            table.add_column(tr("Time", "시간"))
             for sid, target, profile, count, time_str in scans:
                 table.add_row(str(sid), target, profile, str(count), time_str)
             console.print(table)
             console.print()
         else:
-            console.print("[yellow]스캔 기록이 없습니다.[/yellow]")
+            console.print(f"[yellow]{tr('No scan history found.', '스캔 기록이 없습니다.')}[/yellow]")
             return None
     except Exception:
         pass  # DB 연결 실패 시 ID 직접 입력으로 진행
 
     scan_id = inquirer.text(
-        message="리포트를 생성할 스캔 ID를 입력하세요",
+        message=tr("Enter the scan ID to report", "리포트를 생성할 스캔 ID를 입력하세요"),
         qmark="\U0001f4c4",
         amark="\u2705",
     ).execute()
@@ -1301,13 +1314,8 @@ def report_menu() -> dict | None:
         return None
 
     fmt = inquirer.select(
-        message="출력 포맷을 선택하세요",
-        choices=[
-            {"name": "\U0001f4c4  HTML 리포트", "value": "html"},
-            {"name": "\U0001f4d8  DOCX 리포트", "value": "docx"},
-            {"name": "\u2709\ufe0f   Attestation Letter", "value": "attestation"},
-            {"name": "\u2b05\ufe0f   취소", "value": "cancel"},
-        ],
+        message=tr("Choose an output format", "출력 포맷을 선택하세요"),
+        choices=_report_format_choices(),
         pointer="\u276f",
         qmark="\U0001f4e4",
         amark="\u2705",
@@ -1641,13 +1649,13 @@ def _execute_scan(params: dict) -> None:
         from InquirerPy import inquirer as _post_inquirer
 
         post_action = _post_inquirer.select(
-            message="다음 작업을 선택하세요",
+            message=tr("Choose the next action", "다음 작업을 선택하세요"),
             choices=[
-                {"name": "\U0001f4c4  리포트 생성 (HTML)", "value": "report_html"},
-                {"name": "\U0001f4d8  리포트 생성 (DOCX)", "value": "report_docx"},
-                {"name": "\U0001f4ca  결과 상세 보기", "value": "detail"},
-                {"name": "\U0001f310  대시보드에서 보기", "value": "dashboard"},
-                {"name": "\u2b05\ufe0f   메인 메뉴로", "value": "back"},
+                {"name": f"\U0001f4c4  {tr('Generate report (HTML)', '리포트 생성 (HTML)')}", "value": "report_html"},
+                {"name": f"\U0001f4d8  {tr('Generate report (DOCX)', '리포트 생성 (DOCX)')}", "value": "report_docx"},
+                {"name": f"\U0001f4ca  {tr('View finding details', '결과 상세 보기')}", "value": "detail"},
+                {"name": f"\U0001f310  {tr('Open in dashboard', '대시보드에서 보기')}", "value": "dashboard"},
+                {"name": f"\u2b05\ufe0f   {tr('Back to main menu', '메인 메뉴로')}", "value": "back"},
             ],
             pointer="\u276f",
             qmark="\u2705",
@@ -1680,17 +1688,21 @@ def _execute_scan(params: dict) -> None:
                 _html = ReportGenerator().render_html(_report_data)
                 with open(_report_path, "w", encoding="utf-8") as _fh:
                     _fh.write(_html)
-                console.print(f"[green]HTML 리포트 저장됨:[/green] {_report_path}")
+                console.print(
+                    f"[green]{tr('Saved HTML report:', 'HTML 리포트 저장됨:')}[/green] {_report_path}"
+                )
             except Exception as _exc:
-                console.print(f"[red]HTML 리포트 생성 실패:[/red] {_exc}")
+                console.print(
+                    f"[red]{tr('HTML report generation failed:', 'HTML 리포트 생성 실패:')}[/red] {_exc}"
+                )
 
         else:  # report_docx
             try:
                 from vxis.report.docx_export import DOCXReportGenerator
             except ImportError:
                 console.print(
-                    "[yellow]DOCX 내보내기를 사용할 수 없습니다.[/yellow] "
-                    "python-docx 패키지를 설치하세요: pip install python-docx"
+                    f"[yellow]{tr('DOCX export is unavailable.', 'DOCX 내보내기를 사용할 수 없습니다.')}[/yellow] "
+                    f"{tr('Install python-docx: pip install python-docx', 'python-docx 패키지를 설치하세요: pip install python-docx')}"
                 )
                 return
 
@@ -1707,13 +1719,17 @@ def _execute_scan(params: dict) -> None:
                     findings=result.findings,
                 )
                 DOCXReportGenerator().generate(_report_data, _Path(_report_path))
-                console.print(f"[green]DOCX 리포트 저장됨:[/green] {_report_path}")
+                console.print(
+                    f"[green]{tr('Saved DOCX report:', 'DOCX 리포트 저장됨:')}[/green] {_report_path}"
+                )
             except Exception as _exc:
-                console.print(f"[red]DOCX 리포트 생성 실패:[/red] {_exc}")
+                console.print(
+                    f"[red]{tr('DOCX report generation failed:', 'DOCX 리포트 생성 실패:')}[/red] {_exc}"
+                )
 
     elif post_action == "detail":
         if not result.findings:
-            console.print("[dim]발견된 취약점이 없습니다.[/dim]")
+            console.print(f"[dim]{tr('No findings were recorded.', '발견된 취약점이 없습니다.')}[/dim]")
             return
 
         _sev_colors = {
@@ -1806,7 +1822,10 @@ def _show_results(params: dict) -> None:
                     )
                     scan = scan_r.scalar_one_or_none()
                     if scan is None:
-                        console.print(f"[red]스캔 ID {scan_id}를 찾을 수 없습니다.[/red]")
+                        console.print(
+                            f"[red]{tr('Scan ID', '스캔 ID')} {scan_id} "
+                            f"{tr('was not found.', '를 찾을 수 없습니다.')}[/red]"
+                        )
                         return
 
                     findings_r = await session.execute(
@@ -1818,12 +1837,17 @@ def _show_results(params: dict) -> None:
                     info = Table.grid(padding=(0, 2))
                     info.add_column(style="bold", width=14)
                     info.add_column()
-                    info.add_row("\U0001f3af 대상:", f"[cyan]{scan.target}[/cyan]")
-                    info.add_row("\U0001f4cb 프로필:", f"[yellow]{scan.profile}[/yellow]")
-                    info.add_row("\U0001f4c5 시작:", str(scan.started_at))
-                    info.add_row("\u2705 상태:", f"[green]{scan.status}[/green]")
-                    info.add_row("\U0001f50d 발견:", f"[bold]{len(findings)}[/bold]개")
-                    console.print(Panel(info, title=f"스캔 #{scan_id}", border_style=BRASS))
+                    info.add_row(f"\U0001f3af {tr('Target', '대상')}:", f"[cyan]{scan.target}[/cyan]")
+                    info.add_row(f"\U0001f4cb {tr('Profile', '프로필')}:", f"[yellow]{scan.profile}[/yellow]")
+                    info.add_row(f"\U0001f4c5 {tr('Started', '시작')}:", str(scan.started_at))
+                    info.add_row(f"\u2705 {tr('Status', '상태')}:", f"[green]{scan.status}[/green]")
+                    info.add_row(
+                        f"\U0001f50d {tr('Findings', '발견')}:",
+                        f"[bold]{len(findings)}[/bold] {tr('items', '개')}",
+                    )
+                    console.print(
+                        Panel(info, title=f"{tr('Scan', '스캔')} #{scan_id}", border_style=BRASS)
+                    )
 
                     if findings:
                         # Severity 테이블
@@ -1833,9 +1857,9 @@ def _show_results(params: dict) -> None:
                             border_style="green",
                             expand=False,
                         )
-                        sev_table.add_column("심각도", no_wrap=True)
-                        sev_table.add_column("건수", justify="right")
-                        sev_table.add_column("주요 항목")
+                        sev_table.add_column(tr("Severity", "심각도"), no_wrap=True)
+                        sev_table.add_column(tr("Count", "건수"), justify="right")
+                        sev_table.add_column(tr("Highlights", "주요 항목"))
 
                         sev_colors = {
                             "critical": "bold red",
@@ -1866,7 +1890,7 @@ def _show_results(params: dict) -> None:
                             if len(items) > 3:
                                 titles += f" (+{len(items) - 3})"
                             sev_table.add_row(
-                                f"[{style}]{sev_kr.get(sev, sev)}[/{style}]",
+                                f"[{style}]{tr(sev.replace('_', ' ').title(), sev_kr.get(sev, sev))}[/{style}]",
                                 f"[{style}]{len(items)}[/{style}]",
                                 titles,
                             )
@@ -1881,22 +1905,24 @@ def _show_results(params: dict) -> None:
                     scans = list(scans_r.scalars().all())
 
                     if not scans:
-                        console.print("[yellow]스캔 기록이 없습니다.[/yellow]")
+                        console.print(
+                            f"[yellow]{tr('No scan history found.', '스캔 기록이 없습니다.')}[/yellow]"
+                        )
                         return
 
                     table = Table(
-                        title="\U0001f4cb 최근 스캔 목록",
+                        title=f"\U0001f4cb {tr('Recent scans', '최근 스캔 목록')}",
                         show_header=True,
                         header_style="bold",
                         border_style=BRASS,
                         expand=False,
                     )
                     table.add_column("ID", style="bold cyan", no_wrap=True)
-                    table.add_column("대상", no_wrap=True)
-                    table.add_column("프로필", no_wrap=True)
-                    table.add_column("상태", no_wrap=True)
-                    table.add_column("발견", justify="right")
-                    table.add_column("시간", no_wrap=True)
+                    table.add_column(tr("Target", "대상"), no_wrap=True)
+                    table.add_column(tr("Profile", "프로필"), no_wrap=True)
+                    table.add_column(tr("Status", "상태"), no_wrap=True)
+                    table.add_column(tr("Findings", "발견"), justify="right")
+                    table.add_column(tr("Time", "시간"), no_wrap=True)
 
                     for s in scans:
                         count_r = await session.execute(
@@ -1919,14 +1945,16 @@ def _show_results(params: dict) -> None:
                         )
 
                     console.print(table)
-                    console.print("[dim]상세 조회: 스캔 결과 조회 → 스캔 ID로 조회[/dim]")
+                    console.print(
+                        f"[dim]{tr('For details: View scan results -> Find by scan ID', '상세 조회: 스캔 결과 조회 → 스캔 ID로 조회')}[/dim]"
+                    )
         finally:
             await engine.dispose()
 
     try:
         asyncio.run(_query())
     except Exception as exc:
-        console.print(f"[red]조회 실패:[/red] {exc}")
+        console.print(f"[red]{tr('Lookup failed:', '조회 실패:')}[/red] {exc}")
 
 
 def _generate_report(params: dict) -> None:
