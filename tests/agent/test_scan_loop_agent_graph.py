@@ -722,6 +722,7 @@ def test_judge_replan_hint_uses_agent_graph_escalation_status():
         escalation_reason="positive result needs chain/pivot decision from director",
     )
     branch.status = "active"
+    loop._focus_branch = lambda: branch  # type: ignore[method-assign]
     hint = loop._judge_replan_hint()
     assert "positive result" in hint.lower()
     assert "crown-chain" in hint.lower() or "post-exploit" in hint.lower()
@@ -2413,6 +2414,39 @@ def test_agent_graph_branch_stops_forcing_run_after_limit_blocker():
         watch_terms=["agent-0001", "test_injection"],
     )
     branch.blocker = "agent_graph run: agent-0001 reached the child-run limit (3)"
+    assert loop._forced_branch_action(branch) is None
+
+
+def test_crown_report_branch_does_not_fall_back_to_post_auth_enum_without_report_tool():
+    reg = ToolRegistry()
+
+    class _RunSkill:
+        name = "run_skill"
+        description = "run skill"
+        input_schema = {"type": "object"}
+
+        async def run(self, **kwargs):  # pragma: no cover - not executed
+            return ToolResult(ok=True, summary="ok")
+
+    reg.register(_RunSkill())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=30)
+    branch = loop.state.ensure_branch(
+        "agent:agent-0001:crown-chain",
+        "WEB-CROWN-PIVOT",
+        "Crown-chain follow-up for agent-0001",
+        priority=96,
+        role="post_exploit_worker",
+        phase="data_access",
+        owner="root",
+        objective="Turn delegated proof into crown-jewel impact.",
+        next_step="Call report_finding for the proven post-exploit crown impact, then link_chain.",
+        crown_jewel="authenticated data access",
+        evidence="confirmed token reuse proof",
+    )
+    branch.status = "active"
+    branch.escalation_status = "needs_report"
+    branch.blocker = "report_finding required for proven crown-jewel impact"
+
     assert loop._forced_branch_action(branch) is None
 
 

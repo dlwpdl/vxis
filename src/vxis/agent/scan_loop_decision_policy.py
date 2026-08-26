@@ -1327,6 +1327,8 @@ class ScanLoopDecisionPolicyMixin:
         crown_report = self._agent_graph_crown_report_action(branch)
         if crown_report is not None:
             return crown_report
+        if str(branch.escalation_status or "").strip() == "needs_report":
+            return None
         crown_agent_create = self._agent_graph_crown_followup_create_action(branch)
         if crown_agent_create is not None:
             return crown_agent_create
