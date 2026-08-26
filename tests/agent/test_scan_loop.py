@@ -1559,6 +1559,47 @@ def test_dag_finish_blocking_branches_dedupes_same_source_finding_same_phase():
     assert [item.id for item in blockers] == [a.id, c.id]
 
 
+def test_dag_finish_blocking_branches_dedupes_same_source_candidate_same_phase():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    a = loop.state.ensure_branch(
+        "agent:agent-1001",
+        "agent_graph:post_exploit_worker",
+        "delegated child a",
+        priority=97,
+        role="post_exploit_worker",
+        phase="delegated_task",
+        owner="agent_graph",
+        parent_branch_id="agent:agent-0001:crown-chain",
+        source_candidate_id="agent:agent-0001",
+    )
+    b = loop.state.ensure_branch(
+        "agent:agent-1002",
+        "agent_graph:post_exploit_worker",
+        "delegated child b",
+        priority=96,
+        role="post_exploit_worker",
+        phase="delegated_task",
+        owner="agent_graph",
+        parent_branch_id="agent:agent-0001:crown-chain",
+        source_candidate_id="agent:agent-0001",
+    )
+    c = loop.state.ensure_branch(
+        "agent:agent-1003",
+        "agent_graph:post_exploit_worker",
+        "delegated child c",
+        priority=95,
+        role="post_exploit_worker",
+        phase="data_access",
+        owner="agent_graph",
+        parent_branch_id="agent:agent-0001:crown-chain",
+        source_candidate_id="agent:agent-0001",
+    )
+
+    blockers = loop._dedupe_blocking_campaign_branches([a, b, c])
+
+    assert [item.id for item in blockers] == [a.id, c.id]
+
+
 def test_campaign_groups_for_ui_rolls_up_same_finding_campaign():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
     loop.state.ensure_branch(

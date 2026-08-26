@@ -92,8 +92,9 @@ class ScanLoopDecisionPolicyMixin:
         deduped: list[BranchState] = []
         seen: set[tuple[str, str]] = set()
         for branch in blockers:
-            if branch.source_finding_id:
-                key = (branch.source_finding_id, branch.phase or "surface")
+            campaign_id = self._campaign_id_for_branch(branch)
+            if campaign_id != branch.id:
+                key = (campaign_id, branch.phase or "surface")
                 if key in seen:
                     continue
                 seen.add(key)
