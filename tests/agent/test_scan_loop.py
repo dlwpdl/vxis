@@ -249,7 +249,6 @@ def test_cloud_profiles_allow_uncovered_family_probe_more_readily_than_local():
         priority=95,
         role="post_exploit_worker",
         phase="session_reuse",
-        source_finding_id="VXIS-0001",
     )
     candidate = loop.state.ensure_vector_candidate(
         "web:dir-bruteforce",
@@ -488,6 +487,9 @@ def test_open_crown_goal_keeps_post_exploit_branch_finish_blocking_until_depth()
     assert loop._branch_has_finish_blocking_yield(branch) is True
 
     branch.attempts = 3
+    assert loop._branch_has_finish_blocking_yield(branch) is True
+
+    branch.attempts = 4
     assert loop._branch_has_finish_blocking_yield(branch) is False
 
 
@@ -1414,7 +1416,7 @@ def test_off_branch_action_allowed_for_same_campaign_branch():
     assert allowed is True
 
 
-def test_off_branch_action_allowed_for_high_value_cross_campaign_after_sqli_foothold():
+def test_off_branch_action_blocked_for_cross_campaign_probe_after_concrete_chain_focus():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
     loop.state.findings.append(
         {
@@ -1447,7 +1449,7 @@ def test_off_branch_action_allowed_for_high_value_cross_campaign_after_sqli_foot
         [],
         [idor.id],
     )
-    assert allowed is True
+    assert allowed is False
 
 
 def test_high_value_cross_campaign_exception_ignores_low_value_unrelated_campaign():

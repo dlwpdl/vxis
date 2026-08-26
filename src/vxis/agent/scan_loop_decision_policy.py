@@ -404,7 +404,7 @@ class ScanLoopDecisionPolicyMixin:
     def _branch_has_open_crown_goal(branch: BranchState) -> bool:
         if not str(branch.crown_jewel or "").strip():
             return False
-        if branch.attempts >= 3:
+        if branch.attempts >= 4:
             return False
         if str(branch.role or "").lower() == "post_exploit_worker":
             return True
@@ -2467,6 +2467,8 @@ class ScanLoopDecisionPolicyMixin:
                         if isinstance(item, dict)
                     }
                     if not (related & found_types):
+                        if branch.source_finding_id:
+                            continue
                         if uncovered_family_floor and cap_score < uncovered_family_floor:
                             continue
                         return True
@@ -2485,6 +2487,8 @@ class ScanLoopDecisionPolicyMixin:
         capability_score: int,
     ) -> bool:
         if capability_score < 12:
+            return False
+        if branch.source_finding_id:
             return False
         focus_family = self._branch_family(branch)
         if focus_family not in {"auth", "injection"}:
