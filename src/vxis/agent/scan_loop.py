@@ -13,6 +13,9 @@ from vxis.agent.scan_loop_state import (
 )
 from vxis.agent.scan_loop_actions import ScanLoopActionMixin
 from vxis.agent.scan_loop_agent_graph import ScanLoopAgentGraphMixin
+from vxis.agent.scan_loop_agent_graph_worker_planner import (
+    ScanLoopAgentGraphWorkerPlannerMixin,
+)
 from vxis.agent.scan_loop_dashboard import build_scan_dashboard
 from vxis.agent.scan_loop_decision_policy import ScanLoopDecisionPolicyMixin
 from vxis.agent.scan_loop_run import ScanLoopRunMixin
@@ -35,7 +38,11 @@ def _env_flag(name: str) -> bool:
 
 
 class ScanAgentLoop(
-    ScanLoopActionMixin, ScanLoopDecisionPolicyMixin, ScanLoopAgentGraphMixin, ScanLoopRunMixin
+    ScanLoopActionMixin,
+    ScanLoopDecisionPolicyMixin,
+    ScanLoopAgentGraphWorkerPlannerMixin,
+    ScanLoopAgentGraphMixin,
+    ScanLoopRunMixin,
 ):
     _ROLE_ALLOWED_CAPABILITIES = ROLE_ALLOWED_CAPABILITIES
     _POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES = POST_EXPLOIT_PHASE_ALLOWED_CAPABILITIES

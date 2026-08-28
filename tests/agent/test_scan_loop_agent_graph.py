@@ -33,6 +33,18 @@ class RunSkillTool:
         return ToolResult(ok=True, summary=f"ran skill {kwargs.get('skill', '?')}", data={})
 
 
+class BrokenSnapshotAgentGraphTool:
+    name = "agent_graph"
+    description = "broken agent graph snapshot"
+    input_schema = {"type": "object"}
+
+    def snapshot_agents(self, **kwargs):
+        raise RuntimeError("snapshot exploded")
+
+    async def run(self, **kwargs) -> ToolResult:
+        return ToolResult(ok=True, summary="unused", data={})
+
+
 class WorkerPlannerBrain:
     def __init__(
         self,
@@ -83,7 +95,11 @@ class WorkerPlannerBrain:
                 return self.responses.pop(0)
             if self.response:
                 return self.response
-            skill = "post_auth_enum" if "allowed_skills=post_auth_enum" in user_prompt else "test_injection"
+            skill = (
+                "post_auth_enum"
+                if "allowed_skills=post_auth_enum" in user_prompt
+                else "test_injection"
+            )
             return json.dumps(
                 {
                     "tool": "run_skill",
@@ -207,6 +223,39 @@ def test_scan_dashboard_includes_agent_graph_snapshot():
     assert "Map auth and API surface" in dashboard
     assert "last_run: run_skill ok: mapped /login and /api/products" in dashboard
     assert 'agent_graph(action="finish", agent_id="agent-0001", result="...")' in dashboard
+
+
+def test_agent_graph_agents_from_messages_logs_snapshot_failures(
+    caplog: pytest.LogCaptureFixture,
+):
+    registry = ToolRegistry()
+    registry.register(BrokenSnapshotAgentGraphTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=registry, max_iters=3)
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "agent_graph",
+            "args": {"action": "create", "role": "recon_worker", "task": "Map target"},
+            "result": {
+                "ok": True,
+                "summary": "agent_graph: created agent-0001 (recon_worker)",
+                "data": {
+                    "agent": {
+                        "id": "agent-0001",
+                        "role": "recon_worker",
+                        "task": "Map target",
+                        "status": "running",
+                    }
+                },
+            },
+        },
+    )
+
+    with caplog.at_level("DEBUG", logger="vxis.agent.scan_loop_agent_graph"):
+        agents = loop._agent_graph_agents_from_messages()
+
+    assert [agent["id"] for agent in agents] == ["agent-0001"]
+    assert "agent_graph snapshot_agents failed" in caplog.text
 
 
 def test_scan_dashboard_surfaces_director_worker_exchange():
@@ -1823,13 +1872,9 @@ def test_agent_graph_worker_planner_prompt_fits_local_budget_and_preserves_artif
                 "valid": True,
             }
         },
-        "messages": [
-            {"sender": "root", "body": "old message " + ("M" * 4000)}
-            for _ in range(8)
-        ],
+        "messages": [{"sender": "root", "body": "old message " + ("M" * 4000)} for _ in range(8)],
         "executions": [
-            {"tool": "run_skill", "summary": "old execution " + ("E" * 5000)}
-            for _ in range(8)
+            {"tool": "run_skill", "summary": "old execution " + ("E" * 5000)} for _ in range(8)
         ],
     }
 
@@ -2398,7 +2443,10 @@ def test_agent_graph_branch_prefers_protocol_run_when_tool_registered():
     assert forced == ("agent_graph", {"action": "run", "agent_id": "agent-0001"})
     loop.state.branches["agent:agent-0001"].priority = 99
     dashboard = loop._build_scan_dashboard()
-    assert 'Suggested agent_graph action: agent_graph(action="run", agent_id="agent-0001")' in dashboard
+    assert (
+        'Suggested agent_graph action: agent_graph(action="run", agent_id="agent-0001")'
+        in dashboard
+    )
 
 
 def test_agent_graph_branch_stops_forcing_run_after_limit_blocker():
