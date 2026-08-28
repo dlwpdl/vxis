@@ -2417,6 +2417,27 @@ def test_desired_chain_count_stays_one_for_three_same_family_findings():
     assert desired == 1
 
 
+def test_next_retry_round_ignores_invalid_tool_history_round(caplog: pytest.LogCaptureFixture):
+    loop = ScanAgentLoop(target="http://localhost", registry=ToolRegistry(), max_iters=8)
+    loop.state.add_message(
+        "tool",
+        {
+            "name": "run_skill",
+            "args": {
+                "skill": "test_injection",
+                "params": {"round": "oops"},
+            },
+            "result": {"ok": False, "summary": "retry failed"},
+        },
+    )
+
+    with caplog.at_level("DEBUG", logger="vxis.agent.scan_loop_decision_policy"):
+        next_round = loop._next_retry_round("test_injection")
+
+    assert next_round == 2
+    assert "ignoring non-integer retry round for test_injection: 'oops'" in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_scan_loop_respects_max_iters():
     reg = ToolRegistry()
