@@ -1,6 +1,9 @@
 """Skill: attempt_auth — try to authenticate via multiple methods."""
 
 from __future__ import annotations
+import base64
+import html
+import json
 import logging
 import re
 import secrets
@@ -34,9 +37,111 @@ RESET_PATHS = _load_ds(
     "attempt_auth", "reset_paths"
 )  # ADR-007 Phase 3-9 — data in data/payloads/attempt_auth.json
 
+_JS_REF_RE = re.compile(r"""(?:src|href)=["']([^"']+\.js(?:\?[^"']*)?)["']""", re.IGNORECASE)
+_AUTH_FRAGMENT_RE = re.compile(
+    r"""["']((?:[A-Za-z0-9_-]+/)*(?:api|auth|rest)[A-Za-z0-9_./-]{0,80}(?:login|sign[_-]?in|signup|register|sessions?|token))["']""",
+    re.IGNORECASE,
+)
+_SERVICE_PREFIX_RE = re.compile(r"""["']([A-Za-z][A-Za-z0-9_-]{1,32}/)["']""")
+
 
 def _preview_text(text: str) -> str:
     return "[response body redacted]" if text else ""
+
+
+def _decode_jwt_claims(token: str) -> dict[str, Any]:
+    parts = str(token or "").split(".")
+    if len(parts) < 2:
+        return {}
+    payload = parts[1].strip()
+    if not payload:
+        return {}
+    try:
+        decoded = base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4))
+        parsed = json.loads(decoded.decode("utf-8", "ignore"))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _claim_value(claims: dict[str, Any], *paths: tuple[str, ...]) -> Any:
+    for path in paths:
+        current: Any = claims
+        for part in path:
+            if not isinstance(current, dict):
+                current = None
+                break
+            current = current.get(part)
+        if current not in (None, ""):
+            return current
+    return None
+
+
+def _normalize_path_candidate(path: str) -> str:
+    clean = str(path or "").strip()
+    if not clean:
+        return ""
+    if clean.startswith("http://") or clean.startswith("https://"):
+        from urllib.parse import urlparse
+
+        parsed = urlparse(clean)
+        clean = parsed.path or "/"
+    clean = "/" + clean.lstrip("/")
+    return clean.split("?", 1)[0]
+
+
+def _extract_js_paths(body: str) -> list[str]:
+    seen: set[str] = set()
+    paths: list[str] = []
+    for match in _JS_REF_RE.finditer(body or ""):
+        path = _normalize_path_candidate(html.unescape(match.group(1)))
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        paths.append(path)
+    return paths
+
+
+def _extract_asset_auth_paths(text: str) -> list[str]:
+    seen: set[str] = set()
+    paths: list[str] = []
+    for match in _AUTH_FRAGMENT_RE.finditer(text or ""):
+        fragment = _normalize_path_candidate(match.group(1))
+        if fragment and fragment not in seen:
+            seen.add(fragment)
+            paths.append(fragment)
+        window = text[max(0, match.start() - 200) : min(len(text), match.end() + 200)]
+        for prefix in _SERVICE_PREFIX_RE.findall(window):
+            prefixed = _normalize_path_candidate(f"{prefix}{fragment.lstrip('/')}")
+            if prefixed and prefixed not in seen:
+                seen.add(prefixed)
+                paths.append(prefixed)
+    return paths
+
+
+async def _discover_asset_auth_paths(session: Any) -> list[str]:
+    seen: set[str] = set()
+    candidates: list[str] = []
+    try:
+        root = await session.request("GET", "/")
+    except Exception:
+        return []
+
+    def add(paths: list[str]) -> None:
+        for path in paths:
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            candidates.append(path)
+
+    add(_extract_asset_auth_paths(root.text))
+    for js_path in _extract_js_paths(root.text)[:5]:
+        try:
+            js = await session.request("GET", js_path)
+        except Exception:
+            continue
+        add(_extract_asset_auth_paths(js.text))
+    return candidates
 
 
 def _extract_token_and_user_info(data: dict[str, Any]) -> tuple[str, dict[str, str]]:
@@ -54,6 +159,32 @@ def _extract_token_and_user_info(data: dict[str, Any]) -> tuple[str, dict[str, s
         "role": auth.get("role", "") if isinstance(auth, dict) else "",
         "id": auth.get("bid", auth.get("id", "")) if isinstance(auth, dict) else "",
     }
+    if token:
+        claims = _decode_jwt_claims(token)
+        if not user_info["role"]:
+            claim_role = _claim_value(claims, ("role",), ("data", "role"))
+            if claim_role not in (None, ""):
+                user_info["role"] = str(claim_role)
+        if not user_info["email"]:
+            claim_email = _claim_value(
+                claims,
+                ("email",),
+                ("umail",),
+                ("data", "email"),
+                ("data", "umail"),
+            )
+            if claim_email in (None, ""):
+                claim_email = _claim_value(claims, ("sub",))
+            if claim_email not in (None, "") and "@" in str(claim_email):
+                user_info["email"] = str(claim_email)
+        if not user_info["id"]:
+            claim_id = _claim_value(claims, ("id",), ("bid",), ("data", "id"), ("data", "bid"))
+            if claim_id in (None, ""):
+                subject = _claim_value(claims, ("sub",))
+                if subject not in (None, "") and str(subject).isdigit():
+                    claim_id = subject
+            if claim_id not in (None, ""):
+                user_info["id"] = str(claim_id)
     return token, user_info
 
 
@@ -180,6 +311,17 @@ def _format_login_transcript(
     )
 
 
+def _public_signup_payloads(*, suffix: str, email: str, password: str) -> list[dict[str, str]]:
+    username = f"user_{suffix}"
+    name = f"User {suffix}"
+    number = f"555{suffix[:4]}"
+    return [
+        {"username": username, "email": email, "password": password},
+        {"name": name, "email": email, "password": password},
+        {"username": username, "name": name, "email": email, "password": password, "number": number},
+    ]
+
+
 async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
     """Try multiple authentication methods against the target.
 
@@ -221,15 +363,27 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
 
     # Phase 1: Find login endpoint
     active_login = ""
-    for path in LOGIN_PATHS:
-        try:
-            r = await _session.request("POST", path, json_data={"email": "x", "password": "x"})
-            if r.status != 404:
+    fallback_login = ""
+    probed_logins: set[str] = set()
+
+    async def _probe_login_candidates(paths: list[str]) -> None:
+        nonlocal active_login, fallback_login
+        for path in paths:
+            if active_login or not path or path in probed_logins:
+                continue
+            probed_logins.add(path)
+            try:
+                r = await _session.request("POST", path, json_data={"email": "x", "password": "x"})
+            except Exception:
+                continue
+            if r.status in {200, 400, 401, 403, 422, 429}:
                 active_login = path
                 logger.info("Found login endpoint: %s (status %d)", path, r.status)
-                break
-        except Exception:
-            continue
+                return
+            if not fallback_login and r.status in {301, 302, 303, 307, 308, 405, 415}:
+                fallback_login = path
+
+    await _probe_login_candidates([str(path) for path in LOGIN_PATHS])
 
     if not active_login:
         # Try GET-based login forms
@@ -241,6 +395,21 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                     break
             except Exception:
                 continue
+
+    if not active_login:
+        try:
+            asset_candidates = [
+                path
+                for path in await _discover_asset_auth_paths(_session)
+                if any(marker in path.lower() for marker in ("login", "sign-in", "sign_in", "signin"))
+            ]
+            await _probe_login_candidates(asset_candidates)
+        except Exception:
+            pass
+
+    if not active_login and fallback_login:
+        active_login = fallback_login
+        logger.info("Using fallback login endpoint: %s", active_login)
 
     if not active_login:
         return {**result, "error": "No login endpoint found"}
@@ -435,7 +604,64 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
     if successful_logins:
         return _finalize_successes()
 
-    # Phase 4: Try password reset with common security answers
+    # Phase 4: Try public signup for a low-priv foothold
+    reg_paths: list[str] = []
+    try:
+        for path in await _discover_asset_auth_paths(_session):
+            lower = path.lower()
+            if any(marker in lower for marker in ("signup", "register")) and path not in reg_paths:
+                reg_paths.append(path)
+    except Exception:
+        pass
+    for path in ["/api/users", "/api/register", "/api/signup", "/api/account"]:
+        if path not in reg_paths:
+            reg_paths.append(path)
+
+    public_signup_successes: list[dict[str, Any]] = []
+    for path in reg_paths:
+        while len(public_signup_successes) < 2:
+            suffix = secrets.token_hex(4)
+            email = f"{suffix}@example.test"
+            password = f"Test1234!{suffix}"
+            created = False
+            for body in _public_signup_payloads(suffix=suffix, email=email, password=password):
+                try:
+                    response = await _session.request("POST", path, json_data=body)
+                except Exception:
+                    continue
+                if response.status not in (200, 201):
+                    continue
+                outcome = await _record_login_attempt(
+                    email,
+                    password,
+                    phase="public_signup",
+                    identity_hint=str(body.get("username") or ""),
+                )
+                if not outcome or outcome["response"].status != 200 or not outcome["token"]:
+                    continue
+                success = _success_result(
+                    method="public_signup",
+                    email=email,
+                    password=password,
+                    token=outcome["token"],
+                    user_info=outcome["user_info"],
+                    positive_attempt=outcome["attempt"],
+                    label="positive_public_signup",
+                )
+                success["signup_endpoint"] = path
+                public_signup_successes.append(success)
+                created = True
+                break
+            if not created:
+                break
+        if len(public_signup_successes) >= 2:
+            break
+
+    if public_signup_successes:
+        successful_logins.extend(public_signup_successes)
+        return _finalize_successes()
+
+    # Phase 5: Try password reset with common security answers
     for reset_path in RESET_PATHS:
         try:
             # First check if endpoint exists

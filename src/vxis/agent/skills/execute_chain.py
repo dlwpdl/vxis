@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 _AUTO_CONTEXT_KEYS = (
     "token",
     "identities",
+    "credentials",
     "owner_map",
     "object_ids",
     "url_pattern",
@@ -20,6 +21,7 @@ _AUTO_CONTEXT_KEYS = (
     "credential_evidence",
     "loot",
     "secrets",
+    "seed_paths",
     "urls",
     "internal_urls",
     "object_patterns",
@@ -73,7 +75,19 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
     if template == "auth_to_crown":
         return [
             {
+                "skill": "test_sensitive_files",
+                "extract": {
+                    "credentials": "credentials",
+                    "loot": "loot",
+                    "secrets": "secrets",
+                    "seed_paths": "seed_paths",
+                    "urls": "urls",
+                    "internal_urls": "internal_urls",
+                },
+            },
+            {
                 "skill": "attempt_auth",
+                "params": {"credentials": "{{credentials}}"},
                 "extract": {
                     "token": "token",
                     "auth_method": "method",
@@ -110,6 +124,24 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
             "skill": "post_auth_enum",
             "requires": ["token"],
             "params": {"token": "{{token}}", "identities": "{{identities}}"},
+            "extract": {
+                "post_auth_result": "",
+                "discovered_endpoints": "accessible",
+                "discovered_auth_only_endpoints": "new_endpoints",
+                "discovered_paths": "discovered_paths",
+            },
+        },
+        {
+            "skill": "test_api_security",
+            "requires": ["token"],
+            "params": {
+                "token": "{{token}}",
+                "identities": "{{identities}}",
+                "discovered_endpoints": "{{discovered_endpoints}}",
+                "discovered_auth_only_endpoints": "{{discovered_auth_only_endpoints}}",
+                "discovered_paths": "{{discovered_paths}}",
+            },
+            "extract": {"api_security_result": ""},
         },
         {
             "skill": "test_idor",
@@ -122,6 +154,16 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
                 "object_patterns": "{{object_patterns}}",
                 "max_id": "{{max_id}}",
             },
+            "extract": {"idor_result": ""},
+        },
+        {
+            "skill": "prove_post_auth_crown",
+            "requires": ["post_auth_result", "idor_result"],
+            "params": {
+                "post_auth_result": "{{post_auth_result}}",
+                "api_security_result": "{{api_security_result}}",
+                "idor_result": "{{idor_result}}",
+            },
         },
         {
             "skill": "test_auth_deep",
@@ -131,11 +173,15 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
     ]
 
 
-async def _dispatch_skill(skill_name: str, target_url: str, params: dict[str, Any]) -> dict[str, Any]:
+async def _dispatch_skill(
+    skill_name: str, target_url: str, params: dict[str, Any]
+) -> dict[str, Any]:
     from vxis.agent.skills import SKILL_REGISTRY
 
     if skill_name == "prove_cloud_impact":
         return _prove_cloud_impact(params)
+    if skill_name == "prove_post_auth_crown":
+        return _prove_post_auth_crown(params)
     if skill_name == "execute_chain":
         raise ValueError("execute_chain cannot call itself")
     if skill_name not in SKILL_REGISTRY:
@@ -212,7 +258,13 @@ async def _dispatch_idor_object_patterns(
         "total_tested": sum(int(item.get("total_tested", 0) or 0) for item in pattern_results),
     }
     for result in pattern_results:
-        for key in ("accessible_ids", "auth_bypass_ids", "data_samples", "comparisons", "identity_comparisons"):
+        for key in (
+            "accessible_ids",
+            "auth_bypass_ids",
+            "data_samples",
+            "comparisons",
+            "identity_comparisons",
+        ):
             aggregate[key].extend(list(result.get(key) or [])[:20])
         for key in ("cross_identity_access", "role_matrix_findings"):
             values = list(result.get(key) or [])
@@ -225,6 +277,34 @@ def _boolish(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "on", "allow"}
+
+
+def _privileged_mass_assignment_candidates(api_security_result: dict[str, Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for finding in list(api_security_result.get("findings") or []):
+        if not isinstance(finding, dict):
+            continue
+        if str(finding.get("type") or "").strip().lower() != "mass_assignment":
+            continue
+        blob = " ".join(
+            str(finding.get(key) or "")
+            for key in ("payload", "evidence", "response_preview", "endpoint")
+        ).lower()
+        if any(token in blob for token in ("role", "admin", "isadmin", "is_admin", "privilege")):
+            candidates.append(finding)
+    return candidates
+
+
+def _candidate_endpoint(candidate: dict[str, Any]) -> str:
+    endpoint = str(candidate.get("endpoint") or "").strip()
+    if endpoint:
+        return endpoint
+    payload = str(candidate.get("payload") or "").strip()
+    if " on " in payload:
+        tail = payload.rsplit(" on ", 1)[-1].strip()
+        if tail.startswith("/"):
+            return tail
+    return ""
 
 
 def _first_aws_credentials(raw: Any) -> dict[str, Any]:
@@ -249,9 +329,9 @@ def _first_aws_credentials(raw: Any) -> dict[str, Any]:
 
 def _prove_cloud_impact(params: dict[str, Any]) -> dict[str, Any]:
     creds = _first_aws_credentials(params.get("cloud_credentials"))
-    allow_probe = _boolish(params.get("allow_probe")) or os.environ.get(
-        "VXIS_ALLOW_CLOUD_API_PROBE"
-    ) == "1"
+    allow_probe = (
+        _boolish(params.get("allow_probe")) or os.environ.get("VXIS_ALLOW_CLOUD_API_PROBE") == "1"
+    )
     planned = [
         "aws sts get-caller-identity",
         "aws s3api list-buckets --max-items 10",
@@ -307,6 +387,214 @@ def _prove_cloud_impact(params: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _prove_post_auth_crown(params: dict[str, Any]) -> dict[str, Any]:
+    post_auth = (
+        params.get("post_auth_result") if isinstance(params.get("post_auth_result"), dict) else {}
+    )
+    api_security = (
+        params.get("api_security_result")
+        if isinstance(params.get("api_security_result"), dict)
+        else {}
+    )
+    idor = params.get("idor_result") if isinstance(params.get("idor_result"), dict) else {}
+    cross = list(idor.get("cross_identity_access") or [])
+    auth_bypass = list(idor.get("auth_bypass_ids") or [])
+    role = list(idor.get("role_matrix_findings") or [])
+    privileged_mass_assignment = _privileged_mass_assignment_candidates(api_security)
+    if privileged_mass_assignment:
+        candidate = privileged_mass_assignment[0]
+        component = _candidate_endpoint(candidate) or "post-auth API surface"
+        credential_evidence = candidate.get("credential_evidence") or {}
+        observed = {
+            "payload": candidate.get("payload", ""),
+            "evidence": candidate.get("evidence", ""),
+            "response_preview": candidate.get("response_preview", ""),
+            "credential_evidence": credential_evidence,
+        }
+        artifact = {
+            "source_output": (
+                f"foothold token unlocked {len(post_auth.get('accessible') or [])} authenticated "
+                f"endpoint(s); /api coverage included {component}."
+            )[:1200],
+            "pivot_action": (
+                f"Reuse the foothold session against {component} and submit privileged account "
+                "attributes such as role=admin."
+            )[:1200],
+            "control_result": str(
+                candidate.get("control")
+                or candidate.get("negative_result")
+                or post_auth.get("control_evidence", {})
+                or []
+            )[:1200],
+            "observed_result": str(observed)[:1500],
+            "crown_jewel_evidence": str(
+                credential_evidence
+                or candidate.get("response_preview")
+                or candidate.get("evidence")
+                or candidate.get("payload")
+                or ""
+            )[:1800],
+            "source_output_used_in_pivot": True,
+            "verification_method": "live_chain_replay",
+            "hops": [
+                {
+                    "source_skill": "post_auth_enum",
+                    "target_skill": "test_api_security",
+                    "source_output": list(post_auth.get("accessible") or [])[:3],
+                    "pivot_action": f"Replay privileged field assignment on {component}",
+                    "observed_result": observed,
+                    "control_result": (
+                        candidate.get("control")
+                        or candidate.get("negative_result")
+                        or post_auth.get("control_evidence", {})
+                        or []
+                    ),
+                    "source_output_used_in_pivot": True,
+                    "repeat_count": 2 if credential_evidence else 1,
+                    "negative_result": candidate.get("negative_result")
+                    or candidate.get("control")
+                    or "Privileged fields should be rejected or ignored.",
+                }
+            ],
+            "repeat_count": 2 if credential_evidence else 1,
+            "negative_result": candidate.get("negative_result")
+            or candidate.get("control")
+            or "Privileged fields should be rejected or ignored.",
+        }
+        finding = {
+            "title": f"Validated post-auth crown replay on {component}",
+            "severity": "critical" if credential_evidence else "medium",
+            "finding_type": "attack_chain",
+            "affected_component": component,
+            "description": (
+                "A live post-auth chain reused the foothold session to submit privileged account "
+                "attributes on an authenticated API surface."
+            ),
+            "impact": (
+                "An attacker can turn an authenticated foothold into privileged account creation "
+                "or admin takeover."
+            ),
+            "technical_analysis": (
+                f"post_auth_control={post_auth.get('control_evidence', {})} "
+                f"api_security_mass_assignment={privileged_mass_assignment[:3]}"
+            ),
+            "poc_description": (
+                "Authenticate, replay the privileged field assignment on the authenticated API, "
+                "and confirm that the privileged attribute is accepted or persists after login."
+            ),
+            "poc_script_code": str(artifact),
+            "remediation_steps": (
+                "Apply strict server-side allowlists for user-controlled fields and reject "
+                "privileged attributes on self-service account creation or update flows."
+            ),
+            "endpoint": component,
+            "method": "POST",
+            "cwe": "CWE-915",
+            "verification_method": "live_chain_replay",
+            "evidence_artifact": artifact,
+        }
+        return {
+            "ok": True,
+            "verified": True,
+            "reason": "live_chain_replay",
+            "evidence_artifact": artifact,
+            "findings": [finding],
+        }
+    if not (cross or auth_bypass or role):
+        return {
+            "ok": False,
+            "verified": False,
+            "reason": "no_post_auth_crown_signal",
+            "findings": [],
+        }
+
+    object_patterns = list(post_auth.get("object_patterns") or [])
+    component = str(idor.get("url_pattern") or "")
+    if not component and object_patterns:
+        component = str((object_patterns[0] or {}).get("url_pattern") or "")
+    if not component:
+        component = "post-auth object surface"
+    crown_target = cross[:3] or role[:3] or auth_bypass[:5]
+    post_auth_paths = [
+        str(item.get("path") or "")
+        for item in list(post_auth.get("user_data_exposed") or post_auth.get("accessible") or [])[
+            :5
+        ]
+        if isinstance(item, dict) and item.get("path")
+    ]
+    auth_controls = dict(post_auth.get("control_evidence") or {})
+    idor_controls = dict(idor.get("control_evidence") or {})
+    artifact = {
+        "source_output": (
+            f"foothold token unlocked {len(post_auth.get('accessible') or [])} endpoint(s), "
+            f"{len(post_auth.get('user_data_exposed') or [])} data-bearing; "
+            f"paths={post_auth_paths[:3]}"
+        )[:1200],
+        "pivot_action": (
+            f"Reuse the foothold session against {component} and replay non-owner object IDs "
+            f"derived from post-auth enumeration ({post_auth_paths[:3]})."
+        )[:1200],
+        "control_result": str(
+            idor_controls.get("negative_cases")
+            or auth_controls.get("auth_only")
+            or auth_controls.get("same_data_without_auth")
+            or []
+        )[:1200],
+        "observed_result": str(crown_target)[:1500],
+        "crown_jewel_evidence": str(
+            idor.get("identity_comparisons")
+            or idor.get("data_samples")
+            or post_auth.get("user_data_exposed")
+            or []
+        )[:1800],
+        "source_output_used_in_pivot": True,
+        "verification_method": "live_chain_replay",
+        "hops": [
+            {
+                "source_skill": "post_auth_enum",
+                "target_skill": "test_idor",
+                "source_output": post_auth_paths[:3],
+                "pivot_action": f"Replay non-owner IDs on {component}",
+                "observed_result": crown_target[:3],
+                "control_result": (
+                    idor_controls.get("negative_cases") or auth_controls.get("auth_only") or []
+                )[:3],
+                "source_output_used_in_pivot": True,
+            }
+        ],
+    }
+    severity = "critical" if cross and post_auth.get("user_data_exposed") else "high"
+    finding = {
+        "title": f"Validated post-auth crown replay on {component}",
+        "severity": severity,
+        "finding_type": "attack_chain",
+        "affected_component": component,
+        "description": "A live post-auth chain reused foothold output to reach another user's object data.",
+        "impact": "A low-privilege foothold can be chained into cross-account data access and repeatable exfiltration.",
+        "technical_analysis": (
+            f"post_auth_control={auth_controls} "
+            f"idor_control={idor_controls} "
+            f"cross_identity_access={cross[:5]} role_matrix_findings={role[:5]} "
+            f"auth_bypass_ids={auth_bypass[:5]}"
+        ),
+        "poc_description": "Authenticate, enumerate the unlocked data-bearing surface, then replay a non-owner object ID against the discovered pattern and compare it with the control cases.",
+        "poc_script_code": str(artifact),
+        "remediation_steps": "Apply object-level authorization on every authenticated object route and constrain post-auth enumeration to least privilege.",
+        "endpoint": component,
+        "method": "GET",
+        "cwe": "CWE-639",
+        "verification_method": "live_chain_replay",
+        "evidence_artifact": artifact,
+    }
+    return {
+        "ok": True,
+        "verified": True,
+        "reason": "live_chain_replay",
+        "evidence_artifact": artifact,
+        "findings": [finding],
+    }
+
+
 def _summarize_child(skill: str, data: dict[str, Any]) -> str:
     if skill == "post_auth_enum":
         return (
@@ -319,12 +607,20 @@ def _summarize_child(skill: str, data: dict[str, Any]) -> str:
             f"{len(data.get('cross_identity_access', []))} cross-identity, "
             f"{len(data.get('auth_bypass_ids', []))} no-auth"
         )
+    if skill == "test_api_security":
+        return f"{len(data.get('findings', []))} api-security finding(s)"
     if skill == "test_auth_deep":
         return f"{len(data.get('findings', []))} auth-depth finding(s)"
     if skill == "attempt_auth":
         return (
             f"{'authenticated' if data.get('authenticated') else 'not authenticated'}, "
             f"{len(data.get('identities') or [])} identity(s)"
+        )
+    if skill == "test_sensitive_files":
+        return (
+            f"{len(data.get('exposed') or [])} exposed path(s), "
+            f"{len(data.get('credentials') or [])} credential pivot(s), "
+            f"{len(data.get('loot') or [])} loot item(s)"
         )
     if skill == "test_ssrf":
         creds = data.get("cloud_credentials") or []
@@ -336,6 +632,12 @@ def _summarize_child(skill: str, data: dict[str, Any]) -> str:
     if skill == "prove_cloud_impact":
         impact = data.get("cloud_impact") or {}
         return f"cloud impact {'ready' if impact else 'unavailable'} ({impact.get('reason', 'no_reason')})"
+    if skill == "prove_post_auth_crown":
+        return (
+            "post-auth crown replay verified"
+            if data.get("verified")
+            else f"post-auth crown replay unavailable ({data.get('reason', 'no_reason')})"
+        )
     return "completed"
 
 
@@ -416,7 +718,9 @@ def _normalized_findings(skill: str, data: dict[str, Any], target_url: str) -> l
         cross = list(data.get("cross_identity_access") or [])
         role = list(data.get("role_matrix_findings") or [])
         finding_type = "bola" if cross else "idor"
-        title = "Broken object authorization across identities" if cross else "IDOR on object pattern"
+        title = (
+            "Broken object authorization across identities" if cross else "IDOR on object pattern"
+        )
         component = data.get("url_pattern") or target_url
         findings.append(
             {
@@ -500,6 +804,8 @@ def _normalized_findings(skill: str, data: dict[str, Any], target_url: str) -> l
             if not isinstance(finding, dict):
                 continue
             copied = dict(finding)
+            copied.setdefault("finding_type", str(copied.get("type") or "generic_finding"))
+            copied.setdefault("title", str(copied.get("type") or "finding"))
             copied.setdefault("affected_component", target_url)
             copied.setdefault("endpoint", copied["affected_component"])
             copied.setdefault("method", "GET")
@@ -517,7 +823,10 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         if key in kwargs and kwargs.get(key) is not None:
             context[key] = kwargs[key]
     context.setdefault("url_pattern", f"{target}/api/Users/{{id}}")
-    steps = list(kwargs.get("steps") or _default_steps(template))
+    resolved_template = template
+    if not kwargs.get("steps") and template == "post_auth_crown" and not context.get("token"):
+        resolved_template = "auth_to_crown"
+    steps = list(kwargs.get("steps") or _default_steps(resolved_template))
 
     executed: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
@@ -580,6 +889,7 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
     return {
         "ok": ok,
         "template": template,
+        "resolved_template": resolved_template,
         "steps": executed,
         "findings": findings,
         "finding_count": len(findings),

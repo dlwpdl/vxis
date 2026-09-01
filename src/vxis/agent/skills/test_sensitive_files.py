@@ -2,12 +2,195 @@
 from __future__ import annotations
 import asyncio
 import logging
+import re
 from typing import Any
+from urllib.parse import urljoin, urlparse
 from ._payload_loader import load_skill_dataset as _load_ds
+from .test_infra import _seeded_git_env_paths
 
 logger = logging.getLogger(__name__)
 
 SENSITIVE_PATHS = [tuple(_c) for _c in _load_ds("test_sensitive_files", "sensitive_paths")]  # ADR-007 Phase 3-9 — data in data/payloads/test_sensitive_files.json
+_HREF_RE = re.compile(r"""href=["']([^"']+)["']""", re.IGNORECASE)
+_URL_RE = re.compile(r"""https?://[A-Za-z0-9._~:/?#\[\]@!$&'()*+,;=%-]{6,}""")
+_KEY_VALUE_RE = re.compile(r"""^\s*([A-Za-z][A-Za-z0-9_.-]{1,63})\s*[:=]\s*(.+?)\s*$""")
+_JSON_CRED_RE = re.compile(
+    r"""(?is)["'](email|username|user)["']\s*[:=]\s*["']([^"' \t\r\n,}]{3,120})["'].{0,160}?["'](password|pass|pwd)["']\s*[:=]\s*["']([^"'\r\n]{1,120})["']"""
+)
+_LISTING_MARKERS = ("listing directory", "index of")
+_AUTH_IDENTITY_MARKERS = ("email", "username", "user", "login", "account", "admin")
+_AUTH_PASSWORD_MARKERS = ("password", "pass", "pwd")
+_INFRA_CRED_MARKERS = ("db", "mongo", "mysql", "postgres", "pgsql", "jdbc", "redis", "smtp", "kafka")
+_ARTIFACT_EXTENSIONS = (
+    ".bak",
+    ".kdbx",
+    ".sql",
+    ".zip",
+    ".db",
+    ".sqlite",
+    ".md",
+    ".pdf",
+)
+_SECRET_EXTENSIONS = (".key", ".pem", ".p12", ".jks")
+_CONFIG_EXTENSIONS = (".json", ".yml", ".yaml", ".properties", ".conf", ".config", ".env")
+_FOLLOWUP_NAME_MARKERS = (
+    "log",
+    "audit",
+    "incident",
+    "support",
+    "config",
+    "env",
+    "secret",
+    "token",
+    "credential",
+    "auth",
+    "key",
+    "backup",
+    "dump",
+)
+_CROWN_SIGNAL_MARKERS = (
+    "ftp",
+    "log",
+    "audit",
+    "key",
+    "secret",
+    "token",
+    "credential",
+    "env",
+    "config",
+    "backup",
+    "dump",
+    "git",
+    "passwd",
+    "encryption",
+)
+
+
+def _normalize_path(path: str) -> str:
+    cleaned = str(path or "").strip()
+    if not cleaned:
+        return ""
+    if "://" in cleaned:
+        cleaned = urlparse(cleaned).path or "/"
+    if not cleaned.startswith("/"):
+        cleaned = f"/{cleaned.lstrip('/')}"
+    return cleaned.split("#", 1)[0].split("?", 1)[0]
+
+
+def _looks_directory_listing(path: str, body: str) -> bool:
+    lower = body.lower() if body else ""
+    return path.endswith("/") or any(marker in lower for marker in _LISTING_MARKERS)
+
+
+def _extract_directory_children(path: str, body: str) -> list[str]:
+    children: list[str] = []
+    seen: set[str] = set()
+    base = path or "/"
+    for match in _HREF_RE.finditer(body or ""):
+        href = str(match.group(1) or "").strip()
+        if not href or href in {".", "./", "..", "./.."} or href.startswith("?") or "://" in href:
+            continue
+        child = _normalize_path(urljoin(base, href))
+        if not child or child == path or child in seen:
+            continue
+        seen.add(child)
+        children.append(child)
+    return children[:24]
+
+
+def _extract_urls(body: str) -> list[str]:
+    seen: set[str] = set()
+    urls: list[str] = []
+    for match in _URL_RE.finditer(body or ""):
+        url = str(match.group(0) or "").strip().rstrip('\'"),.;')
+        if url and url not in seen:
+            seen.add(url)
+            urls.append(url)
+    return urls[:20]
+
+
+def _is_auth_identity_key(key: str) -> bool:
+    lower = str(key or "").lower()
+    return any(marker in lower for marker in _AUTH_IDENTITY_MARKERS) and not any(
+        marker in lower for marker in _INFRA_CRED_MARKERS
+    )
+
+
+def _is_auth_password_key(key: str) -> bool:
+    lower = str(key or "").lower()
+    return any(marker in lower for marker in _AUTH_PASSWORD_MARKERS) and not any(
+        marker in lower for marker in _INFRA_CRED_MARKERS
+    )
+
+
+def _extract_auth_credentials(body: str) -> list[dict[str, str]]:
+    credentials: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def add(identity_key: str, identity_value: str, password: str) -> None:
+        ident = str(identity_value or "").strip().strip("\"'")
+        secret = str(password or "").strip().strip("\"'")
+        if not ident or not secret or len(secret) > 160:
+            return
+        payload: dict[str, str] = {"password": secret}
+        if "@" in ident or "email" in identity_key.lower():
+            payload["email"] = ident
+        else:
+            payload["username"] = ident
+        key = (
+            payload.get("email") or payload.get("username") or "",
+            payload["password"],
+            "email" if payload.get("email") else "username",
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        credentials.append(payload)
+
+    key_values: dict[str, str] = {}
+    for line in (body or "").splitlines()[:120]:
+        match = _KEY_VALUE_RE.match(line)
+        if not match:
+            continue
+        key = str(match.group(1) or "").strip()
+        value = str(match.group(2) or "").strip().strip("\"'")
+        if key and value:
+            key_values[key] = value
+    identities = [(key, value) for key, value in key_values.items() if _is_auth_identity_key(key)]
+    passwords = [(key, value) for key, value in key_values.items() if _is_auth_password_key(key)]
+    for identity_key, identity_value in identities[:4]:
+        for _password_key, password in passwords[:4]:
+            add(identity_key, identity_value, password)
+
+    for match in _JSON_CRED_RE.finditer(body or ""):
+        add(str(match.group(1) or ""), str(match.group(2) or ""), str(match.group(4) or ""))
+    return credentials[:8]
+
+
+def _loot_items_for_path(path: str, body: str = "") -> list[dict[str, str]]:
+    lower_path = path.lower()
+    lower_body = body.lower() if body else ""
+    items: list[dict[str, str]] = []
+    if lower_path.endswith(_ARTIFACT_EXTENSIONS):
+        items.append({"kind": "artifact", "path": path})
+    if lower_path.endswith(_CONFIG_EXTENSIONS) or re.search(r"^[A-Z_]+=.+", body or "", re.MULTILINE):
+        items.append({"kind": "config", "path": path})
+    if (
+        lower_path.endswith(_SECRET_EXTENSIONS)
+        and not lower_path.endswith(".pub")
+    ) or "begin private key" in lower_body or (
+        any(marker in lower_path for marker in ("token", "secret", "credential"))
+        and len(body.strip()) >= 16
+    ):
+        items.append({"kind": "secret", "path": path})
+    return items[:3]
+
+
+def _is_crown_signal_path(path: str, severity: str) -> bool:
+    lower = path.lower()
+    if severity in {"critical", "high"}:
+        return True
+    return any(marker in lower for marker in _CROWN_SIGNAL_MARKERS)
 
 
 def _adjust_severity(path: str, body: str, declared: str) -> tuple[str, str | None]:
@@ -75,7 +258,19 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
 
     target = target_url.rstrip("/")
     exposed: list[dict] = []
+    credentials: list[dict[str, str]] = []
+    loot: list[dict[str, str]] = []
+    urls: list[str] = []
+    internal_urls: list[str] = []
+    seed_paths: list[str] = []
+    secrets: list[dict[str, str]] = []
     baseline_size: int | None = kwargs.get("baseline_size")
+    directory_bodies: dict[str, str] = {}
+    seen_credentials: set[tuple[str, str, str]] = set()
+    seen_loot: set[tuple[str, str]] = set()
+    seen_urls: set[str] = set()
+    seen_internal_urls: set[str] = set()
+    seen_seed_paths: set[str] = set()
 
     _mgr = SessionManager()
     _session = await _mgr.get_session(target)
@@ -89,6 +284,63 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             pass
 
     sem = asyncio.Semaphore(20)
+
+    def add_seed_path(path: str) -> None:
+        normalized = _normalize_path(path)
+        if not normalized or normalized in seen_seed_paths:
+            return
+        seen_seed_paths.add(normalized)
+        seed_paths.append(normalized)
+        if normalized.startswith("/"):
+            if normalized not in seen_internal_urls:
+                seen_internal_urls.add(normalized)
+                internal_urls.append(normalized)
+
+    def add_url(url: str) -> None:
+        cleaned = str(url or "").strip()
+        if not cleaned or cleaned in seen_urls:
+            return
+        seen_urls.add(cleaned)
+        urls.append(cleaned)
+
+    def add_loot(item: dict[str, str]) -> None:
+        kind = str(item.get("kind") or "").strip()
+        path = _normalize_path(str(item.get("path") or ""))
+        if not kind or not path:
+            return
+        key = (kind, path)
+        if key in seen_loot:
+            return
+        seen_loot.add(key)
+        normalized = {"kind": kind, "path": path}
+        loot.append(normalized)
+        if kind == "secret":
+            secrets.append(normalized)
+
+    def add_credential(item: dict[str, str], *, source: str) -> None:
+        if not isinstance(item, dict):
+            return
+        identity = str(item.get("email") or item.get("username") or "").strip()
+        password = str(item.get("password") or "").strip()
+        if not identity or not password:
+            return
+        key = (
+            item.get("email") or item.get("username") or "",
+            password,
+            "email" if item.get("email") else "username",
+        )
+        if key in seen_credentials:
+            return
+        seen_credentials.add(key)
+        credentials.append({**item, "source": source})
+
+    def analyze_content(path: str, body: str, *, source: str) -> None:
+        for item in _extract_auth_credentials(body):
+            add_credential(item, source=source)
+        for item in _loot_items_for_path(path, body):
+            add_loot(item)
+        for url in _extract_urls(body):
+            add_url(url)
 
     async def check(path: str, severity: str, description: str) -> None:
         async with sem:
@@ -112,12 +364,72 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
                         entry["severity_note"] = note
                         entry["original_severity"] = severity
                     exposed.append(entry)
+                    if not _is_crown_signal_path(path, final_sev):
+                        return
+                    add_seed_path(path)
+                    if _looks_directory_listing(path, body):
+                        directory_bodies[path] = body
+                        return
+                    analyze_content(path, body, source=f"sensitive_file:{path}")
             except Exception:
                 pass
 
     await asyncio.gather(*[check(p, s, d) for p, s, d in SENSITIVE_PATHS])
 
+    followup_queue: list[tuple[str, int]] = []
+    queued_paths: set[str] = set()
+
+    def enqueue_followup(path: str, depth: int, *, expand_seeded: bool = True) -> None:
+        normalized = _normalize_path(path)
+        if not normalized or normalized in queued_paths:
+            return
+        queued_paths.add(normalized)
+        followup_queue.append((normalized, depth))
+        add_seed_path(normalized)
+        for item in _loot_items_for_path(normalized):
+            add_loot(item)
+        if not expand_seeded:
+            return
+        for seeded_path, _signature in _seeded_git_env_paths([normalized]):
+            seeded_normalized = _normalize_path(seeded_path)
+            add_seed_path(seeded_normalized)
+            if (
+                seeded_normalized
+                and seeded_normalized not in queued_paths
+                and len(queued_paths) < 24
+            ):
+                enqueue_followup(seeded_normalized, min(depth + 1, 2), expand_seeded=False)
+
+    for path, body in directory_bodies.items():
+        for child in _extract_directory_children(path, body):
+            if any(marker in child.lower() for marker in _FOLLOWUP_NAME_MARKERS) or "." in child.rsplit("/", 1)[-1]:
+                enqueue_followup(child, 1)
+
+    while followup_queue and len(queued_paths) <= 24:
+        path, depth = followup_queue.pop(0)
+        try:
+            r = await _session.request("GET", f"{target}{path}")
+        except Exception:
+            continue
+        if r.status != 200 or r.body_length <= 0:
+            continue
+        body = r.text
+        analyze_content(path, body, source=f"sensitive_file:{path}")
+        if depth < 2 and _looks_directory_listing(path, body):
+            for child in _extract_directory_children(path, body):
+                if any(marker in child.lower() for marker in _FOLLOWUP_NAME_MARKERS) or "." in child.rsplit("/", 1)[-1]:
+                    enqueue_followup(child, depth + 1)
+
     exposed.sort(key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "informational": 4}.get(x["severity"], 5))
 
     logger.info("test_sensitive_files: %d exposed out of %d scanned", len(exposed), len(SENSITIVE_PATHS))
-    return {"exposed": exposed, "total_scanned": len(SENSITIVE_PATHS)}
+    return {
+        "exposed": exposed,
+        "credentials": credentials[:10],
+        "seed_paths": seed_paths[:30],
+        "loot": loot[:20],
+        "secrets": secrets[:10],
+        "urls": urls[:20],
+        "internal_urls": internal_urls[:30],
+        "total_scanned": len(SENSITIVE_PATHS),
+    }
