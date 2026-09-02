@@ -2,6 +2,7 @@ import pytest
 
 from vxis.agent.replay_gate import (
     blocking_replay_gate_findings,
+    machine_chain_replay_gate,
     machine_replay_gate,
     parse_raw_http_requests,
     replay_gate_passed,
@@ -160,3 +161,55 @@ async def test_machine_replay_gate_blocks_unconfirmed_unsafe_methods(caplog: pyt
 
     assert gate["status"] == "blocked_policy"
     assert "VXIS-0007" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_machine_chain_replay_gate_replays_target_finding_using_source_clue() -> None:
+    async def dispatch(name: str, args: dict) -> ToolResult:
+        assert name == "http_request"
+        path = str(args.get("path", ""))
+        body = "role=user"
+        if "token=abc" in path:
+            body = "role=admin token=abc"
+        return ToolResult(ok=True, data={"status": 200, "body_preview": body})
+
+    gate = await machine_chain_replay_gate(
+        finding_ids=["VXIS-0001", "VXIS-0002"],
+        evidence_artifact={
+            "source_output": "token abc",
+            "pivot_action": "Replay token abc into the admin request.",
+            "observed_result": "role=admin token=abc",
+            "control_result": "GET /admin?token=bad HTTP/1.1\nHost: example\n\n",
+            "repeat_count": 2,
+            "hops": [
+                {
+                    "source_finding_id": "VXIS-0001",
+                    "target_finding_id": "VXIS-0002",
+                    "source_output": "token abc",
+                    "pivot_action": "Replay token abc into the admin request.",
+                    "observed_result": "role=admin token=abc",
+                    "control_result": "GET /admin?token=bad HTTP/1.1\nHost: example\n\n",
+                }
+            ],
+        },
+        target="http://localhost:3000",
+        dispatch=dispatch,
+        findings_by_id={
+            "VXIS-0001": {
+                "id": "VXIS-0001",
+                "title": "debug leak",
+                "description": "debug leak exposed token abc",
+            },
+            "VXIS-0002": {
+                "id": "VXIS-0002",
+                "title": "admin data exposed",
+                "request_or_payload": "GET /admin?token=abc HTTP/1.1\nHost: example\n\n",
+                "response_or_effect": "role=admin token=abc",
+                "control_comparison": "GET /admin?token=bad HTTP/1.1\nHost: example\n\n",
+            },
+        },
+    )
+
+    assert gate["status"] == "passed"
+    assert gate["hop_results"][0]["status"] == "passed"
+    assert gate["hop_results"][0]["reused_source_output"] is True

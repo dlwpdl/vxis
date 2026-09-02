@@ -422,3 +422,89 @@ async def test_attempt_auth_recovers_identity_from_token_only_jwt(
     assert str(result["user_info"]["id"]) == "7"
     assert result["identities"][0]["email"] == "alice@example.test"
     assert result["identities"][0]["role"] == "user"
+
+
+class _ResetCandidateSession:
+    def __init__(self) -> None:
+        self.passwords = {"ops@example.test": "old-pass"}
+
+    async def request(self, method: str, path: str, **kwargs: Any) -> _Resp:
+        body = dict(kwargs.get("json_data") or {})
+        email = str(body.get("email") or "")
+        password = str(body.get("password") or "")
+        if method == "POST" and path == "/internal/auth/login" and email == "x":
+            return _Resp(401, text="login required")
+        if (
+            method == "POST"
+            and path == "/internal/auth/login"
+            and email == "baseline-check@example.invalid"
+        ):
+            return _Resp(401, text="invalid credentials")
+        if (
+            method == "POST"
+            and path == "/internal/auth/login"
+            and email == "ops@example.test"
+            and password == self.passwords["ops@example.test"]
+        ):
+            return _Resp(
+                200,
+                {
+                    "authentication": {
+                        "token": "tok-ops-12345678901234567890",  # gitleaks:allow -- test token
+                        "email": email,
+                        "role": "admin",
+                        "id": 9,
+                    }
+                },
+            )
+        if method == "POST" and path == "/internal/auth/reset" and email == "test":
+            return _Resp(400, text="need real account")
+        if (
+            method == "POST"
+            and path == "/internal/auth/reset"
+            and email == "ops@example.test"
+            and body.get("answer") == "NCC-1701"
+        ):
+            self.passwords[email] = str(body.get("new") or "")
+            return _Resp(200, text='{"message":"password updated"}')
+        return _Resp(404, text="not found")
+
+
+class _ResetCandidateManager:
+    def __init__(self) -> None:
+        self.session = _ResetCandidateSession()
+
+    async def get_session(self, base_url: str, *, identity: str | None = None, **kwargs: Any):
+        return self.session
+
+
+@pytest.mark.asyncio
+async def test_attempt_auth_uses_sensitive_file_reset_candidates_and_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "vxis.interaction.hands.SessionManager",
+        lambda: _ResetCandidateManager(),
+    )
+    monkeypatch.setattr(attempt_auth_mod, "LOGIN_PATHS", ["/rest/user/login"])
+    monkeypatch.setattr(attempt_auth_mod, "SQLI_CREDS", [])
+    monkeypatch.setattr(attempt_auth_mod, "DEFAULT_CREDS", [])
+    monkeypatch.setattr(attempt_auth_mod, "RESET_PATHS", [])
+    monkeypatch.setattr(
+        attempt_auth_mod.secrets,
+        "token_hex",
+        lambda _: "abcdef123456",
+    )
+
+    result = await attempt_auth_mod.execute(
+        "https://app.example.test",
+        login_paths=["/internal/auth/login"],
+        reset_paths=["/internal/auth/reset"],
+        reset_candidates=[{"email": "ops@example.test", "answer": "NCC-1701"}],
+    )
+
+    assert result["authenticated"] is True
+    assert result["method"] == "password_reset"
+    assert result["login_endpoint"] == "/internal/auth/login"
+    assert result["reset_endpoint"] == "/internal/auth/reset"
+    assert result["token"] == "tok-ops-12345678901234567890"

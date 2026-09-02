@@ -161,6 +161,24 @@ class TestReportDataFindingsBySeverity:
         titles = [f.title for f in grouped["high"]]
         assert titles == sorted(titles)
 
+    def test_attack_chain_is_prioritized_within_same_severity_group(self):
+        findings = [
+            make_finding(
+                id="f1",
+                title="Zebra Finding",
+                severity=Severity.critical,
+                finding_type="sqli",
+            ),
+            make_finding(
+                id="f2",
+                title="Zulu Crown Replay",
+                severity=Severity.critical,
+                finding_type="attack_chain",
+            ),
+        ]
+        grouped = make_report_data(findings=findings).findings_by_severity
+        assert [f.finding_type for f in grouped["critical"]] == ["attack_chain", "sqli"]
+
     def test_analyst_override_routes_to_correct_group(self):
         f = make_finding(severity=Severity.critical, analyst_severity=Severity.medium)
         grouped = make_report_data(findings=[f]).findings_by_severity

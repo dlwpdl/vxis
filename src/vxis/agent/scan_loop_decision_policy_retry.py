@@ -258,9 +258,7 @@ class ScanLoopDecisionPolicyRetryMixin:
             _push(f"{target}/search?q=test")
         elif skill == "test_xss":
             _push(f"{target}/search?q=test")
-            _push(f"{target}/redirect?next=/profile")
         elif skill == "test_ssrf":
-            _push(f"{target}/redirect?url=http://example.com")
             _push(f"{target}/proxy?url=http://example.com")
         elif skill in {"test_api_security", "test_business_logic"}:
             _push(target)
@@ -350,7 +348,7 @@ class ScanLoopDecisionPolicyRetryMixin:
                         )
                     )
                 )
-                or f"{target}/redirect?url=http://example.com"
+                or f"{target}/proxy?url=http://example.com"
             )
             return {"url": picked}
         if skill == "test_idor":

@@ -1,6 +1,6 @@
 # 2026-06-23 - Strix vs VXIS Comparison
 
-Status: pending full same-environment run.
+Status: executable same-environment contract landed on September 2, 2026; live side-by-side run still pending.
 
 This file is the single comparison record for the current direction decision:
 Strix is the product/UX benchmark, while VXIS should win on accepted evidence,
@@ -21,8 +21,9 @@ related-impact depth, policy gates, and reproducible reporting.
 
 | Target | URL | State |
 |---|---|---|
-| Juice Shop | `http://localhost:3000` | pending |
-| WebGoat | `http://localhost:8080/WebGoat` | pending |
+| Juice Shop | `http://localhost:3000` | executable via `infra/benchmarks/league-v2-local.json` |
+| WebGoat | `http://localhost:8080/WebGoat` | executable via `infra/benchmarks/league-v2-local.json` |
+| crAPI | `http://localhost:8889` | executable via `infra/benchmarks/league-v2-local.json` |
 | Local repo/source target | TBD | blocked until source-aware VXIS tools are production-promoted |
 
 ## Metric Contract
@@ -85,4 +86,5 @@ mode as if they are equivalent products.
 
 Pending benchmark execution. The current implementation work prepares the VXIS
 side by adding `--profile bugbounty`, stricter high/critical evidence contracts,
-and `--format bugbounty` accepted-finding JSON.
+`--format bugbounty` accepted-finding JSON, and an executable same-environment
+manifest for Juice Shop + WebGoat + crAPI.

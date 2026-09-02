@@ -297,7 +297,11 @@ async def findings_partial(
             (FindingRecord.effective_severity == "informational", 4),
             else_=5,
         )
-        stmt = stmt.order_by(severity_order_case, FindingRecord.title)
+        attack_chain_order_case = case(
+            (FindingRecord.finding_type == "attack_chain", 0),
+            else_=1,
+        )
+        stmt = stmt.order_by(severity_order_case, attack_chain_order_case, FindingRecord.title)
 
         result = await session.execute(stmt)
         findings: list[FindingRecord] = list(result.scalars().all())

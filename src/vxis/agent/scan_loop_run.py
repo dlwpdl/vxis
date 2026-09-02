@@ -273,6 +273,9 @@ class ScanLoopRunMixin(
             actions = actions[:1]
             for name, args in actions:
                 args = self._normalize_tool_args(name, args)
+                if name == "link_chain" and isinstance(args, dict) and not args.get("target"):
+                    args = dict(args)
+                    args["target"] = self.state.target
                 if name != "finish_scan":
                     _replan_ignore_counts.clear()
                     _finish_rejection_streak = 0

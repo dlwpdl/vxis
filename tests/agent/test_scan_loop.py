@@ -877,6 +877,21 @@ def test_best_skill_params_reuses_known_search_surface_for_xss_and_injection():
     assert loop._best_skill_params("test_injection")["url"].endswith("/rest/products/search?q=test")
 
 
+def test_best_skill_params_uses_proxy_fallback_for_ssrf():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    assert (
+        loop._best_skill_params("test_ssrf")["url"]
+        == "http://localhost:3000/proxy?url=http://example.com"
+    )
+
+
+def test_surface_candidates_for_xss_skip_stale_redirect_seed():
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
+    assert "http://localhost:3000/redirect?next=/profile" not in loop._surface_candidates_for_skill(
+        "test_xss"
+    )
+
+
 def test_best_skill_params_passes_seed_paths_to_infra():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=ToolRegistry(), max_iters=3)
     loop.state.add_message(

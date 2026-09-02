@@ -305,6 +305,16 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
                     "triggered": 2,
                     "total_tokens_saved": 1200,
                 },
+                "context_budget": {
+                    "mode": "local",
+                    "local_profile": True,
+                    "context_window": 8192,
+                    "max_prompt_tokens": 3500,
+                    "history_tokens": 840,
+                    "compression_threshold_tokens": 2200,
+                    "history_tokens_last_check": 1980,
+                    "history_pressure_ratio": 0.9,
+                },
             },
             "sdk_runtime": {
                 "enabled": True,
@@ -398,6 +408,8 @@ def test_scan_display_switches_to_single_loop_live_mode() -> None:
     assert "gpt-5.4-mini" in control_text
     assert "frontier_loose" in control_text
     assert "compress 2x" in control_text
+    assert "ctx local" in control_text
+    assert "1980/2200" in control_text
     assert "Authentication bypass or weak login" in control_text
     assert "Probe /admin" in control_text
     assert "xray running" in control_text

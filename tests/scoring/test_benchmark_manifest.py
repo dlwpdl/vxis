@@ -62,3 +62,16 @@ def test_has_llm_api_key_checks_supported_providers() -> None:
     assert has_llm_api_key({}) is False
     assert has_llm_api_key({"ANTHROPIC_API_KEY": "secret"}) is True
     assert has_llm_api_key({"GEMINI_API_KEY": "secret"}) is True
+
+
+def test_local_same_environment_manifest_lists_juice_shop_webgoat_and_crapi() -> None:
+    manifest = load_benchmark_manifest("infra/benchmarks/league-v2-local.json")
+
+    assert manifest.league_id == "crown-league-v2-local"
+    assert [target.target_id for target in manifest.targets] == [
+        "juice-shop",
+        "webgoat",
+        "crapi",
+    ]
+    assert manifest.select(target_id="webgoat")[0].default_url == "http://localhost:8080/WebGoat"
+    assert manifest.select(target_id="crapi")[0].default_url == "http://localhost:8889"

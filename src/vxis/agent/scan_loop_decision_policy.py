@@ -697,30 +697,6 @@ class ScanLoopDecisionPolicyMixin(
         """Keep branch pressure high on real scans without deadlocking short smokes."""
         return min(max_iters, min(60, max(3, max_iters - 5)))
 
-    @staticmethod
-    def _error_oracle_preview_is_actionable(preview: str) -> bool:
-        """Only promote 500s that leak concrete backend details."""
-        if not preview:
-            return False
-        lower = preview.lower()
-        markers = (
-            "traceback",
-            "stack trace",
-            "exception:",
-            "sql",
-            "sqlite",
-            "mysql",
-            "postgres",
-            "ora-",
-            "syntax error",
-            "sequelize",
-            "typeorm",
-            "prisma",
-            "undefined",
-            "cannot read",
-        )
-        return any(marker in lower for marker in markers)
-
     def _record_judge_escalation(
         self,
         *,

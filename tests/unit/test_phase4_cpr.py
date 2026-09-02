@@ -116,6 +116,17 @@ class TestHandsImport:
         )
         assert result == "/api/users/12345/profile"
 
+    def test_target_session_does_not_request_brotli_by_default(self):
+        import asyncio
+
+        from vxis.interaction.hands import TargetSession
+
+        session = TargetSession("https://example.test")
+        try:
+            assert "br" not in session._client.headers.get("Accept-Encoding", "")
+        finally:
+            asyncio.run(session.close())
+
 
 class TestXRayImport:
     """X-Ray 모듈 import 및 기본 동작 검증."""

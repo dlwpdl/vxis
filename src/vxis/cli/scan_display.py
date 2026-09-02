@@ -773,6 +773,23 @@ class ScanLiveDisplay:
                 lines.append(
                     f"[dim]compress {compress_triggered}x · save ~{tokens_saved:,} tok[/dim]"
                 )
+            context_budget = self.telemetry.get("context_budget") or {}
+            if isinstance(context_budget, dict) and context_budget:
+                mode = str(context_budget.get("mode") or "").strip()
+                window = int(context_budget.get("context_window") or 0)
+                max_prompt = int(context_budget.get("max_prompt_tokens") or 0)
+                history_tokens = int(context_budget.get("history_tokens") or 0)
+                threshold = int(context_budget.get("compression_threshold_tokens") or 0)
+                last_history = int(context_budget.get("history_tokens_last_check") or 0)
+                if mode or window or max_prompt or history_tokens:
+                    lines.append(
+                        f"[dim]ctx {mode or '?'} · win {window:,} · prompt<={max_prompt:,} · hist<={history_tokens:,}[/dim]"
+                    )
+                if threshold > 0 or last_history > 0:
+                    ratio = float(context_budget.get("history_pressure_ratio") or 0.0)
+                    lines.append(
+                        f"[dim]hist {last_history}/{threshold or history_tokens} tok · {int(round(ratio * 100))}%[/dim]"
+                    )
 
         if self.proxy:
             backend = self.proxy.get("backend") or "disabled"

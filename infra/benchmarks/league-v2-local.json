@@ -1,0 +1,34 @@
+{
+  "league_id": "crown-league-v2-local",
+  "profile": "crown",
+  "description": "Same-environment local benchmark contract for VXIS. Keeps the core engine generic while exercising one broad web target, one training web target, and one API auth target on the same host.",
+  "targets": [
+    {
+      "target_id": "juice-shop",
+      "target_type": "web",
+      "name": "OWASP Juice Shop",
+      "default_url": "http://localhost:3000",
+      "url_env": "VXIS_BENCHMARK_TARGET_JUICE_SHOP",
+      "required": true,
+      "enabled": true
+    },
+    {
+      "target_id": "webgoat",
+      "target_type": "web",
+      "name": "WebGoat",
+      "default_url": "http://localhost:8080/WebGoat",
+      "url_env": "VXIS_BENCHMARK_TARGET_WEBGOAT",
+      "required": true,
+      "enabled": true
+    },
+    {
+      "target_id": "crapi",
+      "target_type": "api",
+      "name": "crAPI",
+      "default_url": "http://localhost:8889",
+      "url_env": "VXIS_BENCHMARK_TARGET_CRAPI",
+      "required": true,
+      "enabled": true
+    }
+  ]
+}

@@ -62,7 +62,7 @@ class _DirectoryMiningSession:
         if route == "/ftp/package.json.bak":
             return _Resp(
                 200,
-                '{"name":"app","scripts":{"start":"node server.js"},"authUrl":"https://api.example.test/auth/login"}',
+                '{"name":"app","scripts":{"start":"node server.js"},"authUrl":"https://api.example.test/auth/login","internalLogin":"/rest/user/login","resetPath":"/rest/user/reset-password"}',
             )
         if route == "/ftp/incident-support.kdbx":
             return _Resp(200, "KDBX\x00vault-bytes")
@@ -84,7 +84,7 @@ class _DirectoryMiningSession:
         if route == "/support/logs/audit.json":
             return _Resp(
                 200,
-                '{"auditFilename":"logs/audit.json","files":[{"name":"/juice-shop/logs/access.log.2026-09-01"}]}',
+                '{"auditFilename":"logs/audit.json","files":[{"name":"/juice-shop/logs/access.log.2026-09-01"}],"email":"ops@example.test","securityAnswer":"NCC-1701"}',
             )
         if route == "/encryptionkeys/":
             return _Resp(
@@ -116,12 +116,22 @@ async def test_sensitive_files_mines_directory_children_into_pivots(
     seed_paths = result.get("seed_paths") or []
     loot = result.get("loot") or []
     urls = result.get("urls") or []
+    login_paths = result.get("login_paths") or []
+    reset_paths = result.get("reset_paths") or []
+    reset_candidates = result.get("reset_candidates") or []
 
     assert any(item.get("email") == "admin@example.test" and item.get("password") == "Sup3rSecret!" for item in credentials)
     assert any(item.get("email") == "seed-admin@example.test" and item.get("password") == "FromNestedEnv2026!" for item in credentials)
     assert any(item.get("email") == "ops@example.test" and item.get("password") == "Winter2026!" for item in credentials)
     assert "/ftp/credentials.txt" in seed_paths
     assert "/support/logs/access.log.2026-09-01" in seed_paths
+    assert "/support/logs/audit.json" in seed_paths
     assert any(item.get("kind") == "artifact" and item.get("path") == "/ftp/incident-support.kdbx" for item in loot)
     assert any(item.get("kind") == "secret" and item.get("path") == "/encryptionkeys/premium.key" for item in loot)
     assert "https://api.example.test/auth/login" in urls
+    assert "/rest/user/login" in login_paths
+    assert "/rest/user/reset-password" in reset_paths
+    assert any(
+        item.get("email") == "ops@example.test" and item.get("answer") == "NCC-1701"
+        for item in reset_candidates
+    )

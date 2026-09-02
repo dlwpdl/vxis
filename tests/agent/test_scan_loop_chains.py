@@ -1,7 +1,7 @@
 import pytest
 
 from vxis.agent.scan_loop import ScanAgentLoop
-from vxis.agent.tool_registry import ToolRegistry
+from vxis.agent.tool_registry import ToolRegistry, ToolResult
 from vxis.agent.tools.finding_tools import (
     LinkChainTool,
     ReportFindingTool,
@@ -24,7 +24,7 @@ def _chain_artifact(source_id: str, target_id: str, *, crown: str = "privileged 
         "target_finding_id": target_id,
         "source_output": "exposed config disclosed /support/logs and token abc",
         "pivot_action": "Reused token abc from the source finding against the target endpoint.",
-        "observed_result": "HTTP/1.1 200 OK\n\n{\"data\":\"privileged record\",\"token\":\"abc\"}",
+        "observed_result": 'HTTP/1.1 200 OK\n\n{"data":"privileged record","token":"abc"}',
         "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied without token abc",
         "crown_jewel_evidence": f"{crown} returned with token abc in the response.",
         "repeat_count": 2,
@@ -36,7 +36,7 @@ def _chain_artifact(source_id: str, target_id: str, *, crown: str = "privileged 
                 "target_finding_id": target_id,
                 "source_output": "exposed config disclosed /support/logs and token abc",
                 "pivot_action": "Reused token abc from the source finding against the target endpoint.",
-                "observed_result": "HTTP/1.1 200 OK\n\n{\"data\":\"privileged record\",\"token\":\"abc\"}",
+                "observed_result": 'HTTP/1.1 200 OK\n\n{"data":"privileged record","token":"abc"}',
                 "control_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied without token abc",
                 "repeat_count": 2,
                 "negative_result": "HTTP/1.1 403 Forbidden\n\nbaseline denied without token abc",
@@ -44,6 +44,19 @@ def _chain_artifact(source_id: str, target_id: str, *, crown: str = "privileged 
             }
         ],
     }
+
+
+class _HttpRequestTool:
+    name = "http_request"
+    description = "test http replay"
+    input_schema = {"type": "object", "properties": {}}
+
+    async def run(self, **kwargs) -> ToolResult:
+        path = str(kwargs.get("path", ""))
+        body = "role=user"
+        if "token=abc" in path:
+            body = "role=admin token=abc"
+        return ToolResult(ok=True, data={"status": 200, "body_preview": body})
 
 
 @pytest.mark.asyncio
@@ -85,20 +98,26 @@ async def test_weak_chain_proof_spawns_recursive_chain_challenge_branch():
     reg.register(ReportFindingTool())
     reg.register(LinkChainTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
-    first = await reg.dispatch("report_finding", {
-        "title": "debug leak",
-        "severity": "medium",
-        "finding_type": "information_disclosure",
-        "affected_component": "/debug",
-        "description": "debug endpoint leaked /admin and token abc",
-    })
-    second = await reg.dispatch("report_finding", {
-        "title": "admin data exposed",
-        "severity": "medium",
-        "finding_type": "broken_access_control",
-        "affected_component": "/admin",
-        "description": "admin endpoint returned sensitive data",
-    })
+    first = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "debug leak",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "debug endpoint leaked /admin and token abc",
+        },
+    )
+    second = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "admin data exposed",
+            "severity": "medium",
+            "finding_type": "broken_access_control",
+            "affected_component": "/admin",
+            "description": "admin endpoint returned sensitive data",
+        },
+    )
     args = {
         "finding_ids": [first.data["id"], second.data["id"]],
         "rationale": "debug leak led to admin data access",
@@ -121,33 +140,162 @@ async def test_weak_chain_proof_spawns_recursive_chain_challenge_branch():
 
 
 @pytest.mark.asyncio
+async def test_weak_chain_replay_spawns_recursive_chain_challenge_branch():
+    class _FlatHttpRequestTool:
+        name = "http_request"
+        description = "test http replay"
+        input_schema = {"type": "object", "properties": {}}
+
+        async def run(self, **kwargs) -> ToolResult:
+            return ToolResult(ok=True, data={"status": 200, "body_preview": "role=user"})
+
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
+    reg.register(_FlatHttpRequestTool())
+    loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
+    first = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "debug leak",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "debug endpoint leaked token abc",
+        },
+    )
+    second = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "admin data exposed",
+            "severity": "medium",
+            "finding_type": "broken_access_control",
+            "affected_component": "/admin",
+            "description": "admin endpoint returned privileged data",
+            "technical_analysis": "token replay appeared to reach admin data",
+            "poc_description": "Compare bad token and leaked token.",
+            "poc_script_code": (
+                "GET /admin?token=bad HTTP/1.1\nHost: example\n\n"
+                "HTTP/1.1 200 OK\n\nrole=user\n\n"
+                "GET /admin?token=abc HTTP/1.1\nHost: example\n\n"
+                "HTTP/1.1 200 OK\n\nrole=user"
+            ),
+            "control_comparison": "GET /admin?token=bad HTTP/1.1\nHost: example\n\n",
+            "request_or_payload": "GET /admin?token=abc HTTP/1.1\nHost: example\n\n",
+            "response_or_effect": "role=admin token=abc",
+            "remediation_steps": "Enforce authorization.",
+        },
+    )
+    args = {
+        "finding_ids": [first.data["id"], second.data["id"]],
+        "rationale": "debug leak led to admin data access",
+        "crown_jewel": "admin takeover",
+        "target": "http://localhost:3000",
+        "evidence_artifact": _chain_artifact(first.data["id"], second.data["id"], crown="admin token"),
+    }
+
+    result = await reg.dispatch("link_chain", args)
+    assert result.ok is False
+    assert result.error == "weak_chain_replay"
+
+    branch_id = loop._spawn_recursive_gap_branch_from_result("link_chain", args, result)
+
+    assert branch_id is not None
+    branch = loop.state.branches[branch_id]
+    assert branch.vector_id == "CHALLENGE-CHAIN"
+    assert branch.role == "post_exploit_worker"
+    assert branch.escalation_status == "needs_recursive_dig"
+
+
+@pytest.mark.asyncio
+async def test_link_chain_runs_machine_replay_when_target_is_supplied():
+    reg = ToolRegistry()
+    reg.register(ReportFindingTool())
+    reg.register(LinkChainTool())
+    reg.register(_HttpRequestTool())
+    first = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "debug leak",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "debug endpoint leaked token abc",
+        },
+    )
+    second = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "admin data exposed",
+            "severity": "medium",
+            "finding_type": "broken_access_control",
+            "affected_component": "/admin",
+            "description": "admin endpoint returned privileged data",
+            "technical_analysis": "Bad token returned role=user, leaked token returned role=admin.",
+            "poc_description": "Compare bad token and leaked token.",
+            "poc_script_code": (
+                "GET /admin?token=bad HTTP/1.1\nHost: example\n\n"
+                "HTTP/1.1 200 OK\n\nrole=user\n\n"
+                "GET /admin?token=abc HTTP/1.1\nHost: example\n\n"
+                "HTTP/1.1 200 OK\n\nrole=admin token=abc"
+            ),
+            "control_comparison": "GET /admin?token=bad HTTP/1.1\nHost: example\n\n",
+            "request_or_payload": "GET /admin?token=abc HTTP/1.1\nHost: example\n\n",
+            "response_or_effect": "role=admin token=abc",
+            "remediation_steps": "Enforce authorization.",
+        },
+    )
+
+    result = await reg.dispatch(
+        "link_chain",
+        {
+            "finding_ids": [first.data["id"], second.data["id"]],
+            "rationale": "debug leak token abc was replayed into the admin request",
+            "crown_jewel": "admin takeover",
+            "target": "http://localhost:3000",
+            "evidence_artifact": _chain_artifact(first.data["id"], second.data["id"], crown="admin token"),
+        },
+    )
+
+    assert result.ok is True
+    assert result.data["verification_status"] == "verified"
+    assert result.data["proof"]["machine_replay"]["status"] == "passed"
+
+
+@pytest.mark.asyncio
 async def test_suggested_chain_candidate_can_be_auto_linked():
     reg = ToolRegistry()
     reg.register(ReportFindingTool())
     reg.register(LinkChainTool())
 
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
-    await reg.dispatch("report_finding", {
-        "title": "debug leak",
-        "severity": "medium",
-        "finding_type": "information_disclosure",
-        "affected_component": "/debug",
-        "description": "debug endpoint exposed",
-        "evidence": "GET /debug HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlogin_path=/login token_hint=abc",
-    })
-    await reg.dispatch("report_finding", {
-        "title": "weak auth",
-        "severity": "medium",
-        "finding_type": "weak_auth",
-        "affected_component": "/login",
-        "description": "weak authentication evidence",
-        "evidence": (
-            "POST /login HTTP/1.1\n\nusername=bad&password=bad\n\n"
-            "HTTP/1.1 401 Unauthorized\n\n"
-            "POST /login HTTP/1.1\n\nusername=admin&password=admin\n\n"
-            "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
-        ),
-    })
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "debug leak",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "debug endpoint exposed",
+            "evidence": "GET /debug HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlogin_path=/login token_hint=abc",
+        },
+    )
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "weak auth",
+            "severity": "medium",
+            "finding_type": "weak_auth",
+            "affected_component": "/login",
+            "description": "weak authentication evidence",
+            "evidence": (
+                "POST /login HTTP/1.1\n\nusername=bad&password=bad\n\n"
+                "HTTP/1.1 401 Unauthorized\n\n"
+                "POST /login HTTP/1.1\n\nusername=admin&password=admin\n\n"
+                "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
+            ),
+        },
+    )
 
     candidates = loop._suggest_chain_candidates(limit=3)
     assert candidates
@@ -165,28 +313,37 @@ async def test_chain_candidates_prioritize_auth_foothold_to_post_auth_data_acces
     reg.register(LinkChainTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
 
-    first = await reg.dispatch("report_finding", {
-        "title": "Authentication bypass via sqli_bypass",
-        "severity": "medium",
-        "finding_type": "sql_injection",
-        "affected_component": "/rest/user/login",
-        "description": "Authentication succeeded via SQLi.",
-    })
-    await reg.dispatch("report_finding", {
-        "title": "Sensitive file exposed: /ftp/",
-        "severity": "medium",
-        "finding_type": "information_disclosure",
-        "affected_component": "/ftp/",
-        "description": "FTP directory exposed.",
-    })
-    third = await reg.dispatch("report_finding", {
-        "title": "Sensitive user data exposed on 4 endpoint(s)",
-        "severity": "medium",
-        "finding_type": "broken_access_control",
-        "affected_component": "http://localhost:3000",
-        "description": "Authenticated functionality exposed sensitive user data.",
-        "technical_analysis": "The post_auth_enum skill collected user-data-bearing endpoints after authentication.",
-    })
+    first = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Authentication bypass via sqli_bypass",
+            "severity": "medium",
+            "finding_type": "sql_injection",
+            "affected_component": "/rest/user/login",
+            "description": "Authentication succeeded via SQLi.",
+        },
+    )
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Sensitive file exposed: /ftp/",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/ftp/",
+            "description": "FTP directory exposed.",
+        },
+    )
+    third = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Sensitive user data exposed on 4 endpoint(s)",
+            "severity": "medium",
+            "finding_type": "broken_access_control",
+            "affected_component": "http://localhost:3000",
+            "description": "Authenticated functionality exposed sensitive user data.",
+            "technical_analysis": "The post_auth_enum skill collected user-data-bearing endpoints after authentication.",
+        },
+    )
 
     candidates = loop._suggest_chain_candidates(limit=3)
     assert candidates
@@ -219,30 +376,39 @@ async def test_settle_branches_after_chain_closes_parent_and_child_lineage():
         source_finding_id="VXIS-0001",
     )
 
-    first = await reg.dispatch("report_finding", {
-        "title": "Authentication bypass via sqli_bypass",
-        "severity": "medium",
-        "finding_type": "sql_injection",
-        "affected_component": "/rest/user/login",
-        "description": "Authentication succeeded via SQLi.",
-    })
-    second = await reg.dispatch("report_finding", {
-        "title": "Sensitive user data exposed on 4 endpoint(s)",
-        "severity": "medium",
-        "finding_type": "broken_access_control",
-        "affected_component": "http://localhost:3000",
-        "description": "Authenticated functionality exposed sensitive user data.",
-    })
-    linked = await reg.dispatch("link_chain", {
-        "finding_ids": [first.data["id"], second.data["id"]],
-        "rationale": "Authentication bypass session was reused to read sensitive user data.",
-        "crown_jewel": "authenticated data exfiltration",
-        "evidence_artifact": _chain_artifact(
-            first.data["id"],
-            second.data["id"],
-            crown="authenticated user data",
-        ),
-    })
+    first = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Authentication bypass via sqli_bypass",
+            "severity": "medium",
+            "finding_type": "sql_injection",
+            "affected_component": "/rest/user/login",
+            "description": "Authentication succeeded via SQLi.",
+        },
+    )
+    second = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Sensitive user data exposed on 4 endpoint(s)",
+            "severity": "medium",
+            "finding_type": "broken_access_control",
+            "affected_component": "http://localhost:3000",
+            "description": "Authenticated functionality exposed sensitive user data.",
+        },
+    )
+    linked = await reg.dispatch(
+        "link_chain",
+        {
+            "finding_ids": [first.data["id"], second.data["id"]],
+            "rationale": "Authentication bypass session was reused to read sensitive user data.",
+            "crown_jewel": "authenticated data exfiltration",
+            "evidence_artifact": _chain_artifact(
+                first.data["id"],
+                second.data["id"],
+                crown="authenticated user data",
+            ),
+        },
+    )
     assert linked.ok is True
 
     loop._settle_branches_after_chain([first.data["id"], second.data["id"]])
@@ -258,20 +424,26 @@ async def test_unverified_narrative_chain_does_not_settle_branches():
     reg.register(LinkChainTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
 
-    first = await reg.dispatch("report_finding", {
-        "title": "Informational route hint",
-        "severity": "low",
-        "finding_type": "misc",
-        "affected_component": "/hint",
-        "description": "Route hint observed.",
-    })
-    second = await reg.dispatch("report_finding", {
-        "title": "Benign header",
-        "severity": "low",
-        "finding_type": "misc",
-        "affected_component": "/header",
-        "description": "Header observed.",
-    })
+    first = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Informational route hint",
+            "severity": "low",
+            "finding_type": "misc",
+            "affected_component": "/hint",
+            "description": "Route hint observed.",
+        },
+    )
+    second = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Benign header",
+            "severity": "low",
+            "finding_type": "misc",
+            "affected_component": "/header",
+            "description": "Header observed.",
+        },
+    )
     branch = loop.state.ensure_branch(
         "manual:narrative",
         "MANUAL-NARRATIVE",
@@ -280,10 +452,13 @@ async def test_unverified_narrative_chain_does_not_settle_branches():
         source_finding_id=first.data["id"],
     )
 
-    linked = await reg.dispatch("link_chain", {
-        "finding_ids": [first.data["id"], second.data["id"]],
-        "rationale": "The two observations are related but no exploit chain was proven.",
-    })
+    linked = await reg.dispatch(
+        "link_chain",
+        {
+            "finding_ids": [first.data["id"], second.data["id"]],
+            "rationale": "The two observations are related but no exploit chain was proven.",
+        },
+    )
     assert linked.ok is True
     assert linked.data["verification_status"] == "narrative"
 
@@ -298,45 +473,60 @@ async def test_link_chain_dedups_similar_source_target_type_and_crown_jewel():
     reg.register(ReportFindingTool())
     reg.register(LinkChainTool())
 
-    await reg.dispatch("report_finding", {
-        "title": "Authentication bypass via sqli_bypass",
-        "severity": "medium",
-        "finding_type": "sql_injection",
-        "affected_component": "/rest/user/login",
-        "description": "Authentication succeeded via SQLi.",
-    })
-    await reg.dispatch("report_finding", {
-        "title": "Sensitive file exposed: /ftp/",
-        "severity": "medium",
-        "finding_type": "information_disclosure",
-        "affected_component": "/ftp/",
-        "description": "FTP directory exposed.",
-    })
-    await reg.dispatch("report_finding", {
-        "title": "Sensitive file exposed: /support/logs",
-        "severity": "medium",
-        "finding_type": "information_disclosure",
-        "affected_component": "/support/logs",
-        "description": "Logs exposed.",
-    })
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Authentication bypass via sqli_bypass",
+            "severity": "medium",
+            "finding_type": "sql_injection",
+            "affected_component": "/rest/user/login",
+            "description": "Authentication succeeded via SQLi.",
+        },
+    )
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Sensitive file exposed: /ftp/",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/ftp/",
+            "description": "FTP directory exposed.",
+        },
+    )
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Sensitive file exposed: /support/logs",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/support/logs",
+            "description": "Logs exposed.",
+        },
+    )
 
     findings = _get_findings()
     first = findings[0]["id"]
     second = findings[1]["id"]
     third = findings[2]["id"]
 
-    first_link = await reg.dispatch("link_chain", {
-        "finding_ids": [first, second],
-        "rationale": "Leaked content helps pivot.",
-        "crown_jewel": "privileged data exfiltration",
-        "evidence_artifact": _chain_artifact(first, second),
-    })
-    second_link = await reg.dispatch("link_chain", {
-        "finding_ids": [first, third],
-        "rationale": "Leaked content helps pivot again.",
-        "crown_jewel": "privileged data exfiltration",
-        "evidence_artifact": _chain_artifact(first, third),
-    })
+    first_link = await reg.dispatch(
+        "link_chain",
+        {
+            "finding_ids": [first, second],
+            "rationale": "Leaked content helps pivot.",
+            "crown_jewel": "privileged data exfiltration",
+            "evidence_artifact": _chain_artifact(first, second),
+        },
+    )
+    second_link = await reg.dispatch(
+        "link_chain",
+        {
+            "finding_ids": [first, third],
+            "rationale": "Leaked content helps pivot again.",
+            "crown_jewel": "privileged data exfiltration",
+            "evidence_artifact": _chain_artifact(first, third),
+        },
+    )
 
     assert first_link.ok is True
     assert second_link.ok is True
@@ -350,56 +540,65 @@ async def test_suggest_chain_candidates_keeps_best_source_per_target_and_crown()
     reg.register(ReportFindingTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
 
-    first = await reg.dispatch("report_finding", {
-        "title": "Sensitive file exposed: /support/logs",
-        "severity": "critical",
-        "finding_type": "information_disclosure",
-        "affected_component": "/support/logs",
-        "description": "leak",
-        "impact": "leak",
-        "technical_analysis": "Negative control missing path returned 404, exposed logs returned token twice. repeat_count=2",
-        "poc_description": "GET missing path, then GET logs twice.",
-        "poc_script_code": "GET /support/missing HTTP/1.1\n\nHTTP/1.1 404 Not Found\n\nnegative control\n\nGET /support/logs HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlog token=abc\n\nrepeat_count=2\nGET /support/logs HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlog token=abc",
-        "remediation_steps": "fix",
-    })
-    second = await reg.dispatch("report_finding", {
-        "title": "Sensitive file exposed: /ftp",
-        "severity": "critical",
-        "finding_type": "information_disclosure",
-        "affected_component": "/ftp",
-        "description": "leak",
-        "impact": "leak",
-        "technical_analysis": "Negative control missing path returned 404, exposed ftp returned backup twice. repeat_count=2",
-        "poc_description": "GET missing path, then GET ftp twice.",
-        "poc_script_code": "GET /ftp-missing HTTP/1.1\n\nHTTP/1.1 404 Not Found\n\nnegative control\n\nGET /ftp HTTP/1.1\n\nHTTP/1.1 200 OK\n\nbackup data\n\nrepeat_count=2\nGET /ftp HTTP/1.1\n\nHTTP/1.1 200 OK\n\nbackup data",
-        "remediation_steps": "fix",
-    })
-    target = await reg.dispatch("report_finding", {
-        "title": "Sensitive user data exposed on 4 endpoint(s)",
-        "severity": "high",
-        "finding_type": "broken_access_control",
-        "affected_component": "/api/profile",
-        "description": "post-auth exposure",
-        "impact": "impact",
-        "technical_analysis": "Negative control without auth returned 403, authenticated request returned profile data twice. repeat_count=2",
-        "poc_description": "Replay unauthenticated control, then authenticated profile request twice and compare responses.",
-        "poc_script_code": (
-            "GET /api/profile HTTP/1.1\nCookie: session=\n\n"
-            "HTTP/1.1 403 Forbidden\n\n"
-            "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
-            "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}\n\n"
-            "repeat_count=2\n"
-            "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
-            "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}"
-        ),
-        "remediation_steps": "fix",
-    })
+    first = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Sensitive file exposed: /support/logs",
+            "severity": "critical",
+            "finding_type": "information_disclosure",
+            "affected_component": "/support/logs",
+            "description": "leak",
+            "impact": "leak",
+            "technical_analysis": "Negative control missing path returned 404, exposed logs returned token twice. repeat_count=2",
+            "poc_description": "GET missing path, then GET logs twice.",
+            "poc_script_code": "GET /support/missing HTTP/1.1\n\nHTTP/1.1 404 Not Found\n\nnegative control\n\nGET /support/logs HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlog token=abc\n\nrepeat_count=2\nGET /support/logs HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlog token=abc",
+            "remediation_steps": "fix",
+        },
+    )
+    second = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Sensitive file exposed: /ftp",
+            "severity": "critical",
+            "finding_type": "information_disclosure",
+            "affected_component": "/ftp",
+            "description": "leak",
+            "impact": "leak",
+            "technical_analysis": "Negative control missing path returned 404, exposed ftp returned backup twice. repeat_count=2",
+            "poc_description": "GET missing path, then GET ftp twice.",
+            "poc_script_code": "GET /ftp-missing HTTP/1.1\n\nHTTP/1.1 404 Not Found\n\nnegative control\n\nGET /ftp HTTP/1.1\n\nHTTP/1.1 200 OK\n\nbackup data\n\nrepeat_count=2\nGET /ftp HTTP/1.1\n\nHTTP/1.1 200 OK\n\nbackup data",
+            "remediation_steps": "fix",
+        },
+    )
+    target = await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Sensitive user data exposed on 4 endpoint(s)",
+            "severity": "high",
+            "finding_type": "broken_access_control",
+            "affected_component": "/api/profile",
+            "description": "post-auth exposure",
+            "impact": "impact",
+            "technical_analysis": "Negative control without auth returned 403, authenticated request returned profile data twice. repeat_count=2",
+            "poc_description": "Replay unauthenticated control, then authenticated profile request twice and compare responses.",
+            "poc_script_code": (
+                "GET /api/profile HTTP/1.1\nCookie: session=\n\n"
+                "HTTP/1.1 403 Forbidden\n\n"
+                "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
+                'HTTP/1.1 200 OK\n\n{"data":"sensitive profile"}\n\n'
+                "repeat_count=2\n"
+                "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
+                'HTTP/1.1 200 OK\n\n{"data":"sensitive profile"}'
+            ),
+            "remediation_steps": "fix",
+        },
+    )
 
     candidates = loop._suggest_chain_candidates(limit=5)
     target_matches = [
-        c for c in candidates
-        if c["target_id"] == target.data["id"]
-        and c["crown_jewel"] == "sensitive record exposure"
+        c
+        for c in candidates
+        if c["target_id"] == target.data["id"] and c["crown_jewel"] == "sensitive record exposure"
     ]
     assert len(target_matches) == 1
     assert target_matches[0]["source_id"] in {first.data["id"], second.data["id"]}
@@ -412,47 +611,53 @@ async def test_suggest_chain_candidates_collapses_same_target_family():
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=3)
 
     for path in ("/support/logs", "/ftp", "/encryptionkeys"):
-        await reg.dispatch("report_finding", {
-            "title": f"Sensitive file exposed: {path}",
-            "severity": "critical",
-            "finding_type": "information_disclosure",
-            "affected_component": path,
-            "description": "leak",
-            "impact": "leak",
-            "technical_analysis": "Negative control missing path returned 404, exposed file returned content twice. repeat_count=2",
-            "poc_description": "GET missing path, then GET file twice.",
-            "poc_script_code": f"GET {path}-missing HTTP/1.1\n\nHTTP/1.1 404 Not Found\n\nnegative control\n\nGET {path} HTTP/1.1\n\nHTTP/1.1 200 OK\n\nsecret file content\n\nrepeat_count=2\nGET {path} HTTP/1.1\n\nHTTP/1.1 200 OK\n\nsecret file content",
+        await reg.dispatch(
+            "report_finding",
+            {
+                "title": f"Sensitive file exposed: {path}",
+                "severity": "critical",
+                "finding_type": "information_disclosure",
+                "affected_component": path,
+                "description": "leak",
+                "impact": "leak",
+                "technical_analysis": "Negative control missing path returned 404, exposed file returned content twice. repeat_count=2",
+                "poc_description": "GET missing path, then GET file twice.",
+                "poc_script_code": f"GET {path}-missing HTTP/1.1\n\nHTTP/1.1 404 Not Found\n\nnegative control\n\nGET {path} HTTP/1.1\n\nHTTP/1.1 200 OK\n\nsecret file content\n\nrepeat_count=2\nGET {path} HTTP/1.1\n\nHTTP/1.1 200 OK\n\nsecret file content",
+                "remediation_steps": "fix",
+            },
+        )
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "Sensitive user data exposed on 4 endpoint(s)",
+            "severity": "high",
+            "finding_type": "broken_access_control",
+            "affected_component": "/api/profile",
+            "description": "post-auth exposure",
+            "impact": "impact",
+            "technical_analysis": "Negative control without auth returned 403, authenticated request returned profile data twice. repeat_count=2",
+            "poc_description": "Replay unauthenticated control, then authenticated profile request twice and compare responses.",
+            "poc_script_code": (
+                "GET /api/profile HTTP/1.1\nCookie: session=\n\n"
+                "HTTP/1.1 403 Forbidden\n\n"
+                "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
+                'HTTP/1.1 200 OK\n\n{"data":"sensitive profile"}\n\n'
+                "repeat_count=2\n"
+                "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
+                'HTTP/1.1 200 OK\n\n{"data":"sensitive profile"}'
+            ),
             "remediation_steps": "fix",
-        })
-    await reg.dispatch("report_finding", {
-        "title": "Sensitive user data exposed on 4 endpoint(s)",
-        "severity": "high",
-        "finding_type": "broken_access_control",
-        "affected_component": "/api/profile",
-        "description": "post-auth exposure",
-        "impact": "impact",
-        "technical_analysis": "Negative control without auth returned 403, authenticated request returned profile data twice. repeat_count=2",
-        "poc_description": "Replay unauthenticated control, then authenticated profile request twice and compare responses.",
-        "poc_script_code": (
-            "GET /api/profile HTTP/1.1\nCookie: session=\n\n"
-            "HTTP/1.1 403 Forbidden\n\n"
-            "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
-            "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}\n\n"
-            "repeat_count=2\n"
-            "GET /api/profile HTTP/1.1\nCookie: session=valid\n\n"
-            "HTTP/1.1 200 OK\n\n{\"data\":\"sensitive profile\"}"
-        ),
-        "remediation_steps": "fix",
-    })
+        },
+    )
 
     candidates = loop._suggest_chain_candidates(limit=10)
     family = [
-        c for c in candidates
+        c
+        for c in candidates
         if c["target_type"] == "broken_access_control"
         and c["crown_jewel"] == "sensitive record exposure"
     ]
     assert len(family) == 1
-
 
 
 @pytest.mark.asyncio
@@ -465,27 +670,33 @@ async def test_display_chain_cache_matches_direct_and_invalidates():
     reg.register(ReportFindingTool())
     loop = ScanAgentLoop(target="http://localhost:3000", registry=reg, max_iters=6)
 
-    await reg.dispatch("report_finding", {
-        "title": "debug leak",
-        "severity": "medium",
-        "finding_type": "information_disclosure",
-        "affected_component": "/debug",
-        "description": "debug endpoint exposed",
-        "evidence": "GET /debug HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlogin_path=/login token_hint=abc",
-    })
-    await reg.dispatch("report_finding", {
-        "title": "weak auth",
-        "severity": "medium",
-        "finding_type": "weak_auth",
-        "affected_component": "/login",
-        "description": "weak authentication evidence",
-        "evidence": (
-            "POST /login HTTP/1.1\n\nusername=bad&password=bad\n\n"
-            "HTTP/1.1 401 Unauthorized\n\n"
-            "POST /login HTTP/1.1\n\nusername=admin&password=admin\n\n"
-            "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
-        ),
-    })
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "debug leak",
+            "severity": "medium",
+            "finding_type": "information_disclosure",
+            "affected_component": "/debug",
+            "description": "debug endpoint exposed",
+            "evidence": "GET /debug HTTP/1.1\n\nHTTP/1.1 200 OK\n\nlogin_path=/login token_hint=abc",
+        },
+    )
+    await reg.dispatch(
+        "report_finding",
+        {
+            "title": "weak auth",
+            "severity": "medium",
+            "finding_type": "weak_auth",
+            "affected_component": "/login",
+            "description": "weak authentication evidence",
+            "evidence": (
+                "POST /login HTTP/1.1\n\nusername=bad&password=bad\n\n"
+                "HTTP/1.1 401 Unauthorized\n\n"
+                "POST /login HTTP/1.1\n\nusername=admin&password=admin\n\n"
+                "HTTP/1.1 200 OK\nSet-Cookie: session=admin"
+            ),
+        },
+    )
     assert len(_get_findings()) == 2  # both stored -> a real state to chain over
 
     # cached display result equals a fresh direct computation for the same state
@@ -501,13 +712,15 @@ async def test_display_chain_cache_matches_direct_and_invalidates():
     # report_finding acceptance gate, which is irrelevant to the cache logic.
     from vxis.agent.tools.finding_tools import _store
 
-    _store().findings.append({
-        "id": "F-EXTRA",
-        "severity": "critical",
-        "finding_type": "ssrf",
-        "affected_component": "/fetch",
-        "title": "ssrf sink",
-    })
+    _store().findings.append(
+        {
+            "id": "F-EXTRA",
+            "severity": "critical",
+            "finding_type": "ssrf",
+            "affected_component": "/fetch",
+            "title": "ssrf sink",
+        }
+    )
     assert len(_get_findings()) == 3
     recached = loop._chain_candidates_for_display(limit=3)
     assert loop._cp_chain_sig != sig_before  # signature invalidated by the new finding

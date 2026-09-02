@@ -50,7 +50,7 @@ REPORT_FILE = Path("tools/benchmark/growth_report.md")
 
 KST = timezone(timedelta(hours=9))
 
-from vxis.registry import TARGETS_DICT as TARGETS, DIM_NAMES_KO, DIM_MAX
+from vxis.registry import TARGETS_DICT as TARGETS, DIM_NAMES_KO, DIM_MAX  # noqa: E402
 
 # 판정 임계값
 IMPROVED_THRESHOLD = 5.0   # +5점 이상 → 자동 반영
@@ -83,8 +83,15 @@ def ensure_docker_targets(target_names: list[str]) -> list[tuple[str, str]]:
             print(f"  [START] {name} — docker compose up in {compose_dir}...")
             try:
                 subprocess.run(
-                    ["docker", "compose", "-f", f"{compose_dir}/docker-compose.yml",
-                     "up", "-d"],
+                    [
+                        "docker",
+                        "compose",
+                        "-f",
+                        f"{compose_dir}/docker-compose.yml",
+                        "--compatibility",
+                        "up",
+                        "-d",
+                    ],
                     capture_output=True, text=True, timeout=120,
                 )
             except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
@@ -506,8 +513,8 @@ def main() -> None:
         help="LLM provider: together, anthropic (default: auto-detect from env)",
     )
     parser.add_argument(
-        "--targets", default="dvwa,juice-shop,webgoat,nodegoat",
-        help="Comma-separated target names (default: dvwa,juice-shop,webgoat,nodegoat)",
+        "--targets", default="dvwa,juice-shop,webgoat,crapi",
+        help="Comma-separated target names (default: dvwa,juice-shop,webgoat,crapi)",
     )
     parser.add_argument(
         "--iterations", type=int, default=None,
@@ -544,10 +551,10 @@ def main() -> None:
     # 타겟 준비
     target_names = [t.strip() for t in args.targets.split(",")]
     print(f"\n{'#' * 60}")
-    print(f"  VXIS Growth Loop Runner")
+    print("  VXIS Growth Loop Runner")
     print(f"  Time: {datetime.now(KST).strftime('%Y-%m-%d %H:%M')} KST")
     print(f"  Targets: {', '.join(target_names)}")
-    print(f"  Brain: AgentBrain (LLM)")
+    print("  Brain: AgentBrain (LLM)")
     print(f"  Provider: {args.provider or 'auto'}")
     if until_hour_kst is not None:
         print(f"  Until: {until_hour_kst:02d}:00 KST")
@@ -607,7 +614,7 @@ def main() -> None:
                 comp = result.get("comparison")
                 if comp and comp.total_delta > 0:
                     result["runner"].save_baseline(result["score_obj"])
-                    print(f"  ✅ Baseline updated!")
+                    print("  ✅ Baseline updated!")
             else:
                 print(f"  ❌ ERROR: {result['error']}")
 
@@ -651,7 +658,7 @@ def main() -> None:
         if improvement > 0 and iteration > 1:
             print(f"  📈 +{improvement:.1f}점 성장!")
         elif iteration > 1:
-            print(f"  ➡️ 개선 없음 — 계속 시도")
+            print("  ➡️ 개선 없음 — 계속 시도")
 
         # 전략 조정
         action = apply_strategy(weakest_dim, iteration)
@@ -661,12 +668,12 @@ def main() -> None:
 
         # 다음 반복 전 대기
         if should_continue(iteration, max_iterations, until_hour_kst):
-            print(f"\n  [WAIT] 30초 후 다음 반복...")
+            print("\n  [WAIT] 30초 후 다음 반복...")
             time.sleep(30)
 
     # ── 최종 판정 ──
     print(f"\n{'#' * 60}")
-    print(f"  Growth Loop 완료 — 판정 중...")
+    print("  Growth Loop 완료 — 판정 중...")
     print(f"{'#' * 60}")
 
     # 판정 생성

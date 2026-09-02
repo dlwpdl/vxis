@@ -9,6 +9,8 @@ from typing import Any
 import pytest
 
 test_api_security_mod = importlib.import_module("vxis.agent.skills.test_api_security")
+surface_mod = importlib.import_module("vxis.agent.skills._api_security_surface_discovery")
+crown_mod = importlib.import_module("vxis.agent.skills._api_security_crown")
 parse_openapi = importlib.import_module("vxis.primitives.patterns").parse_openapi
 
 
@@ -172,7 +174,7 @@ def test_parse_openapi_ignores_non_mapping_text() -> None:
 
 
 def test_action_api_privileged_candidates_ignore_read_only_actions() -> None:
-    candidates = test_api_security_mod._extract_action_privileged_candidates(
+    candidates = surface_mod._extract_action_privileged_candidates(
         {
             "/admin/R": {"GetUserList", "SetUserRole", "DeleteUser"},
             "/profile/R": {"GetProfile"},
@@ -211,7 +213,7 @@ def test_graphql_privileged_candidates_build_mutation_probe() -> None:
         ],
     }
 
-    candidates = test_api_security_mod._extract_graphql_privileged_candidates(schema, "/graphql")
+    candidates = surface_mod._extract_graphql_privileged_candidates(schema, "/graphql")
 
     assert len(candidates) == 1
     assert candidates[0]["path"] == "/graphql"
@@ -221,7 +223,7 @@ def test_graphql_privileged_candidates_build_mutation_probe() -> None:
 
 @pytest.mark.asyncio
 async def test_privileged_probe_requires_low_priv_denial_when_baseline_exists() -> None:
-    proof = await test_api_security_mod._probe_privileged_access(
+    proof = await crown_mod._probe_privileged_access(
         _PrivilegedProbeSession(),
         target="https://app.example.test",
         elevated_token="elevated",
@@ -236,7 +238,7 @@ async def test_privileged_probe_requires_low_priv_denial_when_baseline_exists() 
 
 @pytest.mark.asyncio
 async def test_privileged_probe_supports_action_api_token_in_body() -> None:
-    proof = await test_api_security_mod._probe_privileged_access(
+    proof = await crown_mod._probe_privileged_access(
         _ActionApiProbeSession(),
         target="https://app.example.test",
         elevated_token="elevated",
@@ -849,3 +851,337 @@ async def test_api_security_adapts_self_write_body_from_validation_errors(
         and (call["kwargs"].get("json_data") or {}).get("old_email") == "alice@example.test"
     ]
     assert successful
+
+
+class _ReloginSelfWriteMassAssignmentSession:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.password = "OrigPass!2026"
+        self.role = "user"
+        self.admin_token = ""
+
+    async def request(self, method: str, path: str, **kwargs: Any) -> _Resp:
+        from urllib.parse import urlparse
+
+        self.calls.append({"method": method, "path": path, "kwargs": kwargs})
+        route = urlparse(path).path or path
+        auth = str((kwargs.get("headers") or {}).get("Authorization") or "")
+        body = dict(kwargs.get("json_data") or {})
+
+        if method == "POST" and route == "/api/v2/user/change-password":
+            if auth != "Bearer tok-foothold":
+                return _Resp(403, json.dumps({"error": "forbidden"}), {"content-type": "application/json"})
+            if not body.get("new_password") or not body.get("repeat_password"):
+                return _Resp(
+                    400,
+                    json.dumps(
+                        {
+                            "message": "Validation failed",
+                            "details": (
+                                "Field error in object 'changePasswordForm' on field 'new_password': rejected value [null]; "
+                                "Field error in object 'changePasswordForm' on field 'repeat_password': rejected value [null]"
+                            ),
+                        }
+                    ),
+                    {"content-type": "application/json"},
+                )
+            if body.get("new_password") != body.get("repeat_password"):
+                return _Resp(400, json.dumps({"error": "mismatch"}), {"content-type": "application/json"})
+            self.password = str(body.get("new_password") or self.password)
+            self.role = "admin" if str(body.get("role") or "") == "admin" else "user"
+            return _Resp(200, json.dumps({"status": "updated"}), {"content-type": "application/json"})
+
+        if method == "POST" and route == "/internal/auth/login":
+            email = str(body.get("email") or "")
+            password = str(body.get("password") or "")
+            if email == "x":
+                return _Resp(401, json.dumps({"error": "missing"}), {"content-type": "application/json"})
+            if email == "baseline-check@example.invalid":
+                return _Resp(401, json.dumps({"error": "invalid"}), {"content-type": "application/json"})
+            if email == "alice@example.test" and password == self.password:
+                token = _jwt({"email": email, "role": self.role, "username": "alice"})
+                if self.role == "admin":
+                    self.admin_token = token
+                return _Resp(
+                    200,
+                    json.dumps(
+                        {
+                            "authentication": {"token": token},
+                            "user": {"email": email, "role": self.role, "username": "alice"},
+                        }
+                    ),
+                    {"content-type": "application/json"},
+                )
+            return _Resp(401, json.dumps({"error": "invalid"}), {"content-type": "application/json"})
+
+        if method == "GET" and route == "/admin/panel":
+            if auth == f"Bearer {self.admin_token}":
+                return _Resp(200, json.dumps({"ok": True, "scope": "admin"}), {"content-type": "application/json"})
+            return _Resp(403, json.dumps({"error": "forbidden"}), {"content-type": "application/json"})
+
+        return _Resp(404, "not found")
+
+
+@pytest.mark.asyncio
+async def test_api_security_relogs_after_self_write_password_escalation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _ReloginSelfWriteMassAssignmentSession()
+    manager = _FakeSessionManager(session)
+    monkeypatch.setattr("vxis.interaction.hands.SessionManager", lambda: manager)
+
+    result = await test_api_security_mod.execute(
+        "https://app.example.test",
+        token="tok-foothold",
+        login_paths=["/internal/auth/login"],
+        identities=[
+            {"name": "alice", "token": "tok-foothold", "email": "alice@example.test"},
+            {"name": "bob", "token": "tok-bob", "email": "bob@example.test"},
+        ],
+        discovered_paths=["/api/v2/user/change-password"],
+    )
+
+    mass = next(f for f in result["findings"] if f["type"] == "mass_assignment")
+    assert mass["endpoint"] == "/api/v2/user/change-password"
+    assert mass["credential_evidence"]["login_endpoint"] == "/internal/auth/login"
+    assert mass["credential_evidence"]["persisted_role"] == "admin"
+    assert mass["credential_evidence"]["principal"]["email"] == "alice@example.test"
+    assert mass["credential_evidence"]["principal"]["password"].startswith("Test1234!")
+    assert mass["credential_evidence"]["privileged_access_proof"]["baseline_status"] == 403
+    assert mass["credential_evidence"]["privileged_access_proof"]["elevated_status"] == 200
+    assert "/internal/auth/login" in mass["credential_evidence"]["replay_commands"]["relogin"]
+    assert any(call["path"] == "https://app.example.test/internal/auth/login" for call in session.calls)
+
+
+class _CredentialSeedSelfWriteMassAssignmentSession:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.password = "OrigPass!2026"
+        self.role = "user"
+        self.admin_token = ""
+
+    async def request(self, method: str, path: str, **kwargs: Any) -> _Resp:
+        from urllib.parse import urlparse
+
+        self.calls.append({"method": method, "path": path, "kwargs": kwargs})
+        route = urlparse(path).path or path
+        auth = str((kwargs.get("headers") or {}).get("Authorization") or "")
+        body = dict(kwargs.get("json_data") or {})
+
+        if method == "POST" and route == "/api/v2/user/change-password":
+            if auth != "Bearer tok-foothold":
+                return _Resp(403, json.dumps({"error": "forbidden"}), {"content-type": "application/json"})
+            if not body.get("currentPassword") or not body.get("newPassword") or not body.get("repeatPassword"):
+                return _Resp(
+                    400,
+                    json.dumps(
+                        {
+                            "message": "Validation failed",
+                            "details": (
+                                "Field error in object 'changePasswordForm' on field 'currentPassword': rejected value [null]; "
+                                "Field error in object 'changePasswordForm' on field 'newPassword': rejected value [null]; "
+                                "Field error in object 'changePasswordForm' on field 'repeatPassword': rejected value [null]"
+                            ),
+                        }
+                    ),
+                    {"content-type": "application/json"},
+                )
+            if body.get("currentPassword") != self.password:
+                return _Resp(403, json.dumps({"error": "bad_current_password"}), {"content-type": "application/json"})
+            if body.get("newPassword") != body.get("repeatPassword"):
+                return _Resp(400, json.dumps({"error": "mismatch"}), {"content-type": "application/json"})
+            self.password = str(body.get("newPassword") or self.password)
+            self.role = "admin" if str(body.get("role") or "") == "admin" else "user"
+            return _Resp(200, json.dumps({"status": "updated"}), {"content-type": "application/json"})
+
+        if method == "POST" and route == "/internal/auth/login":
+            email = str(body.get("email") or "")
+            password = str(body.get("password") or "")
+            if email == "x":
+                return _Resp(401, json.dumps({"error": "missing"}), {"content-type": "application/json"})
+            if email == "baseline-check@example.invalid":
+                return _Resp(401, json.dumps({"error": "invalid"}), {"content-type": "application/json"})
+            if email == "alice@example.test" and password == self.password:
+                token = _jwt({"email": email, "role": self.role, "username": "alice"})
+                if self.role == "admin":
+                    self.admin_token = token
+                return _Resp(
+                    200,
+                    json.dumps(
+                        {
+                            "authentication": {"token": token},
+                            "user": {"email": email, "role": self.role, "username": "alice"},
+                        }
+                    ),
+                    {"content-type": "application/json"},
+                )
+            return _Resp(401, json.dumps({"error": "invalid"}), {"content-type": "application/json"})
+
+        if method == "GET" and route == "/admin/panel":
+            if auth == f"Bearer {self.admin_token}":
+                return _Resp(200, json.dumps({"ok": True, "scope": "admin"}), {"content-type": "application/json"})
+            return _Resp(403, json.dumps({"error": "forbidden"}), {"content-type": "application/json"})
+
+        return _Resp(404, "not found")
+
+
+@pytest.mark.asyncio
+async def test_api_security_uses_credentials_to_fill_current_password_and_relogin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _CredentialSeedSelfWriteMassAssignmentSession()
+    manager = _FakeSessionManager(session)
+    monkeypatch.setattr("vxis.interaction.hands.SessionManager", lambda: manager)
+
+    result = await test_api_security_mod.execute(
+        "https://app.example.test",
+        token="tok-foothold",
+        login_paths=["/internal/auth/login"],
+        credentials=[{"email": "alice@example.test", "password": "OrigPass!2026"}],
+        identities=[
+            {"name": "alice", "token": "tok-foothold"},
+            {"name": "bob", "token": "tok-bob"},
+        ],
+        discovered_paths=["/api/v2/user/change-password"],
+    )
+
+    mass = next(f for f in result["findings"] if f["type"] == "mass_assignment")
+    replay = mass["credential_evidence"]["replay_commands"]["self_write"]
+    assert mass["endpoint"] == "/api/v2/user/change-password"
+    assert mass["credential_evidence"]["login_endpoint"] == "/internal/auth/login"
+    assert mass["credential_evidence"]["principal"]["email"] == "alice@example.test"
+    assert mass["credential_evidence"]["persisted_role"] == "admin"
+    assert '"currentPassword":"OrigPass!2026"' in replay
+    assert '"newPassword":"' in replay
+    assert '"repeatPassword":"' in replay
+    assert mass["credential_evidence"]["privileged_access_proof"]["baseline_status"] == 403
+    assert mass["credential_evidence"]["privileged_access_proof"]["elevated_status"] == 200
+
+
+class _CredentialSeedProfileChangeSession:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.email = "alice@example.test"
+        self.username = "alice"
+        self.password = "OrigPass!2026"
+        self.role = "user"
+        self.admin_token = ""
+
+    async def request(self, method: str, path: str, **kwargs: Any) -> _Resp:
+        from urllib.parse import urlparse
+
+        self.calls.append({"method": method, "path": path, "kwargs": kwargs})
+        route = urlparse(path).path or path
+        auth = str((kwargs.get("headers") or {}).get("Authorization") or "")
+        body = dict(kwargs.get("json_data") or {})
+
+        if method == "POST" and route == "/api/v2/user/change-profile":
+            if auth != "Bearer tok-foothold":
+                return _Resp(403, json.dumps({"error": "forbidden"}), {"content-type": "application/json"})
+            required = (
+                "currentEmail",
+                "newEmail",
+                "currentUsername",
+                "newUsername",
+                "passwordConfirmation",
+            )
+            if any(not body.get(key) for key in required):
+                return _Resp(
+                    400,
+                    json.dumps(
+                        {
+                            "message": "Validation failed",
+                            "details": (
+                                "Field error in object 'changeProfileForm' on field 'currentEmail': rejected value [null]; "
+                                "Field error in object 'changeProfileForm' on field 'newEmail': rejected value [null]; "
+                                "Field error in object 'changeProfileForm' on field 'currentUsername': rejected value [null]; "
+                                "Field error in object 'changeProfileForm' on field 'newUsername': rejected value [null]; "
+                                "Field error in object 'changeProfileForm' on field 'passwordConfirmation': rejected value [null]"
+                            ),
+                        }
+                    ),
+                    {"content-type": "application/json"},
+                )
+            if body.get("currentEmail") != self.email or body.get("currentUsername") != self.username:
+                return _Resp(403, json.dumps({"error": "bad_current_identity"}), {"content-type": "application/json"})
+            if body.get("passwordConfirmation") != self.password:
+                return _Resp(403, json.dumps({"error": "bad_confirmation"}), {"content-type": "application/json"})
+            self.email = str(body.get("newEmail") or self.email)
+            self.username = str(body.get("newUsername") or self.username)
+            self.role = "admin" if str(body.get("role") or "") == "admin" else "user"
+            return _Resp(200, json.dumps({"status": "updated"}), {"content-type": "application/json"})
+
+        if method == "POST" and route == "/internal/auth/login":
+            email = str(body.get("email") or "")
+            username = str(body.get("username") or "")
+            password = str(body.get("password") or "")
+            if email == "x":
+                return _Resp(401, json.dumps({"error": "missing"}), {"content-type": "application/json"})
+            if email == "baseline-check@example.invalid":
+                return _Resp(401, json.dumps({"error": "invalid"}), {"content-type": "application/json"})
+            if username == self.username and password == self.password:
+                token = _jwt({"email": self.email, "role": self.role, "username": self.username})
+                if self.role == "admin":
+                    self.admin_token = token
+                return _Resp(
+                    200,
+                    json.dumps(
+                        {
+                            "authentication": {"token": token},
+                            "user": {"email": self.email, "role": self.role, "username": self.username},
+                        }
+                    ),
+                    {"content-type": "application/json"},
+                )
+            return _Resp(401, json.dumps({"error": "invalid"}), {"content-type": "application/json"})
+
+        if method == "GET" and route == "/admin/panel":
+            if auth == f"Bearer {self.admin_token}":
+                return _Resp(200, json.dumps({"ok": True, "scope": "admin"}), {"content-type": "application/json"})
+            return _Resp(403, json.dumps({"error": "forbidden"}), {"content-type": "application/json"})
+
+        return _Resp(404, "not found")
+
+
+@pytest.mark.asyncio
+async def test_api_security_handles_current_and_new_identity_aliases_for_self_write_relogin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _CredentialSeedProfileChangeSession()
+    manager = _FakeSessionManager(session)
+    monkeypatch.setattr("vxis.interaction.hands.SessionManager", lambda: manager)
+
+    result = await test_api_security_mod.execute(
+        "https://app.example.test",
+        token="tok-foothold",
+        login_paths=["/internal/auth/login"],
+        credentials=[
+            {
+                "email": "alice@example.test",
+                "username": "alice",
+                "password": "OrigPass!2026",
+            }
+        ],
+        identities=[
+            {"name": "alice", "token": "tok-foothold"},
+            {"name": "bob", "token": "tok-bob"},
+        ],
+        discovered_paths=["/api/v2/user/change-profile"],
+    )
+
+    mass = next(f for f in result["findings"] if f["type"] == "mass_assignment")
+    replay = mass["credential_evidence"]["replay_commands"]["self_write"]
+    relogin = mass["credential_evidence"]["replay_commands"]["relogin"]
+    assert mass["endpoint"] == "/api/v2/user/change-profile"
+    assert mass["credential_evidence"]["login_endpoint"] == "/internal/auth/login"
+    assert mass["credential_evidence"]["identity"] == "username"
+    assert mass["credential_evidence"]["principal"]["email"] != "alice@example.test"
+    assert mass["credential_evidence"]["principal"]["username"] != "alice"
+    assert '"currentEmail":"alice@example.test"' in replay
+    assert '"currentUsername":"alice"' in replay
+    assert '"newEmail":"' in replay
+    assert '"newUsername":"' in replay
+    assert '"passwordConfirmation":"OrigPass!2026"' in replay
+    assert '"username":"' in relogin
+    assert mass["credential_evidence"]["privileged_access_proof"]["baseline_status"] == 403
+    assert mass["credential_evidence"]["privileged_access_proof"]["elevated_status"] == 200

@@ -130,10 +130,9 @@ async def ghost_verify() -> dict:
 
 def ghost_status() -> dict:
     """Return the current ghost layer status."""
-    return {
-        "active": ghost_layer.is_active(),
-        "proxy_count": len(getattr(ghost_layer, "_proxy_pool", []) or []),
-    }
+    from vxis.ghost.routing import ghost_status_snapshot
+
+    return ghost_status_snapshot()
 
 
 def ghost_deactivate() -> None:

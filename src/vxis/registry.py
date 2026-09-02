@@ -83,9 +83,9 @@ BENCHMARK_TARGETS: list[TargetInfo] = [
     ),
     TargetInfo(
         "crapi",
-        "http://localhost:8025",
-        "8025:8025",
-        compose="tools/targets/crapi",
+        "http://localhost:8889",
+        "8889:80",
+        compose="infra/benchmarks/crapi",
         category="API",
         description="API 보안 (OWASP API Top 10)",
     ),

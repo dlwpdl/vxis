@@ -322,6 +322,71 @@ def _stringify_artifact_value(value: Any, *, limit: int = 3000) -> str:
         return str(value)[:limit]
 
 
+def _extract_chain_artifact_from_text(value: Any) -> dict[str, Any]:
+    if not isinstance(value, str):
+        return {}
+    text = _normalize_poc_transcript(value).strip()
+    if not text:
+        return {}
+    fields: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        if ":" not in raw_line:
+            continue
+        key, raw_value = raw_line.split(":", 1)
+        normalized_key = key.strip().lower().replace(" ", "_")
+        normalized_value = raw_value.strip()
+        if normalized_key and normalized_value and normalized_key not in fields:
+            fields[normalized_key] = normalized_value
+    if not any(
+        key in fields
+        for key in (
+            "source_output",
+            "crown_jewel_evidence",
+            "control",
+            "payload",
+            "delta",
+            "repeat_count",
+        )
+    ):
+        return {}
+    artifact: dict[str, Any] = {
+        "verification_method": "finding_embedded_evidence_artifact",
+    }
+    source_output = fields.get("source_output", "")
+    target = fields.get("target", "")
+    payload = fields.get("payload", "")
+    repro = fields.get("repro", "")
+    delta = fields.get("delta", "")
+    control = fields.get("control", "")
+    crown = fields.get("crown_jewel_evidence", "") or delta
+    if source_output:
+        artifact["source_output"] = source_output
+    pivot_action = payload or repro
+    if target and pivot_action:
+        pivot_action = f"{pivot_action} target={target}"
+    elif target:
+        pivot_action = f"Replay against {target}"
+    if pivot_action:
+        artifact["pivot_action"] = pivot_action
+    if delta:
+        artifact["observed_result"] = f"observed_result: {delta}"
+    if control:
+        artifact["control_result"] = f"control: {control}"
+        artifact.setdefault("negative_result", f"negative_control: {control}")
+    if crown:
+        artifact["crown_jewel_evidence"] = crown
+    if "repeat_count" in fields:
+        try:
+            artifact["repeat_count"] = int(fields["repeat_count"])
+        except (TypeError, ValueError):
+            artifact["repeat_count"] = 0
+    if "source_output_used_in_pivot" in fields:
+        artifact["source_output_used_in_pivot"] = fields[
+            "source_output_used_in_pivot"
+        ].strip().lower() in {"1", "true", "yes", "on"}
+    return artifact
+
+
 def _normalize_chain_artifact(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         text = value.strip()
@@ -330,6 +395,9 @@ def _normalize_chain_artifact(value: Any) -> dict[str, Any]:
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:
+            extracted = _extract_chain_artifact_from_text(text)
+            if extracted:
+                return extracted
             return {"observed_result": _normalize_poc_transcript(text)}
         value = parsed
     if not isinstance(value, dict):
@@ -960,6 +1028,16 @@ class ReportFindingTool:
             kwargs.get("replay_gate"),
             machine=bool(kwargs.get("_replay_gate_machine")),
         )
+        explicit_evidence_artifact = _normalize_chain_artifact(
+            kwargs.get("evidence_artifact")
+            or kwargs.get("chain_evidence")
+            or kwargs.get("proof")
+            or {}
+        )
+        embedded_evidence_artifact = _extract_chain_artifact_from_text(
+            normalized["poc_script_code"]
+        )
+        stored_evidence_artifact = explicit_evidence_artifact or embedded_evidence_artifact
 
         for existing in findings:
             ex_type = _normalize(_canonical_finding_type(existing["finding_type"]))
@@ -1063,6 +1141,18 @@ class ReportFindingTool:
                     or not existing.get("replay_gate")
                 ):
                     existing["replay_gate"] = normalized_replay_gate
+                if stored_evidence_artifact and (
+                    not isinstance(existing.get("evidence_artifact"), dict)
+                    or len(json.dumps(stored_evidence_artifact, sort_keys=True, default=str))
+                    > len(
+                        json.dumps(
+                            existing.get("evidence_artifact") or {},
+                            sort_keys=True,
+                            default=str,
+                        )
+                    )
+                ):
+                    existing["evidence_artifact"] = dict(stored_evidence_artifact)
                 existing["acceptance_status"] = _finding_acceptance_status(
                     severity=str(existing.get("severity", "")).lower(),
                     proof=existing.get("proof", {}),
@@ -1108,6 +1198,7 @@ class ReportFindingTool:
             "cwe": str(kwargs.get("cwe", "")),
             "extra_evidence": normalized_extra_evidence,
             "replay_gate": normalized_replay_gate,
+            "evidence_artifact": dict(stored_evidence_artifact),
             "proof": proof if severity in ("high", "critical") else {},
             "acceptance_status": _finding_acceptance_status(
                 severity=severity,
@@ -1255,9 +1346,24 @@ class LinkChainTool:
             "chain_evidence": {
                 "description": "Legacy alias for evidence_artifact.",
             },
+            "target": {
+                "type": "string",
+                "description": "Optional scan target base URL. When present, VXIS replays the hop on the target before accepting a crown chain.",
+            },
         },
         "required": ["finding_ids", "rationale"],
     }
+
+    def __init__(self) -> None:
+        self._dispatch: Callable[[str, dict[str, Any]], Any] | None = None
+
+    def set_dispatch(self, dispatch: Callable[[str, dict[str, Any]], Any]) -> None:
+        self._dispatch = dispatch
+
+    def _has_http_request_oracle(self) -> bool:
+        dispatch_owner = getattr(self._dispatch, "__self__", None)
+        has_tool = getattr(dispatch_owner, "has_tool", None)
+        return bool(callable(has_tool) and has_tool("http_request"))
 
     async def run(self, **kwargs: Any) -> ToolResult:
         store = _store()
@@ -1319,6 +1425,30 @@ class LinkChainTool:
                 error="weak_chain_proof",
                 data={"proof": proof},
             )
+        target = str(kwargs.get("target") or kwargs.get("scan_target") or "").strip()
+        if target and callable(self._dispatch) and self._has_http_request_oracle():
+            from vxis.agent.replay_gate import machine_chain_replay_gate
+
+            machine_replay = await machine_chain_replay_gate(
+                finding_ids=[str(fid) for fid in finding_ids],
+                evidence_artifact=evidence_artifact,
+                target=target,
+                dispatch=self._dispatch,
+                findings_by_id={
+                    str(finding.get("id", "")): finding
+                    for finding in findings
+                    if str(finding.get("id", "")).strip()
+                },
+            )
+            proof["machine_replay"] = machine_replay
+            if str(machine_replay.get("status", "")).lower() != "passed":
+                reason = str(machine_replay.get("reason", "")).strip() or "chain replay failed"
+                return ToolResult(
+                    ok=False,
+                    summary=f"link_chain: chain replay did not pass ({reason})",
+                    error="weak_chain_replay",
+                    data={"proof": proof, "replay_gate": machine_replay},
+                )
 
         new_signature = _chain_signature(list(finding_ids), str(crown_jewel))
         for existing in chains:
@@ -1360,8 +1490,10 @@ class LinkChainTool:
             "rationale": str(rationale),
             "crown_jewel": str(crown_jewel),
             "length": len(finding_ids),
+            "target": target,
             "evidence_artifact": evidence_artifact,
             "proof": proof,
+            "replay_gate": proof.get("machine_replay", {}),
             "verification_status": "verified" if proof.get("verified") else "narrative",
         }
         chains.append(chain)

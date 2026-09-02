@@ -4,12 +4,13 @@ import logging
 from typing import Any
 
 from vxis.agent.scan_loop_policy import _DESKTOP_SKILLS
+from vxis.agent.scan_loop_run_skill_handoffs import ScanLoopRunSkillHandoffMixin
 from vxis.agent.tools.skill_runner import redact_sensitive_output
 
 logger = logging.getLogger(__name__)
 
 
-class ScanLoopScheduledSkillsMixin:
+class ScanLoopScheduledSkillsMixin(ScanLoopRunSkillHandoffMixin):
     async def _run_scheduled_skills(
         self,
         *,
@@ -95,94 +96,12 @@ class ScanLoopScheduledSkillsMixin:
 
                             # Chain: if auth succeeded, queue post-auth skills
                             if _real_skill == "attempt_auth" and sr.data:
-                                if sr.data.get("authenticated"):
-                                    auth_token = sr.data.get("token", "")
-                                    identities = sr.data.get("identities") or []
-                                    if not identities and auth_token:
-                                        identities = [
-                                            {
-                                                "name": sr.data.get("primary_identity")
-                                                or "authenticated",
-                                                "token": auth_token,
-                                                "role": (sr.data.get("user_info", {}) or {}).get(
-                                                    "role", ""
-                                                ),
-                                                "email": (sr.data.get("user_info", {}) or {}).get(
-                                                    "email", ""
-                                                ),
-                                            }
-                                        ]
-                                    self.state.record_auth_identities(identities)
-                                    if isinstance(sr.data.get("owner_map"), dict):
-                                        self.state.object_owner_map.update(
-                                            {
-                                                str(k): str(v)
-                                                for k, v in sr.data.get("owner_map", {}).items()
-                                            }
-                                        )
-                                    authz_params = self.state.authz_context_params()
-                                    method = sr.data.get("method", "?")
-                                    # Auto-report auth finding
-                                    severity = "critical" if "sqli" in method else "high"
-                                    ftype = "sql_injection" if "sqli" in method else "weak_auth"
-                                    login_endpoint = sr.data.get(
-                                        "login_endpoint", self.state.target
-                                    )
-                                    control_checks = sr.data.get("control_checks", {}) or {}
-                                    poc_blob = redact_sensitive_output(
-                                        sr.data.get("poc_http_exchange")
-                                        or (
-                                            f"Method: {method}\n"
-                                            "Credentials used: [redacted]\n"
-                                            "Token: [redacted]\n"
-                                            "User info: [redacted]\n"
-                                            f"Control checks: {control_checks}"
-                                        )
-                                    )
-                                    await self._dispatch_report_finding_checked(
-                                        self._build_report_finding_args(
-                                            title=f"Authentication bypass via {method}",
-                                            severity=severity,
-                                            finding_type=ftype,
-                                            affected_component=login_endpoint,
-                                            description=f"Authentication succeeded via {method}.",
-                                            impact="An unauthenticated actor can obtain a valid session or token and pivot into post-authenticated functionality.",
-                                            technical_analysis=(
-                                                f"The attempt_auth skill reported authenticated=True using method={method}. "
-                                                f"Negative control: {control_checks.get('negative_control', {})}. "
-                                                f"Positive control: {control_checks.get('positive_control', {})}. "
-                                                "This indicates the login boundary can be bypassed under the observed conditions."
-                                            ),
-                                            poc_description="Replay the authentication flow with the same bypass technique and confirm that the application returns an authenticated token or session.",
-                                            poc_script_code=poc_blob,
-                                            remediation_steps="Enforce server-side authentication checks, normalize credential validation, and add regression tests for the bypass condition.",
-                                            endpoint=login_endpoint,
-                                            method="POST",
-                                        )
-                                    )
-                                    # Queue the generic chain executor instead
-                                    # of hard-coded post-auth fan-out. The
-                                    # individual child skills remain available
-                                    # through pivot/sweep fallback paths.
-                                    queue_skill(
-                                        "execute_chain",
-                                        self.state.iteration + 2,
-                                        {
-                                            "template": "post_auth_crown",
-                                            "token": auth_token,
-                                            **authz_params,
-                                            "url_pattern": (
-                                                self.state.target.rstrip("/") + "/api/users/{id}"
-                                            ),
-                                        },
-                                    )
-                                    self.state.add_message(
-                                        "user",
-                                        (
-                                            f"SKILL CHAIN: Auth bypass confirmed via {method}! "
-                                            "Token acquired. Post-auth chain executor queued."
-                                        ),
-                                    )
+                                next_auth_token = await self._handle_auth_success_handoff(
+                                    sr.data,
+                                    queue_skill,
+                                )
+                                if next_auth_token:
+                                    auth_token = next_auth_token
 
                             # Auto-report sensitive files
                             if _real_skill == "test_sensitive_files" and sr.data:
@@ -282,143 +201,14 @@ class ScanLoopScheduledSkillsMixin:
 
                             # Auto-report enumeration results
                             if _real_skill == "enumerate_endpoints" and sr.data:
-                                # Queue injection/XSS/SSRF on search/query endpoints
-                                accessible = sr.data.get("accessible", [])
-                                for ep in accessible:
-                                    path = ep.get("path", "")
-                                    if "?" in path or "search" in path.lower():
-                                        full_url = self.state.target.rstrip("/") + path
-                                        queue_skill(
-                                            "test_injection",
-                                            self.state.iteration + 2,
-                                            {"url": full_url},
-                                        )
-                                        queue_skill(
-                                            "test_xss", self.state.iteration + 3, {"url": full_url}
-                                        )
-                                        queue_skill(
-                                            "test_ssrf", self.state.iteration + 4, {"url": full_url}
-                                        )
-                                        break
-                                # Queue test_idor on discovered numeric-id
-                                # patterns so we don't rely on the
-                                # Juice-Shop-only /api/Users/{id} default.
-                                import re as _re2
-
-                                _idor_patterns_seen: set[str] = set()
-                                for ep in accessible:
-                                    path = ep.get("path", "")
-                                    # Match /segment/<digits> or /segment/<digits>/...
-                                    m = _re2.search(r"^(/[^?]*?/)\d+(/|$)", path)
-                                    if m:
-                                        base = m.group(1).rstrip("/")
-                                        pattern = self.state.target.rstrip("/") + base + "/{id}"
-                                        if pattern not in _idor_patterns_seen:
-                                            _idor_patterns_seen.add(pattern)
-                                            queue_skill(
-                                                "test_idor",
-                                                self.state.iteration + 5,
-                                                {
-                                                    "url_pattern": pattern,
-                                                    **self.state.authz_context_params(),
-                                                    "_skill_override": "test_idor",
-                                                },
-                                                alias=f"test_idor_{len(_idor_patterns_seen)}",
-                                            )
-                                            if len(_idor_patterns_seen) >= 4:
-                                                break
-                                # Also target common API shapes if nothing
-                                # numeric turned up yet. These are generic
-                                # probes, not target-specific.
-                                if not _idor_patterns_seen:
-                                    for _candidate in (
-                                        "/api/users/{id}",
-                                        "/api/user/{id}",
-                                        "/api/orders/{id}",
-                                        "/api/account/{id}",
-                                        "/users/{id}",
-                                        "/profile/{id}",
-                                    ):
-                                        pattern = self.state.target.rstrip("/") + _candidate
-                                        queue_skill(
-                                            "test_idor",
-                                            self.state.iteration + 5,
-                                            {
-                                                "url_pattern": pattern,
-                                                **self.state.authz_context_params(),
-                                                "_skill_override": "test_idor",
-                                            },
-                                            alias=f"test_idor_probe_{_candidate.strip('/').replace('/', '_')}",
-                                        )
-                                # Report error endpoints
-                                for ep in (sr.data.get("errors") or [])[:5]:
-                                    preview = (ep.get("error_preview", "") or "")[:300]
-                                    if not self._error_oracle_preview_is_actionable(preview):
-                                        continue
-                                    await self._dispatch_report_finding_checked(
-                                        {
-                                            "title": f"HTTP 500 on {ep['path']}",
-                                            "severity": "medium",
-                                            "finding_type": "error_oracle",
-                                            "affected_component": self.state.target + ep["path"],
-                                            "description": f"Endpoint returns HTTP 500 ({ep.get('size', '?')}B) with actionable backend error details.",
-                                            "evidence": preview,
-                                        }
-                                    )
+                                await self._handle_enumerate_endpoints_handoff(
+                                    sr.data,
+                                    queue_skill,
+                                )
 
                             # Generic chain executor findings
                             if _real_skill == "execute_chain" and sr.data:
-                                chain_findings = list(sr.data.get("findings") or [])
-                                for finding in chain_findings[:10]:
-                                    if not isinstance(finding, dict):
-                                        continue
-                                    await self._dispatch_report_finding_checked(
-                                        self._build_report_finding_args(
-                                            title=str(
-                                                finding.get("title")
-                                                or "Validated attack chain finding"
-                                            ),
-                                            severity=str(finding.get("severity") or "high"),
-                                            finding_type=str(
-                                                finding.get("finding_type") or "attack_chain"
-                                            ),
-                                            affected_component=str(
-                                                finding.get("affected_component")
-                                                or finding.get("endpoint")
-                                                or self.state.target
-                                            ),
-                                            description=str(
-                                                finding.get("description")
-                                                or "The chain executor validated a post-authenticated follow-up finding."
-                                            ),
-                                            impact=str(
-                                                finding.get("impact")
-                                                or "A foothold can be chained into protected data or authorization impact."
-                                            ),
-                                            technical_analysis=str(
-                                                finding.get("technical_analysis")
-                                                or finding.get("evidence")
-                                                or sr.data.get("steps", [])[:3]
-                                            ),
-                                            poc_description=str(
-                                                finding.get("poc_description")
-                                                or "Replay the chain steps and compare each child control."
-                                            ),
-                                            poc_script_code=str(
-                                                finding.get("poc_script_code")
-                                                or sr.data.get("steps", [])[:3]
-                                            ),
-                                            remediation_steps=str(
-                                                finding.get("remediation_steps")
-                                                or "Fix the broken trust boundary identified by the validated chain."
-                                            ),
-                                            endpoint=str(
-                                                finding.get("endpoint") or self.state.target
-                                            ),
-                                            method=str(finding.get("method") or "GET"),
-                                            cwe=finding.get("cwe"),
-                                        )
-                                    )
+                                await self._handle_execute_chain_handoff(sr.data)
 
                             # IDOR results
                             if _real_skill == "test_idor" and sr.data:
@@ -478,62 +268,7 @@ class ScanLoopScheduledSkillsMixin:
 
                             # Post-auth enum results
                             if _real_skill == "post_auth_enum" and sr.data:
-                                if sr.data.get("identities"):
-                                    self.state.record_auth_identities(sr.data.get("identities"))
-                                if isinstance(sr.data.get("owner_map"), dict):
-                                    self.state.object_owner_map.update(
-                                        {
-                                            str(k): str(v)
-                                            for k, v in sr.data.get("owner_map", {}).items()
-                                        }
-                                    )
-                                user_data = sr.data.get("user_data_exposed", [])
-                                if user_data:
-                                    paths = [e["path"] for e in user_data[:5]]
-                                    control_evidence = sr.data.get("control_evidence", {}) or {}
-                                    user_data_sample = str(user_data[:3])[:1200]
-                                    self.state.record_retrieval_observation(
-                                        finding_type="broken_access_control",
-                                        component=self.state.target,
-                                        retrieval_kind="post_auth_data_access",
-                                        summary=f"Sensitive user data observed on {len(user_data)} authenticated endpoint(s): {paths}",
-                                        sample=user_data_sample,
-                                    )
-                                    await self._dispatch_report_finding_checked(
-                                        self._build_report_finding_args(
-                                            title=f"Sensitive user data exposed on {len(user_data)} endpoint(s)",
-                                            severity="high",
-                                            finding_type="broken_access_control",
-                                            affected_component=self.state.target,
-                                            description=f"Authenticated functionality exposed sensitive user data on endpoints including: {paths}",
-                                            impact="Low-privilege or bypassed access can disclose user records and enable lateral movement into other accounts.",
-                                            technical_analysis=(
-                                                "The post_auth_enum skill collected user-data-bearing endpoints after authentication and compared them with unauthenticated access results. "
-                                                f"Control evidence: {control_evidence}."
-                                            ),
-                                            poc_description="Access the listed post-auth endpoints with the acquired session and confirm that user data is returned beyond the minimum necessary scope.",
-                                            poc_script_code=(
-                                                f"Control evidence: {control_evidence}\n"
-                                                f"User data samples: {user_data_sample}"
-                                            ),
-                                            remediation_steps="Apply object- and field-level authorization checks on user data endpoints and minimize exposed record fields.",
-                                            endpoint=self.state.target,
-                                            method="GET",
-                                            extra_evidence=[
-                                                self._retrieval_evidence_item(
-                                                    title="Authenticated Data Retrieval",
-                                                    retrieval_kind="post_auth_data_access",
-                                                    summary=f"Authenticated access exposed user data on {len(user_data)} endpoint(s).",
-                                                    sample=user_data_sample,
-                                                ),
-                                                self._exfil_evidence_item(
-                                                    title="Post-Authentication Exfiltration Surface",
-                                                    summary=f"The acquired session unlocks reusable data-bearing endpoints: {paths}",
-                                                    sample=str(control_evidence)[:1200],
-                                                ),
-                                            ],
-                                        )
-                                    )
+                                await self._handle_post_auth_enum_handoff(sr.data)
 
                             # Auto-report: XSS findings
                             if _real_skill == "test_xss" and sr.data:

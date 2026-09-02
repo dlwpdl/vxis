@@ -133,6 +133,46 @@ def resolve_context_budget(
     )
 
 
+def build_context_budget_snapshot(
+    role: Any,
+    *,
+    provider: str = "",
+    model: str = "",
+    context_window: int | None = None,
+    memory_stats: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    budget = resolve_context_budget(
+        role,
+        provider=provider,
+        model=model,
+        context_window=context_window,
+    )
+    stats = memory_stats if isinstance(memory_stats, dict) else {}
+    compression_threshold = int(stats.get("last_threshold") or 0)
+    last_history_tokens = int(stats.get("last_tokens_before") or 0)
+    pressure_base = compression_threshold or int(budget.history_tokens or 0) or 1
+    return {
+        "role": budget.role,
+        "provider": budget.provider,
+        "model": budget.model,
+        "mode": "local" if budget.local_profile else "frontier",
+        "local_profile": budget.local_profile,
+        "context_window": int(budget.context_window or 0),
+        "max_prompt_tokens": int(budget.max_prompt_tokens or 0),
+        "history_tokens": int(budget.history_tokens or 0),
+        "max_skill_chars": int(budget.max_skill_chars or 0),
+        "max_message_chars": int(budget.max_message_chars or 0),
+        "max_execution_chars": int(budget.max_execution_chars or 0),
+        "max_agent_messages": int(budget.max_agent_messages or 0),
+        "max_agent_executions": int(budget.max_agent_executions or 0),
+        "compression_threshold_tokens": compression_threshold,
+        "history_tokens_last_check": last_history_tokens,
+        "history_pressure_ratio": round(last_history_tokens / pressure_base, 3)
+        if last_history_tokens > 0
+        else 0.0,
+    }
+
+
 def trim_text_to_token_budget(
     text: Any, max_tokens: int, *, marker: str = "...truncated..."
 ) -> str:
@@ -268,6 +308,7 @@ def _execution_char_budget(role: str, *, local_profile: bool) -> int:
 
 __all__ = [
     "RoleContextBudget",
+    "build_context_budget_snapshot",
     "compact_context_value",
     "estimate_context_tokens",
     "fit_lines_to_token_budget",

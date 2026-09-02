@@ -618,7 +618,7 @@ class ScanLoopActionMixin:
                 "baseline",
                 "observed_result",
             ]
-        elif name == "link_chain" and error == "weak_chain_proof":
+        elif name == "link_chain" and error in {"weak_chain_proof", "weak_chain_replay"}:
             finding_ids = [str(fid) for fid in args.get("finding_ids") or [] if str(fid)]
             source_finding_id = finding_ids[0] if finding_ids else ""
             crown_jewel = str(args.get("crown_jewel") or "crown-jewel impact").strip()
@@ -633,13 +633,15 @@ class ScanLoopActionMixin:
             )
             next_step = (
                 "Produce VerifiedChainArtifact with source_output, pivot_action, control_result, "
-                "observed_result, crown_jewel_evidence, and hop evidence for every adjacent finding pair."
+                "observed_result, crown_jewel_evidence, and replayable hop evidence for every adjacent "
+                "finding pair."
             )
             watch_terms = [
                 "link_chain",
                 "source_output",
                 "pivot_action",
                 "crown_jewel_evidence",
+                "replay_gate",
                 *finding_ids,
             ]
         elif name == "verify_finding" and result.ok:
@@ -1165,6 +1167,7 @@ class ScanLoopActionMixin:
         import os
 
         telemetry: dict[str, Any] = {}
+        memory_stats: dict[str, Any] = {}
         proxy_status: dict[str, Any] = {}
         ghost_status: dict[str, Any] = {}
         egress_contract: dict[str, Any] = {}
@@ -1174,6 +1177,7 @@ class ScanLoopActionMixin:
                 get_llm_call_count as _get_llm_call_count,
                 get_llm_usage_stats as _get_llm_usage_stats,
             )
+            from vxis.agent.context_budget import build_context_budget_snapshot
             from vxis.agent.memory_compressor import get_memory_compression_stats
             from vxis.agent.egress_contract import registry_target_egress_snapshot
             from vxis.agent.tools.proxy_runtime import get_proxy_status_snapshot
@@ -1182,12 +1186,14 @@ class ScanLoopActionMixin:
             telemetry = _get_llm_usage_stats()
             telemetry["llm_calls"] = _get_llm_call_count()
             telemetry["brain_decisions"] = _get_brain_decision_count()
-            telemetry["memory_compression"] = get_memory_compression_stats()
+            memory_stats = get_memory_compression_stats()
+            telemetry["memory_compression"] = memory_stats
             proxy_status = get_proxy_status_snapshot()
             ghost_status = ghost_status_snapshot()
             egress_contract = registry_target_egress_snapshot(self.registry)
         except Exception:
             telemetry = {}
+            memory_stats = {}
             proxy_status = {}
             ghost_status = {}
             egress_contract = {}
@@ -1202,6 +1208,17 @@ class ScanLoopActionMixin:
             elif provider == "llamacpp":
                 telemetry["base_url"] = os.environ.get("VXIS_LLAMACPP_BASE_URL", "").rstrip("/")
         telemetry["discipline_profile"] = self._llm_discipline_profile()
+        try:
+            from vxis.agent.context_budget import build_context_budget_snapshot
+
+            telemetry["context_budget"] = build_context_budget_snapshot(
+                "director",
+                provider=str(telemetry.get("provider") or getattr(self.brain, "_provider", "")),
+                model=str(telemetry.get("model") or getattr(self.brain, "_model", "")),
+                memory_stats=memory_stats,
+            )
+        except Exception:
+            pass
 
         snapshot = self.state.control_plane_snapshot()
         focus = self._focus_branch()
@@ -1930,75 +1947,6 @@ class ScanLoopActionMixin:
         haystack = " ".join(str(context or "").lower() for context in contexts)
         return any(token in haystack for token in source_tokens)
 
-    def _chain_evidence_artifact_for_pair(
-        self,
-        source: dict[str, Any],
-        target: dict[str, Any],
-        candidate: dict[str, Any],
-    ) -> dict[str, Any]:
-        source_id = str(source.get("id") or "")
-        target_id = str(target.get("id") or "")
-        source_output = self._finding_chain_blob(source)
-        observed_result = self._finding_chain_blob(target)
-        control_result = self._finding_control_blob(target) or self._finding_control_blob(source)
-        negative_result = control_result
-        source_context = " ".join(
-            part
-            for part in (
-                source_id,
-                str(source.get("finding_type") or ""),
-                str(source.get("affected_component") or ""),
-                source_output[:600],
-            )
-            if part
-        )
-        pivot_action = (
-            f"Reuse source output ({source_context}) against {target_id}: "
-            f"{candidate.get('rationale', '')}"
-        )[:1000]
-        source_reused = self._chain_source_output_reused(
-            source_output,
-            pivot_action,
-            observed_result,
-            str(target.get("technical_analysis") or ""),
-            str(target.get("poc_script_code") or target.get("evidence") or ""),
-        )
-        crown_evidence = "\n".join(
-            part
-            for part in (
-                str(target.get("impact") or ""),
-                str(target.get("technical_analysis") or ""),
-                str(target.get("poc_script_code") or target.get("evidence") or ""),
-            )
-            if part
-        )[:3000]
-        return {
-            "source_finding_id": source_id,
-            "target_finding_id": target_id,
-            "source_output": source_output,
-            "pivot_action": pivot_action,
-            "observed_result": observed_result,
-            "control_result": control_result,
-            "repeat_count": 2 if "repeat_count" in observed_result.lower() else 0,
-            "negative_result": negative_result,
-            "crown_jewel_evidence": crown_evidence,
-            "source_output_used_in_pivot": source_reused,
-            "verification_method": "derived_from_reported_poc",
-            "hops": [
-                {
-                    "source_finding_id": source_id,
-                    "target_finding_id": target_id,
-                    "source_output": source_output,
-                    "pivot_action": pivot_action,
-                    "observed_result": observed_result,
-                    "control_result": control_result,
-                    "repeat_count": 2 if "repeat_count" in observed_result.lower() else 0,
-                    "negative_result": negative_result,
-                    "source_output_used_in_pivot": source_reused,
-                }
-            ],
-        }
-
     def _chain_evidence_artifact_for_ids(
         self,
         source_id: str,
@@ -2006,7 +1954,11 @@ class ScanLoopActionMixin:
         candidate: dict[str, Any],
     ) -> dict[str, Any]:
         try:
-            from vxis.agent.tools.finding_tools import _get_findings
+            from vxis.agent.tools.finding_tools import (
+                _extract_chain_artifact_from_text,
+                _get_findings,
+                _normalize_chain_artifact,
+            )
         except Exception:
             return {}
         by_id = {
@@ -2018,7 +1970,92 @@ class ScanLoopActionMixin:
         target = by_id.get(str(target_id))
         if not source or not target:
             return {}
-        return self._chain_evidence_artifact_for_pair(source, target, candidate)
+        del candidate
+
+        raw_artifact = (
+            target.get("evidence_artifact")
+            or _extract_chain_artifact_from_text(target.get("poc_script_code"))
+            or _extract_chain_artifact_from_text(target.get("technical_analysis"))
+            or _extract_chain_artifact_from_text(target.get("evidence"))
+            or source.get("evidence_artifact")
+            or _extract_chain_artifact_from_text(source.get("poc_script_code"))
+            or _extract_chain_artifact_from_text(source.get("technical_analysis"))
+            or _extract_chain_artifact_from_text(source.get("evidence"))
+        )
+        artifact = _normalize_chain_artifact(raw_artifact)
+        if not artifact:
+            source_output = self._finding_chain_blob(source)
+            observed_result = self._finding_chain_blob(target)
+            control_result = self._finding_control_blob(target)
+            if not (source_output and observed_result and control_result):
+                return {}
+            repeated = any(
+                marker in observed_result.lower()
+                for marker in (
+                    "repeat_count=2",
+                    "repeat_count:2",
+                    "reproduced twice",
+                    "replayed twice",
+                    "second run",
+                    "attempt 2",
+                    "twice",
+                )
+            )
+            artifact = {
+                "source_output": source_output[:1200],
+                "pivot_action": (
+                    f"Reuse source finding output against {target.get('affected_component')}: "
+                    f"{source_output[:400]}"
+                )[:1200],
+                "observed_result": observed_result[:1500],
+                "control_result": control_result[:1200],
+                "crown_jewel_evidence": observed_result[:1500],
+                "repeat_count": 2 if repeated else 1,
+                "negative_result": control_result[:1200],
+            }
+
+        artifact = dict(artifact)
+        artifact.setdefault("source_finding_id", str(source_id))
+        artifact.setdefault("target_finding_id", str(target_id))
+        if artifact.get("control_result") and not (
+            artifact.get("negative_result") or artifact.get("negative_control")
+        ):
+            artifact["negative_result"] = artifact["control_result"]
+        if not artifact.get("crown_jewel_evidence"):
+            artifact["crown_jewel_evidence"] = str(artifact.get("observed_result") or "")
+        if artifact.get("source_output") and "source_output_used_in_pivot" not in artifact:
+            artifact["source_output_used_in_pivot"] = self._chain_source_output_reused(
+                str(artifact.get("source_output") or ""),
+                str(artifact.get("pivot_action") or ""),
+                str(artifact.get("observed_result") or ""),
+                str(artifact.get("crown_jewel_evidence") or ""),
+            )
+        artifact.setdefault("verification_method", "finding_embedded_evidence_artifact")
+        if "hops" not in artifact and any(
+            artifact.get(field)
+            for field in ("source_output", "pivot_action", "observed_result", "control_result")
+        ):
+            artifact["hops"] = [
+                {
+                    "source_finding_id": artifact["source_finding_id"],
+                    "target_finding_id": artifact["target_finding_id"],
+                    "source_output": str(artifact.get("source_output") or ""),
+                    "pivot_action": str(artifact.get("pivot_action") or ""),
+                    "observed_result": str(artifact.get("observed_result") or ""),
+                    "control_result": str(artifact.get("control_result") or ""),
+                    "repeat_count": int(artifact.get("repeat_count") or 0),
+                    "negative_result": str(
+                        artifact.get("negative_result")
+                        or artifact.get("negative_control")
+                        or artifact.get("control_result")
+                        or ""
+                    ),
+                    "source_output_used_in_pivot": bool(
+                        artifact.get("source_output_used_in_pivot")
+                    ),
+                }
+            ]
+        return artifact
 
     @staticmethod
     def _find_finding_by_id(
@@ -2065,22 +2102,15 @@ class ScanLoopActionMixin:
                 best_candidate = candidate
         if best_candidate is None:
             return
-        source_finding = self._find_finding_by_id(findings, best_candidate["source_id"])
-        if source_finding is None:
-            logger.warning(
-                "auto-link-chain: source finding %s vanished, skipping",
-                best_candidate["source_id"],
-            )
-            return
         result = await self.registry.dispatch(
             "link_chain",
             {
                 "finding_ids": [best_candidate["source_id"], best_candidate["target_id"]],
                 "rationale": best_candidate["rationale"],
                 "crown_jewel": best_candidate["crown_jewel"],
-                "evidence_artifact": self._chain_evidence_artifact_for_pair(
-                    source_finding,
-                    current,
+                "evidence_artifact": self._chain_evidence_artifact_for_ids(
+                    best_candidate["source_id"],
+                    best_candidate["target_id"],
                     best_candidate,
                 ),
             },
@@ -2251,27 +2281,27 @@ class ScanLoopActionMixin:
         if isinstance(result.data, dict) and result.data.get("dedup"):
             return None
         result_data = result.data if isinstance(result.data, dict) else {}
-        if result_data.get("verification_status") != "verified":
-            return None
-        self._settle_branches_after_chain([candidate["source_id"], candidate["target_id"]])
-        logger.info(
-            "judge auto-linked suggested chain %s -> %s",
-            candidate["source_id"],
-            candidate["target_id"],
-        )
-        self.state.add_message(
-            "system",
-            {
-                "hint": (
-                    f"SYSTEM HINT: auto-linked chain {candidate['source_id']} -> {candidate['target_id']} "
-                    f"toward {candidate['crown_jewel']}. Re-evaluate whether finish_scan is now justified."
-                ),
-            },
-        )
+        if result_data.get("verification_status") == "verified":
+            self._settle_branches_after_chain([candidate["source_id"], candidate["target_id"]])
+            logger.info(
+                "judge auto-linked suggested chain %s -> %s",
+                candidate["source_id"],
+                candidate["target_id"],
+            )
+            self.state.add_message(
+                "system",
+                {
+                    "hint": (
+                        f"SYSTEM HINT: auto-linked chain {candidate['source_id']} -> {candidate['target_id']} "
+                        f"toward {candidate['crown_jewel']}. Re-evaluate whether finish_scan is now justified."
+                    ),
+                },
+            )
         return {
             "source_id": candidate["source_id"],
             "target_id": candidate["target_id"],
             "crown_jewel": candidate["crown_jewel"],
+            "verification_status": result_data.get("verification_status", "narrative"),
         }
 
     async def _decide(self, state: ScanLoopState) -> list[tuple[str, dict[str, Any]]]:

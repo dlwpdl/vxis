@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 
 from vxis.agent.scan_loop import ScanAgentLoop
@@ -96,6 +97,27 @@ def test_control_plane_exposes_ghost_coverage() -> None:
     assert control_events[-1]["egress_contract"]["errors"] == []
     egress_tools = {item["name"]: item for item in control_events[-1]["egress_contract"]["tools"]}
     assert egress_tools["agent_graph"]["mode"] == "delegated"
+
+
+def test_control_plane_exposes_local_context_budget() -> None:
+    reg = ToolRegistry()
+    events: list[tuple[str, dict]] = []
+    loop = ScanAgentLoop(
+        target="http://example.test",
+        registry=reg,
+        max_iters=1,
+        brain=SimpleNamespace(_provider="llamacpp", _model="local-8b"),
+        event_callback=lambda event_type, data: events.append((event_type, data)),
+    )
+
+    loop._emit_control_plane("local budget")
+
+    control_events = [data for event_type, data in events if event_type == "control_plane"]
+    budget = control_events[-1]["telemetry"]["context_budget"]
+    assert budget["mode"] == "local"
+    assert budget["local_profile"] is True
+    assert int(budget["max_prompt_tokens"]) <= 6_000
+    assert int(budget["compression_threshold_tokens"]) >= 0
 
 
 def test_scan_loop_spawns_followup_branches_from_finding() -> None:

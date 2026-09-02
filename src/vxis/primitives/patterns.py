@@ -386,6 +386,8 @@ def parse_openapi(spec_text: str) -> dict:
             spec = yaml.safe_load(spec_text) or {}
         except Exception:
             return {"version": "", "title": "", "base_path": "", "endpoints": []}
+    if not isinstance(spec, dict):
+        return {"version": "", "title": "", "base_path": "", "endpoints": []}
 
     version = spec.get("openapi") or spec.get("swagger") or ""
     info = spec.get("info") or {}

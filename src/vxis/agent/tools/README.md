@@ -74,10 +74,11 @@ Both run inside the shared `vxis-sandbox` Docker container. Lifecycle: lazy-star
 
 **Security**: arbitrary execution is fail-closed unless the operator separately
 sets `VXIS_ALLOW_ARBITRARY_EXEC=1`. `--approve-destructive` and injection approval
-do not unlock it. The container uses host networking and static destination checks
-cannot constrain obfuscated/raw-socket code, so enable it only in an isolated,
-trusted environment. `VXIS_EGRESS_STRICT=1` is an additional best-effort check,
-not a packet-level firewall.
+do not unlock it. Ghost can inject proxy env into these tools, but that is still
+partial coverage: child code can ignore env proxy settings, and raw-socket paths
+remain outside Ghost's authority. Treat `shell_exec` / `python_exec` as best-effort
+proxied helpers, not packet-level confinement. `VXIS_EGRESS_STRICT=1` is still an
+additional best-effort check, not a firewall.
 
 **Shared workspace**: `/tmp/vxis-workspace` (host) ↔ `/workspace` (container).
 

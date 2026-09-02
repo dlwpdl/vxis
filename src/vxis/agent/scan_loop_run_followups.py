@@ -18,9 +18,10 @@ class ScanLoopRunFollowupMixin:
         # just keep the pressure on.
         try:
             from vxis.agent.tools.finding_tools import _get_findings, _get_chains
+
             _nudge_findings = _get_findings()
             _nudge_chains = _get_chains()
-            _last_nudge_iter = getattr(self, '_last_chain_nudge_iter', -100)
+            _last_nudge_iter = getattr(self, "_last_chain_nudge_iter", -100)
             _nudge_gap = self.state.iteration - _last_nudge_iter
             _desired = max(3, len(_nudge_findings) // 3)
             _needs_chain = (
@@ -33,12 +34,16 @@ class ScanLoopRunFollowupMixin:
                 self._last_chain_nudge_iter = self.state.iteration
                 # Build a findings summary for Brain to reason about
                 f_summary = "\n".join(
-                    f"  {f['id']} [{f.get('severity','?').upper()}] {f.get('finding_type','')}: {f.get('title','')[:60]}"
+                    f"  {f['id']} [{f.get('severity', '?').upper()}] {f.get('finding_type', '')}: {f.get('title', '')[:60]}"
                     for f in _nudge_findings[:15]
                 )
                 # Concrete example pair from actual findings
                 _fid_a = _nudge_findings[0]["id"]
-                _fid_b = _nudge_findings[-1]["id"] if len(_nudge_findings) > 1 else _nudge_findings[0]["id"]
+                _fid_b = (
+                    _nudge_findings[-1]["id"]
+                    if len(_nudge_findings) > 1
+                    else _nudge_findings[0]["id"]
+                )
                 existing_str = ""
                 if _nudge_chains:
                     existing_str = (
@@ -49,40 +54,44 @@ class ScanLoopRunFollowupMixin:
                         )
                         + f"\n\nBuild {_desired - len(_nudge_chains)} MORE. Every combination.\n"
                     )
-                self.state.add_message("user", (
-                    "═══ CHAIN ANALYSIS PHASE — DO NOT finish_scan ═══\n\n"
-                    f"Findings: {len(_nudge_findings)} | Chains: {len(_nudge_chains)} / {_desired} target\n\n"
-                    f"YOUR FINDINGS:\n{f_summary}\n"
-                    f"{existing_str}\n"
-                    "A chain = one finding's output feeds into the next exploit.\n"
-                    "Example: SQLi dumps admin creds → log in → access admin panel → "
-                    "find IDOR → exfiltrate all user data.\n\n"
-                    "CONCRETE ACTION you can take RIGHT NOW:\n"
-                    f'  link_chain(finding_ids=["{_fid_a}", "{_fid_b}"], '
-                    f'rationale="<why these compose>", '
-                    f'crown_jewel="<admin takeover | DB dump | RCE | data exfil>", '
-                    'evidence_artifact={'
-                    '"source_output":"<credential/token/endpoint/object id from source>", '
-                    '"pivot_action":"<how that output was replayed into target>", '
-                    '"control_result":"<baseline/control response>", '
-                    '"observed_result":"<target response proving impact>", '
-                    '"crown_jewel_evidence":"<admin/data/session/RCE evidence>", '
-                    '"source_output_used_in_pivot":true})\n\n'
-                    "For EACH chain:\n"
-                    "  1. TRY IT — use tools to prove the chain works.\n"
-                    "  2. Call link_chain with finding IDs + VerifiedChainArtifact.\n"
-                    "  3. Move to the next combination.\n\n"
-                    "Think creatively. Combine findings in every way you can imagine. "
-                    "The more chains you build, the better the report."
-                ))
+                self.state.add_message(
+                    "user",
+                    (
+                        "═══ CHAIN ANALYSIS PHASE — DO NOT finish_scan ═══\n\n"
+                        f"Findings: {len(_nudge_findings)} | Chains: {len(_nudge_chains)} / {_desired} target\n\n"
+                        f"YOUR FINDINGS:\n{f_summary}\n"
+                        f"{existing_str}\n"
+                        "A chain = one finding's output feeds into the next exploit.\n"
+                        "Example: SQLi dumps admin creds → log in → access admin panel → "
+                        "find IDOR → exfiltrate all user data.\n\n"
+                        "CONCRETE ACTION you can take RIGHT NOW:\n"
+                        f'  link_chain(finding_ids=["{_fid_a}", "{_fid_b}"], '
+                        f'rationale="<why these compose>", '
+                        f'crown_jewel="<admin takeover | DB dump | RCE | data exfil>", '
+                        "evidence_artifact={"
+                        '"source_output":"<credential/token/endpoint/object id from source>", '
+                        '"pivot_action":"<how that output was replayed into target>", '
+                        '"control_result":"<baseline/control response>", '
+                        '"observed_result":"<target response proving impact>", '
+                        '"crown_jewel_evidence":"<admin/data/session/RCE evidence>", '
+                        '"source_output_used_in_pivot":true})\n\n'
+                        "For EACH chain:\n"
+                        "  1. TRY IT — use tools to prove the chain works.\n"
+                        "  2. Call link_chain with finding IDs + VerifiedChainArtifact.\n"
+                        "  3. Move to the next combination.\n\n"
+                        "Think creatively. Combine findings in every way you can imagine. "
+                        "The more chains you build, the better the report."
+                    ),
+                )
                 logger.info(
                     "chain nudge re-injected at iter %d (%d findings, %d chains, target %d)",
-                    self.state.iteration, len(_nudge_findings),
-                    len(_nudge_chains), _desired,
+                    self.state.iteration,
+                    len(_nudge_findings),
+                    len(_nudge_chains),
+                    _desired,
                 )
         except Exception:
             logger.exception("chain nudge failed")
-
 
     def _maybe_queue_skill_sweep(
         self,
@@ -104,10 +113,11 @@ class ScanLoopRunFollowupMixin:
         # sees each result and decides how to escalate.
         try:
             if self.state.iteration >= 25 and "run_skill" in self.registry.list_tools():
-                _last_sweep = getattr(self, '_last_skill_sweep_iter', -100)
+                _last_sweep = getattr(self, "_last_skill_sweep_iter", -100)
                 _sweep_gap = self.state.iteration - _last_sweep
                 if _sweep_gap >= 10:
                     from vxis.agent.skills import SKILL_REGISTRY as _REG
+
                     # Filter the registry to skills that match the surface
                     # kind. The 6 desktop skills (module-level _DESKTOP_SKILLS)
                     # have macOS-specific code paths (codesign, otool, plistlib)
@@ -120,7 +130,8 @@ class ScanLoopRunFollowupMixin:
                     else:
                         _eligible = _all_registered - _DESKTOP_SKILLS
                     _untried = sorted(
-                        sk for sk in (_eligible - real_skills_completed)
+                        sk
+                        for sk in (_eligible - real_skills_completed)
                         if self._recent_blocked_skill_count(sk) < 3
                     )
                     if _untried:
@@ -137,7 +148,7 @@ class ScanLoopRunFollowupMixin:
                                 "url": f"{_base}/search?q=test",
                                 "browser_confirm": True,
                             },
-                            "test_ssrf": {"url": f"{_base}/redirect?url=http://example.com"},
+                            "test_ssrf": {"url": f"{_base}/proxy?url=http://example.com"},
                             "test_idor": {
                                 "url_pattern": f"{_base}/api/users/{{id}}",
                                 "token": auth_token or "",
@@ -163,21 +174,25 @@ class ScanLoopRunFollowupMixin:
                             _alias = f"{sk}__sweep{self.state.iteration}"
                             if queue_skill(sk, self.state.iteration + 1, params, alias=_alias):
                                 _queued += 1
-                        self.state.add_message("user", (
-                            f"SKILL SWEEP at iter {self.state.iteration}: "
-                            f"{_queued} untried skills queued ({', '.join(_untried[:8])}"
-                            f"{'...' if len(_untried) > 8 else ''}). "
-                            "Vector coverage was dropping — these will run on upcoming iters "
-                            "with generic defaults. Watch the results and refine with targeted "
-                            "args if any look promising."
-                        ))
+                        self.state.add_message(
+                            "user",
+                            (
+                                f"SKILL SWEEP at iter {self.state.iteration}: "
+                                f"{_queued} untried skills queued ({', '.join(_untried[:8])}"
+                                f"{'...' if len(_untried) > 8 else ''}). "
+                                "Vector coverage was dropping — these will run on upcoming iters "
+                                "with generic defaults. Watch the results and refine with targeted "
+                                "args if any look promising."
+                            ),
+                        )
                         logger.info(
                             "skill sweep iter %d: queued %d untried: %s",
-                            self.state.iteration, _queued, _untried,
+                            self.state.iteration,
+                            _queued,
+                            _untried,
                         )
         except Exception:
             logger.exception("skill sweep failed")
-
 
     async def _maybe_execute_director_action(
         self,
@@ -209,24 +224,30 @@ class ScanLoopRunFollowupMixin:
                     d_key = f"{d_name}::{d_args!r}"
                 d_count = call_counts.get(d_key, 0)
                 if d_count >= 3:
-                    logger.warning("iter %d: director dedup-blocked %s", self.state.iteration, d_name)
+                    logger.warning(
+                        "iter %d: director dedup-blocked %s", self.state.iteration, d_name
+                    )
                 else:
                     call_counts[d_key] = d_count + 1
                     try:
                         self._emit_action_progress(d_name, d_args, "Director executing")
                         d_result = await self.registry.dispatch(d_name, d_args)
-                        self.state.add_message("tool", {
-                            "name": d_name,
-                            "args": d_args,
-                            "result": {
-                                "ok": d_result.ok,
-                                "summary": f"[DIRECTOR] {d_result.summary}",
-                                "data": d_result.data,
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": d_name,
+                                "args": d_args,
+                                "result": {
+                                    "ok": d_result.ok,
+                                    "summary": f"[DIRECTOR] {d_result.summary}",
+                                    "data": d_result.data,
+                                },
                             },
-                        })
+                        )
                         logger.info(
                             "iter %d: director executed %s → %s",
-                            self.state.iteration, d_name,
+                            self.state.iteration,
+                            d_name,
                             "ok" if d_result.ok else "fail",
                         )
                         # Auto-analyze director results for findings
@@ -240,12 +261,15 @@ class ScanLoopRunFollowupMixin:
                                 or "payload:" in stdout.lower()
                                 or (isinstance(status, int) and status == 500)
                             ):
-                                self.state.add_message("user", (
-                                    f"DIRECTOR RESULT ANALYSIS: {d_name} on "
-                                    f"{d_args.get('url', d_args.get('command',''))[:80]} "
-                                    f"returned interesting data (status={status}). "
-                                    f"Output: {stdout[:500]}\n"
-                                    "If this is a real vulnerability, call report_finding."
-                                ))
+                                self.state.add_message(
+                                    "user",
+                                    (
+                                        f"DIRECTOR RESULT ANALYSIS: {d_name} on "
+                                        f"{d_args.get('url', d_args.get('command', ''))[:80]} "
+                                        f"returned interesting data (status={status}). "
+                                        f"Output: {stdout[:500]}\n"
+                                        "If this is a real vulnerability, call report_finding."
+                                    ),
+                                )
                     except Exception:
                         logger.exception("director action dispatch failed")

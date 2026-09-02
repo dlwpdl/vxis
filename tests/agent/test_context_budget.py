@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from vxis.agent.context_budget import (
+    build_context_budget_snapshot,
     estimate_context_tokens,
     fit_lines_to_token_budget,
     resolve_context_budget,
@@ -65,3 +66,17 @@ def test_context_audit_reports_large_file(tmp_path: Path) -> None:
     assert report.warning_count >= 1
     assert any(item.path.endswith("large.py") for item in report.offenders)
     assert "Top offenders" in rendered
+
+
+def test_build_context_budget_snapshot_marks_local_pressure() -> None:
+    snapshot = build_context_budget_snapshot(
+        "director",
+        provider="llamacpp",
+        model="local-8b",
+        memory_stats={"last_threshold": 2200, "last_tokens_before": 1980},
+    )
+
+    assert snapshot["mode"] == "local"
+    assert snapshot["local_profile"] is True
+    assert snapshot["compression_threshold_tokens"] == 2200
+    assert snapshot["history_pressure_ratio"] > 0.8

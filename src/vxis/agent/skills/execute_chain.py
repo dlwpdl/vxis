@@ -12,6 +12,9 @@ _AUTO_CONTEXT_KEYS = (
     "token",
     "identities",
     "credentials",
+    "login_paths",
+    "reset_paths",
+    "reset_candidates",
     "owner_map",
     "object_ids",
     "url_pattern",
@@ -78,6 +81,9 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
                 "skill": "test_sensitive_files",
                 "extract": {
                     "credentials": "credentials",
+                    "login_paths": "login_paths",
+                    "reset_paths": "reset_paths",
+                    "reset_candidates": "reset_candidates",
                     "loot": "loot",
                     "secrets": "secrets",
                     "seed_paths": "seed_paths",
@@ -87,7 +93,12 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
             },
             {
                 "skill": "attempt_auth",
-                "params": {"credentials": "{{credentials}}"},
+                "params": {
+                    "credentials": "{{credentials}}",
+                    "login_paths": "{{login_paths}}",
+                    "reset_paths": "{{reset_paths}}",
+                    "reset_candidates": "{{reset_candidates}}",
+                },
                 "extract": {
                     "token": "token",
                     "auth_method": "method",
@@ -137,6 +148,8 @@ def _default_steps(template: str) -> list[dict[str, Any]]:
             "params": {
                 "token": "{{token}}",
                 "identities": "{{identities}}",
+                "credentials": "{{credentials}}",
+                "login_paths": "{{login_paths}}",
                 "discovered_endpoints": "{{discovered_endpoints}}",
                 "discovered_auth_only_endpoints": "{{discovered_auth_only_endpoints}}",
                 "discovered_paths": "{{discovered_paths}}",

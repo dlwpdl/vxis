@@ -107,6 +107,9 @@ async def test_execute_chain_bootstraps_auth_for_post_auth_crown_without_token(
             ],
             "seed_paths": ["/ftp/credentials.txt", "/ftp/.env"],
             "loot": [{"kind": "artifact", "path": "/ftp/credentials.txt"}],
+            "login_paths": ["/rest/user/login"],
+            "reset_paths": ["/rest/user/reset-password"],
+            "reset_candidates": [{"email": "ops@example.test", "answer": "NCC-1701"}],
         }
 
     async def fake_auth(target_url: str, **kwargs: Any) -> dict[str, Any]:
@@ -135,7 +138,7 @@ async def test_execute_chain_bootstraps_auth_for_post_auth_crown_without_token(
         }
 
     async def fake_api_security(target_url: str, token: str, **kwargs: Any) -> dict[str, Any]:
-        calls.append({"skill": "test_api_security", "token": token})
+        calls.append({"skill": "test_api_security", "token": token, "kwargs": kwargs})
         return {}
 
     async def fake_idor(
@@ -171,9 +174,18 @@ async def test_execute_chain_bootstraps_auth_for_post_auth_crown_without_token(
     assert calls[1]["kwargs"]["credentials"] == [
         {"email": "admin@example.test", "password": "Sup3rSecret!", "source": "sensitive_file:/ftp/credentials.txt"}
     ]
+    assert calls[1]["kwargs"]["login_paths"] == ["/rest/user/login"]
+    assert calls[1]["kwargs"]["reset_paths"] == ["/rest/user/reset-password"]
+    assert calls[1]["kwargs"]["reset_candidates"] == [
+        {"email": "ops@example.test", "answer": "NCC-1701"}
+    ]
     assert calls[2]["skill"] == "post_auth_enum"
     assert calls[2]["token"] == "tok-alice"
     assert calls[3]["skill"] == "test_api_security"
+    assert calls[3]["kwargs"]["credentials"] == [
+        {"email": "admin@example.test", "password": "Sup3rSecret!", "source": "sensitive_file:/ftp/credentials.txt"}
+    ]
+    assert calls[3]["kwargs"]["login_paths"] == ["/rest/user/login"]
     assert all(not step.get("skipped") for step in result["steps"][:4])
 
 

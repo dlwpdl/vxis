@@ -150,6 +150,9 @@ def build_browser_ghost_route(
 def ghost_status_snapshot() -> dict[str, Any]:
     active = ghost_layer.is_active()
     proxy_pool = list(getattr(ghost_layer, "_proxy_pool", []) or [])
+    partial_tools = ["shell_exec", "python_exec"] if active else []
+    direct_tools = ["nmap_scan"] if active else []
+    delegated_tools = ["run_skill", "agent_graph"] if active else []
     coverage = {
         "target_session": "ghost_transport" if active else "off",
         "http_request": "ghost_transport" if active else "off",
@@ -159,14 +162,25 @@ def ghost_status_snapshot() -> dict[str, Any]:
         "python_exec": "env_proxy" if active and proxy_pool else ("ua_env_only" if active else "off"),
         "nmap_scan": "direct_raw_socket" if active else "off",
     }
+    warnings: list[str] = []
+    if active:
+        warnings.append(
+            "shell_exec/python_exec depend on injected proxy env, not packet-level egress enforcement"
+        )
+        warnings.append(
+            "run_skill/agent_graph use delegated execution paths; inspect egress_contract for per-tool truth"
+        )
+        warnings.append(
+            "nmap_scan uses raw TCP/UDP sockets and is not anonymized by HTTP/SOCKS proxy env"
+        )
     return {
         "active": active,
         "proxy_count": len(proxy_pool),
         "proxies": [mask_proxy_url(proxy) for proxy in proxy_pool[:4]],
         "coverage": coverage,
-        "warning": (
-            "nmap_scan uses raw TCP/UDP sockets and is not anonymized by HTTP/SOCKS proxy env"
-            if active
-            else ""
-        ),
+        "partial_tools": partial_tools,
+        "direct_tools": direct_tools,
+        "delegated_tools": delegated_tools,
+        "warning": warnings[-1] if warnings else "",
+        "warnings": warnings,
     }

@@ -56,6 +56,10 @@ _DEFAULT_METHODOLOGY = (
 )
 
 
+def _finding_group_sort_key(finding: Finding) -> tuple[int, str]:
+    return (0 if finding.finding_type == "attack_chain" else 1, finding.title)
+
+
 @dataclass
 class ReportData:
     """Aggregated data required to render a security assessment report.
@@ -150,9 +154,9 @@ class ReportData:
         for finding in self.findings:
             key = finding.effective_severity.value
             grouped[key].append(finding)
-        # Sort each group by title for deterministic output
+        # Sort each group deterministically, with validated chains first.
         for group in grouped.values():
-            group.sort(key=lambda f: f.title)
+            group.sort(key=_finding_group_sort_key)
         return grouped
 
     @property

@@ -25,6 +25,9 @@ class ToolRegistry:
         if tool.name in self._tools:
             raise ValueError(f"tool {tool.name} already registered")
         self._tools[tool.name] = tool
+        set_dispatch = getattr(tool, "set_dispatch", None)
+        if callable(set_dispatch):
+            set_dispatch(self.dispatch)
 
     def list_tools(self) -> list[str]:
         return sorted(self._tools.keys())

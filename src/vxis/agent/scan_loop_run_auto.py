@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from vxis.agent.skills.enumerate_endpoints import preview_has_sql_error_signal
 from vxis.agent.scan_loop_v3 import v3_after_action
 from vxis.agent.tool_registry import ToolResult
 
@@ -10,6 +11,27 @@ logger = logging.getLogger(__name__)
 
 
 class ScanLoopAutoOrchestrationMixin:
+    @staticmethod
+    def _pick_auto_sqlmap_target(findings: list[dict[str, Any]]) -> str | None:
+        for finding in findings:
+            component = str(finding.get("affected_component", "")).strip()
+            if not component.startswith("http") or "?" not in component:
+                continue
+            blob = " ".join(
+                str(finding.get(field, ""))
+                for field in (
+                    "title",
+                    "finding_type",
+                    "description",
+                    "evidence",
+                    "technical_analysis",
+                    "response_or_effect",
+                )
+            )
+            if preview_has_sql_error_signal(blob):
+                return component
+        return None
+
     async def _dispatch_and_record(
         self,
         name: str,
@@ -76,11 +98,18 @@ class ScanLoopAutoOrchestrationMixin:
                     "browser_navigate", {"url": self.state.target}
                 )
                 if nav_result.ok:
-                    self.state.add_message("tool", {
-                        "name": "browser_navigate",
-                        "args": {"url": self.state.target},
-                        "result": {"ok": True, "summary": nav_result.summary, "data": nav_result.data},
-                    })
+                    self.state.add_message(
+                        "tool",
+                        {
+                            "name": "browser_navigate",
+                            "args": {"url": self.state.target},
+                            "result": {
+                                "ok": True,
+                                "summary": nav_result.summary,
+                                "data": nav_result.data,
+                            },
+                        },
+                    )
                     # Check for login-like inputs
                     inputs = nav_result.data.get("inputs", []) if nav_result.data else []
                     has_password = any(i.get("type") == "password" for i in inputs)
@@ -91,32 +120,54 @@ class ScanLoopAutoOrchestrationMixin:
                         # Try navigating to common login paths. WebGoat uses
                         # /login (no hash), Juice Shop uses /#/login, etc.
                         for login_path in [
-                            "/#/login", "/login", "/auth/login",
-                            "/signin", "/users/sign_in", "/user/login",
-                            "/WebGoat/login", "/admin/login",
+                            "/#/login",
+                            "/login",
+                            "/auth/login",
+                            "/signin",
+                            "/users/sign_in",
+                            "/user/login",
+                            "/WebGoat/login",
+                            "/admin/login",
                         ]:
                             login_url = self.state.target.rstrip("/") + login_path
-                            lr = await self.registry.dispatch("browser_navigate", {"url": login_url})
+                            lr = await self.registry.dispatch(
+                                "browser_navigate", {"url": login_url}
+                            )
                             if lr.ok:
                                 lr_inputs = lr.data.get("inputs", []) if lr.data else []
                                 has_password = any(i.get("type") == "password" for i in lr_inputs)
                                 if has_password:
                                     inputs = lr_inputs
                                     _login_url_found = login_url
-                                    self.state.add_message("tool", {
-                                        "name": "browser_navigate",
-                                        "args": {"url": login_url},
-                                        "result": {"ok": True, "summary": lr.summary, "data": lr.data},
-                                    })
+                                    self.state.add_message(
+                                        "tool",
+                                        {
+                                            "name": "browser_navigate",
+                                            "args": {"url": login_url},
+                                            "result": {
+                                                "ok": True,
+                                                "summary": lr.summary,
+                                                "data": lr.data,
+                                            },
+                                        },
+                                    )
                                     break
 
                     # DOM analysis
                     dom_result = await self.registry.dispatch("browser_analyze_dom", {})
                     if dom_result.ok:
-                        self.state.add_message("tool", {
-                            "name": "browser_analyze_dom", "args": {},
-                            "result": {"ok": True, "summary": dom_result.summary, "data": dom_result.data},
-                        })
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": "browser_analyze_dom",
+                                "args": {},
+                                "result": {
+                                    "ok": True,
+                                    "summary": dom_result.summary,
+                                    "data": dom_result.data,
+                                },
+                            },
+                        )
 
                     # Auto-login: adaptive selector detection. We don't
                     # hardcode #email/#loginButton — that only works on
@@ -128,13 +179,17 @@ class ScanLoopAutoOrchestrationMixin:
                         auto_login_done = True
                         try:
                             from vxis.agent.tools.browser_tools import _page as _bp
+
                             if _bp is not None:
                                 # Dismiss common overlays
                                 for dismiss_sel in [
-                                    "a.cc-dismiss", "button.cc-dismiss",
+                                    "a.cc-dismiss",
+                                    "button.cc-dismiss",
                                     "button[aria-label='Close Welcome Banner']",
-                                    "button.close", ".modal .close",
-                                    "[aria-label*='dismiss' i]", "[aria-label*='close' i]",
+                                    "button.close",
+                                    ".modal .close",
+                                    "[aria-label*='dismiss' i]",
+                                    "[aria-label*='close' i]",
                                 ]:
                                     try:
                                         await _bp.click(dismiss_sel, timeout=2000)
@@ -170,7 +225,13 @@ class ScanLoopAutoOrchestrationMixin:
                                 if _user_input is None:
                                     for i in inputs:
                                         itype = str(i.get("type", "")).lower()
-                                        if itype != "password" and itype in ("text", "email", "tel", "", "search"):
+                                        if itype != "password" and itype in (
+                                            "text",
+                                            "email",
+                                            "tel",
+                                            "",
+                                            "search",
+                                        ):
                                             _user_input = i
                                             break
 
@@ -184,13 +245,20 @@ class ScanLoopAutoOrchestrationMixin:
                                     if _unm:
                                         _user_sels.append(f"input[name='{_unm}']")
                                 # Generic fallbacks
-                                _user_sels.extend([
-                                    "input[type='email']",
-                                    "input[name='username']", "input[name='email']",
-                                    "input[name='user']", "input[name='login']",
-                                    "#username", "#email", "#user", "#login",
-                                    "input[type='text']:not([type='password'])",
-                                ])
+                                _user_sels.extend(
+                                    [
+                                        "input[type='email']",
+                                        "input[name='username']",
+                                        "input[name='email']",
+                                        "input[name='user']",
+                                        "input[name='login']",
+                                        "#username",
+                                        "#email",
+                                        "#user",
+                                        "#login",
+                                        "input[type='text']:not([type='password'])",
+                                    ]
+                                )
                                 _pw_sels: list[str] = []
                                 if _pw_input:
                                     _pid = _pw_input.get("id") or ""
@@ -199,14 +267,23 @@ class ScanLoopAutoOrchestrationMixin:
                                         _pw_sels.append(f"#{_pid}")
                                     if _pnm:
                                         _pw_sels.append(f"input[name='{_pnm}']")
-                                _pw_sels.extend([
-                                    "input[type='password']", "#password", "#pass",
-                                ])
+                                _pw_sels.extend(
+                                    [
+                                        "input[type='password']",
+                                        "#password",
+                                        "#pass",
+                                    ]
+                                )
                                 _submit_sels = [
-                                    "button[type='submit']", "input[type='submit']",
-                                    "#loginButton", "#login-button", "button.login",
-                                    "button[name='login']", "button:has-text('Sign in')",
-                                    "button:has-text('Log in')", "button:has-text('Login')",
+                                    "button[type='submit']",
+                                    "input[type='submit']",
+                                    "#loginButton",
+                                    "#login-button",
+                                    "button.login",
+                                    "button[name='login']",
+                                    "button:has-text('Sign in')",
+                                    "button:has-text('Log in')",
+                                    "button:has-text('Login')",
                                 ]
 
                                 # Target-agnostic credential matrix. The SQLi
@@ -219,7 +296,7 @@ class ScanLoopAutoOrchestrationMixin:
                                     ("admin@juice-sh.op", "admin123"),
                                     ("admin", "admin"),
                                     ("admin", "password"),
-                                    ("guest", "guest"),   # WebGoat default
+                                    ("guest", "guest"),  # WebGoat default
                                     ("user", "user"),
                                     ("webgoat", "webgoat"),
                                     ("test", "test"),
@@ -231,8 +308,10 @@ class ScanLoopAutoOrchestrationMixin:
                                 # scans aren't a black box on failure.
                                 logger.info(
                                     "auto-login: %d inputs on %s — user_sels=%s pw_sels=%s",
-                                    len(inputs), _login_target,
-                                    _user_sels[:3], _pw_sels[:3],
+                                    len(inputs),
+                                    _login_target,
+                                    _user_sels[:3],
+                                    _pw_sels[:3],
                                 )
 
                                 async def _fill_any(sels: list[str], value: str) -> str | None:
@@ -303,12 +382,15 @@ class ScanLoopAutoOrchestrationMixin:
                                             timeout=_login_nav_timeout_ms,
                                         )
                                         import asyncio as _aio
+
                                         # WebGoat / Spring Security often re-render
                                         # the form; give the DOM a moment to settle.
                                         await _aio.sleep(0.7)
                                         _user_sel = await _fill_any(_user_sels, email)
                                         if _user_sel is None:
-                                            logger.debug("auto-login: user field not found for %s", email)
+                                            logger.debug(
+                                                "auto-login: user field not found for %s", email
+                                            )
                                             _login_failures.append(f"{email}:no_user_field")
                                             continue
                                         _pw_sel = await _fill_any(_pw_sels, pwd)
@@ -328,7 +410,11 @@ class ScanLoopAutoOrchestrationMixin:
                                         snap = await _bp.snapshot()
 
                                         # Check for session token
-                                        token_cookies = [c for c in snap.cookies if "token" in c.get("name", "").lower()]
+                                        token_cookies = [
+                                            c
+                                            for c in snap.cookies
+                                            if "token" in c.get("name", "").lower()
+                                        ]
                                         if token_cookies:
                                             # Extract JWT payload
                                             jwt_payload = ""
@@ -338,7 +424,10 @@ class ScanLoopAutoOrchestrationMixin:
                                                 )
                                                 if jwt_data:
                                                     import json as _jm
-                                                    jwt_payload = _jm.dumps(jwt_data, default=str)[:500]
+
+                                                    jwt_payload = _jm.dumps(jwt_data, default=str)[
+                                                        :500
+                                                    ]
                                             except Exception:
                                                 pass
 
@@ -355,24 +444,31 @@ class ScanLoopAutoOrchestrationMixin:
                                                     "CRITICAL severity. The login form is injectable.\n"
                                                 )
                                             self.state.add_message("user", finding_msg)
-                                            logger.info("auto-login SUCCESS: %s → token found, JWT=%s",
-                                                       email, jwt_payload[:100])
+                                            logger.info(
+                                                "auto-login SUCCESS: %s → token found, JWT=%s",
+                                                email,
+                                                jwt_payload[:100],
+                                            )
                                             cookie_header = "; ".join(
                                                 f"{c.get('name')}={c.get('value')}"
                                                 for c in snap.cookies
                                                 if c.get("name") and c.get("value")
                                             )
-                                            self.state.record_auth_identities([
-                                                {
-                                                    "name": email,
-                                                    "email": email if "@" in email else "",
-                                                    "token": str(token_cookies[0].get("value") or ""),
-                                                    "headers": {"Cookie": cookie_header}
-                                                    if cookie_header
-                                                    else {},
-                                                    "source": "auto_login_browser",
-                                                }
-                                            ])
+                                            self.state.record_auth_identities(
+                                                [
+                                                    {
+                                                        "name": email,
+                                                        "email": email if "@" in email else "",
+                                                        "token": str(
+                                                            token_cookies[0].get("value") or ""
+                                                        ),
+                                                        "headers": {"Cookie": cookie_header}
+                                                        if cookie_header
+                                                        else {},
+                                                        "source": "auto_login_browser",
+                                                    }
+                                                ]
+                                            )
                                             try:
                                                 from vxis.agent.tools.hands_tools import (
                                                     import_browser_cookies,
@@ -397,15 +493,21 @@ class ScanLoopAutoOrchestrationMixin:
                                                 f"Redirected to: {snap.url}"
                                             )
                                             severity = "critical" if "OR 1=1" in email else "high"
-                                            ftype = "sql_injection" if "OR 1=1" in email else "weak_auth"
-                                            await self._dispatch_report_finding_checked({
-                                                "title": f"Authentication bypass via {'SQLi' if 'OR 1=1' in email else 'default credentials'} on login form",
-                                                "severity": severity,
-                                                "finding_type": ftype,
-                                                "affected_component": _login_target,
-                                                "description": finding_msg,
-                                                "evidence": evidence,
-                                            })
+                                            ftype = (
+                                                "sql_injection"
+                                                if "OR 1=1" in email
+                                                else "weak_auth"
+                                            )
+                                            await self._dispatch_report_finding_checked(
+                                                {
+                                                    "title": f"Authentication bypass via {'SQLi' if 'OR 1=1' in email else 'default credentials'} on login form",
+                                                    "severity": severity,
+                                                    "finding_type": ftype,
+                                                    "affected_component": _login_target,
+                                                    "description": finding_msg,
+                                                    "evidence": evidence,
+                                                }
+                                            )
                                             self.state.record_attempt_outcome(
                                                 "web:auth-bypass",
                                                 "auto-login",
@@ -428,7 +530,9 @@ class ScanLoopAutoOrchestrationMixin:
                                             _login_failures.append(f"{email}:no_session_cookie")
                                     except Exception as _le:
                                         logger.debug("auto-login attempt %s failed: %s", email, _le)
-                                        _login_failures.append(f"{email}:exception_{type(_le).__name__}")
+                                        _login_failures.append(
+                                            f"{email}:exception_{type(_le).__name__}"
+                                        )
 
                                 # If every credential failed, tell Brain explicitly so it
                                 # pivots instead of letting the attempt fail silently.
@@ -457,7 +561,8 @@ class ScanLoopAutoOrchestrationMixin:
                                     )
                                     logger.warning(
                                         "auto-login exhausted after %d creds on %s — telling Brain to pivot",
-                                        len(_login_creds), _login_target,
+                                        len(_login_creds),
+                                        _login_target,
                                     )
                         except Exception:
                             logger.exception("auto-login failed")
@@ -467,7 +572,7 @@ class ScanLoopAutoOrchestrationMixin:
 
         # Auto-ffuf: directory bruteforce at iter 10
         if (
-            not getattr(self, '_auto_ffuf_done', False)
+            not getattr(self, "_auto_ffuf_done", False)
             and self.state.iteration >= 10
             and "shell_exec" in self.registry.list_tools()
         ):
@@ -503,19 +608,27 @@ class ScanLoopAutoOrchestrationMixin:
                     if fr.ok:
                         stdout = str(fr.data.get("stdout", "")) if fr.data else ""
                         if stdout.strip():
-                            self.state.add_message("tool", {
-                                "name": "shell_exec",
-                                "args": {"command": "ffuf directory scan"},
-                                "result": {"ok": True, "summary": fr.summary, "data": fr.data},
-                            })
-                            self.state.add_message("user", (
-                                "AUTO-RECON: ffuf found these paths:\n"
-                                + stdout[:1500] + "\n\n"
-                                "Navigate to each path with browser_navigate or "
-                                "http_request and assess for vulnerabilities."
-                            ))
-                        logger.info("auto-ffuf completed at iter %d (%d bytes)",
-                                   self.state.iteration, len(stdout))
+                            self.state.add_message(
+                                "tool",
+                                {
+                                    "name": "shell_exec",
+                                    "args": {"command": "ffuf directory scan"},
+                                    "result": {"ok": True, "summary": fr.summary, "data": fr.data},
+                                },
+                            )
+                            self.state.add_message(
+                                "user",
+                                (
+                                    "AUTO-RECON: ffuf found these paths:\n" + stdout[:1500] + "\n\n"
+                                    "Navigate to each path with browser_navigate or "
+                                    "http_request and assess for vulnerabilities."
+                                ),
+                            )
+                        logger.info(
+                            "auto-ffuf completed at iter %d (%d bytes)",
+                            self.state.iteration,
+                            len(stdout),
+                        )
                 except Exception:
                     logger.exception("auto-ffuf failed")
 
@@ -557,45 +670,47 @@ class ScanLoopAutoOrchestrationMixin:
                     )
                     sandbox_invocations.append({"tool": "shell_exec", "cmd": nuclei_cmd})
                     if nr.ok:
-                        self.state.add_message("tool", {
-                            "name": "shell_exec",
-                            "args": {"command": "nuclei scan"},
-                            "result": {"ok": True, "summary": nr.summary, "data": nr.data},
-                        })
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": "shell_exec",
+                                "args": {"command": "nuclei scan"},
+                                "result": {"ok": True, "summary": nr.summary, "data": nr.data},
+                            },
+                        )
                         stdout = ""
                         if isinstance(nr.data, dict):
                             stdout = str(nr.data.get("stdout", ""))
                         if stdout.strip():
-                            self.state.add_message("user", (
-                                "AUTO-RECON: nuclei found results! Analyze each line "
-                                "and report_finding for confirmed vulnerabilities:\n"
-                                + stdout[:2000]
-                            ))
-                        logger.info("auto-nuclei completed at iter %d (%d bytes output)",
-                                   self.state.iteration, len(stdout))
+                            self.state.add_message(
+                                "user",
+                                (
+                                    "AUTO-RECON: nuclei found results! Analyze each line "
+                                    "and report_finding for confirmed vulnerabilities:\n"
+                                    + stdout[:2000]
+                                ),
+                            )
+                        logger.info(
+                            "auto-nuclei completed at iter %d (%d bytes output)",
+                            self.state.iteration,
+                            len(stdout),
+                        )
                 except Exception:
                     logger.exception("auto-nuclei failed")
 
         # Auto-sqlmap: at iter 18+, if findings exist with 500 errors
         # and Brain hasn't run sqlmap, auto-fire on the best target
         if (
-            not getattr(self, '_auto_sqlmap_done', False)
+            not getattr(self, "_auto_sqlmap_done", False)
             and self.state.iteration >= 18
             and "shell_exec" in self.registry.list_tools()
         ):
             try:
                 from vxis.agent.tools.finding_tools import _get_findings
+
                 current_findings = _get_findings()
             except Exception:
                 current_findings = []
-
-            # Find endpoints with error responses (500s = likely injectable)
-            sqlmap_targets = []
-            for f in current_findings:
-                comp = f.get("affected_component", "")
-                title = f.get("title", "")
-                if ("500" in title or "error" in f.get("finding_type", "")) and comp.startswith("http"):
-                    sqlmap_targets.append(comp)
 
             sqlmap_ran = any(
                 m.get("role") == "tool"
@@ -605,12 +720,9 @@ class ScanLoopAutoOrchestrationMixin:
                 for m in self.state.messages
             )
 
-            if sqlmap_targets and not sqlmap_ran:
+            target_url = self._pick_auto_sqlmap_target(current_findings)
+            if target_url and not sqlmap_ran:
                 self._auto_sqlmap_done = True
-                target_url = sqlmap_targets[0]
-                # Add query param if none exists (sqlmap needs injectable param)
-                if "?" not in target_url:
-                    target_url += "?q=test"
                 try:
                     sqlmap_cmd = (
                         f"sqlmap -u '{target_url}' "
@@ -630,11 +742,14 @@ class ScanLoopAutoOrchestrationMixin:
                     sandbox_invocations.append({"tool": "shell_exec", "cmd": sqlmap_cmd})
                     if sr.ok:
                         stdout = str(sr.data.get("stdout", "")) if sr.data else ""
-                        self.state.add_message("tool", {
-                            "name": "shell_exec",
-                            "args": {"command": f"sqlmap -u '{target_url}' --batch"},
-                            "result": {"ok": True, "summary": sr.summary, "data": sr.data},
-                        })
+                        self.state.add_message(
+                            "tool",
+                            {
+                                "name": "shell_exec",
+                                "args": {"command": f"sqlmap -u '{target_url}' --batch"},
+                                "result": {"ok": True, "summary": sr.summary, "data": sr.data},
+                            },
+                        )
                         # Parse sqlmap output for injectable params
                         is_injectable = any(
                             kw in stdout.lower()
@@ -642,32 +757,40 @@ class ScanLoopAutoOrchestrationMixin:
                         )
                         if is_injectable:
                             # Auto-report — don't ask Brain, it won't do it
-                            await self._dispatch_report_finding_checked(self._build_report_finding_args(
-                                title=f"SQL Injection confirmed by sqlmap on {target_url.split('?')[0]}",
-                                severity="critical",
-                                finding_type="sql_injection",
-                                affected_component=target_url,
-                                description="sqlmap confirmed injectable behavior on the supplied parameterized URL.",
-                                impact="Attackers may extract or modify backend database data and pivot into account compromise or administrative access.",
-                                technical_analysis="The auto-sqlmap branch detected canonical sqlmap success markers including injectable parameter / payload output in the tool transcript.",
-                                poc_description="Run sqlmap against the same target URL and confirm that the tool identifies the parameter as injectable and returns working payload details.",
-                                poc_script_code=stdout[:4000],
-                                remediation_steps="Parameterize the backend query, remove raw SQL concatenation, and suppress database error leakage to clients.",
-                                endpoint=target_url,
-                                method="GET",
-                                cwe="CWE-89",
-                            ))
-                            self.state.add_message("user", (
-                                f"AUTO-EXPLOIT: sqlmap confirmed SQL injection on {target_url}!\n"
-                                "Finding auto-reported as CRITICAL sql_injection."
-                            ))
+                            await self._dispatch_report_finding_checked(
+                                self._build_report_finding_args(
+                                    title=f"SQL Injection confirmed by sqlmap on {target_url.split('?')[0]}",
+                                    severity="critical",
+                                    finding_type="sql_injection",
+                                    affected_component=target_url,
+                                    description="sqlmap confirmed injectable behavior on the supplied parameterized URL.",
+                                    impact="Attackers may extract or modify backend database data and pivot into account compromise or administrative access.",
+                                    technical_analysis="The auto-sqlmap branch detected canonical sqlmap success markers including injectable parameter / payload output in the tool transcript.",
+                                    poc_description="Run sqlmap against the same target URL and confirm that the tool identifies the parameter as injectable and returns working payload details.",
+                                    poc_script_code=stdout[:4000],
+                                    remediation_steps="Parameterize the backend query, remove raw SQL concatenation, and suppress database error leakage to clients.",
+                                    endpoint=target_url,
+                                    method="GET",
+                                    cwe="CWE-89",
+                                )
+                            )
+                            self.state.add_message(
+                                "user",
+                                (
+                                    f"AUTO-EXPLOIT: sqlmap confirmed SQL injection on {target_url}!\n"
+                                    "Finding auto-reported as CRITICAL sql_injection."
+                                ),
+                            )
                             logger.info("auto-sqlmap FOUND injection on %s", target_url)
                         else:
-                            self.state.add_message("user", (
-                                f"AUTO-EXPLOIT: sqlmap ran on {target_url} but did not "
-                                f"confirm injection. Output:\n{stdout[:1000]}\n\n"
-                                "Try different endpoints or parameters."
-                            ))
+                            self.state.add_message(
+                                "user",
+                                (
+                                    f"AUTO-EXPLOIT: sqlmap ran on {target_url} but did not "
+                                    f"confirm injection. Output:\n{stdout[:1000]}\n\n"
+                                    "Try different endpoints or parameters."
+                                ),
+                            )
                         logger.info("auto-sqlmap completed at iter %d", self.state.iteration)
                 except Exception:
                     logger.exception("auto-sqlmap failed")

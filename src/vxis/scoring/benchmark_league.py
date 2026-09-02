@@ -150,6 +150,7 @@ def default_crown_benchmark_league() -> BenchmarkLeague:
                 target_type="api",
                 purpose="API authorization, object-level access, and workflow abuse.",
                 docker_hint="OWASP/crAPI",
+                default_url="http://localhost:8889",
                 expected_weakness_families=(
                     "bola",
                     "broken_authentication",

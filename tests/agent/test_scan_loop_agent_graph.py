@@ -1181,6 +1181,10 @@ async def test_agent_graph_crown_chain_creates_post_exploit_worker_child_agent()
     chains = _get_chains()
     assert chains
     assert chains[-1]["finding_ids"] == [foothold.data["id"], reported.data["id"]]
+    assert chains[-1]["evidence_artifact"]["source_finding_id"] == foothold.data["id"]
+    assert chains[-1]["evidence_artifact"]["target_finding_id"] == reported.data["id"]
+    assert chains[-1]["evidence_artifact"]["source_output_used_in_pivot"] is True
+    assert chains[-1]["evidence_artifact"].get("verification_method") != "derived_from_reported_poc"
     assert planner_brain.calls
 
 

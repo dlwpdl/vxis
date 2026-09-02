@@ -12,6 +12,7 @@ from vxis.ghost.routing import (
     mask_proxy_url,
     wrap_shell_command_for_ghost,
 )
+from vxis.primitives.ghost import ghost_status
 from vxis.ghost.transport import GhostTransport
 from vxis.ghost.trigger import detect_ghost_keyword, parse_ghost_trigger
 from vxis.ghost.verifier import GhostVerifier
@@ -289,6 +290,21 @@ def test_ghost_status_snapshot_marks_nmap_as_direct_raw_socket():
         assert status["coverage"]["python_exec"] == "env_proxy"
         assert status["coverage"]["nmap_scan"] == "direct_raw_socket"
         assert "raw TCP/UDP" in status["warning"]
+    finally:
+        ghost_layer.deactivate()
+
+
+def test_primitives_ghost_status_returns_gap_summary():
+    from vxis.ghost.layer import ghost_layer
+
+    ghost_layer.activate(["socks5://127.0.0.1:9050"])
+    try:
+        status = ghost_status()
+        assert status["coverage"]["shell_exec"] == "env_proxy"
+        assert status["partial_tools"] == ["shell_exec", "python_exec"]
+        assert status["direct_tools"] == ["nmap_scan"]
+        assert status["delegated_tools"] == ["run_skill", "agent_graph"]
+        assert any("delegated" in warning for warning in status["warnings"])
     finally:
         ghost_layer.deactivate()
 

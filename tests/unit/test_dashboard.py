@@ -88,8 +88,25 @@ async def _seed(engine: AsyncEngine) -> tuple[int, int]:
             source_plugin="nmap",
             confidence=1.0,
         )
+        f3 = FindingRecord(
+            scan_id=scan.id,
+            dedup_hash="ghi789",
+            title="ZZ Crown Replay",
+            description="Authenticated foothold chained into privileged account creation.",
+            severity="critical",
+            effective_severity="critical",
+            status="open",
+            finding_type="attack_chain",
+            target="192.168.1.1",
+            port=80,
+            protocol="tcp",
+            affected_component="/api/users",
+            source_plugin="vxis_chain",
+            confidence=1.0,
+        )
         session.add(f1)
         session.add(f2)
+        session.add(f3)
         await session.flush()
 
         scan_id = scan.id
@@ -356,6 +373,14 @@ def test_findings_partial_returns_html(client: TestClient, scan_id: int) -> None
 def test_findings_partial_shows_findings(client: TestClient, scan_id: int) -> None:
     response = client.get(f"/scan/{scan_id}/findings")
     assert "SQL Injection" in response.text
+
+
+def test_findings_partial_prioritizes_attack_chain_within_same_severity(
+    client: TestClient, scan_id: int
+) -> None:
+    response = client.get(f"/scan/{scan_id}/findings?severity=critical")
+    assert response.status_code == 200
+    assert response.text.index("ZZ Crown Replay") < response.text.index("SQL Injection in login form")
 
 
 def test_findings_partial_filter_by_severity(client: TestClient, scan_id: int) -> None:

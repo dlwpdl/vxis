@@ -121,6 +121,20 @@ def _candidate_markers(*values: Any) -> list[str]:
     return markers[:8]
 
 
+def _source_output_reused(source_output: Any, *contexts: Any) -> bool:
+    combined = "\n".join(str(value or "").lower() for value in contexts)
+    for marker in _candidate_markers(source_output):
+        lowered = marker.lower()
+        if lowered in combined:
+            return True
+    tokens = {
+        token.lower()
+        for token in re.findall(r"[a-zA-Z0-9_./:@=-]{3,}", str(source_output or ""))
+        if token.lower() not in {"http", "https", "host", "authorization", "bearer", "token"}
+    }
+    return any(token in combined for token in sorted(tokens, key=len, reverse=True)[:8])
+
+
 async def machine_replay_gate(
     *,
     finding: dict[str, Any],
@@ -198,4 +212,122 @@ async def machine_replay_gate(
         "replay_status": replay_status,
         "matched_markers": matched,
         "reason": "status_or_marker_delta" if passed else "no status or marker delta",
+    }
+
+
+async def machine_chain_replay_gate(
+    *,
+    finding_ids: list[str],
+    evidence_artifact: dict[str, Any],
+    target: str,
+    dispatch: Any,
+    findings_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    if not callable(dispatch):
+        return {"status": "blocked_oracle", "method": "machine_chain_http", "reason": "no dispatch"}
+    if not target:
+        return {"status": "blocked_oracle", "method": "machine_chain_http", "reason": "missing target"}
+    pairs = list(zip(finding_ids, finding_ids[1:]))
+    if not pairs:
+        return {
+            "status": "blocked_oracle",
+            "method": "machine_chain_http",
+            "reason": "need at least 2 findings",
+        }
+
+    hops = [hop for hop in list(evidence_artifact.get("hops") or []) if isinstance(hop, dict)]
+    if not hops and len(pairs) == 1:
+        hops = [evidence_artifact]
+
+    hop_results: list[dict[str, Any]] = []
+    for index, (source_id, target_id) in enumerate(pairs):
+        hop = hops[index] if index < len(hops) else {}
+        source_finding = findings_by_id.get(str(source_id)) or {}
+        target_finding = findings_by_id.get(str(target_id)) or {}
+        if not target_finding:
+            hop_results.append(
+                {
+                    "source_id": str(source_id),
+                    "target_id": str(target_id),
+                    "status": "blocked_oracle",
+                    "reason": "missing target finding",
+                    "reused_source_output": False,
+                }
+            )
+            continue
+        source_output = (
+            hop.get("source_output")
+            or source_finding.get("response_or_effect")
+            or source_finding.get("request_or_payload")
+            or source_finding.get("description")
+            or ""
+        )
+        synthetic = dict(target_finding)
+        synthetic["severity"] = "high"
+        if not synthetic.get("control_comparison") and hop.get("control_result"):
+            synthetic["control_comparison"] = hop.get("control_result")
+        if not synthetic.get("request_or_payload") and hop.get("pivot_action"):
+            synthetic["request_or_payload"] = hop.get("pivot_action")
+        if not synthetic.get("response_or_effect") and hop.get("observed_result"):
+            synthetic["response_or_effect"] = hop.get("observed_result")
+        reused = _source_output_reused(
+            source_output,
+            hop.get("pivot_action"),
+            synthetic.get("request_or_payload"),
+            synthetic.get("replay_command"),
+            synthetic.get("poc_script_code"),
+            synthetic.get("response_or_effect"),
+        )
+        if not reused:
+            hop_results.append(
+                {
+                    "source_id": str(source_id),
+                    "target_id": str(target_id),
+                    "status": "failed",
+                    "reason": "source output not reused in replayable target evidence",
+                    "reused_source_output": False,
+                }
+            )
+            continue
+        gate = await machine_replay_gate(
+            finding=synthetic,
+            target=target,
+            dispatch=dispatch,
+        )
+        hop_results.append(
+            {
+                "source_id": str(source_id),
+                "target_id": str(target_id),
+                "status": str(gate.get("status", "")),
+                "reason": str(gate.get("reason", "")),
+                "method": str(gate.get("method", "")),
+                "control_status": gate.get("control_status"),
+                "replay_status": gate.get("replay_status"),
+                "matched_markers": list(gate.get("matched_markers") or []),
+                "reused_source_output": True,
+            }
+        )
+
+    statuses = [str(item.get("status", "")) for item in hop_results]
+    if statuses and all(status == "passed" for status in statuses):
+        return {
+            "status": "passed",
+            "method": "machine_chain_http",
+            "reason": "all hops replayed",
+            "hop_results": hop_results,
+        }
+    for status in ("blocked_policy", "blocked_oracle", "failed"):
+        match = next((item for item in hop_results if item.get("status") == status), None)
+        if match is not None:
+            return {
+                "status": status,
+                "method": "machine_chain_http",
+                "reason": str(match.get("reason", "")),
+                "hop_results": hop_results,
+            }
+    return {
+        "status": "blocked_oracle",
+        "method": "machine_chain_http",
+        "reason": "no hop replay result",
+        "hop_results": hop_results,
     }
